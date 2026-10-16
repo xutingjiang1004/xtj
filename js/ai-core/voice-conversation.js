@@ -9,8 +9,19 @@
       if(marker&&(marker[1][0]==='~'||marker[2].indexOf('`')<0)){fence={marker:marker[1][0],length:marker[1].length};lines.push('（代码片段）');return;}
       lines.push(line);
     });
+    // Strip paired Markdown markers, not meaningful characters in formulas,
+    // comparisons or identifiers such as C#. Read operators rather than joining
+    // their operands into a different number.
     return lines.join('\n').replace(/!\[[^\]]*\]\([^)]*\)/g, '')
-      .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').replace(/https?:\/\/\S+/g, '链接').replace(/[*_#`>|]/g, '').trim();
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').replace(/https?:\/\/\S+/g, '链接')
+      .replace(/^ {0,3}#{1,6}[ \t]+/gm, '').replace(/^ {0,3}(?:>[ \t]+)+/gm, '')
+      .replace(/^\s{0,3}(?:[-+*]|\d+[.)])[ \t]+/gm, '')
+      .replace(/\*\*([^*\n]+)\*\*|__([^_\n]+)__/g, function(_,stars,underscores){return stars||underscores;})
+      .replace(/(^|[\s（(])([*_])([^\s*_][^\n]*?\S|[^\s*_])\2(?=$|[\s，。！？,.!?）)])/g, '$1$3')
+      .replace(/`+([^`\n]+)`+/g, '$1')
+      .replace(/([\w\u3400-\u9fff）)])\s*\*\s*(?=[\w\u3400-\u9fff（(])/g, '$1 乘以 ')
+      .replace(/>=/g, ' 大于等于 ').replace(/<=/g, ' 小于等于 ').replace(/!=/g, ' 不等于 ')
+      .replace(/>/g, ' 大于 ').replace(/</g, ' 小于 ').trim();
   }
   function create(options) {
     var enabled = false, disposed = false, seq = 0, speechSeq = 0, recognition = null, recorder = null, media = null;

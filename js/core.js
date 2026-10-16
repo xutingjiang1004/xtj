@@ -1822,7 +1822,7 @@ function isAdmin() {
 
         var xtjModuleDefinitions = {
             enhancements: { scripts: ['xtj-module-core-animations', 'xtj-module-features', 'xtj-module-ui-effects'] },
-            'ai-agent': { styles: ['xtj-module-ai-style','xtj-module-ai-workbench-style','xtj-module-ai-reading-style','xtj-module-ai-features-style'], scripts: ['xtj-module-ai-script'] },
+            'ai-agent': { styles: ['xtj-module-ai-style','xtj-module-ai-reading-style','xtj-module-ai-features-style'], scripts: ['xtj-module-ai-script'] },
             'photo-wall': { scripts: ['xtj-module-photo-data', 'xtj-module-photo-render', 'xtj-module-photo-main'] },
             'photo-preview': { styles: ['xtj-module-photo-preview-style'], scripts: ['xtj-module-photo-preview', 'xtj-module-photo-preview-hotfix'] },
             'photo-upload': { dependencies: ['photo-wall'], scripts: ['xtj-module-photo-upload'] },
@@ -8979,7 +8979,7 @@ function renderProfileActivityList(kind) {
                 });
             }
 
-            window.toggleFilterPanel = function() {
+            window.toggleFilterPanel = function(event) {
                 var panel = document.getElementById("postFilterPanel");
                 var btn = document.getElementById("filterToggleBtn");
                 if (!panel) return;
@@ -8995,6 +8995,14 @@ function renderProfileActivityList(kind) {
                     var _pfNeedForce = !window.__xtjPostFilterUsersLoadedAt || _pfAge > 3 * 60 * 1000;
                     loadPostFilterUsers(_pfNeedForce);
                     renderPostFilterUsers();
+                    // Desktop posts scroll inside .wrap; panelPosts.scrollTop
+                    // does not move that viewport. Let the revealed panel find
+                    // its actual scrolling ancestors without touching the Dock.
+                    panel.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+                    if (event && event.detail === 0) {
+                        var search = document.getElementById('postSearchInput');
+                        if (search) search.focus({ preventScroll: true });
+                    }
                 } else {
                     panel.style.display = "none";
                     if (btn) { btn.classList.remove("active"); btn.setAttribute("aria-expanded", "false"); }
@@ -13122,6 +13130,10 @@ function renderProfileActivityList(kind) {
             //   叠加 renderDockChatDesktopEmptyState 的归属判断，导致桌面分屏在登出后
             //   仍显示上一个账号的私聊内容。由 doLogout 显式调用。
             window.__xtjResetChatPanels = function() {
+                if (_dockChatDraftTimer) clearTimeout(_dockChatDraftTimer);
+                _dockChatDraftTimer=null;_dockChatDraftLoadSeq++;
+                _dockChatLocalDrafts={};_dockChatDraftWrites={};_dockChatDraftConflicts={};
+                _dockChatConversationStates={};_dockChatConversationOwner='';
                 cancelChatFlashSend();
                 cancelDmAiAsk();
                 if(_chatSendFlight){_chatSendFlight.controller.abort();_chatSendFlight=null;}
@@ -13259,6 +13271,7 @@ function renderProfileActivityList(kind) {
             var _dockChatDraftLoadSeq = 0;
             var _dockChatDraftWrites = {};
             var _dockChatDraftConflicts = {};
+            var _dockChatLocalDrafts = {};
 
             function dockChatConversationRows(states) {
                 return states.filter(function(s) { return s && !s.deleted && s.peer_name; }).map(function(s) {
@@ -15449,6 +15462,7 @@ function renderProfileActivityList(kind) {
                 var sendOrigin = captureDockChatSendOrigin(file);
                 var flight={controller:new AbortController(),owner:sendOwner,epoch:sendEpoch};_chatSendFlight=flight;
                 dockChatSending = true; if (!retrying && (!queuedFile || inp.value.trim()===content)) inp.value = '';
+                if (!retrying) rememberDockChatDraft(targetUser,inp.value);
                 sendDockChatTyping(false);
                 if (_dockChatDraftTimer && !retrying) { clearTimeout(_dockChatDraftTimer); _dockChatDraftTimer = null; }
                 // 把真实的发送状态告诉 ux-features 的指示器（它此前是假的 1.8 秒计时）
@@ -17792,6 +17806,10 @@ function renderProfileActivityList(kind) {
                     });
                     if (window.currentUser !== owner) return;
                     _dockChatConversationStates[peer] = data.state;
+                    if(action==='delete'){
+                        delete _dockChatLocalDrafts[owner+'\u0000'+peer];
+                        delete _dockChatDraftConflicts[owner+'\u0000'+peer];
+                    }
                     if (window.__xtjMutedChatPeers) {
                         if (data.state.muted_until || data.state.deleted) window.__xtjMutedChatPeers[peer] = true;
                         else delete window.__xtjMutedChatPeers[peer];
@@ -17814,31 +17832,40 @@ function renderProfileActivityList(kind) {
                 } catch (error) { showToast(error.message || '会话操作失败'); }
             }
 
+            function rememberDockChatDraft(peer,value) {
+                if(!peer||!window.currentUser)return null;
+                var key=window.currentUser+'\u0000'+peer,epoch=window._authStateEpoch||0,existing=_dockChatLocalDrafts[key];
+                if(existing&&existing.epoch===epoch&&existing.value===value)return existing;
+                return _dockChatLocalDrafts[key]={value:value,epoch:epoch};
+            }
             function persistDockChatDraft(peer, value) {
-                var owner = window.currentUser;
+                var owner = window.currentUser,epoch=window._authStateEpoch||0;
                 if (!peer || !owner) return;
                 var key = owner + '\u0000' + peer;
+                var draft=rememberDockChatDraft(peer,value);
+                function current(){return window.currentUser===owner&&(window._authStateEpoch||0)===epoch;}
                 var previous = _dockChatDraftWrites[key] || Promise.resolve();
                 var write = previous.catch(function() {}).then(function() {
-                    if (window.currentUser !== owner) return;
+                    if (!current()) return;
                     var state = _dockChatConversationStates[peer] || { draft_revision:0 };
                     var revision = Number(state.draft_revision) || 0;
                     return requestDockChatSocial('/conversations/' + encodeURIComponent(peer), {
-                        method:'PATCH',body:JSON.stringify({action:'draft',draft_text:value,draft_revision:revision}),background:false
+                        method:'PATCH',body:JSON.stringify({action:'draft',draft_text:value,draft_revision:revision}),background:false,authOwner:owner,authEpoch:epoch
                     }).then(function(data) {
-                        if (window.currentUser !== owner) return;
+                        if (!current()) return;
                         if (_dockChatConversationStates[peer] && _dockChatConversationStates[peer].deleted) return;
                         _dockChatConversationStates[peer] = Object.assign({},state,data.state);
+                        if(_dockChatLocalDrafts[key]===draft)delete _dockChatLocalDrafts[key];
                         delete _dockChatDraftConflicts[key];
                         if (typeof window.__xtjInvalidateDmListShared === 'function') window.__xtjInvalidateDmListShared();
                         if (dockChatActiveUser !== peer) scheduleDockChatListRefresh(0);
                     }).catch(function(error) {
-                        if (window.currentUser !== owner) return;
+                        if (!current()) return;
                         if (error.code === 'revision_conflict') {
                             _dockChatConversationStates[peer] = Object.assign({},state,{ draft_revision:error.draft_revision });
                             _dockChatDraftConflicts[key] = value;
                             showToast('草稿在其他设备已更新，本机输入已保留；请编辑后重试');
-                        } else if (error.code !== 'not_found' && error.code !== 'deleted') showToast('草稿保存失败，请稍后重试');
+                        } else if (error.code !== 'not_found' && error.code !== 'deleted') showToast('草稿保存失败，本机输入已保留；请编辑后重试');
                     });
                 });
                 _dockChatDraftWrites[key] = write;
@@ -17848,20 +17875,22 @@ function renderProfileActivityList(kind) {
             function restoreDockChatDraft(peer) {
                 if (_dockChatDraftTimer) { clearTimeout(_dockChatDraftTimer); _dockChatDraftTimer = null; }
                 var input = document.getElementById('dockChatInput');
-                if (input) input.value = '';
-                var owner = window.currentUser;
+                var owner = window.currentUser,epoch=window._authStateEpoch||0,key=owner+'\u0000'+peer,localDraft=_dockChatLocalDrafts[key],cached=_dockChatConversationStates[peer];
+                var initial=localDraft&&localDraft.epoch===epoch?localDraft.value:Object.prototype.hasOwnProperty.call(_dockChatDraftConflicts,key)?_dockChatDraftConflicts[key]:cached&&cached.draft_text||'';
+                if (input) input.value = initial;
                 var seq = ++_dockChatDraftLoadSeq;
-                requestDockChatSocial('/conversations/' + encodeURIComponent(peer)).then(function(data) {
-                    if (owner !== window.currentUser || dockChatActiveUser !== peer || seq !== _dockChatDraftLoadSeq) return;
+                requestDockChatSocial('/conversations/' + encodeURIComponent(peer),{authOwner:owner,authEpoch:epoch}).then(function(data) {
+                    if (owner !== window.currentUser || epoch!==(window._authStateEpoch||0) || dockChatActiveUser !== peer || seq !== _dockChatDraftLoadSeq) return;
                     var local = _dockChatConversationStates[peer] || {};
                     if ((Number(local.draft_revision) || 0) > (Number(data.state.draft_revision) || 0)) return;
                     _dockChatConversationStates[peer] = Object.assign({},local,data.state);
-                    if (input && !input.value) {
+                    if(_dockChatLocalDrafts[key]&&_dockChatLocalDrafts[key].epoch===epoch)return;
+                    if (input && input.value===initial) {
                         var conflictKey = owner + '\u0000' + peer;
                         input.value = Object.prototype.hasOwnProperty.call(_dockChatDraftConflicts,conflictKey)
                             ? _dockChatDraftConflicts[conflictKey] : (data.state.draft_text || '');
                     }
-                }).catch(function(error) { if (error.code !== 'not_found') console.warn('[chat] draft load failed',error); });
+                }).catch(function(error) { if (owner===window.currentUser&&epoch===(window._authStateEpoch||0)&&error.code !== 'not_found') console.warn('[chat] draft load failed',error); });
             }
 
             var _conversationOpen = document.getElementById('dockChatConversationBtn');
@@ -17896,6 +17925,7 @@ function renderProfileActivityList(kind) {
             if (_conversationInput) _conversationInput.addEventListener('input',function() {
                 var peer = dockChatActiveUser;
                 var value = _conversationInput.value;
+                rememberDockChatDraft(peer,value);
                 if (_chatTypingStopTimer) clearTimeout(_chatTypingStopTimer);
                 if (value.trim() && !_chatEditDraft) {
                     sendDockChatTyping(true);
@@ -17904,7 +17934,8 @@ function renderProfileActivityList(kind) {
                     },4200);
                 } else sendDockChatTyping(false);
                 if (_dockChatDraftTimer) clearTimeout(_dockChatDraftTimer);
-                _dockChatDraftTimer = setTimeout(function() { persistDockChatDraft(peer,value); },650);
+                var draftOwner=window.currentUser,draftEpoch=window._authStateEpoch||0;
+                _dockChatDraftTimer = setTimeout(function() { _dockChatDraftTimer=null;if(draftOwner===window.currentUser&&draftEpoch===(window._authStateEpoch||0))persistDockChatDraft(peer,value); },650);
             });
 
             function refreshChatSocialBadge(force) {
@@ -21660,9 +21691,10 @@ function renderProfileActivityList(kind) {
  */
         (function installFocusSurfaceLifecycle() {
             if (typeof MutationObserver !== 'function') return;
-            var selector = '.modal-overlay, .announcement-modal-overlay, .report-modal-overlay, #photoPreviewOverlay, #pwUploadSheet, #ppInfoModal, #imgViewer, .pp-download-confirm-overlay, [data-xtj-ai-modal]';
+            var selector = '.modal-overlay, .announcement-modal-overlay, .report-modal-overlay, #ppConfirmOverlay, #photoPreviewOverlay, #pwUploadSheet, #ppInfoModal, #imgViewer, .pp-download-confirm-overlay, [data-xtj-ai-modal]';
             var surfaces = new Map(), background = new Map(), sequence = 0, top = null, syncing = false;
             function visible(root) {
+                if (root.id === 'ppConfirmOverlay' && root.classList.contains('closing')) return false;
                 if (root.hasAttribute('data-xtj-ai-modal')) return !root.hidden && root.classList.contains('is-ready');
                 if (root.id === 'ppInfoModal') return root.getAttribute('aria-hidden') === 'false' && root.style.display !== 'none';
                 return !root.hidden && root.style.display !== 'none' && (root.classList.contains('active') || root.classList.contains('show'));
@@ -21716,7 +21748,11 @@ function renderProfileActivityList(kind) {
                             });
                             branch = parent;
                         }
-                        if (oldTop !== top && !top.contains(document.activeElement)) focusFirst(top);
+                        if (oldTop !== top && !top.contains(document.activeElement)) {
+                            var nestedOrigin = oldTop && surfaces.get(oldTop) && surfaces.get(oldTop).origin;
+                            if (nestedOrigin && nestedOrigin.isConnected && top.contains(nestedOrigin) && !nestedOrigin.closest('[inert]')) nestedOrigin.focus({ preventScroll: true });
+                            else focusFirst(top);
+                        }
                     } else if (oldTop && oldTop.contains(document.activeElement)) {
                         var origin = surfaces.get(oldTop) && surfaces.get(oldTop).origin;
                         if (origin && origin.isConnected && !origin.closest('[inert]')) origin.focus({ preventScroll: true });
@@ -21730,6 +21766,9 @@ function renderProfileActivityList(kind) {
             window.__xtjSyncFocusSurfaces = sync;
             window.__xtjGetFocusSurface = function() { return top; };
             document.addEventListener('keydown',function(event) {
+                if (event.key === 'Escape' && top && top.id === 'ppConfirmOverlay') {
+                    event.preventDefault(); event.stopImmediatePropagation(); window.closeConfirm(); return;
+                }
                 if (event.key !== 'Tab' || !top) return;
                 var nodes = controls(top), first = nodes[0], last = nodes[nodes.length - 1], focused = document.activeElement;
                 if (!nodes.length || !top.contains(focused) || event.shiftKey && focused === first || !event.shiftKey && focused === last) {

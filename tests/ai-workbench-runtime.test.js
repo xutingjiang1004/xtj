@@ -38,8 +38,8 @@ test('decision matrix normalizes supplied weights and rejects missing or invente
   assert.equal(w.weightedDecision([{name:'成本',weight:1e308},{name:'体验',weight:1e308}],[{name:'甲',scores:[8,4]}])[0].score,6);
 });
 test('Markdown export retains complete rows and captured real source dates',()=>{
-  const md=w.buildMarkdown({title:'研究成果',date:'2026-10-14',headers:['项目','备注'],rows:[['甲','a|b\nc']],clips:[{text:'真实原文',url:'https://example.com/source',capturedAt:'2026-10-14T10:00:00Z'}]});
-  assert.match(md,/a\\\|b<br>c/);assert.match(md,/https:\/\/example.com\/source/);assert.match(md,/摘录日期：2026-10-14T10:00:00Z/);
+  const md=w.buildMarkdown({title:'研究成果',date:'2026-10-14',headers:['项目','备注'],rows:[['甲','a|b\nc']],clips:[{text:'真实原文',url:'https://example.com/source',capturedAt:'2026-10-14T10:00:00Z'}],sources:[{title:'时间线原网页',url:'https://example.com/timeline'}]});
+  assert.match(md,/a\\\|b<br>c/);assert.match(md,/https:\/\/example.com\/source/);assert.match(md,/摘录日期：2026-10-14T10:00:00Z/);assert.match(md,/https:\/\/example.com\/timeline/);assert.match(md,/时间线原网页/);
   const bounded=w.buildMarkdown({title:'预览',previewOnly:true,sourceLimit:'原文件5100行，仅载入5000行',steps:[{kind:'calculate',config:{expression:'2+2'},previousStatus:'done',resultText:'2+2 = 4'}]});assert.match(bounded,/仅载入5000行/);assert.match(bounded,/2\+2 = 4/);assert.match(bounded,/执行状态：done/);
 });
 test('workbench tool facade rejects arbitrary code, paths, unsafe protocols, unknown fields and oversized work',()=>{

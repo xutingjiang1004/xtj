@@ -11,6 +11,48 @@ async function wall(f,count=12,social){const rows=Array.from({length:count},(_,i
  await f.page.route(/\/api\/photo\/[^/]+\/social(?:\?|$)/,r=>r.fulfill({json:social?social(new URL(r.request().url())):{ok:true,comments:[],comment_count:0,like_count:0,views:0,liked:false,has_more:false}}));await f.page.locator('.dock-tab[data-tab="ai"]').click();await f.page.waitForSelector('#photoGrid .photo-wall-item');return rows;}
 async function preview(f){await f.page.locator('#photoGrid .photo-wall-item').first().click();await f.page.waitForSelector('#photoPreviewOverlay.active');await f.page.waitForFunction(()=>document.getElementById('ppLikeBtn')&&!document.getElementById('ppLikeBtn').disabled);}
 
+test('deep repair: pending and failed DM drafts survive switching peers while old responses preserve newer edits',{timeout:45000},()=>use(async f=>{
+ const p=f.page,started=deferred(),finish=deferred(),states={};let failure=true,writes=0;
+ await p.route('**/api/chat/conversations/*',async r=>{const peer=decodeURIComponent(new URL(r.request().url()).pathname.split('/').at(-1));states[peer]||={draft_revision:0,draft_text:'',status:'ok'};
+  if(r.request().method()==='PATCH'){const b=r.request().postDataJSON();writes++;if(peer==='bob'&&writes===1){started.resolve();await finish.promise;}if(failure)return r.fulfill({status:503,json:{ok:false,error:'隔离草稿保存失败'}});states[peer]={...states[peer],draft_text:b.draft_text,draft_revision:states[peer].draft_revision+1};}
+  return r.fulfill({json:{ok:true,state:states[peer]}});
+ });
+ await chat(f,[]);await p.locator('#dockChatInput').fill('bob 第一份草稿');await p.evaluate(()=>openChat('carol'));await started.promise;await p.locator('#dockChatInput').fill('carol 草稿');await p.evaluate(()=>openChat('bob'));
+ assert.equal(await p.locator('#dockChatInput').inputValue(),'bob 第一份草稿');finish.resolve();await p.waitForTimeout(100);await p.evaluate(()=>openChat('carol'));await p.evaluate(()=>openChat('bob'));assert.equal(await p.locator('#dockChatInput').inputValue(),'bob 第一份草稿');
+ failure=false;await p.locator('#dockChatInput').fill('bob 第二份草稿');await p.evaluate(()=>openChat('carol'));await p.waitForFunction(()=>document.getElementById('dockChatInput').value==='carol 草稿');await p.evaluate(()=>openChat('bob'));assert.equal(await p.locator('#dockChatInput').inputValue(),'bob 第二份草稿');
+ await p.waitForTimeout(150);await p.evaluate(()=>openChat('carol'));await p.evaluate(()=>openChat('bob'));await p.waitForTimeout(100);assert.equal(await p.locator('#dockChatInput').inputValue(),'bob 第二份草稿');
+}));
+
+test('deep repair: a deliberately cleared pending DM draft is not restored from an older account response',{timeout:45000},()=>use(async f=>{
+ const p=f.page,wait=deferred(),started=deferred();let hold=false;
+ await p.route('**/api/chat/conversations/*',async r=>{if(r.request().method()==='PATCH'&&hold){started.resolve();await wait.promise;return r.fulfill({status:503,json:{ok:false,error:'隔离失败'}});}return r.fulfill({json:{ok:true,state:{status:'ok',draft_revision:0,draft_text:'服务器旧草稿'}}});});
+ await chat(f,[]);await p.waitForFunction(()=>dockChatInput.value==='服务器旧草稿');hold=true;await p.locator('#dockChatInput').fill('');await p.evaluate(()=>openChat('carol'));await started.promise;await p.evaluate(()=>openChat('bob'));await p.waitForTimeout(100);assert.equal(await p.locator('#dockChatInput').inputValue(),'');wait.resolve();
+}));
+test('deep repair: a pending draft from a previous login cannot enter a new session of the same account',{timeout:45000},()=>use(async f=>{
+ const p=f.page,started=deferred(),finish=deferred(),fresh={};let older=true;
+ await p.route('**/api/chat/conversations/*',async r=>{const peer=new URL(r.request().url()).pathname.split('/').at(-1);if(r.request().method()==='PATCH'&&older){started.resolve();await finish.promise;return r.fulfill({json:{ok:true,state:{status:'ok',draft_revision:99,draft_text:'旧会话草稿'}}});}if(r.request().method()==='PATCH'){fresh[peer]={status:'ok',draft_revision:1,draft_text:r.request().postDataJSON().draft_text};}return r.fulfill({json:{ok:true,state:fresh[peer]||{status:'ok',draft_revision:0,draft_text:older?'':'新登录的草稿'}}});});
+ await chat(f,[]);await p.locator('#dockChatInput').fill('旧会话草稿');await p.evaluate(()=>openChat('carol'));await started.promise;
+ await p.evaluate(()=>doLogout());older=false;await p.route('**/api/user/login',r=>r.fulfill({json:{ok:true,user_name:'alice',token:'isolated-new-login'}}));await p.evaluate(async()=>{loginNickInp.value='alice';loginPwInp.value='isolated-only';await doLogin();});await p.evaluate(()=>openChat('bob'));await p.waitForFunction(()=>dockChatInput.value==='新登录的草稿');finish.resolve();await p.waitForTimeout(100);
+ await p.locator('#dockChatInput').fill('新登录继续编辑');await p.evaluate(()=>openChat('carol'));await p.evaluate(()=>openChat('bob'));await p.waitForTimeout(100);assert.equal(await p.locator('#dockChatInput').inputValue(),'新登录继续编辑');
+}));
+
+test('audit repair: closed confirmation stays out of keyboard navigation and opening traps focus until Escape restores its origin',{timeout:45000},()=>use(async f=>{
+ const p=f.page;await p.getByRole('button',{name:'帖子',exact:true}).first().focus();
+ for(let i=0;i<45;i++){await p.keyboard.press('Tab');assert.equal(await p.evaluate(()=>!!document.activeElement.closest('#ppConfirmOverlay')),false);}
+ assert.doesNotMatch(await p.locator('body').ariaSnapshot(),/heading "确认操作"/);
+ await p.locator('#pubBtn').focus();await p.evaluate(()=>{window.confirmExecuted=0;showConfirm('回归确认','只检查焦点，不执行真实写入','确认',()=>window.confirmExecuted++);});
+ const dialog=p.getByRole('dialog',{name:'回归确认',exact:true});await dialog.waitFor();await p.waitForFunction(()=>document.getElementById('ppConfirmOverlay').contains(document.activeElement));
+ await p.getByRole('button',{name:'确认',exact:true}).focus();await p.keyboard.press('Tab');assert.equal(await p.getByRole('button',{name:'取消',exact:true}).evaluate(el=>el===document.activeElement),true);
+ await p.keyboard.press('Shift+Tab');assert.equal(await p.getByRole('button',{name:'确认',exact:true}).evaluate(el=>el===document.activeElement),true);
+ await p.keyboard.press('Escape');await p.waitForFunction(()=>document.getElementById('ppConfirmOverlay').inert&&document.activeElement.id==='pubBtn');assert.equal(await p.evaluate(()=>confirmExecuted),0);
+}));
+for(const viewport of [{width:1440,height:900},{width:390,height:844}])test('audit repair: opening filters after scrolling brings the fields into the actual '+viewport.width+'px reading viewport',{timeout:45000},()=>use(async f=>{
+ const p=f.page;await p.getByRole('button',{name:'查看全部 6 条评论',exact:true}).scrollIntoViewIfNeeded();await p.getByRole('button',{name:'搜索与筛选帖子',exact:true}).click();
+ await p.waitForFunction(()=>{const input=document.getElementById('postSearchInput'),r=input.getBoundingClientRect(),nav=document.querySelector('.posts-nav').getBoundingClientRect();return r.top>=nav.bottom&&r.bottom<=innerHeight;});
+ await p.getByRole('button',{name:'搜索与筛选帖子',exact:true}).focus();await p.keyboard.press('Enter');await p.keyboard.press('Enter');await p.waitForFunction(()=>document.activeElement.id==='postSearchInput');
+ const filter=p.locator('#postFilterPanel');assert.equal(await filter.isVisible(),true);assert.equal(await p.locator('#filterToggleBtn').getAttribute('aria-expanded'),'true');
+},{viewport,counts:[1,3]}));
+
 test('withdrawal body cannot cross a peer switch, including its success toast',{timeout:45000},()=>use(async f=>{
  const old=message(1),other=message(2,'carol');await chat(f,peer=>peer==='bob'?[old]:[other]);
  await f.page.evaluate(()=>{const base=fetch;window.__withdrawToasts=[];const toast=showToast;window.showToast=t=>{__withdrawToasts.push(t);toast(t);};window.fetch=(url,opts)=>new URL(url,location.href).pathname==='/api/dm/withdraw'?Promise.resolve(new Response(new ReadableStream({start(c){window.__withdrawBody=c;}}),{headers:{'Content-Type':'application/json'}})):base(url,opts);});

@@ -2575,7 +2575,7 @@ html[data-xtj-motion="off"]::view-transition-old(root), html[data-xtj-motion="of
 @media(prefers-reduced-motion:reduce) { .chat-gallery { animation: none; }.chat-gallery-stage img { transition: none; } }
 
 /* Personal records and settings have one consistent width and compact rhythm. */
-#panelProfile { --profile-surface: rgba(255,255,255,.75); --profile-line: rgba(80,135,132,.14); --profile-muted: #75888d; }
+#panelProfile { --profile-surface: rgba(255,255,255,.75); --profile-line: rgba(80,135,132,.14); --profile-muted: #526970; }
 html[data-theme="dark"] #panelProfile { --profile-surface: #161d23; --profile-line: rgba(162,194,210,.12); --profile-muted: #94a6b3; }
 html #panelProfile .dock-profile-container { width: 100%; max-width: 720px; margin-inline: auto; padding: 20px 18px calc(var(--dock-reserve,100px) + env(safe-area-inset-bottom)); box-sizing: border-box; }
 html #panelProfile .profile-main-view { width: 100%; max-width: none; padding: 0; display: block !important; grid-template: none !important; }

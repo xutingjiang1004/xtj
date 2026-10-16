@@ -74,6 +74,12 @@ test('empty saved memory does not suppress original turns in the frontend contex
 test('speech skips tilde and wider nested code fences while retaining surrounding prose',()=>{
  const f=voiceFixture();try{for(const code of ["~~~js\nconst raw = \"不应被朗读的代码\";\n~~~","\x60\x60\x60\x60markdown\n\x60\x60\x60js\nconst raw = \"不应被朗读的代码\";\n\x60\x60\x60\n\x60\x60\x60\x60"]){const text=f.global.XtjAiCore.VoiceConversation.speechText('说明段落。\n'+code+'\n结论段落。');assert.match(text,/说明段落/);assert.match(text,/结论段落/);assert.match(text,/代码片段/);assert.doesNotMatch(text,/const raw|不应被朗读/);}}finally{f.controller.dispose();}
 });
+test('audit repair: speech preserves multiplication, comparisons and literal symbols while removing actual Markdown',()=>{
+ const f=voiceFixture();try{
+  const text=f.global.XtjAiCore.VoiceConversation.speechText('## 数学核对\n**算式** 2*3*4=24，5>4，3<4，5>=4，3<=4，5!=4。\n> 引用里的 _结论_ 与 `C#`。\n- [真实来源](https://example.com)');
+  assert.match(text,/2\s*乘以\s*3\s*乘以\s*4=24/);assert.match(text,/5\s*大于\s*4/);assert.match(text,/3\s*小于\s*4/);assert.match(text,/5\s*大于等于\s*4/);assert.match(text,/3\s*小于等于\s*4/);assert.match(text,/5\s*不等于\s*4/);assert.match(text,/C#/);assert.match(text,/引用里的 结论/);assert.doesNotMatch(text,/\*\*|##|https:\/\/|_结论_/);
+ }finally{f.controller.dispose();}
+});
 test('editing input leaves queued and active speech callbacks attached to their own lifecycle',()=>{
  const f=voiceFixture();try{f.controller.speak('真实回复。',false);f.controller.cancelInput();assert.equal(f.states.at(-1).stage,'speech_wait');assert.equal(f.controller.isSpeaking(),true);f.speeches[0].onstart();assert.equal(f.states.at(-1).speaking,true);f.controller.cancelInput();assert.equal(f.states.at(-1).stage,'speaking');f.speeches[0].onend();assert.equal(f.controller.isSpeaking(),false);assert.equal(f.states.at(-1).stage,'idle');}finally{f.controller.dispose();}
 });
