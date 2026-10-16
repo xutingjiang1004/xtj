@@ -476,3 +476,29 @@ AI 提供商密钥填入静态构建变量。后端绑定、访问控制和真�
 
 回退此阶段：停止使用独立预览链接即可，现有 Render、Supabase 和正式域名
 不受影响；构建修改未改动产品前端或后端运行逻辑。
+
+授权完成后的独立预览发布步骤（需先核对项目名未被已有项目占用）：
+
+```sh
+# 在受保护的环境中提供 CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID，
+# 或完成 Wrangler OAuth；不要把密钥写入仓库、聊天或静态构建变量。
+npx --yes wrangler@4.45.0 whoami
+npx --yes wrangler@4.45.0 pages project create xtj-preview --production-branch=preview-production-unused
+npx --yes wrangler@4.45.0 pages deploy output/cloudflare-pages --project-name=xtj-preview --branch=migration-preview
+```
+
+生产分支使用未部署的占位名称，上传只生成独立项目的预览部署。不要将上述
+创建命令用于已有正式项目，也不要添加正式域名。执行环境须允许访问
+`api.cloudflare.com`；OAuth 还需允许 `dash.cloudflare.com`。创建成功后再允许
+实际返回的预览主机，逐项验证 HTTP 状态、安全头和权限；不能用本地通过替代云端验收。
+
+后续迁移需保留既有会话签名与加密密钥的有效值／派生关系，避免已有会话或
+加密供应商密钥失效。Supabase 数据及私有桶先保持原处；Cloudflare 页面本身
+不会消除 Supabase 出站额度。Express 的 HTTP 适配与原生依赖是不同问题：
+`sharp`、`isolated-vm`、文档／正则工作线程和常驻任务都需单独替代及验证，
+不能通过关闭强隔离、公开私密图片或减少功能来完成迁移。
+
+此迁移分支还将闪照孤儿文件列表扫描限制为每五分钟一次，列表失败同样退避；
+孤儿候选仍须超过 24 小时，分页和重试语义保留。撤销／删除记录仍由原有
+15 秒清理周期处理，原图加密、解密和授权不变。这减少列表请求，不代表已
+证实历史图片流量归因或等比例减少总带宽。正式后端尚未部署此变更。

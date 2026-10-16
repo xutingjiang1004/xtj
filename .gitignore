@@ -2,7 +2,7 @@
 .env
 .env.local
 .env.*
-node_modules/
+node_modules
 .trae/
 *.log
 .DS_Store
