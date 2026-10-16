@@ -502,3 +502,7 @@ npx --yes wrangler@4.45.0 pages deploy output/cloudflare-pages --project-name=xt
 孤儿候选仍须超过 24 小时，分页和重试语义保留。撤销／删除记录仍由原有
 15 秒清理周期处理，原图加密、解密和授权不变。这减少列表请求，不代表已
 证实历史图片流量归因或等比例减少总带宽。正式后端尚未部署此变更。
+
+现有 `render.yaml` 声明 `plan: starter`，与用户说明的现有 Free 服务不同。
+本迁移不使用它重建服务或调整套餐；后续操作须核对 Dashboard 的实际方案，
+不能用该蓝图意外创建付费实例。
