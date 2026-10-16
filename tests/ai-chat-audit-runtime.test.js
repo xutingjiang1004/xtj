@@ -8,13 +8,15 @@ function sendFixture(){
  for(const name of ['showToast','sendDockChatTyping','renderDockMessages','animateDockChatSend','applyDockChatConversationPreview','clearDockChatFilePreview','touchUserSession','setDockChatUploadProgress','persistDockChatDraft'])c[name]=(...args)=>calls.push({name,args});
  Object.assign(c,{isUserMuted:()=>false,normalizeDockChatMediaFile:f=>f,isBlockedDmFile:()=>false,getChatUploadKind:f=>f.type.split('/')[0],isDmOriginalSendEnabled:()=>false,captureDockChatSendOrigin:()=>null,buildDMMessageContent:(m,p)=>JSON.stringify(p),getDMMessagePayload:m=>JSON.parse(m.content),getDockChatCacheKey:p=>c.currentUser+':'+p,upsertDockChatCacheMessage(p,m){calls.push({name:'cache',owner:c.currentUser,message:m});return[m];},replaceDockChatCacheMessage(p,t,m){calls.push({name:'cache',owner:c.currentUser,message:m});},releaseDockChatLocalPreview(){},buildDmStorageUploadPath:async()=> 'private-path',uploadDmMediaWithProgress:async()=>{calls.push({name:'upload'});return{storage_path:'private-path'};}});
  c.window={get currentUser(){return c.currentUser;},xtjProtectedFetch:async()=>{calls.push({name:'send'});return{ok:true,json:async()=>({ok:true,message:{id:'server',content:'{}'}})};}};
- vm.createContext(c);vm.runInContext(extract('            async function sendDockChatMessageSingle(', '            // ═════'),c);return{c,calls,input};
+ c._dockChatLocalDrafts={};Object.defineProperty(c.window,'_authStateEpoch',{get(){return c._authStateEpoch;}});
+ vm.createContext(c);vm.runInContext(extract('            function rememberDockChatDraft(', '            function persistDockChatDraft('),c);vm.runInContext(extract('            async function sendDockChatMessageSingle(', '            // ═════'),c);return{c,calls,input};
 }
 test('delivery acknowledgement leaves the next selected attachment intact',async()=>{
  const f=sendFixture(),d=deferred();f.c.window.xtjProtectedFetch=async()=>({ok:true,json:()=>d.promise});
  const pending=f.c.sendDockChatMessageSingle(null,'first message');await new Promise(r=>setImmediate(r));
  const before=f.calls.length;d.resolve({ok:true,message:{id:'server',content:'{}'}});await pending;
  assert.equal(f.calls.slice(before).filter(x=>x.name==='clearDockChatFilePreview').length,0);
+ assert.equal(f.c._dockChatLocalDrafts['A\u0000peer'].value,'');
 });
 test('retrying a failed text does not send or discard the next draft attachment',async()=>{
  const f=sendFixture(),next={name:'next.png',size:10,type:'image/png'},bodies=[];

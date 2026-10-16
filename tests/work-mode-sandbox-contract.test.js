@@ -139,9 +139,11 @@ test('工具定义：AI_TOOLS 含 read_document / make_file / web_extract / task
 });
 
 test('工作模式：prompt 明确提示文档/文件/网页/计划四类新工具', () => {
-  assert.match(taskPolicySrc, /read_document（支持 PDF \/ Word \/ Excel \/ CSV \/ TXT/);
-  assert.match(taskPolicySrc, /make_file（生成 CSV \/ Excel \/ TXT/);
-  assert.match(taskPolicySrc, /web_extract 能抓网页正文/);
+  // 提示必须与实际格式边界一致，不能继续要求曾经误报的 TXT / 多工作表能力。
+  assert.match(taskPolicySrc, /read_document（支持 PDF \/ DOCX \/ XLSX \/ XLS \/ CSV 直链/);
+  assert.match(taskPolicySrc, /make_file（生成 CSV 或单工作表 Excel/);
+  assert.match(taskPolicySrc, /format 仅支持 csv \/ xlsx，不支持 TXT 或多工作表/);
+  assert.match(taskPolicySrc, /read_web_page \/ web_extract（能抓网页正文/);
   assert.match(taskPolicySrc, /task_plan 列出计划/);
 });
 

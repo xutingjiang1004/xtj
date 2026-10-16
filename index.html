@@ -71,22 +71,21 @@
     <link rel="preload" as="style" href="css/visual-refinements.min.css?v=3fd6a30cd9" />
     <link rel="preload" as="style" href="css/ui-enhance.min.css?v=775c4dc55c" />
     <link rel="stylesheet" href="css/visual-refinements.min.css?v=3fd6a30cd9" media="print" onload="this.media='all'" />
-    <noscript><link rel="stylesheet" href="css/visual-refinements.min.css?v=3fd6a30cd9" /><link rel="stylesheet" href="css/ai-agent.min.css?v=f1714d4cef" /><link rel="stylesheet" href="css/ui-enhance.min.css?v=775c4dc55c" /><link rel="stylesheet" href="css/ui-shell.min.css?v=c6832ab115" /></noscript>
+    <noscript><link rel="stylesheet" href="css/visual-refinements.min.css?v=3fd6a30cd9" /><link rel="stylesheet" href="css/ai-agent.min.css?v=46cbc440c2" /><link rel="stylesheet" href="css/ui-enhance.min.css?v=775c4dc55c" /><link rel="stylesheet" href="css/ui-shell.min.css?v=bcc619750e" /></noscript>
     <!-- ★ 2026-09-22 响应式修复（补完）：desktop.css 自身首条断点就是 @media (min-width: 768px)，
          只按宽度加载会让「横屏手机」（宽 ≥768、高 ≈390）也套上桌面两列栅格，与 ui-shell.css 侧
          已加的 min-height:480px 门禁不一致（会出现"桌面栅格 + 移动外壳"的混合布局）。
          故加载条件补上同一高度门禁，让横屏手机真正落回移动布局。 -->
     <link rel="stylesheet" media="(min-width: 768px) and (min-height: 480px)" href="css/desktop.min.css?v=d872211228" />
     <link rel="stylesheet" href="css/ui-enhance.min.css?v=775c4dc55c" media="print" onload="this.media='all'">
-    <link rel="stylesheet" href="css/ui-shell.min.css?v=c6832ab115">
+    <link rel="stylesheet" href="css/ui-shell.min.css?v=bcc619750e">
     <link rel="stylesheet" href="css/post-feed.min.css?v=573d98d8be">
     <link rel="stylesheet" href="css/profile-settings.min.css?v=49f1fd0516">
     <link rel="stylesheet" href="css/author-posts.min.css?v=970234e2e0">
-    <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=f1714d4cef">
-    <meta name="xtj-module-ai-workbench-style" content="css/ai-workbench.min.css?v=6f62e38a54">
+    <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=46cbc440c2">
     <meta name="xtj-module-ai-reading-style" content="css/ai-reading.min.css?v=69f38f78de">
     <meta name="xtj-module-ai-features-style" content="css/ai-assistant-features.min.css?v=c451edb9cb">
-    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=edcb715ff6">
+    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=5583f24c8e">
     <meta name="xtj-module-photo-preview-style" content="css/photo-preview.min.css?v=85f646c603">
     <meta name="xtj-module-photo-preview" content="js/photo-wall/preview.min.js?v=cc74606362">
     <meta name="xtj-module-photo-preview-hotfix" content="js/photo-wall/preview-hotfix.min.js?v=0f2e968901">
@@ -210,7 +209,7 @@
                         <span id="reportBtnBadge" class="nav-chat-badge" style="display:none;">0</span>
                     </button>
                 </div>
-                    <button class="posts-nav-icon-btn filter-toggle-btn" type="button" onclick="toggleFilterPanel()" id="filterToggleBtn" aria-label="搜索与筛选帖子" title="搜索与筛选帖子" aria-expanded="false" aria-controls="postFilterPanel">
+                    <button class="posts-nav-icon-btn filter-toggle-btn" type="button" onclick="toggleFilterPanel(event)" id="filterToggleBtn" aria-label="搜索与筛选帖子" title="搜索与筛选帖子" aria-expanded="false" aria-controls="postFilterPanel">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>
                         <span class="filter-active-badge" id="filterActiveBadge">0</span>
                     </button>
@@ -929,8 +928,8 @@
         </div>
     </div>
 
-    <div class="pp-confirm-overlay" id="ppConfirmOverlay" onclick="if(event.target===this)window.closeConfirm()">
-        <div class="pp-confirm-dialog" onclick="event.stopPropagation()">
+    <div class="pp-confirm-overlay" id="ppConfirmOverlay" onclick="if(event.target===this)window.closeConfirm()" aria-hidden="true" inert>
+        <div class="pp-confirm-dialog" onclick="event.stopPropagation()" role="dialog" aria-modal="true" aria-labelledby="ppConfirmTitle" aria-describedby="ppConfirmMsg">
             <h3 class="pp-confirm-title" id="ppConfirmTitle">确认操作</h3>
             <p class="pp-confirm-msg" id="ppConfirmMsg">确定要执行此操作吗？</p>
             <div class="pp-confirm-actions">
@@ -1220,10 +1219,9 @@
     <script defer src="js/ai-core/scroll-controller.min.js?v=34059556ba"></script>
     <script defer src="js/ai-core/stream-renderer.min.js?v=1434805d77"></script>
     <script defer src="js/ai-core/telemetry.min.js?v=6b7b8750d6"></script>
-    <script defer src="js/ai-core/tool-workbench.min.js?v=b7776dcc6c"></script>
     <script defer src="js/ai-core/reading-tools.min.js?v=a2e4de37ad"></script>
     <script defer src="js/ai-core/assistant-features.min.js?v=40a0b35f76"></script>
-    <script defer src="js/ai-core/voice-conversation.min.js?v=ea026fa00b"></script>
+    <script defer src="js/ai-core/voice-conversation.min.js?v=958f2e69d1"></script>
     <!-- Keep the database SDK on the same origin. The former public-CDN request
          was a single point of failure on restricted/mobile networks and could
          leave the feed permanently unavailable. `defer` preserves script order
@@ -1245,7 +1243,7 @@
     <script defer src="js/core-utils.min.js?v=6a3fe9e2ff"></script>
     <script defer src="js/photo-wall/story.min.js?v=27dc08b64a"></script>
     <script defer src="js/voice-transcription.min.js?v=6247e4303f"></script>
-    <script defer src="js/core.min.js?v=127aca0515"></script>
+    <script defer src="js/core.min.js?v=4dafc1df9d"></script>
     <script defer src="js/login-device.min.js?v=7f402fc787"></script>
     <script defer src="js/theme-toggle.min.js?v=dd3746237f"></script>
     <script defer src="js/desktop-shell.min.js?v=086938c9c6"></script>

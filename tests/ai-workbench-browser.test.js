@@ -39,6 +39,149 @@ async function fixture(options={}) {
 }
 async function tab(page,name) {await page.getByRole('tab',{name,exact:true}).click();}
 async function pasteCsv(page,text='项目,金额\n甲,12\n乙,3\n丙,25') {await page.getByLabel('或粘贴 CSV 数据',{exact:true}).fill(text);await page.getByRole('button',{name:'读取粘贴内容',exact:true}).click();await page.locator('.aw-table').waitFor();}
+test('boundary repair: a chart keeps its pending state across tools and previews, and new settings cancel only the old chart',async()=>{
+ const f=await fixture(),p=f.page;try{
+  await pasteCsv(p);await p.evaluate(png=>{wbChartJobs=[];const base=wbApi;wbApi=(path,opts)=>path.endsWith('/tool')&&opts.body.name==='make_chart'?new Promise(resolve=>{const args=opts.body.args;wbChartJobs.push({signal:opts.signal,args,finish:()=>resolve({ok:true,result:{cards:[{type:'make_chart',data:{image:png,title:args.title}}]}})});}):base(path,opts);},'data:image/png;base64,'+f.png.toString('base64'));
+  await p.getByLabel('图表标题',{exact:true}).fill('旧绘图');await p.getByRole('button',{name:'绘制图表',exact:true}).click();await p.waitForFunction(()=>wbChartJobs.length===1);await tab(p,'计算');await tab(p,'表格');assert.equal(await p.getByRole('button',{name:'正在绘图…',exact:true}).isDisabled(),true);
+  await p.getByRole('button',{name:'编辑与导出成果',exact:true}).click();const pending=p.getByRole('button',{name:'正在绘图…',exact:true});assert.equal(await pending.isDisabled(),true);await pending.evaluate(b=>b.dispatchEvent(new MouseEvent('click',{bubbles:true})));await settleUi(p);assert.equal(await p.evaluate(()=>wbChartJobs.length),1);
+  await p.getByLabel('图表标题',{exact:true}).fill('新绘图');assert.equal(await p.evaluate(()=>wbChartJobs[0].signal.aborted),true);await p.getByRole('button',{name:'绘制图表',exact:true}).click();await p.waitForFunction(()=>wbChartJobs.length===2);
+  await p.evaluate(()=>wbChartJobs[0].finish());await settleUi(p);assert.equal(await p.getByRole('button',{name:'正在绘图…',exact:true}).isDisabled(),true);assert.equal(await p.locator('.aw-chart').count(),0);
+  await p.evaluate(()=>wbChartJobs[1].finish());await p.getByRole('img',{name:'新绘图',exact:true}).waitFor();assert.equal(await p.getByRole('button',{name:'绘制图表',exact:true}).isEnabled(),true);assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
+test('boundary repair: rounded image regions must retain at least one pixel and remain inside the original',async()=>{
+ const f=await fixture(),p=f.page;try{
+  await tab(p,'图片');await p.getByLabel('添加图片',{exact:true}).setInputFiles({name:'原图.png',mimeType:'image/png',buffer:f.png});const coordinates=p.getByLabel('框选坐标 x,y,宽,高（原图像素）',{exact:true});
+  for(const value of ['0,0,0.1,0.1','0.5,0,0.5,1',' ,0,1,1']){
+   await coordinates.fill(value);await p.getByLabel('标注说明',{exact:true}).fill('校验通过前保留的草稿');await p.getByRole('button',{name:'保存区域标注',exact:true}).click();await settleUi(p);assert.equal(await p.getByLabel('标注说明',{exact:true}).inputValue(),'校验通过前保留的草稿');assert.equal(await p.locator('.aw-image-grid').getByText(/^标注 1：/).count(),0);assert.match(await p.locator('.aw-status').textContent(),/原图|像素/);
+   await p.getByRole('button',{name:'识别框选文字',exact:true}).click();await settleUi(p);assert.equal(await p.evaluate(()=>wbCalls.filter(c=>c.path.endsWith('/ocr')).length),0);
+  }
+  await coordinates.fill('0,0,0.6,0.6');await p.getByRole('button',{name:'识别框选文字',exact:true}).click();await p.getByLabel('识别文字（可校正）',{exact:true}).waitFor();assert.equal(await coordinates.inputValue(),'0,0,1,1');
+  const size=await p.evaluate(async()=>{const image=new Image();image.src=wbCalls.find(c=>c.path.endsWith('/ocr')).body.dataUrl;await image.decode();return [image.naturalWidth,image.naturalHeight];});assert.deepEqual(size,[1,1]);assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
+test('boundary repair: workflow column numbers reject decimals and cleared values before executing tools',async()=>{
+ const f=await fixture(),p=f.page;try{
+  await pasteCsv(p);await tab(p,'工具流程');await p.getByLabel('添加步骤',{exact:true}).selectOption('chart');await p.getByRole('button',{name:'添加步骤',exact:true}).click();
+  for(const value of ['1.5','','0','3']){
+   await p.getByLabel('分类列序号（从 1 开始）',{exact:true}).fill(value);await p.getByRole('button',{name:'执行未完成步骤',exact:true}).click();await p.waitForFunction(()=>!!document.querySelector('[data-step-status="done"],[data-step-status="failed"]'));assert.equal(await p.locator('[data-step-index="0"]').getAttribute('data-step-status'),'failed');assert.equal(await p.evaluate(()=>wbCalls.filter(c=>c.body?.name==='make_chart').length),0);
+  }
+  await p.getByLabel('分类列序号（从 1 开始）',{exact:true}).fill('1');await p.getByLabel('数值列序号（从 1 开始）',{exact:true}).fill('');await p.getByRole('button',{name:'执行未完成步骤',exact:true}).click();await p.waitForFunction(()=>!!document.querySelector('[data-step-status="done"],[data-step-status="failed"]'));assert.equal(await p.locator('[data-step-index="0"]').getAttribute('data-step-status'),'failed');
+  await p.getByLabel('数值列序号（从 1 开始）',{exact:true}).fill('2');await p.getByRole('button',{name:'执行未完成步骤',exact:true}).click();await p.locator('[data-step-status="done"]').waitFor();assert.deepEqual(await p.evaluate(()=>wbCalls.find(c=>c.body?.name==='make_chart').body.args.labels),['甲','乙','丙']);
+  await p.getByRole('button',{name:'删除步骤',exact:true}).click();await p.getByLabel('添加步骤',{exact:true}).selectOption('filter');await p.getByRole('button',{name:'添加步骤',exact:true}).click();await p.getByLabel('筛选列序号（从 1 开始）',{exact:true}).fill('');await p.getByRole('button',{name:'执行未完成步骤',exact:true}).click();await p.waitForFunction(()=>!!document.querySelector('[data-step-status="done"],[data-step-status="failed"]'));assert.equal(await p.locator('[data-step-index="0"]').getAttribute('data-step-status'),'failed');assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
+test('deep repair: workflow defaults are the saved and executed values even after the original tool changes',async()=>{
+ const f=await fixture(),p=f.page;try{
+  await tab(p,'计算');await p.getByLabel('数学表达式',{exact:true}).fill('2+2');await p.getByLabel('结果单位',{exact:true}).fill('份');
+  await tab(p,'工具流程');await p.getByLabel('添加步骤',{exact:true}).selectOption('calculate');await p.getByRole('button',{name:'添加步骤',exact:true}).click();
+  assert.equal(await p.getByLabel('表达式',{exact:true}).inputValue(),'2+2');assert.equal(await p.getByLabel('结果单位',{exact:true}).inputValue(),'份');
+  await tab(p,'成果预览');await p.getByRole('button',{name:'保存到我的账号',exact:true}).click();await p.waitForFunction(()=>wbRecords.length===1);
+  const config=await p.evaluate(()=>wbRecords[0].data.steps[0].config);assert.equal(config.expression,'2+2');assert.equal(config.unit,'份');
+  await tab(p,'计算');await p.getByLabel('数学表达式',{exact:true}).fill('9+9');await p.getByLabel('结果单位',{exact:true}).fill('元');await tab(p,'成果预览');await p.getByRole('button',{name:'载入此流程设置',exact:true}).click();
+  assert.equal(await p.getByLabel('表达式',{exact:true}).inputValue(),'2+2');assert.equal(await p.getByLabel('结果单位',{exact:true}).inputValue(),'份');
+  await p.getByRole('button',{name:'执行未完成步骤',exact:true}).click();await p.locator('[data-step-status="done"]').waitFor();assert.match(await p.locator('.aw-step-output').textContent(),/2\+2 = 4[\s\S]*份/);
+  await p.getByLabel('表达式',{exact:true}).fill('');await p.getByRole('button',{name:'执行未完成步骤',exact:true}).click();await p.locator('[data-step-status="failed"]').waitFor();
+  assert.equal(await p.evaluate(()=>wbCalls.filter(c=>c.body?.name==='calculate').length),1,'an explicitly cleared formula must not fall back to another tool');assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
+test('deep repair: in-flight document exports stay with their source and remain available after changing tools',async()=>{
+ const f=await fixture(),p=f.page;try{
+  await pasteCsv(p);await p.getByRole('button',{name:'编辑与导出成果',exact:true}).click();await p.getByLabel('成果标题',{exact:true}).fill('原表成果');await p.evaluate(()=>wbDelay='/tool');
+  await p.getByRole('button',{name:'生成正式文档',exact:true}).click();await p.waitForFunction(()=>typeof wbRelease==='function');await tab(p,'决策对比');await p.evaluate(()=>wbRelease());await settleUi(p);
+  assert.equal(await p.locator('.aw-download').count(),0,'a table export must not be appended into the decision tool');
+  await tab(p,'成果预览');await p.getByRole('button',{name:'下载 原表成果.pdf',exact:true}).waitFor();
+  await p.evaluate(()=>{wbRelease=null;});await p.getByRole('button',{name:'生成 Excel',exact:true}).click();await p.waitForFunction(()=>typeof wbRelease==='function');await tab(p,'表格');await tab(p,'成果预览');
+  assert.equal(await p.getByRole('button',{name:'正在生成…',exact:true}).isDisabled(),true);await p.evaluate(()=>wbRelease());await p.getByRole('button',{name:'下载 原表成果.xlsx',exact:true}).waitFor();
+  await p.getByLabel('摘要 / 正文（可编辑）',{exact:true}).fill('新的摘要');assert.equal(await p.locator('.aw-download').count(),0,'editing the source invalidates generated downloads');
+  await p.evaluate(()=>{wbRelease=null;});await p.getByRole('button',{name:'生成正式文档',exact:true}).click();await p.waitForFunction(()=>typeof wbRelease==='function');await p.getByLabel('成果标题',{exact:true}).fill('修订后的成果');await p.evaluate(()=>wbRelease());await p.getByRole('button',{name:'生成正式文档',exact:true}).waitFor();assert.equal(await p.locator('.aw-download').count(),0,'a late export must not restore a download invalidated by newer edits');assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
+test('deep repair: unsubmitted table filter controls survive tools and pagination without applying themselves',async()=>{
+ const f=await fixture(),p=f.page;try{
+  await pasteCsv(p,'名称,金额\n甲,2\n乙,5');await p.getByLabel('筛选列',{exact:true}).selectOption('1');await p.getByLabel('条件',{exact:true}).selectOption('gte');await p.getByLabel('筛选值',{exact:true}).fill('4');
+  await tab(p,'计算');await tab(p,'表格');assert.equal(await p.getByLabel('筛选列',{exact:true}).inputValue(),'1');assert.equal(await p.getByLabel('条件',{exact:true}).inputValue(),'gte');assert.equal(await p.getByLabel('筛选值',{exact:true}).inputValue(),'4');assert.equal(await p.locator('.aw-table tbody tr').count(),2);
+  await p.getByRole('button',{name:'筛选',exact:true}).click();assert.equal(await p.locator('.aw-table tbody tr').count(),1);assert.match(await p.locator('.aw-table').textContent(),/乙/);
+  await p.getByRole('button',{name:'清除筛选',exact:true}).click();assert.equal(await p.getByLabel('筛选值',{exact:true}).inputValue(),'');assert.equal(await p.getByLabel('条件',{exact:true}).inputValue(),'contains');assert.equal(await p.locator('.aw-table tbody tr').count(),2);assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
+test('deep repair: image coordinate and annotation drafts survive tool switches and OCR completion',async()=>{
+ const f=await fixture(),p=f.page;try{
+  await tab(p,'图片');await p.getByLabel('添加图片',{exact:true}).setInputFiles({name:'原图.png',mimeType:'image/png',buffer:f.png});
+  await p.getByLabel('框选坐标 x,y,宽,高（原图像素）',{exact:true}).fill('0,0,1,1');await p.getByLabel('标注说明',{exact:true}).fill('未保存的标注草稿');await tab(p,'计算');await tab(p,'图片');
+  assert.equal(await p.getByLabel('框选坐标 x,y,宽,高（原图像素）',{exact:true}).inputValue(),'0,0,1,1');assert.equal(await p.getByLabel('标注说明',{exact:true}).inputValue(),'未保存的标注草稿');
+  await p.evaluate(()=>wbDelay='/ocr');await p.getByRole('button',{name:'识别框选文字',exact:true}).click();await p.waitForFunction(()=>typeof wbRelease==='function');await p.getByLabel('标注说明',{exact:true}).fill('OCR 期间继续编辑的标注');await p.evaluate(()=>wbRelease());await p.getByLabel('识别文字（可校正）',{exact:true}).waitFor();
+  assert.equal(await p.getByLabel('标注说明',{exact:true}).inputValue(),'OCR 期间继续编辑的标注');await p.getByRole('button',{name:'保存区域标注',exact:true}).click();assert.equal(await p.getByLabel('标注说明',{exact:true}).inputValue(),'');assert.match(await p.locator('.aw-image-grid').textContent(),/标注 1：OCR 期间继续编辑的标注/);assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
+test('deep repair: manual OCR correction cancels old recognition and survives a late response or a new crop',async()=>{
+ const f=await fixture(),p=f.page;try{
+  await tab(p,'图片');await p.getByLabel('添加图片',{exact:true}).setInputFiles({name:'原图.png',mimeType:'image/png',buffer:f.png});await p.getByLabel('框选坐标 x,y,宽,高（原图像素）',{exact:true}).fill('0,0,1,1');await p.getByRole('button',{name:'识别框选文字',exact:true}).click();await p.getByLabel('识别文字（可校正）',{exact:true}).waitFor();
+  await p.evaluate(()=>{wbDelay='/ocr';const base=wbApi;wbApi=(path,opts)=>{if(path.endsWith('/ocr'))window.ocrSignal=opts.signal;return base(path,opts).catch(()=>{throw Error('聊天记录更新失败，请检查网络后重试');});};});await p.getByRole('button',{name:'识别框选文字',exact:true}).click();await p.waitForFunction(()=>typeof wbRelease==='function');
+  await tab(p,'计算');await tab(p,'图片');assert.equal(await p.getByRole('button',{name:'正在识别…',exact:true}).isDisabled(),true);
+  await p.getByLabel('识别文字（可校正）',{exact:true}).fill('人工核对的正确文字');assert.equal(await p.evaluate(()=>ocrSignal.aborted),true);await p.evaluate(()=>wbRelease());await settleUi(p);assert.equal(await p.getByLabel('识别文字（可校正）',{exact:true}).inputValue(),'人工核对的正确文字');assert.doesNotMatch(await p.locator('.aw-status').textContent(),/聊天记录更新失败/);
+  await p.evaluate(()=>{wbRelease=null;});await p.getByRole('button',{name:'识别框选文字',exact:true}).click();await p.waitForFunction(()=>typeof wbRelease==='function');await p.getByLabel('框选坐标 x,y,宽,高（原图像素）',{exact:true}).fill('0,0,0,0');assert.equal(await p.evaluate(()=>ocrSignal.aborted),true);await p.evaluate(()=>wbRelease());await settleUi(p);assert.equal(await p.getByLabel('识别文字（可校正）',{exact:true}).inputValue(),'人工核对的正确文字');assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
+test('audit repair: charts belong to their own current data and never appear in unrelated timeline results',async()=>{
+ const f=await fixture({viewport:{width:1440,height:900}}),p=f.page;try{
+  await pasteCsv(p);await p.getByLabel('图表标题',{exact:true}).fill('销售原表图');await p.getByRole('button',{name:'绘制图表',exact:true}).click();await p.getByRole('img',{name:'销售原表图',exact:true}).waitFor();
+  await tab(p,'时间线');await p.getByLabel('粘贴资料文字',{exact:true}).fill('2026-10-15 完成审计。');await p.getByLabel('这份文字的来源名称',{exact:true}).fill('会议原文');await p.getByRole('button',{name:'加入文字资料',exact:true}).click();await p.getByRole('button',{name:'提取明确日期',exact:true}).click();await p.getByRole('button',{name:'编辑与导出时间线',exact:true}).click();
+  assert.match(await p.locator('.aw-table').textContent(),/会议原文/);assert.equal(await p.locator('.aw-chart').count(),0);
+  await tab(p,'表格');await p.getByRole('img',{name:'销售原表图',exact:true}).waitFor();await p.getByRole('button',{name:'编辑与导出成果',exact:true}).click();await p.getByRole('img',{name:'销售原表图',exact:true}).waitFor();
+  await p.getByLabel('列 2 名称',{exact:true}).fill('已校正的金额列');assert.equal(await p.locator('.aw-chart').count(),0);assert.equal(await p.getByLabel('列 2 名称',{exact:true}).evaluate(el=>el===document.activeElement),true);
+  assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
+test('audit repair: a late chart cannot attach to another source or changed chart parameters',async()=>{
+ const f=await fixture(),p=f.page;try{
+  await pasteCsv(p);await p.evaluate(()=>window.wbDelay='/tool');await p.getByLabel('图表标题',{exact:true}).fill('旧图请求');await p.getByRole('button',{name:'绘制图表',exact:true}).click();await p.waitForFunction(()=>typeof wbRelease==='function');
+  await p.getByLabel('图表标题',{exact:true}).fill('新的图表设置');await p.evaluate(()=>wbRelease());await p.waitForFunction(()=>!Array.from(document.querySelectorAll('.aw-card button')).some(b=>b.textContent==='正在绘图…'));assert.equal(await p.locator('.aw-chart').count(),0);
+  await p.evaluate(()=>{wbDelay='';wbRelease=null;});await p.getByRole('button',{name:'绘制图表',exact:true}).click();await p.getByRole('img',{name:'新的图表设置',exact:true}).waitFor();
+  await p.getByLabel('分类列',{exact:true}).selectOption('1');assert.equal(await p.locator('.aw-chart').count(),0);assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
+test('audit repair: unread CSV and URL drafts survive tab changes without relabeling an already-read source',async()=>{
+ const f=await fixture(),p=f.page;try{
+  const csv='项目,金额\n保留草稿甲,12\n保留草稿乙,25';await p.getByLabel('或粘贴 CSV 数据',{exact:true}).fill(csv);await tab(p,'计算');await tab(p,'表格');assert.equal(await p.getByLabel('或粘贴 CSV 数据',{exact:true}).inputValue(),csv);await p.getByRole('button',{name:'读取粘贴内容',exact:true}).click();await p.locator('.aw-table').waitFor();assert.match(await p.locator('.aw-table').textContent(),/保留草稿乙/);
+  await tab(p,'网页摘录');const original='https://example.com/original',next='https://example.com/next-draft';await p.getByLabel('网页地址',{exact:true}).fill(original);await tab(p,'计算');await tab(p,'网页摘录');assert.equal(await p.getByLabel('网页地址',{exact:true}).inputValue(),original);
+  await p.getByRole('button',{name:'读取网页',exact:true}).click();await p.getByLabel('选中要保留的正文段落',{exact:true}).waitFor();await p.getByLabel('网页地址',{exact:true}).fill(next);await tab(p,'计算');await tab(p,'网页摘录');assert.equal(await p.getByLabel('网页地址',{exact:true}).inputValue(),next);
+  await p.getByLabel('选中要保留的正文段落',{exact:true}).evaluate(el=>el.setSelectionRange(0,20));await p.getByRole('button',{name:'保存选中段落',exact:true}).click();assert.equal(await p.locator('.aw-card a').getAttribute('href'),original);assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
+test('audit repair: changing workflow inputs immediately invalidates the visible result without losing focus',async()=>{
+ const f=await fixture(),p=f.page;try{
+  await tab(p,'工具流程');await p.getByLabel('添加步骤',{exact:true}).selectOption('calculate');await p.getByRole('button',{name:'添加步骤',exact:true}).click();await p.getByLabel('表达式',{exact:true}).fill('2+2');await p.getByRole('button',{name:'执行未完成步骤',exact:true}).click();await p.locator('[data-step-status="done"]').waitFor();
+  await p.getByLabel('表达式',{exact:true}).fill('9+9');assert.equal(await p.locator('[data-step-status="pending"]').count(),1);assert.match(await p.locator('.aw-step-state').textContent(),/等待执行/);assert.equal(await p.getByRole('button',{name:'从此步骤继续',exact:true}).isEnabled(),true);assert.equal(await p.locator('.aw-output,.aw-download').count(),0);assert.equal(await p.getByLabel('表达式',{exact:true}).evaluate(el=>document.activeElement===el),true);
+  assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
+test('audit repair: workflow PDF preserves every actual calculation, formula and supplied unit',async()=>{
+ const f=await fixture(),p=f.page;try{
+  await tab(p,'工具流程');for(const [expression,unit] of [['2+2','份'],['8/2','元']]){await p.getByLabel('添加步骤',{exact:true}).selectOption('calculate');await p.getByRole('button',{name:'添加步骤',exact:true}).click();await p.getByLabel('表达式',{exact:true}).last().fill(expression);await p.getByLabel('结果单位',{exact:true}).last().fill(unit);}
+  await p.getByLabel('添加步骤',{exact:true}).selectOption('report');await p.getByRole('button',{name:'添加步骤',exact:true}).click();await p.getByRole('button',{name:'执行未完成步骤',exact:true}).click();await p.waitForFunction(()=>document.querySelectorAll('[data-step-status="done"]').length===3);
+  const outputs=await p.locator('.aw-output').allTextContents();assert.equal(outputs.length,2);assert.match(outputs[0],/2\+2.*4/s);assert.match(outputs[0],/份/);assert.match(outputs[1],/8\/2.*4/s);assert.match(outputs[1],/元/);
+  const args=await p.evaluate(()=>wbCalls.find(c=>c.body?.name==='generate_pdf').body.args),buffer=await require('../render-api/ai-report-export').buildReportPdf(args),parsed=await require('../render-api/file-parsers').parsePdfBuffer(buffer);
+  assert.match(parsed.text,/2\+2/);assert.match(parsed.text,/8\/2/);assert.match(parsed.text,/份/);assert.match(parsed.text,/元/);assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
+test('audit repair: web workflow PDF retains the actual original URL and source title',async()=>{
+ const f=await fixture(),p=f.page;try{
+  const url='https://example.com/original-audit-source?article=15';await tab(p,'工具流程');await p.getByRole('button',{name:'网页 → 时间线 → 文档',exact:true}).click();await p.getByLabel('HTTPS 网页地址',{exact:true}).fill(url);await p.getByRole('button',{name:'执行未完成步骤',exact:true}).click();await p.waitForFunction(()=>document.querySelectorAll('[data-step-status="done"]').length===3);
+  const args=await p.evaluate(()=>wbCalls.find(c=>c.body?.name==='generate_pdf').body.args),buffer=await require('../render-api/ai-report-export').buildReportPdf(args),parsed=await require('../render-api/file-parsers').parsePdfBuffer(buffer);
+  assert.ok(parsed.text.includes(url));assert.match(parsed.text,/真实模拟来源/);assert.match(parsed.text,/2026-10-14/);assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
+test('audit repair: stop after revisiting audio cancels the owned task and a late result cannot overwrite the next job',async()=>{
+ const f=await fixture(),p=f.page;try{
+  await p.evaluate(()=>{window.audioJobs=[];window.XTJVoiceTranscription={transcribeBlob:async(file,opts)=>{const job={signal:opts.signal};audioJobs.push(job);return new Promise(resolve=>job.release=resolve);}};});
+  await tab(p,'音频');await p.getByLabel('选择音频',{exact:true}).setInputFiles({name:'local.wav',mimeType:'audio/wav',buffer:Buffer.from('isolated-audio')});await p.getByRole('button',{name:'本地转写',exact:true}).click();await p.waitForFunction(()=>audioJobs.length===1);await tab(p,'计算');await tab(p,'音频');
+  assert.equal(await p.getByRole('button',{name:'正在转写…',exact:true}).isDisabled(),true);await p.getByRole('button',{name:'停止本次转写',exact:true}).click();assert.equal(await p.evaluate(()=>audioJobs[0].signal.aborted),true);
+  await p.getByRole('button',{name:'本地转写',exact:true}).click();await p.waitForFunction(()=>audioJobs.length===2);await p.evaluate(()=>audioJobs[0].release('被取消的旧文字'));await settleUi(p);
+  assert.equal(await p.getByLabel('转写文字（可校正）',{exact:true}).inputValue(),'');assert.equal(await p.getByRole('button',{name:'正在转写…',exact:true}).isDisabled(),true);assert.equal(await p.evaluate(()=>audioJobs[1].signal.aborted),false);
+  await p.evaluate(()=>audioJobs[1].release('下一次任务的实际文字'));await p.waitForFunction(()=>document.querySelector('.aw-field textarea').value==='下一次任务的实际文字');assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
 test('actual table preview filters numeric rows, creates chart, edits headers and downloads all CSV rows',async()=>{
   const f=await fixture();try{
     await pasteCsv(f.page);await f.page.getByLabel('筛选列',{exact:true}).selectOption('1');await f.page.getByLabel('条件',{exact:true}).selectOption('gt');await f.page.getByLabel('筛选值',{exact:true}).fill('10');await f.page.getByRole('button',{name:'筛选',exact:true}).click();assert.equal(await f.page.locator('.aw-table tbody tr').count(),2);
