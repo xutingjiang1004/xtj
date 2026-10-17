@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync, spawnSync } = require('node:child_process');
+const { isDeepStrictEqual } = require('node:util');
 const { PREVIEW_TARGET: TARGET, resolvePreviewAccountId } = require('../cloudflare/preview-target');
 const { preflight, curlRequest, isIsolatedProject } = require('./cloudflare-preview-preflight');
 const { buildPages } = require('./build-pages');
@@ -92,6 +93,14 @@ async function deployPreview({ env = process.env, state = readState, request = c
     stage = 'project_guard';
     const project = await request(base, { token: env.CLOUDFLARE_API_TOKEN });
     if (project.failure || project.status !== 200 || project.data?.success !== true || !isIsolatedProject(project.data.result)) return fail('project_changed_during_checks');
+    const configuration = JSON.parse(fs.readFileSync(path.join(ROOT, 'wrangler.jsonc'), 'utf8'));
+    const declaredVars = configuration.env?.preview?.vars || configuration.vars || {};
+    const previousConfig = project.data.result.deployment_configs || {};
+    const previousBindings = previousConfig.preview?.env_vars || {};
+    // Pages treats Wrangler vars as authoritative and removes other plain-text
+    // bindings. Never copy unknown values into files or quietly delete them.
+    if (Object.entries(previousBindings).some(([name, binding]) => binding.type === 'plain_text'
+      && (!Object.hasOwn(declaredVars, name) || declaredVars[name] !== binding.value))) return fail('undeclared_existing_preview_plain_binding');
     const uploaded = execute('upload', 'npx', ['--yes', 'wrangler@' + TARGET.wranglerVersion, 'pages', 'deploy',
       'output/cloudflare-pages', '--project-name=' + TARGET.project, '--branch=' + TARGET.branch,
       '--commit-hash=' + initial.sha], 240000);
@@ -103,6 +112,15 @@ async function deployPreview({ env = process.env, state = readState, request = c
     if (!match || !/^[a-f0-9-]{36}$/.test(match.id || '')
       || !/^https:\/\/[a-z0-9-]+\.xtj-preview\.pages\.dev$/.test(match.url || '')) {
       return fail(uploaded ? 'deployment_not_confirmed' : 'upload_failed');
+    }
+    const configured = await request(base, { token: env.CLOUDFLARE_API_TOKEN });
+    const deployedConfig = configured.data?.result?.deployment_configs || {};
+    const deployedBindings = deployedConfig.preview?.env_vars || {};
+    if (configured.failure || configured.status !== 200 || configured.data?.success !== true || !isIsolatedProject(configured.data.result)
+      || !isDeepStrictEqual(deployedConfig.production, previousConfig.production)
+      || Object.entries(previousBindings).some(([name, binding]) => deployedBindings[name]?.type !== binding.type)
+      || Object.entries(declaredVars).some(([name, value]) => deployedBindings[name]?.type !== 'plain_text' || deployedBindings[name].value !== value)) {
+      return fail('deployment_runtime_bindings_or_production_configuration_changed');
     }
     const after = await preflight({ accountId, token: env.CLOUDFLARE_API_TOKEN, env, request });
     if (![0, 5].includes(after.exit_code)) return fail('post_deploy_project_check_failed');
