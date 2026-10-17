@@ -143,3 +143,15 @@ test('timeouts and cancellation cannot grant access; expiry is checked again aft
   const expired = fixture(async () => { time += 120000; return json([]); }, { now: () => time });
   assert.equal((await expired.verify(request(), ENV)).status, 401);
 });
+
+test('upstream quota limits stay distinct from retryable failures without reflecting provider bodies', async () => {
+  const quota = fixture(async () => new Response('exceed_egress_quota private_fixture_value', { status: 402 }));
+  const restricted = await quota.verify(request(), ENV);
+  assert.equal(restricted.status, 402); assert.equal(restricted.body.code, 'egress_quota_exceeded');
+  assert.equal(restricted.body.retryable, false);
+  assert.equal(JSON.stringify(restricted).includes('private_fixture_value'), false);
+  const failure = fixture(async () => new Response('private_fixture_value', { status: 403 }));
+  const unavailable = await failure.verify(request(), ENV);
+  assert.equal(unavailable.status, 503); assert.equal(unavailable.body.upstream_status, 403);
+  assert.equal(JSON.stringify(unavailable).includes('private_fixture_value'), false);
+});
