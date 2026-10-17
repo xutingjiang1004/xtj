@@ -22,7 +22,7 @@ test('Pages artifact excludes backend, credentials, metadata and preserves front
   assert.ok(fs.existsSync(path.join(out, '404.html')));
   assert.match(fs.readFileSync(path.join(out, '_headers'), 'utf8'), /Content-Security-Policy:/);
   const routes = JSON.parse(fs.readFileSync(path.join(out, '_routes.json')));
-  const backendPaths = ['/api', '/api/uploads/media', '/admin/login', '/admin/users', '/health', '/health/mail', '/share', '/share/example'];
+  const backendPaths = ['/api', '/api/uploads/media', '/admin/login', '/admin/users', '/admin/verify', '/admin/verify/', '/health', '/health/mail', '/share', '/share/example'];
   const matches = (route, pathname) => route.endsWith('/*') ? pathname === route.slice(0, -2) || pathname.startsWith(route.slice(0, -1)) : pathname === route;
   const isBackendPath = pathname => routes.include.some(route => matches(route, pathname)) && !routes.exclude.some(route => matches(route, pathname));
   for (const pathname of backendPaths) assert.equal(isBackendPath(pathname), true, pathname + ' must return the explicit migration 503');

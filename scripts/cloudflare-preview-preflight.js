@@ -3,9 +3,15 @@
 // Read-only checks for the independent preview. Never print raw provider errors:
 // they can echo a token mistakenly supplied as an Account ID.
 const { spawnSync } = require('node:child_process');
-const PROJECT = 'xtj-preview';
-const PREVIEW_HOST = 'migration-preview.xtj-preview.pages.dev';
-const PRODUCTION_BRANCH = 'preview-production-unused';
+const { PREVIEW_TARGET, resolvePreviewAccountId } = require('../cloudflare/preview-target');
+const { project: PROJECT, hostname: PREVIEW_HOST, productionBranch: PRODUCTION_BRANCH } = PREVIEW_TARGET;
+
+function isIsolatedProject(project) {
+  return project?.name === PROJECT && project.subdomain === PROJECT + '.pages.dev'
+    && project.production_branch === PRODUCTION_BRANCH
+    && project.canonical_deployment == null && project.production_deployment == null
+    && Array.isArray(project.domains) && project.domains.length === 1 && project.domains[0] === PROJECT + '.pages.dev';
+}
 
 function curlRequest(url, { token, spawn = spawnSync } = {}) {
   const args = ['--disable', '--silent', '--show-error', '--proto', '=https',
@@ -85,11 +91,7 @@ async function preflight({ accountId, token, env = {}, request = curlRequest } =
     return done(3);
   }
   const project = projectResponse.data.result;
-  const isolated = project?.name === PROJECT && project.subdomain === PROJECT + '.pages.dev'
-    && project.production_branch === PRODUCTION_BRANCH
-    && project.canonical_deployment == null && project.production_deployment == null
-    && Array.isArray(project.domains) && project.domains.length === 1 && project.domains[0] === PROJECT + '.pages.dev';
-  if (!isolated) {
+  if (!isIsolatedProject(project)) {
     add('pages_project', 'failed', 'preview_project_isolation_check_failed');
     return done(4);
   }
@@ -118,7 +120,13 @@ async function main(argv = process.argv.slice(2)) {
     console.log(JSON.stringify({ ok: false, exit_code: 2, code: 'usage_npm_run_cloudflare_preflight_optional_account_id' }));
     return 2;
   }
-  const result = await preflight({ accountId: argv[1] || process.env.CLOUDFLARE_ACCOUNT_ID,
+  let accountId;
+  try { accountId = resolvePreviewAccountId(argv[1], process.env.CLOUDFLARE_ACCOUNT_ID); }
+  catch (_) {
+    console.log(JSON.stringify({ ok: false, exit_code: 2, code: 'unexpected_preview_account' }));
+    return 2;
+  }
+  const result = await preflight({ accountId,
     token: process.env.CLOUDFLARE_API_TOKEN, env: process.env });
   console.log(JSON.stringify(result, null, 2));
   return result.exit_code;
@@ -128,4 +136,4 @@ if (require.main === module) main().then(code => { process.exitCode = code; }).c
   console.log(JSON.stringify({ ok: false, exit_code: 1, code: 'preflight_failed_without_logging_provider_error' }));
   process.exitCode = 1;
 });
-module.exports = { curlRequest, preflight, main };
+module.exports = { curlRequest, preflight, isIsolatedProject, main };
