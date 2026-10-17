@@ -52,7 +52,9 @@ function fixture(options = {}) {
       const row = { id: crypto.randomUUID(), ...body }; records.push(row);
       return response([row]);
     }
-    let found = records.filter(matches).slice(0, Number(url.searchParams.get('limit') || 100));
+    let found = records.filter(matches);
+    if ((url.searchParams.get('order') || '').startsWith('created_at.')) found.sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)) * (url.searchParams.get('order').endsWith('desc') ? -1 : 1));
+    found = found.slice(0, Number(url.searchParams.get('limit') || 100));
     if (init.method === 'PATCH') {
       if (options.casConflict && found[0]?.media_type === '__rate_limit__') found = [];
       for (const row of found) Object.assign(row, body);
@@ -135,6 +137,11 @@ test('persistent limits combine case/trailing-slash variants and fail closed on 
   const conflict = fixture({ casConflict: true });
   conflict.records.push({ id: 'limit-1', media_type: '__rate_limit__', media_url: 'rl_' + sha(':/api/user/login').slice(0, 32), content: JSON.stringify({ count: 1, resetAt: Date.now() + 60000 }) });
   assert.equal((await login(conflict)).res.status, 503);
+  const persisted = fixture();
+  for (let i = 0; i < 10; i++) assert.equal((await login(persisted, 'alice', 'wrong')).res.status, 401);
+  const coldBackend = createLoginBackend(DB, REVOKED_TOKEN_MARKER, crypto, Buffer, { fetch: persisted.fetcher });
+  const cold = await coldBackend(new Request(ORIGIN + '/api/user/login', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: ORIGIN }, body: JSON.stringify({ user_name: 'alice', password: 'wrong' }) }), ENV);
+  assert.equal(cold.status, 429, 'a new isolate must still enforce the stored counter');
 });
 
 test('CSRF, malformed bodies, wrong database bindings and unsupported routes stop before database access', async () => {
@@ -195,6 +202,18 @@ test('admin-only credentials preserve companion session and durable admin logout
     assert.equal(logout.status, 200);
     assert.equal(f.records.some(r => r.media_type === REVOKED_TOKEN_MARKER && r.media_url === sha(data.token)), true);
   }
+});
+
+test('admin login survives companion identity failures, and profile returns the earliest retained registration time', async () => {
+  const unavailable = fixture({ fail: url => url.searchParams.get('media_type') === 'eq.__auth__' });
+  const res = await unavailable.request('/admin/login', { username: 'xxz', password: ENV.ADMIN_PASSWORD });
+  const data = await res.json();
+  assert.equal(res.status, 200); assert.equal(data.user_token, null); assert.ok(data.user_session_error);
+  assert.equal(res.headers.getSetCookie().length, 1);
+  const f = fixture(), initial = await login(f);
+  f.records.push({ ...f.records[0], id: 'older-legacy-record', created_at: '2019-01-01T00:00:00Z' });
+  const profile = await f.request('/api/user/profile', undefined, { Authorization: 'Bearer ' + initial.data.token });
+  assert.equal((await profile.json()).registered_at, '2019-01-01T00:00:00Z');
 });
 
 test('refresh and logout infrastructure failures preserve browser credentials', async () => {
