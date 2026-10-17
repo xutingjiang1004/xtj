@@ -50,7 +50,7 @@ function createLoginBackend(expectedUrl, revokedMarker, cryptoApi, BufferApi, op
     }
     return equal(stored.toLowerCase(), hash(password)) || equal(stored.toLowerCase(), hash(user + ':' + password));
   }
-  async function boundedJson(response, maxBytes, signal) {
+  async function boundedJson(response, maxBytes, signal, parse = true) {
     const reader = response.body?.getReader();
     if (!reader) throw Error('empty_body');
     const chunks = [];
@@ -71,7 +71,8 @@ function createLoginBackend(expectedUrl, revokedMarker, cryptoApi, BufferApi, op
       await reader.cancel().catch(() => {});
     }
     if (signal?.aborted) throw Error('aborted');
-    return JSON.parse(B.concat(chunks).toString('utf8'));
+    const text = B.concat(chunks).toString('utf8');
+    return parse ? JSON.parse(text) : text;
   }
   function cookie(name, value, path, maxAge, sameSite = 'Lax') {
     return name + '=' + value + '; Path=' + path + '; Max-Age=' + Math.max(0, Math.floor(maxAge / 1000)) + '; HttpOnly; Secure; SameSite=' + sameSite;
@@ -121,8 +122,13 @@ function createLoginBackend(expectedUrl, revokedMarker, cryptoApi, BufferApi, op
       const headers = { apikey: key, Accept: 'application/json', 'Content-Type': 'application/json', Prefer: 'return=representation' };
       if (legacyService) headers.Authorization = 'Bearer ' + key;
       const response = await fetcher(url.href, { method, headers, body: body === undefined ? undefined : JSON.stringify(body),
-        signal: controller.signal, redirect: 'manual', cache: 'no-store' });
-      if (!response.ok || !/application\/json/i.test(response.headers.get('content-type') || '')) throw Error('database_unavailable');
+        signal: controller.signal, redirect: 'manual', cache: 'no-store' })
+        .catch(() => { throw Object.assign(Error('database_unavailable'), { upstreamFailure: 'network' }); });
+      if (!response.ok) {
+        const restricted = response.status === 402 && /exceed_egress_quota/.test(await boundedJson(response, 32768, controller.signal, false));
+        throw Object.assign(Error('database_unavailable'), { upstreamStatus: response.status, egressRestricted: restricted });
+      }
+      if (!/application\/json/i.test(response.headers.get('content-type') || '')) throw Error('database_unavailable');
       const value = await boundedJson(response, 65536, controller.signal);
       if (controller.signal.aborted) throw Error('aborted');
       return value;
@@ -380,7 +386,13 @@ function createLoginBackend(expectedUrl, revokedMarker, cryptoApi, BufferApi, op
         return result(200, { ok: true, user_name: payload.user_name, registered_at: earliest[0]?.created_at || null });
       }
       return result(200, { ok: true, is_admin: payload.user_name === 'xxz', restrictions: await restrictions(payload.user_name, true) });
-    } catch (_) { return unavailable(); }
+    } catch (error) {
+      if (error?.egressRestricted === true) return result(402, { error: '网站数据服务流量额度已用完，服务暂时受限，请等待恢复', code: 'egress_quota_exceeded', retryable: false });
+      const reply = unavailable();
+      if (Number.isInteger(error?.upstreamStatus) && error.upstreamStatus >= 100 && error.upstreamStatus <= 599) reply.body.upstream_status = error.upstreamStatus;
+      if (error?.upstreamFailure === 'network') reply.body.upstream_failure = 'network';
+      return reply;
+    }
     finally { clearTimeout(timer); request.signal.removeEventListener('abort', abort); }
   };
 }

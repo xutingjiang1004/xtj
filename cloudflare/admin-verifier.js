@@ -24,7 +24,7 @@ function createAdminVerifier(expectedSupabaseUrl, revokedTokenMarker, options = 
     catch (_) { return null; }
   }
   async function readBoundedJson(response) {
-    if (!response.ok || !/application\/json/i.test(response.headers.get('content-type') || '')) throw Error('unavailable');
+    if (!response.ok && response.status !== 402) throw Object.assign(Error('unavailable'), { upstreamStatus: response.status });
     const reader = response.body.getReader();
     let length = 0, chunks = [];
     try {
@@ -39,7 +39,10 @@ function createAdminVerifier(expectedSupabaseUrl, revokedTokenMarker, options = 
     const bytes = new Uint8Array(length);
     let offset = 0;
     for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
-    const rows = JSON.parse(decoder.decode(bytes));
+    const decoded = decoder.decode(bytes);
+    if (!response.ok) throw Object.assign(Error('unavailable'), { upstreamStatus: response.status, egressRestricted: /exceed_egress_quota/.test(decoded) });
+    if (!/application\/json/i.test(response.headers.get('content-type') || '')) throw Error('unavailable');
+    const rows = JSON.parse(decoded);
     if (!Array.isArray(rows) || rows.length > 100) throw Error('unavailable');
     return rows;
   }
@@ -103,7 +106,9 @@ function createAdminVerifier(expectedSupabaseUrl, revokedTokenMarker, options = 
       for (let page = 0; page < 20; page++) {
         if (controller.signal.aborted) throw Error('unavailable');
         if (cursor) endpoint.searchParams.set('id', 'gt.' + cursor);
-        const rows = await readBoundedJson(await fetcher(endpoint.href, { method: 'GET', headers, redirect: 'manual', signal: controller.signal, cache: 'no-store' }));
+        const response = await fetcher(endpoint.href, { method: 'GET', headers, redirect: 'manual', signal: controller.signal, cache: 'no-store' })
+          .catch(() => { throw Object.assign(Error('unavailable'), { upstreamFailure: 'network' }); });
+        const rows = await readBoundedJson(response);
         if (controller.signal.aborted) throw Error('unavailable');
         if (!rows.length) return now() > expiresAt ? invalid() : { status: 200, body: { ok: true } };
         for (const row of rows) {
@@ -117,7 +122,13 @@ function createAdminVerifier(expectedSupabaseUrl, revokedTokenMarker, options = 
         cursor = next;
       }
       return unavailable();
-    } catch (_) { return unavailable(); }
+    } catch (error) {
+      if (error?.egressRestricted === true) return { status: 402, body: { error: '网站数据服务流量额度已用完，服务暂时受限，请等待恢复', code: 'egress_quota_exceeded', retryable: false } };
+      const reply = unavailable();
+      if (Number.isInteger(error?.upstreamStatus) && error.upstreamStatus >= 100 && error.upstreamStatus <= 599) reply.body.upstream_status = error.upstreamStatus;
+      if (error?.upstreamFailure === 'network') reply.body.upstream_failure = 'network';
+      return reply;
+    }
     finally { clearTimeout(timer); request.signal.removeEventListener('abort', abort); }
   };
 }

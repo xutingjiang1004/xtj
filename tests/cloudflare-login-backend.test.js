@@ -275,3 +275,14 @@ test('database redirects are rejected without forwarding service credentials', a
   assert.equal((await login(f)).res.status, 503);
   assert.equal(calls, 1);
 });
+
+test('Supabase egress restrictions retain the existing 402 contract and do not clear refresh cookies', async () => {
+  for (const path of ['/api/user/login', '/api/user/refresh']) {
+    const f = fixture({ runtime: { fetch: async () => new Response('{"code":"exceed_egress_quota","private":"fixture-provider-secret"}', { status: 402 }) } });
+    const response = await f.request(path, { user_name: 'alice', password: PASSWORD }, { Cookie: 'xtj_user_refresh=fixture' });
+    const data = await response.json();
+    assert.equal(response.status, 402); assert.equal(data.code, 'egress_quota_exceeded');
+    assert.equal(data.retryable, false); assert.equal(response.headers.has('Set-Cookie'), false);
+    assert.equal(JSON.stringify(data).includes('fixture-provider-secret'), false);
+  }
+});
