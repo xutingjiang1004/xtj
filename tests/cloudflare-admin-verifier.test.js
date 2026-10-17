@@ -41,7 +41,7 @@ test('existing signed admin tokens work with WebCrypto and only query their own 
   assert.equal(parsed.searchParams.get('media_url'), 'eq.' + crypto.createHash('sha256').update(TOKEN).digest('hex'));
   assert.equal(url.includes(TOKEN), false);
   assert.equal(init.method, 'GET');
-  assert.equal(init.redirect, 'error');
+  assert.equal(init.redirect, 'manual');
   assert.equal(init.headers.apikey, ENV.SUPABASE_SERVICE_KEY);
   assert.equal(init.headers.Authorization, 'Bearer ' + ENV.SUPABASE_SERVICE_KEY);
 });
