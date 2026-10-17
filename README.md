@@ -445,7 +445,9 @@ Render 免费服务连续 15 分钟无请求就会休眠，定时访问可减少
 
 ### Cloudflare Pages 独立预览（迁移中）
 
-此阶段只发布前端静态文件，不是可替代正式站的完整部署。预览的
+此阶段发布前端文件和公开配置接口，不是可替代正式站的完整部署。
+`GET/HEAD /api/config/public` 已迁到 Pages Worker，只返回公开 URL 与经过分类的 anon／publishable 配置；未绑定公开密钥时返回 null，绝不回退到 service-role 或签名密钥。此接口不读取或修改用户数据。
+其余未迁移的
 `/api`、`/health`、`/share` 及其子路径、`/admin/*` 返回 HTTP 503 JSON；`/admin.html`（Pages 中规范化为 `/admin`）仍是静态入口。不代理已暂停的 Render，
 不连接生产写入凭据。登录、上传、私密媒体、分享及 AI 等功能须等后端迁移后验收。
 未知路径返回 404，不回退成成功的首页。预览设置 noindex，但这不代替访问控制。
@@ -482,10 +484,17 @@ AI 提供商密钥填入静态构建变量。后端绑定、访问控制和真�
 ```sh
 # 在受保护的环境中提供 CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID，
 # 或完成 Wrangler OAuth；不要把密钥写入仓库、聊天或静态构建变量。
-npx --yes wrangler@4.45.0 whoami
-npx --yes wrangler@4.45.0 pages project create xtj-preview --production-branch=preview-production-unused
-npx --yes wrangler@4.45.0 pages deploy output/cloudflare-pages --project-name=xtj-preview --branch=migration-preview
+node -e 'if (!/^[a-f0-9]{32}$/i.test(process.env.CLOUDFLARE_ACCOUNT_ID || "")) throw Error("Invalid Cloudflare Account ID; do not put a token in this field")'
+npx --yes wrangler@4.151.1 pages project list
+# 仅当项目尚不存在时创建；已有项目直接使用下方部署命令。
+npx --yes wrangler@4.151.1 pages project create xtj-preview --production-branch=preview-production-unused
+npx --yes wrangler@4.151.1 pages deploy output/cloudflare-pages --project-name=xtj-preview --branch=migration-preview
 ```
+
+Account ID 是 32 位十六进制账号标识，不是 API Token。账户 API 令牌的验证接口是
+`/client/v4/accounts/{account_id}/tokens/verify`；用户级 `/user/tokens/verify`
+返回 401 不能据此判定账户令牌失效。需要目标账号的 Cloudflare Pages 编辑权限，
+不能把浏览器或控制台里的全选权限等同于执行环境已经正确绑定凭据。
 
 生产分支使用未部署的占位名称，上传只生成独立项目的预览部署。不要将上述
 创建命令用于已有正式项目，也不要添加正式域名。执行环境须允许访问

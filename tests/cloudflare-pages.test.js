@@ -30,6 +30,27 @@ test('Pages artifact excludes backend, credentials, metadata and preserves front
   assert.deepEqual(routes.exclude, ['/admin', '/admin.html']);
   const workerSource = fs.readFileSync(path.join(out, '_worker.js'), 'utf8');
   const worker = (await import('data:text/javascript;base64,' + Buffer.from(workerSource).toString('base64'))).default;
+  const fixtureJwt = role => 'eyJhbGciOiJIUzI1NiJ9.' + Buffer.from(JSON.stringify({ role })).toString('base64url') + '.fixture';
+  for (const key of ['sb_publishable_fixture', fixtureJwt('anon'), fixtureJwt('service_role'), 'sb_secret_fixture', 'eyJhbG...invalid', null]) {
+    const response = await worker.fetch(new Request('https://preview.example/api/config/public?ignored=private'), {
+      SUPABASE_URL: 'https://fixture.supabase.co', SUPABASE_ANON_KEY: key,
+      SUPABASE_SERVICE_KEY: 'must-never-be-public', API_SECRET: 'must-never-be-public'
+    });
+    assert.equal(response.status, 200);
+    const config = await response.json();
+    assert.deepEqual(config, { supabase_url: 'https://fixture.supabase.co', supabase_anon_key: key && (key.startsWith('sb_publishable_') || key === fixtureJwt('anon')) ? key : null });
+    assert.match(response.headers.get('Cache-Control'), /max-age=300/);
+    assert.ok(response.headers.get('Content-Security-Policy'));
+  }
+  const defaultConfig = await (await worker.fetch(new Request('https://preview.example/api/config/public'))).json();
+  assert.match(defaultConfig.supabase_url, /^https:\/\//);
+  assert.equal(defaultConfig.supabase_anon_key, null);
+  const head = await worker.fetch(new Request('https://preview.example/api/config/public/', { method: 'HEAD' }));
+  assert.equal(head.status, 200); assert.equal(await head.text(), '');
+  const invalidUrl = await (await worker.fetch(new Request('https://preview.example/api/config/public'), { SUPABASE_URL: 'https://name:secret@fixture.supabase.co' })).json();
+  assert.equal(invalidUrl.supabase_url, null);
+  const post = await worker.fetch(new Request('https://preview.example/api/config/public', { method: 'POST' }));
+  assert.equal(post.status, 503);
   for (const pathname of backendPaths) for (const method of ['GET', 'POST', 'HEAD']) {
     const response = await worker.fetch(new Request('https://preview.example' + pathname, {method}));
     assert.equal(response.status, 503);

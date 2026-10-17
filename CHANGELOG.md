@@ -2,6 +2,7 @@
 
 ## 2026-10-17 Cloudflare Pages 预览的后端不可用边界
 
+- 将公开运行时配置 GET／HEAD 接口迁入无 Node／原生依赖的 Pages Worker；只接受 anon／publishable 配置，拒绝误放的 service-role、secret 或畸形密钥，不读取或修改用户数据。其余后端仍明确返回 503，健康检查不冒充完整服务正常。
 - 将现有管理 API `/admin/*` 纳入预览的明确 503 JSON 响应，补齐 `/share` 根路径；保留 `/admin.html`（Pages 中规范化为 `/admin`）与管理脚本的静态访问，未知路径继续返回 404。
 - 此改动只完善独立 Pages 预览，登录、管理、私有媒体、聊天与 AI 后端尚未迁移，不代表正式站完整功能恢复。不切正式域名、不启用付费、不修改用户数据，既定 Dock 与已退役工具入口保持。
 

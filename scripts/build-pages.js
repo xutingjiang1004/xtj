@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { SECURITY_HEADERS } = require('../render-api/security-headers');
+const { createPreviewWorker } = require('../cloudflare/pages-worker');
 const ROOT = path.resolve(__dirname, '..');
 const OUT = path.join(ROOT, 'output', 'cloudflare-pages');
 // Current product decision retires the manual workbench from production assets.
@@ -35,11 +36,12 @@ function buildPages() {
   fs.writeFileSync(path.join(OUT, '404.html'), '<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>404</title><h1>页面不存在</h1></html>\n');
   const headers = Object.entries(SECURITY_HEADERS).map(([key, value]) => `  ${key}: ${value}`).join('\n');
   fs.writeFileSync(path.join(OUT, '_headers'), `/*\n${headers}\n  Cache-Control: no-cache\n  X-Robots-Tag: noindex, nofollow\n`);
-  // Preview deliberately has no production bindings or automatic Render fallback.
-  fs.writeFileSync(path.join(OUT, '_worker.js'), `export default { async fetch(request) {
-    const headers = ${JSON.stringify({...SECURITY_HEADERS, 'Cache-Control':'no-store, private', 'Content-Type':'application/json; charset=utf-8', 'X-Robots-Tag':'noindex, nofollow'})};
-    return new Response(request.method === 'HEAD' ? null : JSON.stringify({ok:false, code:'preview_backend_unavailable', error:'预览后端尚未迁移，此环境不能用于生产。'}), {status:503, headers});
-  }};\n`);
+  // Only the public URL is copied from tracked frontend configuration. Runtime
+  // public-key bindings are classified by the Worker; service keys never fall back.
+  const configSource = fs.readFileSync(path.join(ROOT, 'js/config.js'), 'utf8');
+  const publicUrl = configSource.match(/SUPABASE_URL\s*:\s*"(https:\/\/[^"\s]+)"/);
+  if (!publicUrl) throw Error('Missing public Supabase URL in frontend configuration');
+  fs.writeFileSync(path.join(OUT, '_worker.js'), `export default (${createPreviewWorker.toString()})(${JSON.stringify(SECURITY_HEADERS)}, ${JSON.stringify(publicUrl[1])});\n`);
   // Pages canonicalizes admin.html to /admin; exclude both static entry forms
   // explicitly because Pages' wildcard routing can also match the bare prefix.
   fs.writeFileSync(path.join(OUT, '_routes.json'), JSON.stringify({ version: 1, include: ['/api', '/api/*', '/admin/*', '/health', '/health/*', '/share', '/share/*'], exclude: ['/admin', '/admin.html'] }, null, 2) + '\n');
