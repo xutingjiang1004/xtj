@@ -477,13 +477,14 @@ AI 提供商密钥填入静态构建变量。后端绑定、访问控制和真�
 不要将这个阶段的前端预览切换为正式站。
 
 回退此阶段：停止使用独立预览链接即可，现有 Render、Supabase 和正式域名
-不受影响；构建修改未改动产品前端或后端运行逻辑。
+不受影响；独立预览未向现有 Render 发布新版本。
 
 授权完成后的独立预览发布步骤（需先核对项目名未被已有项目占用）：
 
 ```sh
 # 在受保护的环境中提供 CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID，
 # 或完成 Wrangler OAuth；不要把密钥写入仓库、聊天或静态构建变量。
+set -eu
 node -e 'if (!/^[a-f0-9]{32}$/i.test(process.env.CLOUDFLARE_ACCOUNT_ID || "")) throw Error("Invalid Cloudflare Account ID; do not put a token in this field")'
 npx --yes wrangler@4.151.1 pages project list
 # 仅当项目尚不存在时创建；已有项目直接使用下方部署命令。
@@ -495,6 +496,26 @@ Account ID 是 32 位十六进制账号标识，不是 API Token。账户 API �
 `/client/v4/accounts/{account_id}/tokens/verify`；用户级 `/user/tokens/verify`
 返回 401 不能据此判定账户令牌失效。需要目标账号的 Cloudflare Pages 编辑权限，
 不能把浏览器或控制台里的全选权限等同于执行环境已经正确绑定凭据。
+
+可先运行只读预检 `npm run cloudflare:preflight`。它检查 Account ID 格式、
+账户／用户令牌作用域、独立预览项目边界与公开配置接口连通性，不创建资源或
+修改配置，也不输出密钥或服务商原始错误。若需临时纠正 Account ID，可使用
+`npm run cloudflare:preflight -- --account-id <32位十六进制Account-ID>`；这个参数
+只覆盖本次检查，不更改安全环境中的长期绑定。令牌仍只从受保护的环境变量读取。
+
+若预检报告 `proxy_connect_denied`，说明执行环境代理在建立 HTTPS 连接前拒绝
+目标主机。应在执行环境的网络设置中加入
+`migration-preview.xtj-preview.pages.dev`，应用设置后重新运行预检；Cloudflare
+控制台的 API 权限、Worker URL 开关与 WAF 设置不控制这个代理。实际站点返回的
+HTTP 403 会单独报告，不能一律当作代理拒绝。预检成功也仅代表预览可访问，
+不代表登录、私有媒体或 AI 后端已经迁移；缺少的原后端绑定会单独列出。
+
+Cloudflare 控制台中的 Workers Builds 与 Pages 是不同的发布流程。
+不要从尚无 Pages 配置的 `main` 运行 `npx wrangler deploy`，让自动配置把
+`assets.directory` 设为 `.`：这会把依赖和后端文件一同扫描，可能报
+`Asset too large`，也违反本项目的发布范围。应使用此迁移分支、
+`npm run build:pages` 和上面的 `wrangler pages deploy` 命令；现有 Worker
+`xtj` 的 URL 开关不代表 Pages 预览或完整后端已经部署成功。
 
 生产分支使用未部署的占位名称，上传只生成独立项目的预览部署。不要将上述
 创建命令用于已有正式项目，也不要添加正式域名。执行环境须允许访问
