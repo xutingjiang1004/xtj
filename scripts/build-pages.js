@@ -6,6 +6,8 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { SECURITY_HEADERS } = require('../render-api/security-headers');
 const { createPreviewWorker } = require('../cloudflare/pages-worker');
+const { createAdminVerifier } = require('../cloudflare/admin-verifier');
+const { REVOKED_TOKEN_MARKER } = require('../render-api/post-markers');
 const ROOT = path.resolve(__dirname, '..');
 const OUT = path.join(ROOT, 'output', 'cloudflare-pages');
 // Current product decision retires the manual workbench from production assets.
@@ -41,7 +43,7 @@ function buildPages() {
   const configSource = fs.readFileSync(path.join(ROOT, 'js/config.js'), 'utf8');
   const publicUrl = configSource.match(/SUPABASE_URL\s*:\s*"(https:\/\/[^"\s]+)"/);
   if (!publicUrl) throw Error('Missing public Supabase URL in frontend configuration');
-  fs.writeFileSync(path.join(OUT, '_worker.js'), `export default (${createPreviewWorker.toString()})(${JSON.stringify(SECURITY_HEADERS)}, ${JSON.stringify(publicUrl[1])});\n`);
+  fs.writeFileSync(path.join(OUT, '_worker.js'), `export default (${createPreviewWorker.toString()})(${JSON.stringify(SECURITY_HEADERS)}, ${JSON.stringify(publicUrl[1])}, (${createAdminVerifier.toString()})(${JSON.stringify(publicUrl[1])}, ${JSON.stringify(REVOKED_TOKEN_MARKER)}));\n`);
   // Pages canonicalizes admin.html to /admin; exclude both static entry forms
   // explicitly because Pages' wildcard routing can also match the bare prefix.
   fs.writeFileSync(path.join(OUT, '_routes.json'), JSON.stringify({ version: 1, include: ['/api', '/api/*', '/admin/*', '/health', '/health/*', '/share', '/share/*'], exclude: ['/admin', '/admin.html'] }, null, 2) + '\n');

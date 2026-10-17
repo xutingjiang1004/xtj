@@ -2,6 +2,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { curlRequest, preflight } = require('../scripts/cloudflare-preview-preflight');
+const { PREVIEW_TARGET, resolvePreviewAccountId } = require('../cloudflare/preview-target');
 
 const accountId = 'a'.repeat(32);
 const token = 'cfat_fixture:secret_never_print/==';
@@ -10,6 +11,15 @@ const project = { name: 'xtj-preview', subdomain: 'xtj-preview.pages.dev',
   domains: ['xtj-preview.pages.dev'] };
 const reply = result => ({ status: 200, failure: null, data: { success: true, result } });
 const preview = { status: 200, failure: null, data: { supabase_url: 'https://fixture.supabase.co', supabase_anon_key: null } };
+
+test('the verified preview account handles placeholders without changing identities or exposing values', () => {
+  for (const value of [undefined, '', token, 'managed-reference:fixture']) {
+    assert.equal(resolvePreviewAccountId(undefined, value), PREVIEW_TARGET.accountId);
+  }
+  assert.equal(resolvePreviewAccountId(undefined, PREVIEW_TARGET.accountId), PREVIEW_TARGET.accountId);
+  assert.throws(() => resolvePreviewAccountId(token), { code: 'unexpected_preview_account' });
+  assert.throws(() => resolvePreviewAccountId(undefined, accountId), { code: 'unexpected_preview_account' });
+});
 
 test('invalid account IDs stop before building any URL or sending a credential', async () => {
   for (const value of [token, '', 'a'.repeat(31), 'g'.repeat(32), 'a'.repeat(32) + '/tokens']) {

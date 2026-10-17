@@ -2,7 +2,7 @@
 
 // This factory is embedded into the allowlisted Pages artifact at build time.
 // Keep it self-contained: no Node/native imports and no build-time credentials.
-function createPreviewWorker(securityHeaders, fallbackSupabaseUrl) {
+function createPreviewWorker(securityHeaders, fallbackSupabaseUrl, verifyAdmin) {
   function publicConfig(env) {
     let url = env.SUPABASE_URL || fallbackSupabaseUrl || null;
     try {
@@ -33,6 +33,10 @@ function createPreviewWorker(securityHeaders, fallbackSupabaseUrl) {
         'X-Robots-Tag': 'noindex, nofollow'
       };
       const pathname = new URL(request.url).pathname;
+      if (['/admin/verify', '/admin/verify/'].includes(pathname) && ['GET', 'HEAD'].includes(request.method) && verifyAdmin) {
+        const result = await verifyAdmin(request, env);
+        return new Response(request.method === 'HEAD' ? null : JSON.stringify(result.body), { status: result.status, headers });
+      }
       if ((pathname === '/api/config/public' || pathname === '/api/config/public/') && ['GET', 'HEAD'].includes(request.method)) {
         headers['Cache-Control'] = 'public, max-age=300';
         return new Response(request.method === 'HEAD' ? null : JSON.stringify(publicConfig(env)), { status: 200, headers });
