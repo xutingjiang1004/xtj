@@ -184,12 +184,12 @@ function createLoginBackend(expectedUrl, revokedMarker, cryptoApi, BufferApi, op
       if (!value || typeof value !== 'object' || Array.isArray(value) || typeof value.is_banned !== 'boolean') throw Error('restrictions_unavailable');
       return value;
     }
-    // Existing Render counters contain JSON, whereas a historical RPC uses a
-    // numeric content field. Use the same JSON/CAS format, never reinterpret or
-    // reset an existing counter and never silently fail open on contention.
+    // Render uses JSON/CAS counters; an older atomic RPC uses numeric content
+    // and updated_at. Retain both windows, reset only proven-expired records,
+    // and never silently fail open on contention or malformed state.
     async function limit(max, ip) {
       const actor = 'rl_' + hash(ip + ':' + path).slice(0, 32);
-      const query = { select: 'id,content', media_type: 'eq.__rate_limit__', media_url: 'eq.' + actor, limit: '2' };
+      const query = { select: 'id,content,updated_at,created_at', media_type: 'eq.__rate_limit__', media_url: 'eq.' + actor, limit: '2' };
       for (let attempt = 0; attempt < 4; attempt++) {
         const current = await rows(query);
         if (current.length > 1) throw Error('rate_limit_unavailable');
@@ -197,8 +197,14 @@ function createLoginBackend(expectedUrl, revokedMarker, cryptoApi, BufferApi, op
         let count = 0, resetAt = now() + 60000;
         if (row) {
           const previous = JSON.parse(row.content);
-          if (!previous || !Number.isFinite(previous.resetAt) || !Number.isInteger(previous.count) || previous.count < 0) throw Error('rate_limit_unavailable');
-          if (previous.resetAt > now()) { count = previous.count; resetAt = previous.resetAt; }
+          if (Number.isInteger(previous) && previous >= 0) {
+            const expiry = Date.parse(row.updated_at || row.created_at) + 60000;
+            if (!Number.isFinite(expiry)) throw Error('rate_limit_unavailable');
+            if (expiry > now()) { count = previous; resetAt = expiry; }
+          } else {
+            if (!previous || !Number.isFinite(previous.resetAt) || !Number.isInteger(previous.count) || previous.count < 0) throw Error('rate_limit_unavailable');
+            if (previous.resetAt > now()) { count = previous.count; resetAt = previous.resetAt; }
+          }
         }
         if (count >= max) return result(429, { error: '请求过于频繁，请稍后再试', code: 'RATE_LIMITED', retry_after: Math.max(1, Math.ceil((resetAt - now()) / 1000)) });
         const update = { content: JSON.stringify({ count: count + 1, resetAt }), created_at: new Date(resetAt).toISOString() };
