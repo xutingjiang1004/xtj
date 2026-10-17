@@ -8,6 +8,9 @@ function createLoginBackend(expectedUrl, revokedMarker, cryptoApi, BufferApi, op
   const now = options.now || Date.now;
   const B = BufferApi;
   const ACCESS_MS = 15 * 60 * 1000, REFRESH_MS = 90 * 86400000;
+  // Bounded, disposable abuse counters only; credentials and account state stay
+  // request-local or in the database. The durable layer remains authoritative.
+  const localCounters = new Map();
   const paths = new Map([
     ['/api/user/login', 'POST'], ['/api/user/refresh', 'POST'], ['/api/user/logout', 'POST'],
     ['/api/user/profile', 'GET'], ['/api/user/restrictions', 'GET'],
@@ -175,8 +178,8 @@ function createLoginBackend(expectedUrl, revokedMarker, cryptoApi, BufferApi, op
     function matches(payload, account, lifetime) {
       return !!account && (payload.account_id ? payload.account_id === String(account.id) : Date.parse(account.created_at) < payload.exp - lifetime - 1000);
     }
-    async function restrictions(user) {
-      if (user === 'xxz') return { is_banned: false, is_muted: false, is_blacklisted: false };
+    async function restrictions(user, includeAdmin = false) {
+      if (user === 'xxz' && !includeAdmin) return { is_banned: false, is_muted: false, is_blacklisted: false };
       const value = await rpc('get_user_restrictions', { p_user_name: user });
       if (!value || typeof value !== 'object' || Array.isArray(value) || typeof value.is_banned !== 'boolean') throw Error('restrictions_unavailable');
       return value;
@@ -252,7 +255,15 @@ function createLoginBackend(expectedUrl, revokedMarker, cryptoApi, BufferApi, op
       const ip = request.headers.get('cf-connecting-ip') || '';
       // Only Cloudflare's platform header is trusted. Never x-forwarded-for or
       // a body-supplied address; missing IP shares a conservative bucket.
-      const limited = request.method === 'POST' ? await limit(path.endsWith('/login') ? 10 : path.endsWith('/refresh') ? 30 : 60, ip) : null;
+      const maximum = path.endsWith('/login') ? 10 : path.endsWith('/refresh') ? 30 : 60;
+      const localKey = hash(ip + ':' + path);
+      let counter = localCounters.get(localKey);
+      if (!counter || counter.resetAt <= now()) counter = { count: 0, resetAt: now() + 60000 };
+      if (counter.count >= maximum) return result(429, { error: '请求过于频繁，请稍后再试', code: 'RATE_LIMITED', retry_after: Math.max(1, Math.ceil((counter.resetAt - now()) / 1000)) });
+      counter.count++;
+      if (localCounters.size >= 2000 && !localCounters.has(localKey)) localCounters.delete(localCounters.keys().next().value);
+      localCounters.set(localKey, counter);
+      const limited = request.method === 'POST' ? await limit(maximum, ip) : null;
       if (limited) return limited;
       const device = String(body.device_id || body.deviceId || '').trim().slice(0, 200);
       const ua = (request.headers.get('user-agent') || '').slice(0, 500);
@@ -289,14 +300,18 @@ function createLoginBackend(expectedUrl, revokedMarker, cryptoApi, BufferApi, op
           const updated = await rows({ select: 'id', id: 'eq.' + account.id, user_name: 'eq.' + user, media_type: 'eq.__auth__', media_url: 'eq.' + stored }, 'PATCH', { media_url: verifier });
           if (updated.length !== 1) return unavailable('credential_changed');
         }
-        const current = await identity(user);
-        if (!current || (account && String(current.id) !== String(account.id))) return unavailable('credential_changed');
-        const session = tokens(user, current, device);
         if (admin) {
           const hours = Math.min(Math.max(parseInt(env.ADMIN_TOKEN_EXPIRY_HOURS || '72', 10) || 72, 1), 168);
           const token = sign({ exp: now() + hours * 3600000, user: 'xxz' });
           let companion;
-          try { await storeSession(user, session); companion = sessionResponse(user, session); } catch (_) {}
+          try {
+            const current = await identity(user);
+            if (current) {
+              const session = tokens(user, current, device);
+              await storeSession(user, session);
+              companion = sessionResponse(user, session);
+            }
+          } catch (_) {}
           const adminDevice = 'admin_' + hash(ip + '|' + ua).slice(0, 32), loginAt = new Date(now()).toISOString();
           try {
             await rows({ select: 'id' }, 'POST', { user_name: 'xxz', media_type: '__login_event__', media_url: adminDevice,
@@ -307,6 +322,9 @@ function createLoginBackend(expectedUrl, revokedMarker, cryptoApi, BufferApi, op
           return result(200, { ok: true, username: 'xxz', token, user_token: companion?.body.token || null,
             ...(companion ? {} : { user_session_error: '用户会话暂时无法建立，请稍后重试' }) }, [cookie('xtj_admin_token', token, '/', hours * 3600000, 'Strict'), ...(companion?.cookies || [])]);
         }
+        const current = await identity(user);
+        if (!current || String(current.id) !== String(account.id)) return unavailable('credential_changed');
+        const session = tokens(user, current, device);
         await storeSession(user, session);
         const event = await rpc('record_user_auth_event', { p_user_name: user, p_source: 'login_success', p_event: facts });
         if (!event?.event_id || !event.login_at) return unavailable('auth_event_store_failed');
@@ -351,8 +369,11 @@ function createLoginBackend(expectedUrl, revokedMarker, cryptoApi, BufferApi, op
       if (!payload || await revoked(token)) return invalid();
       const account = await identity(payload.user_name);
       if (!matches(payload, account, ACCESS_MS)) return invalid();
-      if (path === '/api/user/profile') return result(200, { ok: true, user_name: payload.user_name, registered_at: account?.id === 'admin:xxz' ? null : account.created_at });
-      return result(200, { ok: true, is_admin: payload.user_name === 'xxz', restrictions: await restrictions(payload.user_name) });
+      if (path === '/api/user/profile') {
+        const earliest = await rows({ select: 'created_at', user_name: 'eq.' + payload.user_name, media_type: 'eq.__auth__', order: 'created_at.asc', limit: '1' });
+        return result(200, { ok: true, user_name: payload.user_name, registered_at: earliest[0]?.created_at || null });
+      }
+      return result(200, { ok: true, is_admin: payload.user_name === 'xxz', restrictions: await restrictions(payload.user_name, true) });
     } catch (_) { return unavailable(); }
     finally { clearTimeout(timer); request.signal.removeEventListener('abort', abort); }
   };
