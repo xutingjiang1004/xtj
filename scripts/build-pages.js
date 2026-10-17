@@ -40,7 +40,9 @@ function buildPages() {
     const headers = ${JSON.stringify({...SECURITY_HEADERS, 'Cache-Control':'no-store, private', 'Content-Type':'application/json; charset=utf-8', 'X-Robots-Tag':'noindex, nofollow'})};
     return new Response(request.method === 'HEAD' ? null : JSON.stringify({ok:false, code:'preview_backend_unavailable', error:'预览后端尚未迁移，此环境不能用于生产。'}), {status:503, headers});
   }};\n`);
-  fs.writeFileSync(path.join(OUT, '_routes.json'), JSON.stringify({ version: 1, include: ['/api', '/api/*', '/health', '/health/*', '/share/*'], exclude: [] }, null, 2) + '\n');
+  // Pages canonicalizes admin.html to /admin; exclude both static entry forms
+  // explicitly because Pages' wildcard routing can also match the bare prefix.
+  fs.writeFileSync(path.join(OUT, '_routes.json'), JSON.stringify({ version: 1, include: ['/api', '/api/*', '/admin/*', '/health', '/health/*', '/share', '/share/*'], exclude: ['/admin', '/admin.html'] }, null, 2) + '\n');
   console.log(`Pages preview: ${files.length} assets, ${bytes} bytes, ${path.relative(ROOT, OUT)}`);
   return { out: OUT, files, bytes };
 }
