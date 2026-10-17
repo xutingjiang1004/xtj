@@ -541,7 +541,7 @@ Cloudflare 控制台中的 Workers Builds 与 Pages 是不同的发布流程。
 `npm run cloudflare:deploy`，其内部使用 `wrangler pages deploy`；现有 Worker
 `xtj` 的 URL 开关不代表 Pages 预览或完整后端已经部署成功。
 该旧 Worker 构建设置已通过 API 核实，并把生产构建的 `path_excludes` 设为
-`["**"]`，暂停因仓库文件变化触发的错误自动构建；既有 Worker、构建命令、
+`["*"]`，暂停因仓库文件变化触发的错误自动构建；既有 Worker、构建命令、
 正式域名和 Pages 预览均保留。需要恢复该旧流水线时，可将其路径排除列表恢复
 为原来的 `[]`；恢复前仍须先修正其发布目标和资源目录。
 
