@@ -450,7 +450,7 @@ Render 免费服务连续 15 分钟无请求就会休眠，定时访问可减少
 `GET/HEAD /admin/verify` 的只读校验已适配 Worker，使用既有 HMAC 签名及当前令牌的数据库吊销记录；当前尚未绑定原 `API_SECRET`、服务端 Supabase 凭据与 URL，仍返回明确 503。它不执行清理或迁移，也不代表管理登录和其他管理功能已恢复。
 其余未迁移的
 `/api`、`/health`、`/share` 及其子路径、`/admin/*` 返回 HTTP 503 JSON；`/admin.html`（Pages 中规范化为 `/admin`）仍是静态入口。不代理已暂停的 Render，
-不连接生产写入凭据。登录、上传、私密媒体、分享及 AI 等功能须等后端迁移后验收。
+不运行生产清理、迁移或写入流程。登录、上传、私密媒体、分享及 AI 等功能须等后端迁移后验收。
 未知路径返回 404，不回退成成功的首页。预览设置 noindex，但这不代替访问控制。
 
 构建与校验：
@@ -504,6 +504,27 @@ Account ID 本身不是密钥。工具自动处理缺失或代理占位的账号
 账户／用户令牌作用域、独立预览项目边界与公开配置接口连通性，不创建资源或
 修改配置，也不输出密钥或服务商原始错误。
 
+原 Render 配置可直接转入独立预览，无需逐项复制或重新生成密钥：
+
+```sh
+npm run cloudflare:sync-config
+npm run cloudflare:sync-config -- --apply
+npm run cloudflare:deploy
+```
+
+第一条只检查；`--apply` 只补充 `xtj-preview` 缺少的预览绑定，之后须重新部署
+才能验证运行时。需要安全绑定 `RENDER_API_KEY`（目标域名 `api.render.com`）
+与既有 Cloudflare 凭据。只读访问已核实的原 Render 服务，逐页读取配置，核对
+仓库、账号与 Supabase 来源；仅复制原 URL、签名、服务端、公开及历史加密配置。
+密钥在同一个进程内转入 Pages 的加密绑定，不输出、不写本地文件，不传入命令
+参数，不复制 Render／Cloudflare 管理令牌或其他供应商凭据。已有绑定及生产
+配置保持原样，不能据此认定已有密钥值正确；异常分页或项目边界变化时停止。
+这不会启动已暂停的 Render，不执行数据库写入，也不代表其他后端已适配。
+
+发布环境配置后，仍须核对当前任务运行实例是否加载了新版绑定。若实例仍缺少
+`RENDER_API_KEY` 或所需网络域名，应将新版环境应用到任务，或使用该环境启动
+新任务；重新创建 Cloudflare 令牌、编辑本地网络策略文件都不能替代这一步。
+
 若预检报告 `proxy_connect_denied`，说明执行环境代理在建立 HTTPS 连接前拒绝
 目标主机。应在执行环境的网络设置中加入
 `migration-preview.xtj-preview.pages.dev`，应用设置后重新运行预检；Cloudflare
@@ -519,6 +540,10 @@ Cloudflare 控制台中的 Workers Builds 与 Pages 是不同的发布流程。
 `Asset too large`，也违反本项目的发布范围。应使用此迁移分支、
 `npm run cloudflare:deploy`，其内部使用 `wrangler pages deploy`；现有 Worker
 `xtj` 的 URL 开关不代表 Pages 预览或完整后端已经部署成功。
+该旧 Worker 构建设置已通过 API 核实，并把生产构建的 `path_excludes` 设为
+`["**"]`，暂停因仓库文件变化触发的错误自动构建；既有 Worker、构建命令、
+正式域名和 Pages 预览均保留。需要恢复该旧流水线时，可将其路径排除列表恢复
+为原来的 `[]`；恢复前仍须先修正其发布目标和资源目录。
 
 生产分支使用未部署的占位名称，上传只生成独立项目的预览部署。工具仅使用
 已核实的独立项目。执行环境须允许访问 `api.cloudflare.com`；再允许

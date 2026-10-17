@@ -13,15 +13,25 @@ function isIsolatedProject(project) {
     && Array.isArray(project.domains) && project.domains.length === 1 && project.domains[0] === PROJECT + '.pages.dev';
 }
 
-function curlRequest(url, { token, spawn = spawnSync } = {}) {
+function curlRequest(url, { token, method = 'GET', body, spawn = spawnSync } = {}) {
+  if (!['GET', 'PATCH'].includes(method) || (token && !validToken(token))) throw Error('unsafe_request');
   const args = ['--disable', '--silent', '--show-error', '--proto', '=https',
     '--connect-timeout', '10', '--max-time', '20', '--max-filesize', '1048576',
     '--config', '-', '--write-out', '\n%{http_code}', '--url', url];
   // Credentials travel through stdin, not command arguments or temporary files.
-  const input = token ? 'header = ' + JSON.stringify('Authorization: Bearer ' + token) + '\n' : '';
+  const config = [];
+  if (token) config.push('header = ' + JSON.stringify('Authorization: Bearer ' + token));
+  if (method !== 'GET') config.push('request = ' + JSON.stringify(method));
+  if (body !== undefined) {
+    if (method !== 'PATCH') throw Error('unexpected_request_body');
+    config.push('header = "Content-Type: application/json"');
+    config.push('data-binary = ' + JSON.stringify(JSON.stringify(body)));
+  }
+  const input = config.join('\n') + '\n';
   const childEnv = { ...process.env };
   delete childEnv.CLOUDFLARE_API_TOKEN;
   delete childEnv.CLOUDFLARE_ACCOUNT_ID;
+  delete childEnv.RENDER_API_KEY;
   const result = spawn('curl', args, { input, encoding: 'utf8', timeout: 25000,
     maxBuffer: 2 * 1024 * 1024, env: childEnv });
   const output = typeof result.stdout === 'string' ? result.stdout : '';
@@ -136,4 +146,4 @@ if (require.main === module) main().then(code => { process.exitCode = code; }).c
   console.log(JSON.stringify({ ok: false, exit_code: 1, code: 'preflight_failed_without_logging_provider_error' }));
   process.exitCode = 1;
 });
-module.exports = { curlRequest, preflight, isIsolatedProject, main };
+module.exports = { curlRequest, preflight, isIsolatedProject, validToken, main };
