@@ -22,11 +22,16 @@ test('Pages artifact excludes backend, credentials, metadata and preserves front
   assert.ok(fs.existsSync(path.join(out, '404.html')));
   assert.match(fs.readFileSync(path.join(out, '_headers'), 'utf8'), /Content-Security-Policy:/);
   const routes = JSON.parse(fs.readFileSync(path.join(out, '_routes.json')));
-  assert.ok(routes.include.includes('/share/*'));
+  const backendPaths = ['/api', '/api/uploads/media', '/admin/login', '/admin/users', '/health', '/health/mail', '/share', '/share/example'];
+  const matches = (route, pathname) => route.endsWith('/*') ? pathname === route.slice(0, -2) || pathname.startsWith(route.slice(0, -1)) : pathname === route;
+  const isBackendPath = pathname => routes.include.some(route => matches(route, pathname)) && !routes.exclude.some(route => matches(route, pathname));
+  for (const pathname of backendPaths) assert.equal(isBackendPath(pathname), true, pathname + ' must return the explicit migration 503');
+  for (const pathname of ['/', '/admin', '/admin.html', '/js/admin/admin.min.js', '/missing']) assert.equal(isBackendPath(pathname), false, pathname + ' must remain a static path');
+  assert.deepEqual(routes.exclude, ['/admin', '/admin.html']);
   const workerSource = fs.readFileSync(path.join(out, '_worker.js'), 'utf8');
   const worker = (await import('data:text/javascript;base64,' + Buffer.from(workerSource).toString('base64'))).default;
-  for (const method of ['GET', 'POST', 'HEAD']) {
-    const response = await worker.fetch(new Request('https://preview.example/api/uploads/media?path=private.jpg', {method}));
+  for (const pathname of backendPaths) for (const method of ['GET', 'POST', 'HEAD']) {
+    const response = await worker.fetch(new Request('https://preview.example' + pathname, {method}));
     assert.equal(response.status, 503);
     assert.match(response.headers.get('Cache-Control'), /no-store/);
     assert.ok(response.headers.get('Content-Security-Policy'));

@@ -446,7 +446,7 @@ Render 免费服务连续 15 分钟无请求就会休眠，定时访问可减少
 ### Cloudflare Pages 独立预览（迁移中）
 
 此阶段只发布前端静态文件，不是可替代正式站的完整部署。预览的
-`/api`、`/health` 和 `/share/*` 返回 HTTP 503 JSON；不代理已暂停的 Render，
+`/api`、`/health`、`/share` 及其子路径、`/admin/*` 返回 HTTP 503 JSON；`/admin.html`（Pages 中规范化为 `/admin`）仍是静态入口。不代理已暂停的 Render，
 不连接生产写入凭据。登录、上传、私密媒体、分享及 AI 等功能须等后端迁移后验收。
 未知路径返回 404，不回退成成功的首页。预览设置 noindex，但这不代替访问控制。
 
