@@ -474,8 +474,8 @@ JS/CSS、两个 HTML 入口、图标及两个 Service Worker，不复制用户�
 
 先创建独立的免费 Pages 项目 `xtj-preview`，不要附加正式域名或启用付费功能。
 使用 Git 集成时选择迁移分支，避免生产 main 的自动部署；也可以在授权后的
-Wrangler CLI 中向该独立项目上传预览分支。`wrangler.jsonc` 仅声明预览项目，
-不包含账号 ID、密钥、存储绑定或生产资源。
+Wrangler CLI 中向该独立项目上传预览分支。`wrangler.jsonc` 声明预览项目和仅供 preview 的公开 Supabase URL，
+不包含账号 ID、密钥、存储绑定或生产资源。Pages 会移除未在 Wrangler 中声明的明文变量，因此公开 URL 必须显式声明；发布工具遇到其他未声明的既有明文绑定会停止，并在上传后核对绑定保留及生产配置未改变。加密密钥仍由运行时绑定保存，不写入 Wrangler 文件。
 
 部署前必须完成 Cloudflare 账号授权，并确认执行环境可访问 Cloudflare API。
 浏览器里已登录 Cloudflare 不代表远端命令行已授权。不要把 service-role 或
