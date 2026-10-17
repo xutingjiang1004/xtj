@@ -144,6 +144,14 @@ test('persistent limits combine case/trailing-slash variants and fail closed on 
   assert.equal(cold.status, 429, 'a new isolate must still enforce the stored counter');
 });
 
+test('historical numeric RPC counters retain active windows and only expire using their saved server timestamp', async () => {
+  for (const expired of [false, true]) {
+    const f = fixture();
+    f.records.push({ id: 'numeric-limit', media_type: '__rate_limit__', media_url: 'rl_' + sha(':/api/user/login').slice(0, 32), content: '10', updated_at: new Date(Date.now() - (expired ? 120000 : 1000)).toISOString() });
+    assert.equal((await login(f, 'alice', 'wrong')).res.status, expired ? 401 : 429);
+  }
+});
+
 test('CSRF, malformed bodies, wrong database bindings and unsupported routes stop before database access', async () => {
   const f = fixture();
   for (const headers of [{ Origin: 'https://evil.example' }, { Origin: 'null' }, { Origin: '', Cookie: 'xtj_user_refresh=fixture' }, { 'Sec-Fetch-Site': 'cross-site' }]) {
