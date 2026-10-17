@@ -153,3 +153,14 @@ test('HTTP transport sends authorization and JSON only through stdin, retaining 
   assert.throws(() => curlRequest('https://fixture.example', { method: 'DELETE' }));
   assert.throws(() => curlRequest('https://fixture.example', { token: CF_TOKEN + '\nX-Injected: true' }));
 });
+
+test('original admin credentials and expiry copy securely without replacing existing secrets or copying unrelated provider keys', async () => {
+  const f = fixture({ originals: { ADMIN_PASSWORD: 'fixture_private_admin_password', ADMIN_PASSWORD_HASH: 'sha256:' + 'a'.repeat(64), ADMIN_TOKEN_EXPIRY_HOURS: '120' } });
+  const result = await syncPreviewConfig(f.setup);
+  assert.equal(result.ok, true);
+  for (const key of ['ADMIN_PASSWORD', 'ADMIN_PASSWORD_HASH', 'ADMIN_TOKEN_EXPIRY_HOURS']) {
+    assert.equal(f.project.deployment_configs.preview.env_vars[key].value, f.original[key]);
+    assert.equal(f.project.deployment_configs.preview.env_vars[key].type, 'secret_text');
+    assert.equal(JSON.stringify(result).includes(f.original[key]), false);
+  }
+});

@@ -103,7 +103,7 @@ function createAdminVerifier(expectedSupabaseUrl, revokedTokenMarker, options = 
       for (let page = 0; page < 20; page++) {
         if (controller.signal.aborted) throw Error('unavailable');
         if (cursor) endpoint.searchParams.set('id', 'gt.' + cursor);
-        const rows = await readBoundedJson(await fetcher(endpoint.href, { method: 'GET', headers, redirect: 'error', signal: controller.signal, cache: 'no-store' }));
+        const rows = await readBoundedJson(await fetcher(endpoint.href, { method: 'GET', headers, redirect: 'manual', signal: controller.signal, cache: 'no-store' }));
         if (controller.signal.aborted) throw Error('unavailable');
         if (!rows.length) return now() > expiresAt ? invalid() : { status: 200, body: { ok: true } };
         for (const row of rows) {
