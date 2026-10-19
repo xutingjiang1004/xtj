@@ -125,6 +125,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     } catch (e) {}
   }
   // 预置服务商模板：用户只需填 API Key（可改模型名）
+  var OPENROUTER_MODEL_UID = 'or_minimax_m31_free';
+  var serverModelCatalog = [], serverModelIdentity = null;
   var CUSTOM_MODEL_PROVIDERS = [
     { key: 'qwen',    label: '千问 Qwen',      base: 'https://dashscope.aliyuncs.com/compatible-mode/v1', defaultModel: 'qwen-plus', models: ['qwen-turbo', 'qwen-plus', 'qwen-max', 'qwen-long'] },
     { key: 'doubao',  label: '豆包 Doubao',     base: 'https://ark.cn-beijing.volces.com/api/v3',           defaultModel: 'doubao-1-5-pro-32k', models: ['doubao-1-5-pro-32k', 'doubao-1-5-lite-32k', 'doubao-pro-32k'] },
@@ -132,6 +134,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     { key: 'kimi',    label: 'Kimi 月之暗面',    base: 'https://api.moonshot.cn/v1',                         defaultModel: 'moonshot-v1-8k', models: ['moonshot-v1-8k', 'moonshot-v1-32k', 'moonshot-v1-128k'] },
     { key: 'zhipu',   label: '智谱 GLM',        base: 'https://open.bigmodel.cn/api/paas/v4',               defaultModel: 'glm-4-flash', models: ['glm-4-flash', 'glm-4-air', 'glm-4', 'glm-4-plus'] },
     { key: 'openai',  label: 'OpenAI',          base: 'https://api.openai.com/v1',                          defaultModel: 'gpt-4o-mini', models: ['gpt-4o-mini', 'gpt-4o', 'gpt-4.1-mini'] },
+    { key: 'openrouter', label: 'OpenRouter · 站长专用', base: 'https://openrouter.ai/api/v1', defaultModel: 'minimax/minimax-m3.1-flash:free', models: ['minimax/minimax-m3.1-flash:free'] },
     { key: 'custom',  label: '自定义(OpenAI兼容)', base: '',                                                 defaultModel: '', models: [] }
   ];
   // 统一服务商显示字段：本地惯用驼峰 providerLabel，服务端存储用下划线 provider_label
@@ -143,23 +146,25 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     return m;
   }
   function toStoredModel(m) {
-    if (!m) return m;
+    if (!m || m.server_managed || m.provider === 'openrouter') return null;
     var pl = m.providerLabel || m.provider_label || '';
     return Object.assign({}, m, { providerLabel: pl, provider_label: pl });
   }
   function loadCustomModels() {
+    var personal = [];
     try {
-      var raw = scopedStorageGet(CUSTOM_MODELS_KEY);
-      if (!raw) return [];
-      var list = JSON.parse(raw);
-      if (!Array.isArray(list)) return [];
+      var list = JSON.parse(scopedStorageGet(CUSTOM_MODELS_KEY) || '[]');
       var deleted = loadDeletedModelUids();
-      return list.filter(function(m) { return m && m.uid && m.api_key && deleted.indexOf(String(m.uid)) < 0; }).map(normalizeCustomModelRecord);
-    } catch (e) { return []; }
+      if (Array.isArray(list)) {
+        personal = list.filter(function(m) { return m && m.uid && m.uid !== OPENROUTER_MODEL_UID && m.api_key && m.provider !== 'openrouter' && !m.server_managed && deleted.indexOf(String(m.uid)) < 0; }).map(normalizeCustomModelRecord);
+        if (personal.length !== list.length) saveCustomModelsLocal(personal);
+      }
+    } catch (e) {}
+    return personal.concat(serverModelIdentity && customModelIdentityCurrent(serverModelIdentity) ? serverModelCatalog : []);
   }
   function saveCustomModelsLocal(list) {
     try {
-      var stored = (list || []).map(toStoredModel).slice(0, CUSTOM_MODEL_LIMIT);
+      var stored = (list || []).map(toStoredModel).filter(Boolean).slice(0, CUSTOM_MODEL_LIMIT);
       scopedStorageSet(CUSTOM_MODELS_KEY, JSON.stringify(stored));
     } catch (e) {}
   }
@@ -275,7 +280,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var pending;
     try { pending = JSON.parse(scopedStorageGet(CUSTOM_MODEL_PENDING_KEY) || 'null'); } catch (_) {}
     var modelMap = Object.create(null);
-    ((pending && pending.models) || []).concat(list || []).forEach(function(m) { if (m && m.uid) modelMap[m.uid] = toStoredModel(m); });
+    ((pending && pending.models) || []).concat(list || []).forEach(function(m) { var stored = toStoredModel(m); if (stored && stored.uid) modelMap[stored.uid] = stored; });
     var deleted = loadDeletedModelUids().concat(deletedUids || []);
     deleted = deleted.filter(function(uid, index) { return uid && deleted.indexOf(uid) === index; });
     var payload = { models: Object.keys(modelMap).filter(function(uid) { return deleted.indexOf(uid) < 0; }).map(function(uid) { return modelMap[uid]; }).slice(0, 20),
@@ -324,9 +329,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (!auth.token) return null;
       if (!customModelIdentityCurrent(owner)) return null;
       var resp = await fetch(API_BASE + '/custom-models', { method: 'GET', headers: auth.headers });
-      if (!resp.ok) return null;
       var data = await resp.json();
       if (!customModelIdentityCurrent(owner) || seq !== customModelMutationSeq) return null;
+      if (data && Array.isArray(data.server_models)) {
+        serverModelIdentity = owner;
+        serverModelCatalog = data.server_models.filter(function(m) { return m && m.uid === OPENROUTER_MODEL_UID && m.provider === 'openrouter' && m.server_managed === true && m.model === 'minimax/minimax-m3.1-flash:free' && m.base_url === 'https://openrouter.ai/api/v1'; }).map(function(m) { return normalizeCustomModelRecord({uid:m.uid,provider:m.provider,model:m.model,base_url:m.base_url,label:'MiniMax M3.1 Flash 免费版',provider_label:'OpenRouter',server_managed:true}); });
+      }
       if (data && data.ok && Array.isArray(data.models)) {
         // ★ 2026-09-24：同步服务端墓碑到本地，保证「已删 uid 不再复活」双端一致
         if (Array.isArray(data.deleted_uids) && data.deleted_uids.length) {
@@ -349,7 +357,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         } catch (ePref2) {}
         var tombstones = loadDeletedModelUids();
         return data.models.filter(function(m) {
-          if (!m || !m.uid || !m.api_key) return false;
+          if (!m || !m.uid || m.uid === OPENROUTER_MODEL_UID || !m.api_key || m.provider === 'openrouter' || m.server_managed) return false;
           return tombstones.indexOf(String(m.uid)) < 0; // 墓碑兜底：即使服务端返回也丢弃
         }).map(normalizeCustomModelRecord);
       }
@@ -386,8 +394,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       // 当前选中的自定义模型 uid 若已不存在，回退到第一个自定义模型或默认模型
       if (S.selectedModel && isCustomModelId(S.selectedModel)) {
         var uid = S.selectedModel.slice(CUSTOM_MODEL_PREFIX.length);
-        if (!findCustomModel(uid)) {
-          var first = loadCustomModels()[0];
+        if (!findCustomModel(uid) && uid !== OPENROUTER_MODEL_UID) {
+          var first = loadCustomModels().filter(function(m) { return !m.server_managed; })[0];
           S.selectedModel = first ? (CUSTOM_MODEL_PREFIX + first.uid) : DEFAULT_AI_MODEL;
           try { localStorage.setItem('xtj_ai_model', S.selectedModel); } catch (eLs) {}
         }
@@ -421,7 +429,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     if (!isCustomModelId(mid)) return '';
     var uid = mid.slice(CUSTOM_MODEL_PREFIX.length);
     var m = findCustomModel(uid);
-    if (!m) return '自定义模型';
+    if (!m) return uid === OPENROUTER_MODEL_UID ? 'MiniMax M3.1 Flash 免费版 · 暂不可用' : '自定义模型';
     return (m.label || m.model || '自定义模型') + (m.providerLabel ? ' · ' + m.providerLabel : '');
   }
   // 解析自定义模型的选项值 → 配置对象（含 provider/base/api_key/model）
@@ -431,13 +439,16 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     if (!isCustomModelId(mid)) return null;
     var uid = mid.slice(CUSTOM_MODEL_PREFIX.length);
     var m = findCustomModel(uid);
+    if (!m && uid === OPENROUTER_MODEL_UID) m = {uid:uid,provider:'openrouter',model:'minimax/minimax-m3.1-flash:free',base_url:'https://openrouter.ai/api/v1',server_managed:true};
     if (!m) return null;
     var p = null;
     for (var i = 0; i < CUSTOM_MODEL_PROVIDERS.length; i++) { if (CUSTOM_MODEL_PROVIDERS[i].key === m.provider) p = CUSTOM_MODEL_PROVIDERS[i]; }
     return {
       provider: m.provider,
       providerLabel: m.providerLabel || (p && p.label) || '自定义',
-      api_key: String(m.api_key || ''),
+      api_key: m.server_managed ? undefined : String(m.api_key || ''),
+      model_uid: m.server_managed ? m.uid : undefined,
+      server_managed: m.server_managed === true,
       model: String(m.model || (p && p.defaultModel) || ''),
       base_url: String(m.base_url || (p && p.base) || ''),
       reasoning_effort_supported: !!(modelCapabilityCache.get(capabilityKey({provider:m.provider,base_url:String(m.base_url || (p && p.base) || ''),model:String(m.model || (p && p.defaultModel) || ''),api_key:String(m.api_key || '')})) || {}).reasoning
@@ -471,7 +482,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       // 自定义第三方模型：校验该 uid 仍存在
       if (saved && isCustomModelId(saved)) {
         var uid = saved.slice(CUSTOM_MODEL_PREFIX.length);
-        if (findCustomModel(uid)) return saved;
+        if (uid === OPENROUTER_MODEL_UID || findCustomModel(uid)) return saved;
       }
     } catch (e) {}
     return DEFAULT_AI_MODEL;
@@ -6161,6 +6172,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // 回填当前值；若已不存在则回落到 pro
     var valid = false;
     for (var i = 0; i < sel.options.length; i++) { if (sel.options[i].value === prev) { valid = true; break; } }
+    if (!valid && prev === CUSTOM_MODEL_PREFIX + OPENROUTER_MODEL_UID) { sel.appendChild(el('option',{value:prev,text:'MiniMax M3.1 Flash 免费版 · 暂不可用'})); valid = true; }
     sel.value = valid ? prev : 'pro';
     S.dtResearchModel = sel.value;
     syncResearchModelUi(panel);
@@ -6905,7 +6917,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var isConcurrent = errCode === 'concurrent' || /上一个(研究)?请求|请等待上一个/.test(errMsg);
       var isQuota = /quota_exceeded|search_limit|rate_limited|daily_limit|hourly_limit|pro_required|insufficient|not_enough/.test(errCode)
         || /次数已达上限|额度|开通 Pro|访问过于频繁/.test(errMsg);
-      if (isConcurrent || isQuota || /^checkpoint_/.test(errCode) || errCode === 'research_incomplete' || (progressCard && progressCard.dataset && progressCard.dataset.checkpointId) || (err && err.retryable === false) || answer) {
+      if (isConcurrent || isQuota || String(opts && opts.researchModel || '') === CUSTOM_MODEL_PREFIX + OPENROUTER_MODEL_UID || /^checkpoint_/.test(errCode) || errCode === 'research_incomplete' || (progressCard && progressCard.dataset && progressCard.dataset.checkpointId) || (err && err.retryable === false) || answer) {
         console.warn('[AI] Tavily research 终结于不可回退错误:', errCode || errMsg);
         var terminalMsg = isConcurrent
           ? '上一个请求仍在进行中，请等它结束后重试'
@@ -7872,7 +7884,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // 优先走 /api/agent/research/stream SSE 研究流程; 失败时回退到下方原有 deep think 流程。
     // 注: S.deepThink 在独立二级页面架构下恒为 false (深入研究已迁至独立页面, 见 toggleDeepThink),
     //     此处位于深入研究页发送函数内, 即代表深入研究模式。
-    if (sendOptions.checkpointId || (S.tavilyResearchEnabled && ((!researchFileList.length && originalUserText.length>=6) || (researchFileList.length>=2 && researchFileList.some(function(file){return !String(file.type||'').startsWith('image/');}) && originalUserText.length<=500)))) {
+    if (sendOptions.checkpointId || (!(dtSettings.custom && dtSettings.custom.server_managed && researchFileList.some(function(file) { return String(file.type || '').startsWith('image/'); })) && S.tavilyResearchEnabled && ((!researchFileList.length && originalUserText.length>=6) || (researchFileList.length>=2 && researchFileList.some(function(file){return !String(file.type||'').startsWith('image/');}) && originalUserText.length<=500)))) {
       // 3a. 清空输入框 (Tavily 流程先行; 回退时下方 step 3 会再清一次, 无副作用)
       clearSubmittedInput();
 
@@ -9561,6 +9573,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         provider: customCfg.provider,
         conversation_id: S.conversationId,
         api_key: customCfg.api_key,
+        model_uid: customCfg.model_uid,
         model: customCfg.model,
         base_url: customCfg.base_url,
         reasoning_effort_supported: customCfg.reasoning_effort_supported === true,
@@ -13322,7 +13335,7 @@ function showChatMessages() {
         '<div class="ai-invite-modal-box ai-custommodel-box">' +
           '<div class="ai-invite-modal-body ai-custommodel-body">' +
             '<h3 id="aiCustomModelTitle" class="ai-invite-modal-title">添加自定义模型</h3>' +
-            '<p class="ai-invite-modal-tip">选择服务商并填入 API Key，即可直接调用第三方 AI 模型。模型配置（含 API Key）会加密同步到你的账号，换设备后自动恢复；所有字段后续都可在下方列表点“编辑”修改。</p>' +
+            '<p class="ai-invite-modal-tip">选择服务商并填入 API Key，即可直接调用第三方 AI 模型。普通第三方 Key 会加密保存到账号，但浏览器会保留本机明文缓存。OpenRouter 使用站长后端 Key，不下发到浏览器；固定免费模型，不回退付费版。</p>' +
             '<label class="ai-invite-code-label" for="aiCmProvider">服务商</label>' +
             '<select id="aiCmProvider" class="ai-cm-select">' + providerOptions + '</select>' +
             '<label class="ai-invite-code-label" for="aiCmLabel">显示名称（便于自己辨认，可选）</label>' +
@@ -13336,6 +13349,7 @@ function showChatMessages() {
             '<input type="text" id="aiCmBase" class="ai-invite-code-input ai-cm-input" placeholder="https://…/v1" autocomplete="off" spellcheck="false" />' +
             '<button type="button" class="ai-invite-modal-btn ai-cm-check" id="aiCmCheckBtn">检测模型能力</button>' +
             '<p class="ai-checkpoint-note">手动检测会向当前服务商发送最多 5 个短请求，可能消耗少量模型额度。</p>' +
+            '<p class="ai-checkpoint-note" id="aiCmProviderNote" hidden></p>' +
             '<div id="aiCmCapabilities" class="ai-cm-capabilities" role="status" aria-live="polite"></div>' +
             '<div class="ai-cm-list" id="aiCmList"></div>' +
             '<div class="ai-invite-code-feedback ai-cm-feedback" id="aiCmFeedback" aria-live="polite"></div>' +
@@ -13364,12 +13378,12 @@ function showChatMessages() {
       var capabilityAbort = null, capabilitySeq = 0;
       var modalOwner = bindAiModalIdentity(modal,function() { capabilitySeq++; if (capabilityAbort) capabilityAbort.abort(); });
       var checkBtn = modal.querySelector('#aiCmCheckBtn'), capabilityBox = modal.querySelector('#aiCmCapabilities');
-      function testConfig() { return {provider:providerSelect.value,model:modelInput.value.trim(),api_key:apiKeyInput.value.trim(),base_url:baseInput.value.trim()}; }
+      function testConfig() { var managed = providerSelect.value === 'openrouter'; return {provider:providerSelect.value,model:modelInput.value.trim(),api_key:managed ? undefined : apiKeyInput.value.trim(),model_uid:managed ? OPENROUTER_MODEL_UID : undefined,base_url:baseInput.value.trim()}; }
       [providerSelect,modelInput,apiKeyInput,baseInput].forEach(function(field) { field.addEventListener('input', invalidateCapability); field.addEventListener('change', invalidateCapability); });
       function invalidateCapability() { capabilitySeq++; if (capabilityAbort) capabilityAbort.abort(); checkBtn.disabled = false; checkBtn.textContent = '检测模型能力'; capabilityBox.replaceChildren(); }
       checkBtn.addEventListener('click', async function() {
         var config = testConfig();
-        if (!config.model || !config.api_key || !config.base_url) { capabilityBox.textContent = '请先填入模型名称、Key 和接口地址。'; return; }
+        if (!config.model || !config.api_key && config.provider !== 'openrouter' || !config.base_url) { capabilityBox.textContent = '请先填入模型名称、Key 和接口地址。'; return; }
         if (capabilityAbort) capabilityAbort.abort(); capabilityAbort = new AbortController();
         var seq = ++capabilitySeq, key = capabilityKey(config);
         checkBtn.disabled = true; checkBtn.textContent = '正在检测…'; capabilityBox.textContent = '正在检查对话、工具、图片、思考与流式输出…';
@@ -13403,6 +13417,12 @@ function showChatMessages() {
       function syncProviderUI() {
         var p = currentProvider();
         var isCustom = !!(p && p.key === 'custom');
+        var managed = !!(p && p.key === 'openrouter');
+        apiKeyInput.disabled = managed; modelInput.readOnly = managed; baseInput.readOnly = managed; labelInput.disabled = managed;
+        var providerNote = modal.querySelector('#aiCmProviderNote');
+        providerNote.hidden = !managed;
+        providerNote.textContent = '仅站长账号可用，Key 由后端环境变量保管。免费请求有每日及频率限制，能力需手动实测。停止会断开网站接收，MiniMax 服务端可能继续生成，已发出的免费请求不会保证退还。此模式仅使用免费网页搜索，不自动调用付费搜索接口。';
+        if (managed) { apiKeyInput.value = ''; modelInput.value = p.defaultModel; baseInput.value = p.base; modelInput.dataset.auto = '1'; baseInput.dataset.auto = '1'; }
         // 接口地址始终可查看/修改；预置服务商默认填官方地址，自定义服务商必填
         baseInput.placeholder = (p && p.base) ? p.base : 'https://…/v1';
         if (!isCustom && p) {
@@ -13416,7 +13436,7 @@ function showChatMessages() {
           modelInput.value = '';
           modelInput.dataset.auto = '1';
         }
-        apiKeyInput.placeholder = p && p.key === 'openai' ? 'sk-…' : '请输入 API Key';
+        apiKeyInput.placeholder = managed ? '已由后端安全配置（仅站长）' : p && p.key === 'openai' ? 'sk-…' : '请输入 API Key';
         refreshModelCandidates();
       }
       providerSelect.addEventListener('change', function() {
@@ -13473,6 +13493,7 @@ function showChatMessages() {
               nameEl.textContent = (m.label || m.model || '自定义模型') + (m.providerLabel ? ' · ' + m.providerLabel : '');
               subEl.textContent = (m.model || '') + (m.providerLabel ? ' ｜ ' + m.providerLabel : '');
             }
+            item.querySelector('.ai-cm-item-del').hidden = !!(m && m.server_managed);
             item.querySelector('.ai-cm-item-del').addEventListener('click', function(e) {
               e.stopPropagation();
               doDelete(uid);
@@ -13544,7 +13565,7 @@ function showChatMessages() {
       }
 
       async function doDelete(uid) {
-        if (!modalOwner.current()) return;
+        if (!modalOwner.current() || findCustomModel(uid) && findCustomModel(uid).server_managed) return;
         var customs = loadCustomModels();
         var idx = -1;
         for (var i = 0; i < customs.length; i++) { if (customs[i].uid === uid) { idx = i; break; } }
@@ -13584,6 +13605,18 @@ function showChatMessages() {
         var p = currentProvider();
         var apiKey = String(apiKeyInput.value || '').trim();
         if (!p) { feedback.className = 'ai-invite-code-feedback is-bad'; feedback.textContent = '请选择服务商'; return; }
+        if (p.key === 'openrouter') {
+          saveBtn.disabled = true;
+          await fetchServerCustomModels();
+          if (!modalOwner.current()) return;
+          saveBtn.disabled = false;
+          var managedModel = findCustomModel(OPENROUTER_MODEL_UID);
+          if (!managedModel || !managedModel.server_managed) { feedback.className = 'ai-invite-code-feedback is-bad'; feedback.textContent = '此模型仅限站长账号。请确认后端已配置 OPENROUTER_API_KEY、重新部署并登录站长账号。'; return; }
+          S.selectedModel = CUSTOM_MODEL_PREFIX + managedModel.uid; S._userPickedModel = true;
+          try { localStorage.setItem('xtj_ai_model',S.selectedModel); } catch (_) {}
+          updateModelUI(true); close(); notify('已切换到 MiniMax M3.1 Flash 免费版'); return;
+        }
+
         // ★ 2026-09-26（审计 P1-10 配套）：编辑态留空 = 沿用原有 Key（输入框已不再回填明文）
         var keepExistingKey = false;
         if (!apiKey && editingUid) {
@@ -13610,7 +13643,7 @@ function showChatMessages() {
           base_url: baseValue
         };
         var targetUid = editingUid;
-        if (!targetUid && customs.length >= CUSTOM_MODEL_LIMIT) {
+        if (!targetUid && customs.filter(function(m) { return !m.server_managed; }).length >= CUSTOM_MODEL_LIMIT) {
           feedback.className = 'ai-invite-code-feedback is-bad';
           feedback.textContent = '最多保存 ' + CUSTOM_MODEL_LIMIT + ' 个自定义模型，请先删除一个再添加';
           return;
@@ -13907,7 +13940,7 @@ function showChatMessages() {
     function featureCurrent(){return S.active && input.isConnected && voiceLifecycle===S.lifecycleId && customModelIdentityCurrent(featureIdentity);}
     var menuGroup=panelShell.querySelector('.ai-panel-menu-list .ai-panel-group:last-child');
     function addFeatureEntry(label,action){var button=el('button',{type:'button',class:'ai-panel-row'});button.appendChild(el('span',{class:'ai-panel-row-icon','aria-hidden':'true',text:'✧'}));button.appendChild(el('span',{class:'ai-panel-row-title',text:label}));button.addEventListener('click',function(){closePanel(true);action();});menuGroup.appendChild(button);return button;}
-    addFeatureEntry('双模型对比',function(){var features=assistantFeatures();if(!features)return;if(S.sending){notify('当前回复完成或暂停后，可以开始双模型对比');return;}var models=[{id:'deepseek-flash',label:'DeepSeek-V4.1-Flash-1017'},{id:'deepseek-v4-pro',label:'V4 Pro'}];loadCustomModels().forEach(function(config){if(config.api_key&&config.model)models.push({id:'custom:'+config.uid,label:config.label||config.model,config:Object.assign({},config)});});var latestUser=S.messages.slice().reverse().find(function(m){return m.role==='user';});if(S._modelCompare)S._modelCompare.dispose();S._modelCompare=features.openCompare({models:models,thinkingMode:S.thinkingMode,question:input.value.trim() || latestUser&&latestUser.content || '',current:featureCurrent,notify:notify,renderMarkdown:renderMarkdown,context:function(){return buildAiConversationHistory(CONTEXT_LIMIT_NORMAL,MSG_MAX_CHARS_NORMAL,null,null);},run:runModelComparison});});
+    addFeatureEntry('双模型对比',function(){var features=assistantFeatures();if(!features)return;if(S.sending){notify('当前回复完成或暂停后，可以开始双模型对比');return;}var models=[{id:'deepseek-flash',label:'DeepSeek-V4.1-Flash-1017'},{id:'deepseek-v4-pro',label:'V4 Pro'}];loadCustomModels().forEach(function(config){if((config.api_key||config.server_managed)&&config.model)models.push({id:'custom:'+config.uid,label:config.label||config.model,config:Object.assign({},config)});});var latestUser=S.messages.slice().reverse().find(function(m){return m.role==='user';});if(S._modelCompare)S._modelCompare.dispose();S._modelCompare=features.openCompare({models:models,thinkingMode:S.thinkingMode,question:input.value.trim() || latestUser&&latestUser.content || '',current:featureCurrent,notify:notify,renderMarkdown:renderMarkdown,context:function(){return buildAiConversationHistory(CONTEXT_LIMIT_NORMAL,MSG_MAX_CHARS_NORMAL,null,null);},run:runModelComparison});});
     var capacity=el('div',{class:'ai-context-capacity',id:'aiContextCapacity'}),capacityWidget=null,lastContextBudget=null,capacityModel='',capacityConversation='';
     function contextMemory(){for(var i=S.messages.length-1;i>=0;i--){var memory=S.messages[i]&&S.messages[i].context_memory;if(memory&&memory.v===1&&memory.conversation_id===S.conversationId&&typeof memory.summary==='string'&&memory.summary.trim()&&memory.summary.length<=8000)return memory;}return null;}
     function contextWindowTokens(){var value=Number(scopedStorageGet('xtj_ai_context_window_'+S.selectedModel));return [32768,65536,131072].indexOf(value)>=0?value:65536;}
@@ -13918,7 +13951,7 @@ function showChatMessages() {
     inputBar.appendChild(capacity);
     async function runModelComparison(model,text,history,signal,onEvent){
       var config=model.config,body={message:text,messages:history,messages_include_current:false,context_management:true,context_window_tokens:contextWindowTokens(),model:model.id,thinking_mode:model.thinkingMode,client_request_id:'compare_'+Date.now()+'_'+Math.random().toString(36).slice(2),web_search:false,followup_suggestions:false};
-      if(config)Object.assign(body,{provider:config.provider,api_key:config.api_key,model:config.model,base_url:config.base_url,reasoning_effort_supported:config.reasoning_effort_supported===true});
+      if(config)Object.assign(body,{provider:config.provider,api_key:config.api_key,model_uid:config.server_managed?config.uid:undefined,model:config.model,base_url:config.base_url,reasoning_effort_supported:config.reasoning_effort_supported===true});
       var auth=await getUserAuthPayload({forceNoToken:false});if(!featureCurrent()||signal.aborted)throw Error('对比已取消');
       var timeout=setTimeout(function(){if(S._modelCompare)S._modelCompare.dispose();},300000),reader=null,content='',done=false,usage=null;
       try {var response=await fetch(API_BASE+(config?'/custom-chat/stream':'/chat/stream'),{method:'POST',headers:auth.headers||{},credentials:'include',body:JSON.stringify(body),signal:signal});if(!response.ok||!response.body)throw Error('模型请求失败（'+response.status+'）');reader=response.body.getReader();var decoder=new TextDecoder(),pending='';
@@ -14475,6 +14508,11 @@ function showChatMessages() {
   // surfaces can still hold private DOM and a pending auth/history request.
   function resetAiAccountState() {
     modelCapabilityCache.clear();
+    serverModelCatalog = []; serverModelIdentity = null;
+    if (S.selectedModel === CUSTOM_MODEL_PREFIX + OPENROUTER_MODEL_UID) {
+      S.selectedModel = DEFAULT_AI_MODEL;
+      try { localStorage.setItem('xtj_ai_model',DEFAULT_AI_MODEL); } catch (_) {}
+    }
     closeAiChat(true);
     closeDeepThinkPage();
     closeSiteSearch();

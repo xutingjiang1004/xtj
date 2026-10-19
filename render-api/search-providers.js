@@ -387,7 +387,7 @@ async function searchWeb(query, maxResults, options) {
   maxResults = Math.max(1, Math.min(50, Math.floor(maxResults) || 5));
   var searchQuery = buildSearchQuery(query);
   if (!searchQuery) searchQuery = String(query || '').trim();
-  var cacheKey = createHash('sha256').update(JSON.stringify([searchQuery.trim(), maxResults, !!options.need_content, deepseekWeb.credentials(options), process.env.TAVILY_API_KEY || '', process.env.BRAVE_SEARCH_API_KEY || '', process.env.SERPER_API_KEY || '', process.env.SEARCH_API_URL || ''])).digest('hex');
+  var cacheKey = createHash('sha256').update(JSON.stringify([searchQuery.trim(), maxResults, !!options.need_content, !!options.freeOnly, deepseekWeb.credentials(options), process.env.TAVILY_API_KEY || '', process.env.BRAVE_SEARCH_API_KEY || '', process.env.SERPER_API_KEY || '', process.env.SEARCH_API_URL || ''])).digest('hex');
   var cached = searchCache.get(cacheKey);
   if (cached && cached.results) {
     var cachedResults = cached.results.results || [];
@@ -404,11 +404,11 @@ async function searchWeb(query, maxResults, options) {
 
   // 按优先级定义 provider 列表（串行：前面的成功就不走后面的，省 API 配额）
   var providerList = [
-    { name:'DeepSeek', fn:function(signal){return deepseekWeb.search(searchQuery,maxResults,Object.assign({},options,{signal:signal}));}, requiresEnv:'DEEPSEEK_API_KEY', enabled:!!deepseekWeb.credentials(options) },
-    { name: 'Tavily', fn: function(signal) { return searchTavily(searchQuery, maxResults, {signal:signal}); }, requiresEnv: 'TAVILY_API_KEY', enabled: !!process.env.TAVILY_API_KEY },
-    { name: 'Brave', fn: function(signal) { return searchBrave(searchQuery, maxResults, {signal:signal}); }, requiresEnv: 'BRAVE_SEARCH_API_KEY', enabled: !!process.env.BRAVE_SEARCH_API_KEY },
-    { name: 'Serper', fn: function(signal) { return searchSerper(searchQuery, maxResults, {signal:signal}); }, requiresEnv: 'SERPER_API_KEY', enabled: !!process.env.SERPER_API_KEY },
-    { name: 'CustomApi', fn: function(signal) { return searchCustomApi(searchQuery, maxResults, {signal:signal}); }, requiresEnv: 'SEARCH_API_URL', enabled: !!process.env.SEARCH_API_URL },
+    { name:'DeepSeek', fn:function(signal){return deepseekWeb.search(searchQuery,maxResults,Object.assign({},options,{signal:signal}));}, requiresEnv:'DEEPSEEK_API_KEY', enabled: !options.freeOnly && !!deepseekWeb.credentials(options) },
+    { name: 'Tavily', fn: function(signal) { return searchTavily(searchQuery, maxResults, {signal:signal}); }, requiresEnv: 'TAVILY_API_KEY', enabled: !options.freeOnly && !!process.env.TAVILY_API_KEY },
+    { name: 'Brave', fn: function(signal) { return searchBrave(searchQuery, maxResults, {signal:signal}); }, requiresEnv: 'BRAVE_SEARCH_API_KEY', enabled: !options.freeOnly && !!process.env.BRAVE_SEARCH_API_KEY },
+    { name: 'Serper', fn: function(signal) { return searchSerper(searchQuery, maxResults, {signal:signal}); }, requiresEnv: 'SERPER_API_KEY', enabled: !options.freeOnly && !!process.env.SERPER_API_KEY },
+    { name: 'CustomApi', fn: function(signal) { return searchCustomApi(searchQuery, maxResults, {signal:signal}); }, requiresEnv: 'SEARCH_API_URL', enabled: !options.freeOnly && !!process.env.SEARCH_API_URL },
     { name: 'BingHtml', fn: function(signal) { return searchBingHtml(searchQuery, maxResults, {signal:signal}); }, requiresEnv: null, enabled: true },
     { name: 'SearXNG', fn: function(signal) { return searchSearxng(searchQuery, maxResults, {signal:signal}); }, requiresEnv: null, enabled: true }
   ];

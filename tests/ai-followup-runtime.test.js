@@ -77,12 +77,12 @@ for (const result of [{ data: null, error: { message: 'database unavailable' } }
   assert.equal(await persist('alice', 'ABCDEF', 'question', 'answer', []), null);
 });
 
-function cachedResearchRoute(rows, cache = true, persistId = 'saved-current-id', cancelFlow = false, attachments = []) {
+function cachedResearchRoute(rows, cache = true, persistId = 'saved-current-id', cancelFlow = false, attachments = [], researchModel) {
   let handler, persisted = 0, persistedArgs; const queries = [];
   const db = { from() { const filters = []; let q = { select() { return q; }, eq(k,v) { filters.push(r => r[k] === v); queries.push([k,v]); return q; },
     filter(k,_op,p) { const literal = p.replace(/\\_/g, '_').replace(/%$/, ''); filters.push(r => r[k].startsWith(literal)); return q; },
     order() { return q; }, limit() { return q; }, then(resolve, reject) { return Promise.resolve({ data: rows.filter(r => filters.every(f => f(r))), error: null }).then(resolve, reject); } }; return q; } };
-  const c = { ...history, AbortController, Date, require: name => require('../render-api/' + name.slice(2)), parseDocumentBuffer: async () => ({}), ocrImageBuffer: async () => ({}), sharp: {}, supabase: db, app: { post(...args) { handler = args.at(-1); } }, express:{json:()=>null},fetchSafeWebPage:async()=>null, authenticateUser() {}, aiChatConcurrencyGate() {}, rateLimit() {},
+  const c = { ...history, openRouter:require('../render-api/openrouter'),ADMIN_USERNAME:'alice', AbortController, Date, require: name => require('../render-api/' + name.slice(2)), parseDocumentBuffer: async () => ({}), ocrImageBuffer: async () => ({}), sharp: {}, supabase: db, app: { post(...args) { handler = args.at(-1); } }, express:{json:()=>null},fetchSafeWebPage:async()=>null, authenticateUser() {}, aiChatConcurrencyGate() {}, rateLimit() {},
     AI_AGENT_MESSAGE_MARKER: '__ai_agent_msg__', tryAcquireDeepResearch: () => () => {}, enforceAiChatAccess: async () => ({ allowed: true }), measureSearchQuota: async () => ({ allowed: true }),
     validateString: s => s, genConvId: () => 'GENERATED1', researchCacheKey: () => 'fixture', researchCache: new Map(), researchCacheGet: () => cache ? { answer: 'REPORT', sources: [] } : null,
     researchCacheSet() {}, getAiConfig: async () => ({}), runSelfResearchFlow: async opts => { if (cancelFlow) opts.cancelToken.cancelled = true; return { answer: 'REPORT', sources: [] }; },
@@ -91,7 +91,7 @@ function cachedResearchRoute(rows, cache = true, persistId = 'saved-current-id',
     writeSse(res,e) { res.events.push(e); return true; }, console: { warn() {}, error() {} } };
   extract(server, "app.post('/api/agent/research/stream'", '// GET /api/agent/research/history', 'undefined', c);
   return { queries, get persisted() { return persisted; }, get persistedArgs() { return persistedArgs; }, async run() {
-    const req = new EventEmitter(); Object.assign(req, { userName: 'alice', accountId: '11111111-1111-4111-8111-111111111111', body: { query: 'QUESTION', conversation_id: 'CURRENT1', attachments } });
+    const req = new EventEmitter(); Object.assign(req, { userName: 'alice', accountId: '11111111-1111-4111-8111-111111111111', body: { query: 'QUESTION', conversation_id: 'CURRENT1', attachments,research_model:researchModel } });
     const res = new EventEmitter(); Object.assign(res, { events: [], setHeader() {}, flushHeaders() {}, end() { res.writableEnded = true; } });
     await handler(req, res); return res.events;
   } };
@@ -291,4 +291,10 @@ for (const interrupted of [false,true]) test('deep research turn persistence kee
   for (const row of rows[0]) { const meta = JSON.parse(row.media_url); assert.equal(meta.chat_mode, 'deep_think'); assert.equal(meta.client_request_id, 'deep-request-1'); }
   assert.equal(JSON.parse(rows[0][0].media_url).vision_urls[0], 'data:image/png;base64,QUJD');
   error = { code: '42501', message: 'write refused' }; assert.equal(await save(options), false);
+});
+
+test('native free research saves and returns its exact model in history without credentials',async t=>{
+ const old=process.env.OPENROUTER_API_KEY;process.env.OPENROUTER_API_KEY='isolated-native-research-key';t.after(()=>{if(old===undefined)delete process.env.OPENROUTER_API_KEY;else process.env.OPENROUTER_API_KEY=old;});
+ const f=cachedResearchRoute([],false,'saved-free-report',false,[],'custom:or_minimax_m31_free');const events=await f.run();
+ assert.equal(f.persistedArgs[6].model,'minimax/minimax-m3.1-flash:free');assert.equal(events.find(e=>e.type==='research_done').model,'minimax/minimax-m3.1-flash:free');assert.doesNotMatch(JSON.stringify(f.persistedArgs),/isolated-native-research-key|api_key/);
 });

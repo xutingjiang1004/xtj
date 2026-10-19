@@ -74,6 +74,22 @@
 - `project.config.json`
   微信开发者工具项目配置（`miniprogramRoot` 指向 `miniprogram/`）。
 
+## OpenRouter MiniMax M3.1 Flash 免费模型（2026-10-19）
+
+接入现有小猫 AI，不改变默认 DeepSeek。站长在 Render 的 XTJ 服务 Environment 中设置 `OPENROUTER_API_KEY`，保存后重新部署；本机可通过进程环境注入同名变量。不要写进 HTML、公开 JS、仓库、公开配置或日志。本次无需数据库迁移，原有 Supabase 账号／聊天存储仍须正常可用。
+
+- 登录现有站长账号 `xxz` → 小猫 AI → 输入框旁「＋」→ 模型 →「添加自定义模型」→ 选择「OpenRouter · 站长专用」→「保存并使用」。已配置时也能直接从模型列表选择「MiniMax M3.1 Flash 免费版」。深入研究在原有模型下拉菜单另行选择；两处不会自动改动默认档位。
+- 只允许 `minimax/minimax-m3.1-flash:free` 与 `https://openrouter.ai/api/v1/chat/completions`。模型、地址锁定；前端只发送模型引用，Key 不返回浏览器，不进入 localStorage、待同步快照、账号配置、聊天记录或断点。权限依据服务端认证账号，其他账号与匿名请求不能使用该环境变量。
+- 每次请求固定 `provider.allow_fallbacks=false`、`provider.require_parameters=true`，输入／输出／请求／图片最高价格均为 0，显式禁用 web、file-parser、response-healing、fusion、pareto-router 插件（仅传空数组不能覆盖账号默认插件），不使用付费后备模型。此模式搜索只走既有 Bing / SearXNG 免费路径，网页正文使用安全读取器；不消耗已配置的 DeepSeek Search、Tavily 等付费搜索 Key；原失败步骤的工具重试也保留此限制。搜索不可用时如实报告。
+- 复用多轮上下文、SSE、取消、历史、现有模型工具及研究编排。文件使用受限解析器提取文本；普通对话和图片研究保留原生图片输入，服务商拒绝工具或图片时明确报错，不去掉附件冒充读图成功。免费模型仍有频率／每日请求限制，研究会发出多次免费请求。
+- 模型官网声明支持图片与工具调用；这不是本站实测结论。可在原表单手动「检测模型能力」，最多发出 5 个真实短请求，占免费请求次数，分别验证对话、工具、图片、思考与流式，不把 HTTP 200 当作支持。自动回归均使用 Mock，不向模型发送生产内容。当前执行环境无法直连 OpenRouter，真实厂商能力与实体 iPhone/iPad 尚未验收。
+- 401 检查后端 Key，403 检查账户权限／隐私设置，402 检查账户余额或预算（负余额也可能限制免费模型），429 等待免费额度或频率恢复，404／503 表示免费模型或零价格路由暂不可用。不会自动改用收费版。限额以 OpenRouter 账号当前规则为准，换 Key 不会重置账号限额。
+- 停止会取消本站连接并保留中断历史。OpenRouter 文档当前将 MiniMax 列为不支持服务端取消生成的供应商，不能保证远端生成立即停止或退还已发送的免费请求次数。OpenRouter 账号若对付费插件启用了「Prevent overrides」，请求无法关闭该插件，须在其账号设置关闭强制插件；本站无法越过供应商账号政策。零价格限制仅保护此接入的推理与路由；Render／Supabase 原有托管、存储和其他手动选择的模型费用仍按各自配置计费。
+
+审计还确认：其他既有第三方模型仍采用账号侧加密、浏览器侧明文 Key 缓存的旧机制，本次未重构其存储协议。OpenRouter 使用独立的后端凭据引用，不进入该机制。
+
+官方参考：[免费模型](https://openrouter.ai/minimax/minimax-m3.1-flash%3Afree)、[路由与价格限制](https://openrouter.ai/docs/guides/routing/provider-selection)、[流式与取消](https://openrouter.ai/docs/api_reference/streaming)、[账号限制](https://openrouter.ai/docs/api_reference/limits)。
+
 ## DeepSeek 网页工具与估算费用（2026-10-19）
 
 内置 Flash 显示为 `DeepSeek-V4.1-Flash-1017`，实际请求 ID 仍为官方 `deepseek-flash`。新版本全名和历史别名会归一化。普通对话、深入研究继续由模型调用 `search_web` / `read_web_page`，不增加手动工具台。

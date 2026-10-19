@@ -116,7 +116,7 @@ test('custom model route saves an encrypted mutation atomically for its authenti
   cleanAiModelIn:m=>({...m,api_key:undefined,api_key_enc:'encrypted-fixture'}),cleanDeletedUidList:uids=>uids||[],cleanAiPrefs:prefs=>prefs||{},decryptAiModelSecret:()=> 'fixture-key',console,
   supabase:{async rpc(name,args){assert.equal(name,'save_ai_custom_models_snapshot');mutation=args;return{data:{ok:true,models:[],deleted_uids:['last'],ai_prefs:{research_model:'flash'}}}}}};
  const a=source.indexOf("app.put('/api/agent/custom-models'");const b=source.indexOf("app.get('/api/agent/image'",a);const snippet=source.slice(a,b);vm.runInNewContext(snippet.slice(0,snippet.lastIndexOf('\n});')+4),c);
- let output;const res={json:value=>{output=value;},status(){return this}};
+ let output;const headers={};const res={setHeader(key,value){headers[key]=value;},json:value=>{output=value;},status(){return this}};
  await handler({userName:'A',body:{user_name:'B',merge:true,models:[{uid:'last',api_key:'fixture-key'}],deleted_uids:['last'],ai_prefs:{research_model:'flash'}}},res);
- assert.equal(mutation.p_user_name,'A');assert.equal(mutation.p_replace,false);assert.equal(mutation.p_models[0].api_key,undefined);assert.equal(mutation.p_models[0].api_key_enc,'encrypted-fixture');assert.equal(output.models.length,0);assert.deepEqual(output.deleted_uids,['last']);
+ assert.equal(headers['Cache-Control'],'no-store');assert.equal(mutation.p_user_name,'A');assert.equal(mutation.p_replace,false);assert.equal(mutation.p_models[0].api_key,undefined);assert.equal(mutation.p_models[0].api_key_enc,'encrypted-fixture');assert.equal(output.models.length,0);assert.deepEqual(output.deleted_uids,['last']);
 });

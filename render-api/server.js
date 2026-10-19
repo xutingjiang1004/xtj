@@ -75,6 +75,7 @@ const {
   withSearchProviderTimeout
 } = require('./search-providers');
 const deepseekWeb = require('./deepseek-web');
+const openRouter = require('./openrouter');
 const deepSeekPricing = require('./deepseek-pricing');
 const { queryWeather, queryWeatherData, formatWeatherText, CITY_COORDS } = require('./weather');
 const { fetchSafeWebPage, assertSafeWebUrl, requestPinnedStream, fetchSafeRaw, fetchSafeBuffer, fetchSafeRedirectBuffer } = require('./web-fetch');
@@ -338,6 +339,7 @@ function getPreferredDeepSeekModel(model) {
   return normalized;
 }
 function normalizeDeepSeekUsageModel(model, fallbackModel) {
+  if (model === 'minimax/minimax-m3.1-flash:free') return model;
   var preferred = normalizeDeepSeekModelName(model);
   if (preferred) return getPreferredDeepSeekModel(preferred);
   return getPreferredDeepSeekModel(fallbackModel || DEEPSEEK_MODEL_FLASH);
@@ -1731,7 +1733,7 @@ async function executeToolCall(toolCall, context) {
       }
       if (swGate.degraded) { try { console.warn('[SEARCH-QUOTA] search_web fail-open (quota service unavailable)'); } catch (e) {} }
       try {
-        var result = await searchWeb(q, maxR, {signal:context.signal,context:context,deepseekKey:context.deepseekKey});
+        var result = await searchWeb(q, maxR, {signal:context.signal,context:context,deepseekKey:context.deepseekKey,freeOnly:context.freeOnly});
         var resultsArr = result && Array.isArray(result.results) ? result.results : [];
         var searchDiagnostics = result && result.diagnostics;
         if (!resultsArr.length && (result && result.error || searchDiagnostics && searchDiagnostics.provider_errors && searchDiagnostics.provider_errors.length && !(searchDiagnostics.provider_results || []).length)) {
@@ -1765,6 +1767,7 @@ async function executeToolCall(toolCall, context) {
       }
     }
     case 'tavily_search': {
+      if (context.freeOnly) return {tool_name:name,error:'MiniMax 免费模式不调用付费搜索服务，请使用 search_web 免费搜索'};
       var tq = String(args.query || '').trim().slice(0, 200);
       var tMax = Math.min(Math.max(parseInt(args.max_results, 10) || 5, 1), 10);
       if (!tq) return { tool_name: name, error: '搜索关键词为空' };
@@ -1850,7 +1853,7 @@ async function executeToolCall(toolCall, context) {
       }
       if (ssGate.degraded) { try { console.warn('[SEARCH-QUOTA] social search fail-open (quota service unavailable)'); } catch (e) {} }
       try {
-        var ssResult = await searchWeb(socialQuery, 10, {signal:context.signal,context:context,deepseekKey:context.deepseekKey});
+        var ssResult = await searchWeb(socialQuery, 10, {signal:context.signal,context:context,deepseekKey:context.deepseekKey,freeOnly:context.freeOnly});
         var ssArr = (ssResult && ssResult.results) ? ssResult.results : [];
         // 只保留目标平台域名下的结果，过滤搜索引擎串入的无关站
         var ssItems = ssArr.filter(function(r) {
@@ -1878,7 +1881,7 @@ async function executeToolCall(toolCall, context) {
             // ★ P1-9：乐观预占（与主检索共用同一 context 计数）
             var wideGate = await claimSearchSlot(context);
             if (wideGate.allowed) {
-              var wideRes = await searchWeb(wideQuery, 10, {signal:context.signal,context:context,deepseekKey:context.deepseekKey});
+              var wideRes = await searchWeb(wideQuery, 10, {signal:context.signal,context:context,deepseekKey:context.deepseekKey,freeOnly:context.freeOnly});
               var wideArr = (wideRes && wideRes.results) ? wideRes.results : [];
               var onSite = [], offSite = [];
               wideArr.forEach(function(r) {
@@ -2636,10 +2639,10 @@ async function executeToolCall(toolCall, context) {
       try {
         // 透传工具级 abort signal：工具超时/请求取消时中断底层抓取，避免悬空连接
         var page = null;
-        if (deepseekWeb.credentials({deepseekKey:context.deepseekKey})) {
+        if (!context.freeOnly && deepseekWeb.credentials({deepseekKey:context.deepseekKey})) {
           var fetchGate = await claimSearchSlot(context);
           if (fetchGate.allowed) {
-            try { page = await deepseekWeb.fetchPage(pageUrl,{signal:context.signal,context:context,deepseekKey:context.deepseekKey}); }
+            try { page = await deepseekWeb.fetchPage(pageUrl,{signal:context.signal,context:context,deepseekKey:context.deepseekKey,freeOnly:context.freeOnly}); }
             catch (nativeFetchError) { if(context.signal && context.signal.aborted) throw nativeFetchError; }
           }
         }
@@ -11201,7 +11204,7 @@ async function searchWebForUser(userName, query, maxResults, searchApiCounter) {
       quota: gate.quota
     };
   }
-  var result = await searchWeb(query, maxResults, {signal:shared.signal,context:shared,deepseekKey:shared.deepseekKey});
+  var result = await searchWeb(query, maxResults, {signal:shared.signal,context:shared,deepseekKey:shared.deepseekKey,freeOnly:shared.freeOnly});
   // 有 diagnostics 或 results 数组均视为已发起（含 provider 失败），缓存命中也算一次业务搜索
   if (searchApiCounter && typeof searchApiCounter === 'object' && result) {
     var initiated = Array.isArray(result.results) || (result.diagnostics && typeof result.diagnostics === 'object');
@@ -22217,6 +22220,10 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
   var provider = String(body.provider || '').trim();
   var apiKey = String(body.api_key || '').trim();
   var model = String(body.model || '').trim();
+  if (provider === 'openrouter') {
+    try { var managed = openRouter.resolveConfig(req.userName, ADMIN_USERNAME, body); apiKey = managed.api_key; model = managed.model; if (res._aiRetryOwner) res._aiRetryOwner.freeOnly = true; }
+    catch (managedError) { writeSse(res, openRouter.event(managedError)); return safeEnd(); }
+  }
   var message = validateString(body.message, AI_CHAT_MESSAGE_MAX_LEN, '消息内容');
   if (message && message.error) { writeSse(res, { type: 'error', error: message.error }); return safeEnd(); }
   // ★ 审计修复：旧代码在此后用 `String(body.message || '').trim()` 重新取**原始未校验值**，
@@ -22267,7 +22274,7 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
     custom:  { base: '' }
   };
   var ep = CUSTOM_ENDPOINTS[provider];
-  var baseUrl = String(body.base_url || '').trim() || (ep && ep.base) || '';
+  var baseUrl = provider === 'openrouter' ? openRouter.BASE_URL : String(body.base_url || '').trim() || (ep && ep.base) || '';
   if (!baseUrl) { writeSse(res, { type: 'error', error: '该服务商未配置接口地址' }); return safeEnd(); }
   baseUrl = baseUrl.replace(/\/+$/, '');
   var chosenModel = model || (ep && ep.defaultModel) || '';
@@ -22313,6 +22320,7 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
   var _webSearch = body.web_search === true;
   function buildCustomExtras() {
     if (customThinkingOptionDisabled) return {};
+    if (provider === 'openrouter') return _thinkMode === 'off' ? {reasoning:{enabled:false}} : {reasoning:{effort:(_thinkMode === 'max' ? 'high' : _thinkMode)}};
     if (_thinkMode === 'off') return provider === 'qwen' ? {enable_thinking:false} : {};
     var effort = (_thinkMode === 'max' || _thinkMode === 'high') ? 'high' : (_thinkMode === 'medium' ? 'medium' : 'low');
     var extra = require('./ai-model-capabilities').thinkingParameters(provider, chosenModel, effort, body.reasoning_effort_supported === true);
@@ -22392,7 +22400,7 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
   // The same full, server-owned tool set is available to every chat model.
   var TOOL_ROUNDS_MAX = aiTaskPolicy.MAX_TOOL_ROUNDS;
   var customTools = aiToolsForWorkMode();
-  var toolContext = { userName: req.userName || '', signal: controller.signal, searchConsumed: 0 };
+  var toolContext = { freeOnly: provider === 'openrouter', userName: req.userName || '', signal: controller.signal, searchConsumed: 0 };
   if(provider === 'deepseek' && _safeCheck.parsed.hostname === 'api.deepseek.com') toolContext.deepseekKey = apiKey;
   var customConfig;
   try { customConfig = await getAiConfig(); } catch (_) {
@@ -22419,6 +22427,7 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
       payload.tools = customTools;
       payload.tool_choice = 'auto';
     }
+    if (provider === 'openrouter') payload = openRouter.freePayload(payload);
     var upstream;
     try {
       // ★ P1-3 修复：改用 requestPinnedStream（https.request + pinnedLookup）。
@@ -22440,6 +22449,7 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
       return { stop: true };
     }
     if (!upstream.ok) {
+      if (provider === 'openrouter') { try { await upstream.body?.cancel(); } catch (_) {} throw openRouter.upstreamError(upstream.status, upstream.headers?.get('retry-after')); }
       if ((!customUsageOptionDisabled || !customThinkingOptionDisabled) && (upstream.status === 400 || upstream.status === 422)) {
         var optionError = ''; try { optionError = (await upstream.text()).slice(0,4096); } catch (_) {}
         if (!customThinkingOptionDisabled && /reasoning_effort|enable_thinking|thinking_budget/i.test(optionError)) { customThinkingOptionDisabled = true; _thinkMode = 'off'; reasoningEffortFinal = 'off'; writeSse(res,{type:'stage',stage:'model_compatibility',message:'服务商不支持本次思考设置，已按普通对话继续。'}); return {retryWithoutThinking:true}; }
@@ -22481,7 +22491,7 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
     var buf = '';
     var doneFlag = false, terminalSeen = false, roundUsage = null;
     var assistantContent = '';
-    var toolCallsAcc = [];
+    var toolCallsAcc = [], openRouterReasoning = [];
     var toolCallsSeen = false;
     var customVisibleStream = assistantOutput.createSafeAssistantStream({
       emit: function(piece) { if (!aborted && !res.writableEnded) writeSse(res,{type:'content',text:piece}); },
@@ -22502,9 +22512,11 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
           var json;
           try { json = JSON.parse(data); } catch (e) { continue; }
           if (json && json.usage) roundUsage = json.usage;
+          if (provider === 'openrouter') openRouter.checkPacket(json);
           if (json && json.choices && json.choices[0] && json.choices[0].finish_reason) terminalSeen = true;
           var delta = json && json.choices && json.choices[0] && json.choices[0].delta;
           if (!delta) continue;
+          if (provider === 'openrouter' && Array.isArray(delta.reasoning_details)) openRouter.appendReasoning(openRouterReasoning,delta.reasoning_details);
           // ★ 思考过程透传：DeepSeek/Qwen-qwq 等用 reasoning_content，部分厂商用 reasoning/thinking
           var rPiece = delta.reasoning_content || delta.reasoning || delta.thinking || '';
           if (rPiece) {
@@ -22533,11 +22545,19 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
         }
         if (chunk.done) break;
       }
+    } catch (streamError) {
+      if (assistantContent && !toolCallsSeen && !finalReplyContainsInternalProtocolGlobal(assistantContent) && !looksLikeToolArgsFragment(assistantContent)) finalAssistantContent = customVisibleStream.finish(assistantContent).text;
+      throw streamError;
     } finally {
       if (roundUsage) {if(['prompt_tokens','input_tokens','completion_tokens','output_tokens','total_tokens'].some(function(key){return typeof roundUsage[key]==='number'&&Number.isFinite(roundUsage[key]);}))customUsageReported=true;customUsage.prompt_tokens += Math.max(0,Number(roundUsage.prompt_tokens || roundUsage.input_tokens)||0); customUsage.completion_tokens += Math.max(0,Number(roundUsage.completion_tokens || roundUsage.output_tokens)||0); customUsage.total_tokens += Math.max(0,Number(roundUsage.total_tokens)||0); }
       try { if (reader.cancel) reader.cancel().catch(function() {}); } catch (e) {}
     }
 
+    if (provider === 'openrouter' && (aborted || controller.signal.aborted)) {
+      if (assistantContent && !toolCallsSeen && !finalReplyContainsInternalProtocolGlobal(assistantContent) && !looksLikeToolArgsFragment(assistantContent)) finalAssistantContent = customVisibleStream.finish(assistantContent).text;
+      if (!aborted) throw openRouter.upstreamError(504);
+      return {stop:true};
+    }
     if (!terminalSeen && !aborted && !res.writableEnded) {
       if (assistantContent && !finalReplyContainsInternalProtocolGlobal(assistantContent) && !looksLikeToolArgsFragment(assistantContent)) { finalAssistantContent = customVisibleStream.finish(assistantContent).text; }
       throw new Error('custom_upstream_incomplete');
@@ -22617,7 +22637,9 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
       var tcs = readyCalls.map(function(t) {
         return { id: t.id || ('call_' + Date.now().toString(36) + '_' + t.index), type: 'function', function: { name: t.name, arguments: t.arguments || '{}' } };
       });
-      conversation.push({ role: 'assistant', content: assistantContent || null, tool_calls: tcs });
+      var toolAssistant = { role: 'assistant', content: assistantContent || null, tool_calls: tcs };
+      if (provider === 'openrouter' && openRouterReasoning.length) toolAssistant.reasoning_details = openRouterReasoning;
+      conversation.push(toolAssistant);
       // ★ 工具轮次的叙述：先过滤内部协议（DSML/裸参数 JSON），再作为"过程说明"推给前端。
       //   命中协议残留则整段丢弃，绝不外泄；正常叙述推一次，让用户知道 AI 在做什么。
       if (assistantContent && String(assistantContent).trim()) {
@@ -22730,8 +22752,11 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
     if (rounds > TOOL_ROUNDS_MAX && !aborted && !res.writableEnded) writeSse(res, { type: 'error', error: '本轮工具调用已达上限，请缩小任务后重试', code: 'CUSTOM_TOOL_ROUND_LIMIT' });
   } catch (eUp) {
     if (!aborted && !res.writableEnded) {
+      if (provider === 'openrouter' && controller.signal.aborted) eUp = openRouter.upstreamError(504);
+      if (provider === 'openrouter' && openRouter.isError(eUp)) { writeSse(res,openRouter.event(eUp)); } else {
       var reason = eUp&&eUp.code==='context_window_exceeded'?eUp.message:(eUp && eUp.message === 'custom_upstream_incomplete') ? '第三方回复提前中断，已保留收到的内容，可继续提问或重试' : (eUp && eUp.name === 'AbortError') ? '第三方模型响应超时，请重试' : '第三方模型连接失败，请检查 API Key 或网络';
       writeSse(res, { type: 'error', error: reason, code: eUp&&eUp.code==='context_window_exceeded'?eUp.code:'CUSTOM_STREAM_ERROR' });
+      }
     }
   } finally {
     try { clearTimeout(timer); } catch (e) {}
@@ -22812,6 +22837,10 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, aiChatConcurren
   var provider = String(body.provider || '').trim();
   var apiKey = String(body.api_key || '').trim();
   var model = String(body.model || '').trim();
+  if (provider === 'openrouter') {
+    try { var managed = openRouter.resolveConfig(req.userName, ADMIN_USERNAME, body); apiKey = managed.api_key; model = managed.model; if (res._aiRetryOwner) res._aiRetryOwner.freeOnly = true; }
+    catch (managedError) { writeSse(res, openRouter.event(managedError)); return safeEnd(); }
+  }
   // ★ 审计修复：兄弟路由 custom-chat/stream 均经 validateString 校验（长度上限
   //   AI_CHAT_MESSAGE_MAX_LEN），本路由此前完全未校验，原文直达 Planner/Worker/Synth。
   var text = validateString(body.message, AI_CHAT_MESSAGE_MAX_LEN, '消息内容');
@@ -22839,7 +22868,7 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, aiChatConcurren
     custom:  { base: '' }
   };
   var ep = CUSTOM_DP_ENDPOINTS[provider];
-  var baseUrl = String(body.base_url || '').trim() || (ep && ep.base) || '';
+  var baseUrl = provider === 'openrouter' ? openRouter.BASE_URL : String(body.base_url || '').trim() || (ep && ep.base) || '';
   if (!baseUrl) { sseSend({ type: 'error', error: '该服务商未配置接口地址' }); return safeEnd(); }
   baseUrl = baseUrl.replace(/\/+$/, '');
   var chosenModel = model || (ep && ep.defaultModel) || '';
@@ -22863,6 +22892,7 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, aiChatConcurren
 
   // ★ 对任意 OpenAI 兼容 chat/completions 模型的通用调用
   function buildFetch(msgs, options) {
+    _customDeepUpstreamUsed = true;
     options = options || {};
     var payload = {
       model: chosenModel,
@@ -22871,6 +22901,12 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, aiChatConcurren
       max_tokens: options.maxTokens || options.max_tokens || 2000
     };
     if (options.stream) payload.stream = true;
+    if (provider === 'openrouter') {
+      if (customDeepUserExtra.vision_urls.length) {
+        payload.messages = msgs.map(function(msg,index) { return index === msgs.length-1 && msg.role === 'user' ? Object.assign({},msg,{content:[{type:'text',text:String(msg.content || '')}].concat(customDeepUserExtra.vision_urls.map(function(url) { return {type:'image_url',image_url:{url:url}}; }))}) : msg; });
+      }
+      payload = openRouter.freePayload(payload);
+    }
     // ★ P1-3 修复：同 /custom-chat/stream —— `agent:` 对内置 fetch 无效，
     //   改走 requestPinnedStream 做真正的 DNS pin（https.request + pinnedLookup）。
     return requestPinnedStream(_chatEndpoint2, _safe2.addresses, {
@@ -22886,11 +22922,13 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, aiChatConcurren
       throw new Error('redirect_not_allowed');
     }
     if (!upstream.ok) {
+      if (provider === 'openrouter') { try { await upstream.body?.cancel(); } catch (_) {} throw openRouter.upstreamError(upstream.status, upstream.headers?.get('retry-after')); }
       // ★ 修复：不回显上游错误体（此前把前 200 字节拼进异常消息，
       // 经 worker 失败文案流回客户端，构成 SSRF 响应外带通道）。
       throw new Error('HTTP ' + upstream.status);
     }
     var data = await upstream.json();
+    if (provider === 'openrouter') openRouter.checkPacket(data);
     var content = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
     if (typeof content !== 'string' || !content.trim()) throw new Error('invalid provider response');
     return String(content || '').trim();
@@ -22898,6 +22936,7 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, aiChatConcurren
   async function callCustomChatStream(msgs, onChunk, options) {
     var upstream = await buildFetch(msgs, Object.assign({}, options, { stream: true }));
     if (!upstream.ok) {
+      if (provider === 'openrouter') { try { await upstream.body?.cancel(); } catch (_) {} throw openRouter.upstreamError(upstream.status, upstream.headers?.get('retry-after')); }
       throw new Error('HTTP ' + upstream.status);
     }
     if (!upstream.body) throw new Error('empty stream');
@@ -22907,8 +22946,8 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, aiChatConcurren
     try {
       while (!aborted) {
         var chunk = await reader.read();
-        if (chunk.done) break;
-        buf += decoder.decode(chunk.value, { stream: true });
+        if (chunk.done) { buf += decoder.decode(); if (!buf.trim()) break; buf += '\n'; }
+        else buf += decoder.decode(chunk.value, { stream: true });
         var lines = buf.split('\n');
         buf = lines.pop() || '';
         for (var li = 0; li < lines.length; li++) {
@@ -22918,6 +22957,7 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, aiChatConcurren
           if (data === '[DONE]') return;
           var json;
           try { json = JSON.parse(data); } catch (e) { continue; }
+          if (provider === 'openrouter') openRouter.checkPacket(json);
           var choice = json && json.choices && json.choices[0];
           if (choice && choice.finish_reason != null) providerCompleted = true;
           var delta = choice && choice.delta;
@@ -22926,6 +22966,7 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, aiChatConcurren
           var rPiece = delta.reasoning_content || delta.reasoning || delta.thinking || '';
           onChunk(piece, rPiece);
         }
+        if (chunk.done) break;
       }
       if (!providerCompleted && !aborted && !controller.signal.aborted) throw new Error('incomplete provider stream');
     } finally {
@@ -22961,7 +23002,7 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, aiChatConcurren
   //   原来是裸 number + 「先 await 门禁再 ++」，RPC 往返期间所有并发 worker 读到
   //   同一个旧值，6×3=18 次检索可以一次性打穿当日额度。改成对象 + claimSearchSlot
   //   乐观预占后，并发调用各自抢占到递增的序号，额度判定即时生效。
-  var searchCtx = { userName: req.userName || '', searchConsumed: 0, signal: controller.signal };
+  var searchCtx = { freeOnly: provider === 'openrouter', userName: req.userName || '', searchConsumed: 0, signal: controller.signal };
   if(provider === 'deepseek' && _safe2.parsed.hostname === 'api.deepseek.com') searchCtx.deepseekKey = apiKey;
   var sources = [];
   var thinkingAcc = '', customDeepThinkingLog = [];
@@ -22994,7 +23035,7 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, aiChatConcurren
     }
     _customDeepGatePassed = true;
     if (aborted || controller.signal.aborted) return safeEnd();
-    var customDeepFiles = unwrapAttachmentExtract(await extractChatAttachments(text, body.attachments));
+    var customDeepFiles = unwrapAttachmentExtract(await extractChatAttachments(text, body.attachments, provider === 'openrouter' && customDeepUserExtra.vision_urls.length ? {skipImageOcr:true} : undefined));
     text = customDeepFiles.text;
     if (text !== originalCustomDeepMessage) customDeepUserExtra.attachment_context = String(text).slice(0,60000);
     if (aborted || controller.signal.aborted) return safeEnd();
@@ -23004,7 +23045,7 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, aiChatConcurren
 
     // 1) Planner
     var plannerRaw = '';
-    try { plannerRaw = await callCustomChat([{ role: 'user', content: CUSTOM_PLANNER_PROMPT + text }], { maxTokens: customDeepThinkingMode === 'low' ? 512 : 2000, temperature: 0.4 }); } catch (eP) { plannerRaw = ''; }
+    try { plannerRaw = await callCustomChat([{ role: 'user', content: CUSTOM_PLANNER_PROMPT + text }], { maxTokens: customDeepThinkingMode === 'low' ? 512 : 2000, temperature: 0.4 }); } catch (eP) { if (provider === 'openrouter') throw eP; plannerRaw = ''; }
     _customDeepUpstreamUsed = true; // ★ S12：首次上游调用已发生，此后无论成败都必须记账
     if (aborted || controller.signal.aborted) return safeEnd();
     var plan = parsePlannerJson(plannerRaw);
@@ -23054,6 +23095,7 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, aiChatConcurren
       try {
         answer = await callCustomChat([{ role: 'system', content: CUSTOM_WORKER_PROMPT }, { role: 'user', content: userMsg }], { maxTokens: customDeepThinkingMode === 'low' ? 1024 : 1600, temperature: 0.5 });
       } catch (eW) {
+        if (provider === 'openrouter') throw eW;
         // ★ 修复：不再把上游/网络异常原文拼进用户可见文案（防 SSRF 响应外带与内部信息泄漏）
         answer = '（该方向分析失败：第三方服务暂不可用）';
       }
@@ -23086,6 +23128,7 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, aiChatConcurren
         { maxTokens: customDeepThinkingMode === 'low' ? 2048 : 4000, temperature: 0.5 }
       );
     } catch (eS) {
+      if (provider === 'openrouter') throw eS;
       sseSend({ type: 'error', error: '研究报告生成失败，请稍后重试', code: 'CUSTOM_DEEP_SYNTH_ERROR' });
       return safeEnd();
     }
@@ -23113,7 +23156,8 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, aiChatConcurren
     });
   } catch (eFatal) {
     if (!aborted && !res.writableEnded) {
-      sseSend({ type: 'error', error: '深度研究失败，请稍后重试', code: 'CUSTOM_DEEP_ERROR' });
+      if (provider === 'openrouter' && controller.signal.aborted) eFatal = openRouter.upstreamError(504);
+      sseSend(provider === 'openrouter' && openRouter.isError(eFatal) ? openRouter.event(eFatal) : { type: 'error', error: '深度研究失败，请稍后重试', code: 'CUSTOM_DEEP_ERROR' });
     }
   } finally {
     try { clearTimeout(timer); } catch (e) {}
@@ -23156,12 +23200,12 @@ aiModelSecrets.migrateSecrets(supabase).catch(function(e) {
   console.error('[ai-models] Encryption migration incomplete:', e && e.message);
 });
 function cleanAiModelIn(m) {
-  if (!m || typeof m !== 'object') return null;
+  if (!m || typeof m !== 'object' || m.provider === 'openrouter' || m.server_managed) return null;
   var uid = String(m.uid || '').trim().slice(0, 64);
   var provider = String(m.provider || '').trim().slice(0, 32);
   var model = String(m.model || '').trim().slice(0, 64);
   var apiKey = String(m.api_key || '').trim().slice(0, 512);
-  if (!uid || !provider || !model || !apiKey) return null;
+  if (!uid || uid === 'or_minimax_m31_free' || !provider || !model || !apiKey) return null;
   return {
     uid: uid,
     provider: provider,
@@ -23224,6 +23268,8 @@ function cleanDeletedUidList(input) {
 }
 // GET /api/agent/custom-models - 读取当前账号的自定义模型（解密 Key 后返回）
 app.get('/api/agent/custom-models', authenticateUser, rateLimit(60000, 60), async (req, res) => {
+  res.setHeader('Cache-Control','no-store');
+  var serverModels = openRouter.catalog(req.userName, ADMIN_USERNAME);
   try {
     // ★ 2026-09-24 修复（课题②「删除的模型自动复活」）：
     //   原实现拉取最近 20 行快照并按 uid 逐行合并，最新行里没有的 uid 只要在任意旧行存在
@@ -23233,7 +23279,7 @@ app.get('/api/agent/custom-models', authenticateUser, rateLimit(60000, 60), asyn
     var deletedSet = {};
     snap.deletedUids.forEach(function(uid) { deletedSet[uid] = 1; });
     var models = snap.models.filter(function(m) {
-      if (!m || !m.uid) return false;
+      if (!m || !m.uid || m.uid === 'or_minimax_m31_free' || m.provider === 'openrouter' || m.server_managed) return false;
       return !deletedSet[String(m.uid)];
     });
     var out = models.map(function(m) {
@@ -23242,14 +23288,15 @@ app.get('/api/agent/custom-models', authenticateUser, rateLimit(60000, 60), asyn
       else { copy.api_key = String(copy.api_key || ''); }
       return copy;
     });
-    return res.json({ ok: true, models: out, deleted_uids: snap.deletedUids, ai_prefs: snap.aiPrefs || {} });
+    return res.json({ ok: true, models: out, server_models: serverModels, deleted_uids: snap.deletedUids, ai_prefs: snap.aiPrefs || {} });
   } catch (e) {
     console.error('[ai-models] 读取失败:', e && e.message);
-    return res.status(500).json({ error: '读取自定义模型失败', code: 'ai_models_read_error' });
+    return res.status(500).json({ error: '读取自定义模型失败', code: 'ai_models_read_error', server_models: serverModels });
   }
 });
 // PUT /api/agent/custom-models - 整体保存当前账号的自定义模型（整体替换，原子性由删除+插入保证）
 app.put('/api/agent/custom-models', authenticateUser, rateLimit(60000, 30), async (req, res) => {
+  res.setHeader('Cache-Control','no-store');
   try {
     var body = req.body || {};
     var raw = Array.isArray(body.models) ? body.models : [];
@@ -23270,7 +23317,7 @@ app.put('/api/agent/custom-models', authenticateUser, rateLimit(60000, 30), asyn
     models = saved.data.models;
     var deletedUids = saved.data.deleted_uids;
     var savedPrefs = saved.data.ai_prefs;
-    var echo = models.map(function(m) {
+    var echo = models.filter(function(m) { return m.provider !== 'openrouter' && !m.server_managed; }).map(function(m) {
       var copy = Object.assign({}, m);
       copy.api_key = decryptAiModelSecret(copy.api_key_enc);
       delete copy.api_key_enc;
@@ -25627,7 +25674,7 @@ async function runResearchSubAgent(opts) {
   }
 
   if (opts.customModel) {
-    var customSources = [], customQueries = [], customSearch = {userName:opts.userName,searchConsumed:0,signal:subAbortCtrl.signal}, customUsage = null;
+    var customSources = [], customQueries = [], customSearch = {freeOnly:opts.customModel.provider === 'openrouter',userName:opts.userName,searchConsumed:0,signal:subAbortCtrl.signal}, customUsage = null;
     try {
       if(opts.customModel.provider === 'deepseek'){var customBase = new URL(opts.customModel.base_url || 'https://api.deepseek.com');if(customBase.protocol === 'https:' && customBase.hostname === 'api.deepseek.com' && !customBase.username && !customBase.password && (!customBase.port || customBase.port==='443')) customSearch.deepseekKey = opts.customModel.api_key;}
       var context = '';
@@ -25808,6 +25855,7 @@ async function callCustomModelOnce(cm, messages, options) {
     };
     if (!wantStream && options.jsonObject) payload.response_format = { type: 'json_object' };
     if (wantStream) payload.stream = true;
+    if (cm.provider === 'openrouter') { payload = openRouter.freePayload(payload); if (wantStream) payload.stream_options={include_usage:true}; }
     var upstream = await requestPinnedStream(endpoint, safe.addresses, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cm.api_key },
@@ -25817,7 +25865,7 @@ async function callCustomModelOnce(cm, messages, options) {
     if (upstream && (upstream.type === 'opaqueredirect' || (upstream.status >= 300 && upstream.status < 400))) {
       throw new Error('redirect_not_allowed');
     }
-    if (!upstream.ok) throw new Error('HTTP ' + upstream.status);
+    if (!upstream.ok) { try { await upstream.body?.cancel(); } catch (_) {} throw cm.provider === 'openrouter' ? openRouter.upstreamError(upstream.status,upstream.headers?.get('retry-after')) : new Error('HTTP ' + upstream.status); }
     // 流式：按 OpenAI 兼容 SSE 逐块解析 delta.content，通过 onContentChunk 实时回传
     if (wantStream && upstream.body) {
       var full = '', terminalSeen = false, streamUsage = null;
@@ -25840,6 +25888,7 @@ async function callCustomModelOnce(cm, messages, options) {
             try {
               var j = JSON.parse(raw);
               if (j && j.usage) streamUsage = j.usage;
+              if (cm.provider === 'openrouter') { try { openRouter.checkPacket(j); } catch (providerError) { providerError.usage=streamUsage; throw providerError; } }
               if (j && j.choices && j.choices[0] && j.choices[0].finish_reason) terminalSeen = true;
               var thought = j && j.choices && j.choices[0] && j.choices[0].delta && (j.choices[0].delta.reasoning_content || j.choices[0].delta.reasoning);
               if (thought && typeof options.onThinkingChunk === 'function') options.onThinkingChunk(String(thought));
@@ -25850,7 +25899,7 @@ async function callCustomModelOnce(cm, messages, options) {
                   try { options.onContentChunk(String(delta)); } catch (_eCb) {}
                 }
               }
-            } catch (_eJson) { /* 忽略无法解析的分片 */ }
+            } catch (_eJson) { if (cm.provider === 'openrouter' && openRouter.isError(_eJson)) throw _eJson; /* 忽略无法解析的分片 */ }
           }
           if (step.done) break;
         }
@@ -25863,11 +25912,15 @@ async function callCustomModelOnce(cm, messages, options) {
       return { content: full, usage: cm.provider==='deepseek'&&safe.parsed.hostname==='api.deepseek.com'?deepSeekPricing.estimate(streamUsage,chosenModel):streamUsage, model_used: chosenModel };
     }
     var data = await upstream.json();
+    if (cm.provider === 'openrouter') openRouter.checkPacket(data);
     var content = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
     var thought = data && data.choices && data.choices[0] && data.choices[0].message && (data.choices[0].message.reasoning_content || data.choices[0].message.reasoning);
     if (thought && typeof options.onThinkingChunk === 'function') options.onThinkingChunk(String(thought));
     var usage = (data && data.usage) || null;
     return { content: String(content || '').trim(), usage: cm.provider==='deepseek'&&safe.parsed.hostname==='api.deepseek.com'?deepSeekPricing.estimate(usage,chosenModel):usage, model_used: chosenModel };
+  } catch (customModelError) {
+    if (cm.provider === 'openrouter' && controller.signal.aborted && !(options.signal && options.signal.aborted)) throw openRouter.upstreamError(504);
+    throw customModelError;
   } finally {
     clearTimeout(timer);
     if (options.signal) options.signal.removeEventListener('abort',signalAbort);
@@ -25914,7 +25967,9 @@ async function runSelfResearchFlow(opts) {
   var researchDeepseekModel = null;
   if (researchModelSpec.indexOf('custom:') === 0) {
     var _cmUid = researchModelSpec.slice('custom:'.length).trim();
-    if (_cmUid) {
+    if (_cmUid === 'or_minimax_m31_free') {
+      researchCustomModel = openRouter.resolveConfig(userName,ADMIN_USERNAME,{model_uid:_cmUid});
+    } else if (_cmUid) {
       try {
         var _cmSnap = await fetchLatestAiModelsSnapshot(userName);
         var _cmDeleted = {};
@@ -26067,7 +26122,7 @@ async function runSelfResearchFlow(opts) {
         researchQuery = rq;
         sseSend({ type: 'research_stage', stage: 'rewrite_done', message: '任务已拆解，准备派出研究小队…' });
       }
-    } catch (e) { /* 改写失败静默回退原 query */ }
+    } catch (e) { if (researchCustomModel && researchCustomModel.provider === 'openrouter') throw e; /* 改写失败静默回退原 query */ }
   }
   if (isCancelled()) return { answer: '', sources: [], agents: [], usage: researchUsageAgg, search_count: 0 };
 
@@ -26099,6 +26154,7 @@ async function runSelfResearchFlow(opts) {
       researchUsageAgg.reasoning_tokens += Math.max(0, plannerRes.reasoning_tokens);
     }
   } catch (e) {
+    if (researchCustomModel && researchCustomModel.provider === 'openrouter') throw e;
     console.error('[SELF-RESEARCH] planner failed:', e && e.message);
     plannerContent = '{"agents":[]}';
   }
@@ -26164,6 +26220,7 @@ async function runSelfResearchFlow(opts) {
       await saveFrontier('workers');
       return result;
     }).catch(async function (e) {
+      if (researchCustomModel && researchCustomModel.provider === 'openrouter') throw e;
       console.error('[SELF-RESEARCH] sub-agent failed:', agent.role, e && e.message);
       var failed={role:agent.role,status:'failed',content:'',sources:[]};frontier.workers[index]=failed;board.direction('worker-'+index,agent.role,'failed');await saveFrontier('workers');return failed;
     });
@@ -26201,6 +26258,7 @@ async function runSelfResearchFlow(opts) {
       if (!isCancelled()) { frontier.gaps = gaps; frontier.gapCheckDone = true; await saveFrontier('gapfill'); }
 
     } catch (e) {
+      if (researchCustomModel && researchCustomModel.provider === 'openrouter') throw e;
       console.error('[SELF-RESEARCH] gap-check failed:', e && e.message);
     }
   }
@@ -26232,6 +26290,7 @@ async function runSelfResearchFlow(opts) {
             if (!frontier.gapWorkers) frontier.gapWorkers = [];
             frontier.gapWorkers[index] = result; board.direction('gap-'+index,String(g.role||'补充查证'),result.status);await saveFrontier('gapfill'); return result;
           }).catch(async function (e) {
+            if (researchCustomModel && researchCustomModel.provider === 'openrouter') throw e;
             console.error('[SELF-RESEARCH] gap agent failed:', g.role, e && e.message);
             if(!frontier.gapWorkers)frontier.gapWorkers=[];frontier.gapWorkers[index]={role:String(g.role||'补充查证'),status:'failed',content:'',sources:[]};board.direction('gap-'+index,String(g.role||'补充查证'),'failed');await saveFrontier('gapfill');return null;
           });
@@ -26335,8 +26394,9 @@ async function runSelfResearchFlow(opts) {
   } catch (e) {
     if (e && e.usage) accumulateResearchUsage(e.usage);
     console.error('[SELF-RESEARCH] synthesizer failed:', e && e.message);
+    if (researchCustomModel && researchCustomModel.provider === 'openrouter') sseSend(openRouter.isError(e) ? openRouter.event(e) : {type:'error',code:'OPENROUTER_RESEARCH_INTERRUPTED',error:'MiniMax 研究报告生成中断，已保留收到的内容，请重试'});
     // 兜底：直接拼接各子智能体结果
-    if (!finalAnswer && !isCancelled()) finalAnswer = workerResults.map(function (wr, idx) {
+    if (!(researchCustomModel && researchCustomModel.provider === 'openrouter') && !finalAnswer && !isCancelled()) finalAnswer = workerResults.map(function (wr, idx) {
       return '\n【' + (wr.role || ('方向' + (idx + 1))) + '】\n' + (wr.content || '');
     }).join('\n');
   } finally {
@@ -26366,10 +26426,10 @@ async function runSelfResearchFlow(opts) {
     search_count: searchCountTotal,
     board:board.snapshot(), documents:researchDocuments.publicDocuments(documents), thinking_log: processLog.snapshot()
   };
-  } finally { clearFlowWallTimer(); if (checkpointHeartbeat) clearInterval(checkpointHeartbeat); if (cancelToken._onSubCancel === flowCancelHandler) delete cancelToken._onSubCancel; }
+  } finally { if (researchCustomModel && researchCustomModel.provider === 'openrouter') flowAbortCtrl.abort(); clearFlowWallTimer(); if (checkpointHeartbeat) clearInterval(checkpointHeartbeat); if (cancelToken._onSubCancel === flowCancelHandler) delete cancelToken._onSubCancel; }
 }
 
-require('./ai-model-capabilities').installModelCapabilities(app, {authenticateUser:authenticateUser,rateLimit:rateLimit,gate:enforceAiChatAccess,record:recordAiTurnUsage});
+require('./ai-model-capabilities').installModelCapabilities(app, {ownerName:ADMIN_USERNAME,authenticateUser:authenticateUser,rateLimit:rateLimit,gate:enforceAiChatAccess,record:recordAiTurnUsage});
 var researchCheckpoints = require('./research-checkpoints').installResearchCheckpoints(app, { db: supabase, authenticateUser: authenticateUser, rateLimit: rateLimit });
 require('./ai-report-export').installReportExport(app,{authenticateUser:authenticateUser,rateLimit:rateLimit,jsonMiddleware:express.json({limit:'6mb'})});
 require('./ai-tool-retry').installToolRetry(app,{authenticateUser:authenticateUser,rateLimit:rateLimit,execute:executeToolCall,gate:enforceAiChatAccess,record:recordAiTurnUsage,feedback:toolFeedback,normalize:normalizeToolResultItems,store:require('./ai-tool-retry-store').createToolRetryStore(supabase)});
@@ -26494,6 +26554,8 @@ app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, 
     var researchModel = String(req.body && req.body.research_model || 'pro').trim().slice(0, 80);
     var _rmValid = (researchModel === 'pro' || researchModel === 'flash' || /^custom:[A-Za-z0-9_\-]{1,64}$/.test(researchModel));
     if (!_rmValid) researchModel = 'pro';
+    var managedResearchModel = researchModel === 'custom:or_minimax_m31_free' ? 'minimax/minimax-m3.1-flash:free' : '';
+    if (researchModel === 'custom:or_minimax_m31_free') openRouter.resolveConfig(userName,ADMIN_USERNAME,{model_uid:'or_minimax_m31_free'});
     // mode：仅用于缓存 key 兼容（历史沿用 hybrid），当前已不再驱动 Tavily 分支
     var mode = String(req.body && req.body.mode || 'hybrid').trim();
     if (mode !== 'direct') mode = 'hybrid';
@@ -26565,12 +26627,12 @@ app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, 
           }
         } catch (e) { /* 查询失败则按新记录处理 */ }
         if (!cachedMsgId) {
-          cachedMsgId = await persistResearchRecord(userName, convId, query, cachedAnswer, cached.sources, cached.thinking_log,{research_board:cachedBoard,documents:cachedDocuments,prepared_documents:documents});
+          cachedMsgId = await persistResearchRecord(userName, convId, query, cachedAnswer, cached.sources, cached.thinking_log,{research_board:cachedBoard,documents:cachedDocuments,prepared_documents:documents,model:managedResearchModel||undefined});
         }
         // 缓存读取保留现有网站额度计量；本次没有上游模型或搜索调用。
         recordAiTurnUsage(userName, null, {
           conversation_id: convId,
-          model: 'research_' + model,
+          model: managedResearchModel || 'research_' + model,
           source: 'deep_research_cache_hit',
           message: query,
           content: cachedAnswer,
@@ -26604,7 +26666,7 @@ app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, 
       });
     } catch (e) {
       if (!aborted) {
-        try { writeSse(res, { type: 'error', error: 'self_research_failed', message: String(e && e.message || 'unknown') }); } catch (_) {}
+        try { writeSse(res, researchModel === 'custom:or_minimax_m31_free' && openRouter.isError(e) ? openRouter.event(e) : { type: 'error', error: 'self_research_failed', message: String(e && e.message || 'unknown') }); } catch (_) {}
       }
       return safeEnd();
     }
@@ -26615,11 +26677,11 @@ app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, 
     if (aborted || (cancelToken && cancelToken.cancelled)) {
       if (checkpointJob) { try { await checkpointJob.finish('interrupted'); checkpointFinished = true; } catch (_) {} }
       if (!cancelToken.discarded && selfResult && (selfResult.answer || (selfResult.thinking_log || []).length)) await persistResearchRecord(userName, convId, query, selfResult.answer, selfResult.sources, selfResult.thinking_log,
-        { interrupted: true, complete: false, finish_reason: 'cancelled' });
+        { interrupted: true, complete: false, finish_reason: 'cancelled',model:managedResearchModel||undefined });
       else if (!cancelToken.discarded) await saveInterruptedChatTurn({ db: supabase, userName: userName, convId: convId, message: query,
         chatMode: 'deep_think', requestId: req.body && req.body.client_request_id, marker: AI_AGENT_MESSAGE_MARKER, buildMeta: buildMsgMeta });
       await recordAbortedStreamUsage(userName, {
-        convId: convId, usedModel: model, source: 'research_stream_aborted',
+        convId: convId, usedModel: managedResearchModel || model, source: 'research_stream_aborted',
         message: query,
         content: (selfResult && selfResult.answer) || '',
         usage: (selfResult && selfResult.usage) || null,
@@ -26633,14 +26695,15 @@ app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, 
     }
 
     // D. 持久化 + 缓存写入 + 结束事件
-    var researchFinalMeta = {research_board:selfResult.board||null,documents:selfResult.documents||[],prepared_documents:documents};
+    if (managedResearchModel && selfResult.usage) selfResult.usage.model = managedResearchModel;
+    var researchFinalMeta = {model:managedResearchModel||undefined,research_board:selfResult.board||null,documents:selfResult.documents||[],prepared_documents:documents};
     if(selfResult.complete===false)Object.assign(researchFinalMeta,{interrupted:true,complete:false,finish_reason:'upstream_error'});
     var msgId = await persistResearchRecord(userName, convId, query, selfResult.answer, selfResult.sources, selfResult.thinking_log, researchFinalMeta);
     // ★ 修复 S4（簇 A，续）：持久化已完成 → 本次研究的所有上游费用均已实际发生，
     //   此处断开同样必须补记账（此前直接 return 会漏掉整笔研究用量）。
     if (aborted) {
       await recordAbortedStreamUsage(userName, {
-        convId: convId, usedModel: model, source: 'research_stream_aborted',
+        convId: convId, usedModel: managedResearchModel || model, source: 'research_stream_aborted',
         message: query,
         content: selfResult.answer || '',
         usage: (selfResult && selfResult.usage) || null,
@@ -26664,7 +26727,7 @@ app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, 
       }
       researchQuota = await recordAiTurnUsage(userName, researchUsage, {
         conversation_id: convId,
-        model: 'research_' + model,
+        model: managedResearchModel || 'research_' + model,
         source: 'deep_research',
         message: query,
         content: selfResult.answer || '',
@@ -26684,6 +26747,7 @@ app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, 
     writeSse(res, { type: 'research_sources', sources: selfResult.sources });
     writeSse(res, {
       type: 'research_done',
+      model:managedResearchModel||undefined,
       answer: selfResult.answer,
       sources: selfResult.sources,
       message_id: msgId,
@@ -26696,6 +26760,7 @@ app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, 
     return safeEnd();
   } catch (e) {
     if (!aborted) {
+      if (researchModel === 'custom:or_minimax_m31_free' && openRouter.isError(e)) { writeSse(res,openRouter.event(e)); return safeEnd(); }
       var checkpointCode = e && (e.code || e.message) || '';
       var checkpointMessages = {checkpoint_running:'上一个研究仍在保存或执行，请稍后从历史重试。',checkpoint_not_found:'断点已删除或已过期，请开始新的研究。',checkpoint_identity_changed:'账号状态已改变，请重新登录。',checkpoint_storage_unavailable:'研究断点暂时无法保存，请稍后重试。',checkpoint_lease_lost:'该断点已被其他设备接续，请重开研究历史。'};
       try { writeSse(res, { type:'error', error:'tavily_research_failed', code:checkpointMessages[checkpointCode] ? checkpointCode : 'tavily_research_failed', message:checkpointMessages[checkpointCode] || String(e && e.message || '研究失败') }); } catch (_) {}
