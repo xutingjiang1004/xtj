@@ -62,7 +62,7 @@ test('native model prompt assembly keeps recent image context and reports histor
 test('saved assistant metadata carries the same bounded memory and budget while user originals remain intact',async()=>{
  const prepared=context.prepareContext({history:longHistory(),fixed,conversationId:'CURRENT1'});let rows;
  const source=fs.readFileSync('render-api/server.js','utf8'),a=source.indexOf('function buildMsgMeta('),b=source.indexOf('\napp.get(',a);
- const buildMeta=vm.runInNewContext('('+source.slice(a,b).trim()+')',{require:createRequire(require.resolve('../render-api/server.js'))});
+ const buildMeta=vm.runInNewContext('('+source.slice(a,b).trim()+')',{deepseekWeb:require('../render-api/deepseek-web'),require:createRequire(require.resolve('../render-api/server.js'))});
  await require('../render-api/ai-chat-save').saveCustomChatTurn({db:{from:()=>({insert:async value=>{rows=value;return{error:null};}})},userName:'alice',convId:'CURRENT1',message:'真实用户原文',content:'真实回答',contextMemory:prepared.memory,contextBudget:prepared.budget,buildMeta,marker:'__ai_agent_msg__'});
  assert.equal(rows[0].content,'真实用户原文');const meta=JSON.parse(rows[1].media_url);assert.equal(meta.context_memory.summary,prepared.memory.summary);assert.equal(meta.context_budget.window_tokens,65536);
  assert.equal(JSON.parse(buildMeta('assistant','OTHER1',null,null,2,null,0,{context_memory:prepared.memory})).context_memory,null);

@@ -387,16 +387,22 @@ test('HTTP non-2xx response cleans the uploaded file', function(){
   assert.ok(httpOkBlock.indexOf('await cleanupStorage(path, uploadId, cleanupAfterCreateOptions)') >= 0, 'HTTP error must use backend cleanup');
   assert.ok(httpOkBlock.indexOf("photoUploadStage = 'record'") >= 0, 'record stage marker missing');
 });
-test('JSON parse failure after HTTP response cleans the uploaded file', function(){
+test('JSON parse failure after HTTP response preserves a confirmable upload', function(){
   var s = read('js/photo-wall/upload-ui.js');
-  var parseCatch = s.slice(s.indexOf('catch (parseError)'));
-  assert.ok(parseCatch.indexOf('await cleanupStorage(path, uploadId, cleanupAfterCreateOptions)') >= 0, 'parse error must use backend cleanup');
+  var parseCatch = s.slice(s.indexOf('catch (parseError)'), s.indexOf('if (!createData || !createData.data)'));
+  assert.match(parseCatch, /savePendingPhotoUpload\(cleanupAfterCreateOptions\.pendingInfo\)/, 'unreadable success must retain its reconciliation identity');
+  assert.match(parseCatch, /photoUploadStage\s*=\s*'pending'/, 'unreadable success must remain pending');
+  assert.match(parseCatch, /_pendingRetry\s*=\s*true/, 'unreadable success must remain retryable');
+  assert.doesNotMatch(parseCatch, /cleanupStorage\(/, 'unreadable success must not delete a potentially committed original');
 });
-test('response with missing data field remains a record failure', function(){
+test('response with missing data field preserves a confirmable upload', function(){
   var s = read('js/photo-wall/upload-ui.js');
   assert.ok(s.indexOf("if (!createData || !createData.data)") >= 0, 'missing data guard missing');
   var guardBlock = s.slice(s.indexOf("if (!createData || !createData.data)"), s.indexOf('return createData.data;'));
-  assert.ok(guardBlock.indexOf('await cleanupStorage(path, uploadId, cleanupAfterCreateOptions)') >= 0, 'missing data must use backend cleanup');
+  assert.match(guardBlock, /savePendingPhotoUpload\(cleanupAfterCreateOptions\.pendingInfo\)/, 'missing data must retain its reconciliation identity');
+  assert.match(guardBlock, /photoUploadStage\s*=\s*'pending'/, 'missing data must remain pending');
+  assert.match(guardBlock, /_pendingRetry\s*=\s*true/, 'missing data must remain retryable');
+  assert.doesNotMatch(guardBlock, /cleanupStorage\(/, 'missing data must not delete a potentially committed original');
 });
 
 test('photo create headers always retain JSON content type', function(){

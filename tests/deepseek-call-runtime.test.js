@@ -12,6 +12,7 @@ function loadCallDeepSeek(fetchImpl) {
   assert.ok(start >= 0 && end > start, 'callDeepSeek source should be extractable');
 
   const sandbox = {
+    deepSeekPricing: require('../render-api/deepseek-pricing'),
     aiTaskPolicy: require('../render-api/ai-task-policy'),
     fetch: fetchImpl,
     AbortController,

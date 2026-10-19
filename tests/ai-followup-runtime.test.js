@@ -196,7 +196,7 @@ for (const [thinkingMode, model, expectedModel, cached = false] of [['low', 'dee
 test('multi-agent research forwards the same selected model to its planner, all workers and synthesizer', async () => {
   const calls = [], workers = [];
   const run = extract(server, 'async function runMultiAgentFlow(', '// ===================== R:', 'runMultiAgentFlow', {
-    AbortController, setTimeout, clearTimeout, DEEPSEEK_MODEL_REASONER: 'deepseek-v4-pro',
+    deepSeekPricing:require('../render-api/deepseek-pricing'),AbortController, setTimeout, clearTimeout, DEEPSEEK_MODEL_REASONER: 'deepseek-v4-pro',
     DEEP_THINK_CONFIG: { MAX_DURATION_MS: 10000, MAX_WORKERS: 3, MIN_WORKERS: 1, WORKER_MAX_TOOL_ROUNDS: 1, FORCE_SPLIT_MIN_LENGTH: 24, PLANNER_TIMEOUT_MS: 1000, SYNTHESIZER_TIMEOUT_MS: 1000 },
     DEEP_THINK_PLANNER_PROMPT: '{maxWorkers}', DEEP_THINK_SYNTHESIZER_PROMPT: 'synthesize',
     getPreferredDeepSeekModel: value => value, normalizeDeepSeekUsageModel: value => value, buildHistoryContext: () => '', buildAiCorePrompt: () => 'safe prompt',

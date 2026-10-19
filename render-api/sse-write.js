@@ -10,11 +10,13 @@
 
 const { appendProcessEvent } = require('./ai-process-events');
 const assistantOutput = require('./ai-assistant-output');
+const deepseekWeb = require('./deepseek-web');
 
 const MAX_SSE_BUFFER_BYTES = 256 * 1024;
 // ★ 2026 修复：支持可选 event 名（此前只写 'data: ' 帧，带事件名的路由只能裸 res.write
 // 绕过背压上限）。向后兼容：未传 eventName 时行为与旧版完全一致。
 function writeSseRaw(res, payload, eventName) {
+  if(payload && payload.type === 'done') payload = Object.assign({},payload,{usage:deepseekWeb.enrichUsage(payload.usage)});
   try {
     if (res && !res.writableEnded && res.headersSent) {
       require('./ai-tool-retry').observe(res,payload);

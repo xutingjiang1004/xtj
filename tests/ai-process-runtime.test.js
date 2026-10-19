@@ -168,7 +168,7 @@ test('SSE accepted events persist the same ordered process in assistant metadata
   writeSse(res,{type:'tool_result',call_id:'one',tool_name:'search_web',success:true,items:[{title:'来源',url:'https://example.com/'}]});
   writeSse(res,{type:'reasoning',text:'再分析'});
   const source=read('render-api/server.js'),start=source.indexOf('function buildMsgMeta('),end=source.indexOf("app.get('/api/agent/profile'",start);
-  const build=new Function(source.slice(start,end)+'\nreturn buildMsgMeta;')();
+  const build=new Function('deepseekWeb',source.slice(start,end)+'\nreturn buildMsgMeta;')(require('../render-api/deepseek-web'));
   const meta=JSON.parse(build('assistant','cid',null,'先思考再分析',2,null,0,{process_events:getProcessEvents(res)}));
   assert.deepEqual(meta.process_events.map(event=>event.type),['reasoning','tools','reasoning']);
   assert.equal(meta.process_events[1].tools[0].status,'done');

@@ -1,19 +1,22 @@
 /**
  * Web search provider chain + query helpers.
- * Priority: Tavily > Brave > Serper > Custom API > Bing HTML > SearXNG
+ * Priority: DeepSeek > Tavily > Brave > Serper > Custom API > Bing HTML > SearXNG
  */
 'use strict';
 
 // 审计 🟡：SEARCH_API_URL 是用户请求触发的服务端出站请求目标，复用 web-fetch 的
 // assertSafeWebUrl（协议 + DNS 解析 + 私有地址校验），与全站 SSRF 防护标准一致。
 const { assertSafeWebUrl } = require('./web-fetch');
+const deepseekWeb = require('./deepseek-web');
+const { createHash } = require('node:crypto');
+function providerSignal(options, ms) { return options && options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(ms)]) : AbortSignal.timeout(ms); }
 
 function buildSearchQuery(message) {
   var q = String(message || '').trim();
   var hasTimeWord = /今天|现在|当前|实时|最新/i.test(q);
   var hasNewest = /最新/i.test(q);
   // 不再删除时效词 — 保留原样获得更精准的搜索
-  var cleaned = q.slice(0, 120);
+  var cleaned = q; // Keep the complete caller query, including trailing site/date constraints.
   // 包含时效词的问题：追加当前中文日期, 让搜索更精准
   // ★ U3: 避免重复追加 (如"最新的XX"已经有"最新", 不再追加)
   if (hasTimeWord) {
@@ -23,15 +26,15 @@ function buildSearchQuery(message) {
     if (!hasNewest) cleaned = cleaned + ' 最新';
   }
   if (/新闻|资讯|报道|快讯/i.test(q)) {
-    return (cleaned + ' 新闻').slice(0, 120);
+    return cleaned + ' 新闻';
   }
   if (/价格|多少钱|售价/i.test(q)) {
-    return (cleaned + ' 价格').slice(0, 120);
+    return cleaned + ' 价格';
   }
   if (/天气|温度|下雨|降雨/i.test(q)) {
     return ''; // 天气不走搜索
   }
-  return cleaned.slice(0, 120);
+  return cleaned;
 }
 
 function cleanSearchResults(results, maxCount) {
@@ -77,13 +80,13 @@ function cleanSearchResults(results, maxCount) {
     if (r.source && r.source !== 'web') score += 1;
     if (t.length > 8) score += 1;
     if (u) score += 1;
-    out.push({ url: u, title: t, snippet: s, source: (r.source || 'web'), published_at: r.published_at || '', _score: score });
+    out.push({ url: u, title: t, snippet: s, source: (r.source || 'web'), published_at: r.published_at || '', summary: String(r.summary || '').slice(0,2000), content: String(r.content || '').slice(0,12000), _score: score });
   });
   // 按评分降序排列，高分优先
   out.sort(function(a, b) { return (b._score || 0) - (a._score || 0); });
   // 去掉 _score 字段再返回
   return out.slice(0, maxCount).map(function(item) {
-    return { url: item.url, title: item.title, snippet: item.snippet, source: item.source, published_at: item.published_at };
+    return { url: item.url, title: item.title, snippet: item.snippet, source: item.source, published_at: item.published_at, summary: item.summary, content: item.content };
   });
 }
 
@@ -132,7 +135,7 @@ async function searchTavily(query, maxResults, extraOpts) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(tavilyBody),
-      signal: AbortSignal.timeout(15000)
+      signal: providerSignal(extraOpts, 15000)
     });
     if (!resp.ok) {
       var errBody = await resp.text().catch(function() { return ''; });
@@ -158,7 +161,7 @@ async function searchTavily(query, maxResults, extraOpts) {
 
 
 // Provider 2: Brave Search API
-async function searchBrave(query, maxResults) {
+async function searchBrave(query, maxResults, options) {
   var apiKey = process.env.BRAVE_SEARCH_API_KEY;
   if (!apiKey) return { results: [], error: null };
   try {
@@ -168,7 +171,7 @@ async function searchBrave(query, maxResults) {
         'Accept-Encoding': 'gzip',
         'X-Subscription-Token': apiKey
       },
-      signal: AbortSignal.timeout(15000)
+      signal: providerSignal(options, 15000)
     });
     if (!resp.ok) return { results: [], error: 'Brave status=' + resp.status };
     var data = await resp.json();
@@ -191,7 +194,7 @@ async function searchBrave(query, maxResults) {
 }
 
 // Provider 3: Serper / Google Search API
-async function searchSerper(query, maxResults) {
+async function searchSerper(query, maxResults, options) {
   var apiKey = process.env.SERPER_API_KEY;
   if (!apiKey) return { results: [], error: null };
   try {
@@ -199,7 +202,7 @@ async function searchSerper(query, maxResults) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-API-KEY': apiKey },
       body: JSON.stringify({ q: query, num: Math.min(maxResults || 5, 20) }),
-      signal: AbortSignal.timeout(10000)
+      signal: providerSignal(options, 10000)
     });
     if (!resp.ok) return { results: [], error: 'Serper status=' + resp.status };
     var data = await resp.json();
@@ -221,7 +224,7 @@ async function searchSerper(query, maxResults) {
 }
 
 // Provider 4: 自定义 SEARCH_API_URL（兼容 SearXNG 格式）
-async function searchCustomApi(query, maxResults) {
+async function searchCustomApi(query, maxResults, options) {
   var apiUrl = process.env.SEARCH_API_URL;
   if (!apiUrl) return { results: [], error: null };
   try {
@@ -235,7 +238,7 @@ async function searchCustomApi(query, maxResults) {
     var url = apiUrl + '/search?q=' + encodeURIComponent(query) + '&format=json&language=zh-CN&safesearch=1&pageno=1&categories=general';
     var resp = await fetch(url, {
       headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0' },
-      signal: AbortSignal.timeout(10000)
+      signal: providerSignal(options, 10000)
     });
     if (!resp.ok) return { results: [], error: 'CustomApi status=' + resp.status };
     var data = await resp.json();
@@ -257,7 +260,9 @@ async function searchCustomApi(query, maxResults) {
 }
 
 // Provider 5: SearXNG 公共实例
-async function searchSearxng(query, maxResults) {
+async function searchSearxng(query, maxResults, options) {
+  var losers = new AbortController();
+  options = {signal:options && options.signal ? AbortSignal.any([options.signal,losers.signal]) : losers.signal};
   var instances = [
     'https://searx.work', 'https://search.leptons.xyz', 'https://searx.si',
     'https://search.sapti.me', 'https://searx.be', 'https://search.projectsegfau.lt',
@@ -281,7 +286,7 @@ async function searchSearxng(query, maxResults) {
     var url = baseUrl + '/search?q=' + encodeURIComponent(query) + '&format=json&language=zh-CN&safesearch=1&categories=' + category + '&pageno=1';
     return fetch(url, {
       headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-      signal: AbortSignal.timeout(15000)
+      signal: providerSignal(options, 15000)
     }).then(function(r) {
       if (!r.ok) throw new Error(baseUrl.slice(0, 30) + ' status=' + r.status);
       return r.json();
@@ -306,17 +311,17 @@ async function searchSearxng(query, maxResults) {
     return { results: (winner || []).slice(0, maxResults || 5), error: null };
   } catch (e) {
     return { results: [], error: 'SearXNG error: all instances failed' };
-  }
+  } finally { losers.abort(); }
 }
 
 // Provider 6: Bing HTML 解析（最后兜底）
-async function searchBingHtml(query, maxResults) {
+async function searchBingHtml(query, maxResults, options) {
   try {
     var url = 'https://www.bing.com/search?q=' + encodeURIComponent(query) + '&count=' + (maxResults || 5) + '&mkt=zh-CN';
     // ★ 修复：此处 signal 曾被重复定义两次（对象字面量后键覆盖前键），
     //   虽当前取值相同、行为无差异，但属于明显的复制粘贴残留，删除重复项。
     var resp = await fetch(url, {
-      signal: AbortSignal.timeout(15000),
+      signal: providerSignal(options, 15000),
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
         'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
@@ -361,33 +366,33 @@ async function searchBingHtml(query, maxResults) {
 // 主搜索函数：按优先级依次尝试 Provider，取第一个成功的结果（避免浪费 API 配额）
 // M-6: 给单个搜索 provider 套超时（Promise.race），防止无自带超时的 provider
 // 挂起永久卡住整个串行搜索链并泄漏整体定时器
-function withSearchProviderTimeout(providerFn, timeoutMs) {
+function withSearchProviderTimeout(providerFn, timeoutMs, externalSignal) {
   return new Promise(function(resolve, reject) {
-    var timer = setTimeout(function() {
-      var error = new Error('search provider timed out');
-      error.code = 'SEARCH_PROVIDER_TIMEOUT';
-      reject(error);
-    }, timeoutMs);
-    Promise.resolve(providerFn()).then(function(value) {
-      clearTimeout(timer);
-      resolve(value);
-    }, function(error) {
-      clearTimeout(timer);
-      reject(error);
-    });
+    var controller = new AbortController(), settled = false;
+    function finish(error, value) {
+      if (settled) return; settled = true; clearTimeout(timer);
+      if (externalSignal) externalSignal.removeEventListener('abort', cancel);
+      if (error) { controller.abort(); reject(error); } else resolve(value);
+    }
+    function cancel() { finish(Object.assign(new Error('Search cancelled'), {name:'AbortError'})); }
+    var timer = setTimeout(function(){finish(Object.assign(new Error('search provider timed out'),{code:'SEARCH_PROVIDER_TIMEOUT'}));}, timeoutMs);
+    if(externalSignal){if(externalSignal.aborted){cancel();return;}externalSignal.addEventListener('abort',cancel,{once:true});}
+    Promise.resolve().then(function(){if(!settled)return providerFn(controller.signal);}).then(function(value){finish(null,value);},function(error){finish(error);});
   });
 }
 
-async function searchWeb(query, maxResults) {
-  maxResults = maxResults || 5;
+async function searchWeb(query, maxResults, options) {
+  options = options || {};
+  if(options.signal && options.signal.aborted) throw Object.assign(new Error('Search cancelled'),{name:'AbortError'});
+  maxResults = Math.max(1, Math.min(50, Math.floor(maxResults) || 5));
   var searchQuery = buildSearchQuery(query);
-  if (!searchQuery) searchQuery = String(query || '').trim().slice(0, 120);
-  var cacheKey = searchQuery.toLowerCase().trim().slice(0, 100);
+  if (!searchQuery) searchQuery = String(query || '').trim();
+  var cacheKey = createHash('sha256').update(JSON.stringify([searchQuery.trim(), maxResults, !!options.need_content, deepseekWeb.credentials(options), process.env.TAVILY_API_KEY || '', process.env.BRAVE_SEARCH_API_KEY || '', process.env.SERPER_API_KEY || '', process.env.SEARCH_API_URL || ''])).digest('hex');
   var cached = searchCache.get(cacheKey);
   if (cached && cached.results) {
     var cachedResults = cached.results.results || [];
     var cacheTtl = cachedResults.length > 0 ? SEARCH_CACHE_TTL_MS : SEARCH_EMPTY_CACHE_TTL_MS;
-    if ((Date.now() - cached.ts) < cacheTtl) return cached.results;
+    if ((Date.now() - cached.ts) < cacheTtl) return Object.assign({}, cached.results, {cache_hit:true});
     searchCache.delete(cacheKey);
   }
 
@@ -399,12 +404,13 @@ async function searchWeb(query, maxResults) {
 
   // 按优先级定义 provider 列表（串行：前面的成功就不走后面的，省 API 配额）
   var providerList = [
-    { name: 'Tavily', fn: function() { return searchTavily(searchQuery, maxResults); }, requiresEnv: 'TAVILY_API_KEY', enabled: !!process.env.TAVILY_API_KEY },
-    { name: 'Brave', fn: function() { return searchBrave(searchQuery, maxResults); }, requiresEnv: 'BRAVE_SEARCH_API_KEY', enabled: !!process.env.BRAVE_SEARCH_API_KEY },
-    { name: 'Serper', fn: function() { return searchSerper(searchQuery, maxResults); }, requiresEnv: 'SERPER_API_KEY', enabled: !!process.env.SERPER_API_KEY },
-    { name: 'CustomApi', fn: function() { return searchCustomApi(searchQuery, maxResults); }, requiresEnv: 'SEARCH_API_URL', enabled: !!process.env.SEARCH_API_URL },
-    { name: 'BingHtml', fn: function() { return searchBingHtml(searchQuery, maxResults); }, requiresEnv: null, enabled: true },
-    { name: 'SearXNG', fn: function() { return searchSearxng(searchQuery, maxResults); }, requiresEnv: null, enabled: true }
+    { name:'DeepSeek', fn:function(signal){return deepseekWeb.search(searchQuery,maxResults,Object.assign({},options,{signal:signal}));}, requiresEnv:'DEEPSEEK_API_KEY', enabled:!!deepseekWeb.credentials(options) },
+    { name: 'Tavily', fn: function(signal) { return searchTavily(searchQuery, maxResults, {signal:signal}); }, requiresEnv: 'TAVILY_API_KEY', enabled: !!process.env.TAVILY_API_KEY },
+    { name: 'Brave', fn: function(signal) { return searchBrave(searchQuery, maxResults, {signal:signal}); }, requiresEnv: 'BRAVE_SEARCH_API_KEY', enabled: !!process.env.BRAVE_SEARCH_API_KEY },
+    { name: 'Serper', fn: function(signal) { return searchSerper(searchQuery, maxResults, {signal:signal}); }, requiresEnv: 'SERPER_API_KEY', enabled: !!process.env.SERPER_API_KEY },
+    { name: 'CustomApi', fn: function(signal) { return searchCustomApi(searchQuery, maxResults, {signal:signal}); }, requiresEnv: 'SEARCH_API_URL', enabled: !!process.env.SEARCH_API_URL },
+    { name: 'BingHtml', fn: function(signal) { return searchBingHtml(searchQuery, maxResults, {signal:signal}); }, requiresEnv: null, enabled: true },
+    { name: 'SearXNG', fn: function(signal) { return searchSearxng(searchQuery, maxResults, {signal:signal}); }, requiresEnv: null, enabled: true }
   ];
 
   var diagnostics = {
@@ -426,6 +432,7 @@ async function searchWeb(query, maxResults) {
   var searchTimer = setTimeout(function() { searchTimedOut = true; }, 15000);
 
   for (var pi = 0; pi < providerList.length; pi++) {
+    if(options.signal && options.signal.aborted){clearTimeout(searchTimer);throw Object.assign(new Error('Search cancelled'),{name:'AbortError'});}
     if (searchTimedOut || Date.now() >= deadline) break;
     var provider = providerList[pi];
     if (!provider.enabled) {
@@ -438,7 +445,7 @@ async function searchWeb(query, maxResults) {
       // 单个无自带超时的 provider 挂起会永久卡住 await 并泄漏定时器。
       // ★ 2026-09-23：单 provider 上限 12s → 8s（provider 是串行的，8s 已经足够覆盖
       // 正常的 Tavily/Brave 响应；超时即快速降级，避免一次搜索吃掉十几秒）。
-      var result = await withSearchProviderTimeout(provider.fn, Math.max(100, Math.min(8000, deadline - Date.now())));
+      var result = await withSearchProviderTimeout(provider.fn, Math.max(100, Math.min(8000, deadline - Date.now())), options.signal);
       if (result.error) {
         diagnostics.provider_errors.push({ provider: provider.name, error: result.error });
       } else if (result.results && result.results.length > 0) {
@@ -451,13 +458,16 @@ async function searchWeb(query, maxResults) {
         diagnostics.provider_results.push({ provider: provider.name, count: 0 });
       }
     } catch (e) {
-      diagnostics.provider_errors.push({ provider: provider.name, error: e.message || 'unknown' });
+      if(options.signal && options.signal.aborted){clearTimeout(searchTimer);throw e;}
+      diagnostics.provider_errors.push({ provider: provider.name, error: '搜索服务请求失败' });
     }
   }
 
+  if(options.signal && options.signal.aborted){clearTimeout(searchTimer);throw Object.assign(new Error('Search cancelled'),{name:'AbortError'});}
   var finalResult = {
     results: mergedResults,
     diagnostics: diagnostics,
+    cache_hit: false,
     used_provider: usedProvider
   };
 

@@ -160,7 +160,7 @@ test('deepseek flash model is migrated to the canonical V4.1 id', function () {
   assert.ok(aiAgent.indexOf("var DEFAULT_AI_MODEL = 'deepseek-flash'") >= 0,
     '前端默认模型未升级');
   // 显示名更换
-  assert.ok(aiAgent.indexOf("'V4.1 Flash'") >= 0, '前端未显示 V4.1 Flash 名称');
+  assert.ok(aiAgent.indexOf("'DeepSeek-V4.1-Flash-1017'") >= 0, '前端未显示 DeepSeek-V4.1-Flash-1017 名称');
 });
 
 test('legacy model ids are migrated rather than silently rejected', function () {

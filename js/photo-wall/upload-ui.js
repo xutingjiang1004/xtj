@@ -14,8 +14,17 @@
     batchJobs: [],
     postPreviewUrls: [],
     failedJobs: [],
+    resultJobs: [],
     identity: null
   };
+
+  window.addEventListener('auth-ready',function(){
+    if(state.resultJobs.some(function(job){return job.identity && !photoIdentityCurrent(job.identity);})){
+      if(isBusy())cancelCurrentUpload();
+      state.resultJobs.forEach(function(job){job.file=null;job.onProgress=null;});
+      state.resultJobs=[];state.failedJobs=[];clearUploadResult();
+    }
+  });
 
   window.PHOTO_WALL_MARKER = window.PHOTO_WALL_MARKER || MARKER;
 
@@ -131,7 +140,8 @@
     var status = Number(error && (error.status || error.statusCode)) || 0;
     var message = String(error && error.message || '').toLowerCase();
     if (code === 'identity_changed') return '账号已变化，上传已停止';
-    if (code === 'cancelled' || (error && error.name === 'AbortError')) return '已取消';
+    if (code === 'cancelled') return '已取消';
+    if (stage === 'pending' || code === 'timeout' || (error && error.name === 'AbortError')) return '正在确认上传结果，请稍候';
     if (code === 'unsupported_type') return '文件类型不支持';
     if (code === 'file_too_large') return '文件超过 50 MB 限制';
     if (code === 'timeout' || /timeout|timed out/.test(message)) return '正在确认上传结果，请稍候';
@@ -725,7 +735,7 @@
       result.textContent = message || '';
       result.hidden = !message;
       result.classList.toggle('is-error', state === 'error');
-      if (result.dataset) result.dataset.state = !message ? 'idle' : (state === 'cancelled' ? 'partial' : state);
+      if (result.dataset) result.dataset.state = !message ? 'idle' : (state === 'cancelled' || state === 'pending' ? 'partial' : state);
       return;
     }
     setUploadResultState(detailMsg || message, state);
@@ -753,13 +763,13 @@
     result.hidden = false;
     s = s || 'success';
     // 取消沿用 partial 的警示色，但单独显示准确标题，避免零成功时宣称“部分上传成功”。
-    result.dataset.state = s === 'cancelled' ? 'partial' : s;
-    var titleMap = { success: '上传成功', partial: '部分完成', cancelled: '上传已取消', error: '上传失败' };
+    result.dataset.state = s === 'cancelled' || s === 'pending' ? 'partial' : s;
+    var titleMap = { success: '上传成功', partial: '部分完成', pending: '正在确认上传结果', cancelled: '上传已取消', error: '上传失败' };
     if (titleEl) titleEl.textContent = titleMap[s] || titleMap.success;
     var parts = text.split(/\n|[。;；]/).map(function(p){ return p.trim(); }).filter(Boolean);
     if (detailEl) detailEl.textContent = parts.length > 1 ? parts.join('\n') : text;
     if (actionsEl) actionsEl.hidden = (s === 'success');
-    if (retryBtn) retryBtn.hidden = !(s === 'partial' || s === 'error');
+    if (retryBtn) { retryBtn.hidden = !(s === 'partial' || s === 'error' || s === 'pending'); retryBtn.textContent = s === 'pending' ? '确认上传结果' : '重试失败项'; }
     if (closeBtn) closeBtn.hidden = false;
   }
 
@@ -1001,9 +1011,11 @@
     } catch (storageError) {
       // The browser may abort after sending the body while the server is still
       // storing it. Reconcile this known path on resume instead of losing it.
-      if (storageError.photoUploadCode === 'identity_changed' || state.cancelRequested || (signal && signal.aborted))
+      var uncertain = storageError.photoUploadCode === 'timeout' || storageError.photoUploadCode === 'network_error' || storageError.name === 'AbortError';
+      if (uncertain || storageError.photoUploadCode === 'identity_changed' || state.cancelRequested || (signal && signal.aborted))
         savePendingPhotoUpload({uploadId:uploadId,path:path,fileName:file.name,fileSize:file.size,mimeType:type,owner:identity.owner});
-      storageError.photoUploadStage = 'storage';
+      storageError.photoUploadStage = uncertain ? 'pending' : 'storage';
+      if(uncertain)storageError._pendingRetry = true;
       throw storageError;
     }
     if (state.cancelRequested || (signal && signal.aborted)) {
@@ -1131,10 +1143,15 @@
       throw recordError;
     }
     var createData;
-    try { createData = await createRes.json(); } catch (parseError) { parseError.photoUploadStage = 'record'; await cleanupStorage(path, uploadId, cleanupAfterCreateOptions); throw parseError; }
+    try { createData = await createRes.json(); } catch (parseError) {
+      savePendingPhotoUpload(cleanupAfterCreateOptions.pendingInfo);
+      parseError.photoUploadStage = 'pending';parseError._pendingRetry = true;
+      throw parseError;
+    }
     if (!createData || !createData.data) {
-      await cleanupStorage(path, uploadId, cleanupAfterCreateOptions);
-      throw createPhotoUploadError('record');
+      savePendingPhotoUpload(cleanupAfterCreateOptions.pendingInfo);
+      var unknownResult = createPhotoUploadError('record');unknownResult.photoUploadStage='pending';unknownResult._pendingRetry=true;
+      throw unknownResult;
     }
     assertPhotoIdentity(identity);
     return createData.data;
@@ -1183,11 +1200,11 @@
       }, function(err){
         processed += 1;
         // P6: 用户取消不计失败、不进 failedJobs，只有真实错误才记失败
-        var isCancel = state.cancelRequested || !!(err && (err.photoUploadCode === 'cancelled' || err.name === 'AbortError'));
+        var isCancel = state.cancelRequested || !!(signal && signal.aborted) || !!(err && err.photoUploadCode === 'cancelled');
         if (isCancel) {
           cancelled += 1; job.status = 'cancelled'; job.error = null;
         } else {
-          fail += 1; job.status = 'failed'; job.error = err;
+          fail += 1; job.status = err && err._pendingRetry ? 'confirming' : 'failed'; job.error = err;
         }
         onProgress && onProgress(processed, ok, fail);
       }).then(runOne, runOne);  // ★ 修复：补上 reject 回调，防止 onProgress 等回调抛错时整条 worker 链断掉，导致剩余文件永不上传
@@ -1199,9 +1216,10 @@
     return Promise.all(workers).then(function(){ return { processed: processed, ok: ok, fail: fail, cancelled: cancelled, total: total }; }).finally(function(){clearInterval(identityTimer);});
   }
 
-  function buildSummary(processed, total, ok, fail, cancelled){
+  function buildSummary(processed, total, ok, fail, cancelled, pending){
     var notStarted = Math.max(0, total - processed);
     var s = '已处理 ' + processed + '/' + total + ' 张：成功 ' + ok + ' 张，失败 ' + fail + ' 张';
+    if (pending) s += '，待确认 ' + pending + ' 张';
     if (cancelled) s += '，取消中止 ' + cancelled + ' 张';
     if (notStarted) s += '，未开始 ' + notStarted + ' 张';
     var skipped = (state.skippedFiles || []).length;
@@ -1209,8 +1227,9 @@
     return s;
   }
 
-  async function performUpload(jobs){
-    var identity=jobs[0]&&jobs[0].identity||photoIdentity();
+  async function performUpload(jobs, summaryJobs){
+    summaryJobs = summaryJobs || jobs;
+    var identity=jobs[0]&&jobs[0].identity||summaryJobs[0]&&summaryJobs[0].identity||photoIdentity();
     assertPhotoIdentity(identity);state.identity=identity;
     jobs.forEach(function(job){job.identity=identity;});
     state.uploading = true;
@@ -1250,13 +1269,19 @@
     }
     if(!photoIdentityCurrent(identity)){
       jobs.forEach(function(job){job.file=null;job.onProgress=null;});
-      state.failedJobs=[];state.batchJobs=[];state.uploading=false;state.identity=null;return;
+      state.failedJobs=[];state.resultJobs=[];state.batchJobs=[];state.uploading=false;state.identity=null;return;
     }
     // 收尾整体包裹 try/catch：任何一步抛错都必须保证 uploading 最终复位，
     // 避免标志永久卡死导致上传功能不可用。
     try {
-    jobs.forEach(function(j){
-      if (j.status === 'failed' && j.error) {
+    total = summaryJobs.length; processed = 0; ok = 0; fail = 0; cancelled = 0;
+    var pending = 0;
+    summaryJobs.forEach(function(j){
+      if (j.succeeded) { ok++; processed++; }
+      else if (j.status === 'confirming') { pending++; processed++; }
+      else if (j.status === 'cancelled') { cancelled++; processed++; }
+      else if (j.status === 'failed') { fail++; processed++; }
+      if ((j.status === 'failed' || j.status === 'confirming') && j.error) {
         failures.push({
           name: String(j.file && j.file.name || '图片').slice(0, 80),
           reason: photoUploadFailureReason(j.error, j.error && j.error.photoUploadStage),
@@ -1291,11 +1316,11 @@
       else if (typeof window.renderPhotoWall === 'function') await window.renderPhotoWall();
     } catch (e) { refreshFailed = true; }
     if (ok && typeof window.touchUserSession === 'function') window.touchUserSession(false);
-    var summary = buildSummary(processed, total, ok, fail, cancelled);
+    var summary = buildSummary(processed, total, ok, fail, cancelled, pending);
     if (refreshFailed) summary += '。照片已上传，但列表刷新失败，请点击重试';
     var incomplete = processed < total;
-    var cancellationOnly = ok === 0 && fail === 0 && (cancelled > 0 || (state.cancelRequested && incomplete));
-    var resultState = cancellationOnly ? 'cancelled' :
+    var cancellationOnly = ok === 0 && fail === 0 && pending === 0 && (cancelled > 0 || (state.cancelRequested && incomplete));
+    var resultState = pending > 0 ? 'pending' : cancellationOnly ? 'cancelled' :
       (ok === 0 && fail > 0 && !incomplete && cancelled === 0 ? 'error' :
         (fail > 0 || incomplete || cancelled > 0 ? 'partial' : 'success'));
     var details = [];
@@ -1338,6 +1363,7 @@
       return { file: f, caption: state.photoCaptions.get(f) || '', uploadId: genUploadId(), status: 'pending' };
     });
     state.batchJobs = jobs;
+    state.resultJobs = jobs;
     state.failedJobs = [];
     closeSheet({ force: true, restoreFocus: false });
     try {
@@ -1358,7 +1384,7 @@
     var identity=photoIdentity();
     state.retrying = true;
     try {
-    var jobs = (state.failedJobs || []).filter(function(j){ return j && j.file && !j.succeeded && (!j.identity||j.identity.owner===identity.owner); });
+    var jobs = (state.failedJobs || []).filter(function(j){ return j && j.file && !j.succeeded && (!j.identity||photoIdentityCurrent(j.identity)); });
     jobs.forEach(function(job){job.identity=identity;});
     if (!jobs.length) { toast('没有可重试的失败项'); return; }
     state.skippedFiles = [];
@@ -1382,7 +1408,7 @@
         statusData = await statusResp.json().catch(function(){ return {}; });
         if (!statusResp.ok) throw new Error(statusData.error || '照片状态查询失败');
       } catch (statusError) {
-        j.status = 'pending';
+        j.status = 'confirming';
         j.error = statusError;
         j.error.photoUploadStage = 'pending';
         pendingJobs.push(j);
@@ -1396,7 +1422,7 @@
         continue;
       }
       if (statusData.status === 'processing') {
-        j.status = 'pending';
+        j.status = 'confirming';
         j.error = new Error('照片仍在服务端处理中');
         j.error.photoUploadStage = 'pending';
         pendingJobs.push(j);
@@ -1405,7 +1431,7 @@
       // ★ 修复：status 字段缺失（响应不完整）时不落入"暂不可确认"死分支，
       // 走下方重试流程（新 uploadId + previousUploadId 对账）
       if (!statusData || !statusData.status || (statusData.status !== 'failed' && statusData.status !== 'not_found')) {
-        j.status = 'pending';
+        j.status = 'confirming';
         j.error = new Error('照片状态暂不可确认');
         j.error.photoUploadStage = 'pending';
         pendingJobs.push(j);
@@ -1423,7 +1449,7 @@
           var cleanupData = await cleanupResp.json().catch(function(){ return {}; });
           if (!cleanupResp.ok || !cleanupData.ok) throw new Error(cleanupData.error || '旧照片文件清理失败');
         } catch (cleanupError) {
-          j.status = 'pending';
+          j.status = 'confirming';
           j.error = cleanupError;
           j.error.photoUploadStage = 'pending';
           pendingJobs.push(j);
@@ -1440,8 +1466,9 @@
     }
     if(!photoIdentityCurrent(identity)){state.failedJobs=[];return;}
     var uploadJobs = settledJobs.concat(retryJobs);
-    if (uploadJobs.length) await performUpload(uploadJobs);
-    state.failedJobs = photoIdentityCurrent(identity)?(state.failedJobs || []).concat(pendingJobs):[];
+    var summaryJobs = state.resultJobs.length && state.resultJobs.every(function(job){return !job.identity || job.identity.owner === identity.owner;}) ? state.resultJobs : jobs;
+    state.resultJobs = summaryJobs;
+    await performUpload(uploadJobs, summaryJobs);
     if (!uploadJobs.length && pendingJobs.length) toast('照片状态仍在确认中，请稍后重试');
     } finally {
       state.retrying = false;

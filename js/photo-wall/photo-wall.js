@@ -54,7 +54,7 @@
         throw new Error('photo_renderer_not_loaded');
       }
 
-      await window.renderPhotoWall();
+      await window.renderPhotoWall({force:!!force});
 
       // ★ 再次检查 generation
       if (currentGen !== _initGeneration) return true;

@@ -259,7 +259,7 @@ describe('desktop nav refresh lock behavior', function() {
 
   it('refreshTab 必须返回 Promise', function() {
     assert.ok(shell.includes('return _refreshLocks[tab]'), 'refreshTab 必须返回 Promise');
-    assert.ok(shell.includes('_refreshLocks[tab] = performRefresh'), '必须保存 performRefresh Promise');
+    assert.match(shell,/_refreshLocks\[tab\] = Promise\.resolve\(\)\.then\(function\(\)\{ return performRefresh\(tab\); \}\)/, '必须先保存锁再异步执行刷新');
   });
 
   it('performRefresh 必须是 async 函数', function() {
@@ -305,7 +305,7 @@ describe('photo wall init race behavior', function() {
   });
 
   it('必须有 generation 检查防止旧数据覆盖新数据', function() {
-    assert.ok(render.includes('currentGen !== _pwRenderGeneration'), '必须检查 generation');
+    assert.match(render,/currentGen\s*(?:!==|===)\s*_pwRenderGeneration/, '必须检查 generation');
     assert.ok(pw.includes('_initGeneration'), 'photo-wall 必须有 _initGeneration');
   });
 });

@@ -192,7 +192,7 @@
 
   function refreshTab(tab) {
     if (_refreshLocks[tab]) return _refreshLocks[tab];
-    _refreshLocks[tab] = performRefresh(tab);
+    _refreshLocks[tab] = Promise.resolve().then(function(){ return performRefresh(tab); });
     return _refreshLocks[tab];
   }
 
@@ -237,7 +237,7 @@
           if (chatPromises.length) await Promise.allSettled(chatPromises);
           break;
 
-        case 'ai':
+        case 'ai-chat':
           var aiPromises = [];
           if (typeof window.__xtjRefreshAiSession === 'function') {
             aiPromises.push(window.__xtjRefreshAiSession().catch(function() {}));
@@ -248,6 +248,7 @@
           if (aiPromises.length) await Promise.allSettled(aiPromises);
           break;
 
+        case 'ai':
         case 'photos':
           if (typeof window.__xtjPhotoWallForceSync === 'function') {
             await window.__xtjPhotoWallForceSync();
@@ -295,7 +296,7 @@
       var actionButton = _t.closest('[data-desktop-action="ai-chat"]');
       if (actionButton && actionButton.classList.contains('is-active')) {
         event.preventDefault();
-        refreshTab('ai');
+        refreshTab('ai-chat');
       }
     });
 
