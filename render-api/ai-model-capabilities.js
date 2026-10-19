@@ -1,5 +1,6 @@
 'use strict';
 const { assertSafeWebUrl, requestPinnedJson } = require('./web-fetch');
+const openRouter = require('./openrouter');
 const ENDPOINTS = {
   qwen:'https://dashscope.aliyuncs.com/compatible-mode/v1', doubao:'https://ark.cn-beijing.volces.com/api/v3',
   deepseek:'https://api.deepseek.com', kimi:'https://api.moonshot.cn/v1',
@@ -38,7 +39,8 @@ async function probeCapabilities(config, deps = {}) {
   async function probe(name, extra, verify) {
     if (deps.signal && deps.signal.aborted) { results.push({name,status:'unconfirmed',detail:'测试已取消，未继续检查'}); return false; }
     try {
-      const payload = {...base,...extra};
+      let payload = {...base,...extra};
+      if (config.provider === 'openrouter') payload = openRouter.freePayload(payload);
       if (config.provider === 'openai' && /^(?:o[134](?:-|$)|gpt-5(?:-|$))/i.test(config.model)) { payload.max_completion_tokens = Math.max(512,Number(payload.max_tokens)||64); delete payload.max_tokens; if (!payload.reasoning_effort) payload.reasoning_effort = 'low'; }
       const response = await transport(endpoint, safe.addresses, {method:'POST', headers:{'Content-Type':'application/json',Authorization:'Bearer ' + config.api_key},
         body:JSON.stringify(payload), maxBytes:128*1024, timeoutMs:15000, signal:deps.signal});
@@ -47,14 +49,19 @@ async function probeCapabilities(config, deps = {}) {
       if(extra.stream)for(const line of response.text.split(/\r?\n/)){if(!line.startsWith('data:'))continue;try{reported=returnedUsage(JSON.parse(line.slice(5)).usage,reported);}catch(_) {}}
       if(reported)for(const key of ['prompt_tokens','completion_tokens','total_tokens'])usage[key]+=reported[key];
       if (response.status < 200 || response.status >= 300) {
-        results.push({name,status:'failed',...errorLabel(response.status,data),http_status:response.status}); return false;
+        const label = config.provider === 'openrouter' ? openRouter.upstreamError(response.status) : null;
+        results.push({name,status:'failed',...(label ? {category:label.code,detail:label.message} : errorLabel(response.status,data)),http_status:response.status}); return false;
+      }
+      if (config.provider === 'openrouter') {
+        if (extra.stream) for (const line of response.text.split(/\r?\n/)) { if (!line.startsWith('data:')) continue; let packet; try { packet=JSON.parse(line.slice(5)); } catch (_) { continue; } openRouter.checkPacket(packet); }
+        else openRouter.checkPacket(data);
       }
       const status = verify(data, response.text) ? 'passed' : 'unconfirmed';
       results.push({name,status,detail:status === 'passed' ? '本次实测通过' : '接口接受了请求，但未返回足以确认该能力的结果'});
       // Providers without usage still incurred a short request, accounted for conservatively.
       if (!reported) { const outputReserve=Number(payload.max_completion_tokens||payload.max_tokens)||64;usage.prompt_tokens += 100; usage.completion_tokens += outputReserve; usage.total_tokens += 100 + outputReserve; }
       return true;
-    } catch (_) { results.push({name,status:'failed',category:'network',detail:'连接失败、超时或测试已取消'}); return false; }
+    } catch (error) { results.push({name,status:'failed',category:openRouter.isError(error) ? error.code : 'network',detail:openRouter.isError(error) ? error.message : '连接失败、超时或测试已取消'}); return false; }
   }
   const connected = await probe('chat', {}, data => !!(data && data.choices && data.choices[0] && typeof data.choices[0].message?.content === 'string' && data.choices[0].message.content.trim()));
   if (connected && results[0].status === 'passed') {
@@ -64,7 +71,7 @@ async function probeCapabilities(config, deps = {}) {
       return Array.isArray(calls) && calls.some(call => { try { return call.function?.name === 'xtj_model_test' && JSON.parse(call.function.arguments).answer === 'OK'; } catch (_) { return false; } });
     });
     await probe('vision', { messages:[{role:'user',content:[{type:'text',text:'这个纯色图片是什么颜色？只回复颜色。'},{type:'image_url',image_url:{url:RED_IMAGE}}]}] }, data => /红|\bred\b|#ff0000/i.test(String(data?.choices?.[0]?.message?.content || '')));
-    const reasonParams = config.provider === 'qwen' ? {enable_thinking:true,thinking_budget:128} : {reasoning_effort:'low'};
+    const reasonParams = config.provider === 'openrouter' ? {reasoning:{effort:'low'}} : config.provider === 'qwen' ? {enable_thinking:true,thinking_budget:128} : {reasoning_effort:'low'};
     await probe('reasoning', {...reasonParams,max_tokens:512}, data => !!(data?.choices?.[0]?.message?.reasoning_content || data?.choices?.[0]?.message?.reasoning || Number(data?.usage?.completion_tokens_details?.reasoning_tokens) > 0));
     await probe('streaming', {stream:true,stream_options:{include_usage:true}}, (_, body) => {
       const packets = body.split(/\r?\n/).filter(line => line.startsWith('data:')).map(line => { try { return JSON.parse(line.slice(5)); } catch (_) { return null; } });
@@ -76,7 +83,12 @@ async function probeCapabilities(config, deps = {}) {
 function installModelCapabilities(app, deps) {
   app.post('/api/agent/models/check', deps.authenticateUser, deps.rateLimit(60000,2), deps.rateLimit(3600000,20), async (req,res) => {
     const body = req.body || {}, provider = String(body.provider || 'custom');
-    if (!body.api_key || typeof body.api_key !== 'string' || body.api_key.length > 4096 || typeof body.model !== 'string' || !body.model.trim() || body.model.length>128 || !ENDPOINTS[provider] && !body.base_url)
+    let config;
+    if (provider === 'openrouter') {
+      try { config = openRouter.resolveConfig(req.userName,deps.ownerName,body); }
+      catch (error) { return res.status(error.http_status).json({ok:false,...openRouter.event(error)}); }
+    }
+    if (!config && (!body.api_key || typeof body.api_key !== 'string' || body.api_key.length > 4096 || typeof body.model !== 'string' || !body.model.trim() || body.model.length>128 || !ENDPOINTS[provider] && !body.base_url))
       return res.status(400).json({ok:false,error:'请填写有效的模型名称、Key 和接口地址'});
     const controller = new AbortController();
     const cancel = () => { if (!res.writableEnded) controller.abort(); };
@@ -86,7 +98,7 @@ function installModelCapabilities(app, deps) {
     try {
       const gate = await deps.gate(req.userName,{needSearch:false});
       if (!gate.allowed) return res.status(429).json({ok:false,error:'当前 AI 额度或请求次数已达上限'});
-      report = await probeCapabilities({provider,model:body.model.trim(),api_key:body.api_key,base_url:String(body.base_url || '').slice(0,2048)},{signal:controller.signal});
+      report = await probeCapabilities(config || {provider,model:body.model.trim(),api_key:body.api_key,base_url:String(body.base_url || '').slice(0,2048)},{signal:controller.signal});
       if (!controller.signal.aborted) res.json({ok:true,...report,usage:undefined});
     } catch (_) { if (!controller.signal.aborted) res.status(400).json({ok:false,error:'测试无法完成，请检查 HTTPS 地址、网络和模型配置'}); }
     finally {

@@ -20,3 +20,7 @@ test('other accounts, nickname incarnations, forbidden tools and credential-bear
 test('concurrent retry is rejected and the original failure remains retryable until the attempt bound',async()=>{
  let release,started;const ready=new Promise(r=>started=r),value=token({userName:'alice',accountId:'alice-account'}),f=await fixture(async()=>{started();await new Promise(r=>release=r);return {error:'still unavailable'};});try{const first=f.call(value);await ready;assert.equal((await f.call(value)).status,409);release();const result=await first;assert.equal(result.body.result.error,'still unavailable');}finally{if(release)release();await f.close();}
 });
+test('a failed free-model tool retains its server-owned zero-cost search policy on retry',async()=>{
+ const calls=[],value=token({userName:'alice',accountId:'alice-account',freeOnly:true},'search_web',{query:'免费重试'}),f=await fixture(async(call,context)=>{calls.push({call,context});return{tool_name:'search_web',content:'真实模拟搜索结果'};});
+ try{const result=await f.call(value);assert.equal(result.status,200);assert.equal(calls.length,1);assert.equal(calls[0].context.freeOnly,true);assert.equal(calls[0].context.deepseekKey,undefined);assert.equal(calls[0].context.api_key,undefined);}finally{await f.close();}
+});

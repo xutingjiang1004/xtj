@@ -43,6 +43,7 @@ function installToolRetry(app,deps){
     const gate=await deps.gate(req.userName,{needSearch:/search/.test(entry.call.name)});if(!gate.allowed)return res.status(429).json({ok:false,error:'当前模型或搜索额度不足，请稍后重试'});
     if(abort.signal.aborted)return;entry.attempts++;
     const context={userName:req.userName,accountId:req.accountId,signal:abort.signal,searchConsumed:0};
+    if(entry.owner.freeOnly===true)context.freeOnly=true;
     const result=await deps.execute({id:entry.callId,function:{name:entry.call.name,arguments:JSON.stringify(entry.call.args)}},context);
     if(result&&!result.error)entry.result=result;
     if(context.searchConsumed>0&&deps.record)await deps.record(req.userName,null,{source:'tool_step_retry',model:'tool',search_count:context.searchConsumed,did_search:true});

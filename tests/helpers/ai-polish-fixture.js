@@ -4,7 +4,7 @@ async function aiPolishFixture(options = {}) {
   const f = await postBrowserFixture({ counts: [1], publicPosts: true, ...options });
   await f.page.evaluate(options => {
     const base = fetch;
-    window.aiPolish = { calls: [], streams: [], models: options.models || [], modelWriteStatus: options.modelWriteStatus || 200, checkpoints:options.checkpoints || [], capabilityResults:options.capabilityResults || [] };
+    window.aiPolish = { calls: [], streams: [], models: options.models || [], serverModels:options.serverModels || [], modelWriteStatus: options.modelWriteStatus || 200, checkpoints:options.checkpoints || [], capabilityResults:options.capabilityResults || [] };
     window.fetch = async (url, opts = {}) => {
       const u = new URL(url, location.href), path = u.pathname;
       if (!path.startsWith('/api/agent/')) return base(url, opts);
@@ -18,7 +18,7 @@ async function aiPolishFixture(options = {}) {
           if (aiPolish.modelWriteStatus !== 200) return json({ ok: false, error: 'Isolated save failure' }, aiPolish.modelWriteStatus);
           aiPolish.models = body.models || aiPolish.models;
         }
-        return json({ ok: true, models: aiPolish.models, deleted_uids: [], ai_prefs: {} });
+        return json({ ok: true, models: aiPolish.models, server_models:aiPolish.serverModels, deleted_uids: [], ai_prefs: {} });
       }
       if (path.endsWith('/chat/history')) return json({ ok: true, conversation_id: u.searchParams.get('conversation_id') || 'POLISH01', messages: [], has_more: false });
       if (path.endsWith('/chat/conversations')) return json({ ok: true, conversations: [{ conversation_id: 'POLISH01', title: '本地测试对话', preview: '模拟历史内容', message_count: 4, updated_at: '2026-10-13T08:00:00Z' }], has_more: false });
