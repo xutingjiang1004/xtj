@@ -2474,6 +2474,7 @@ function isAdmin() {
                 if (userFilter && String(post.user_name || "").toLowerCase().indexOf(userFilter) < 0) return false;
                 if ((state.startDate || state.endDate) && !isPostInDateRange(post, state.startDate, state.endDate)) return false;
                 if (!keyword) return true;
+                if (post.__searchKeyword === keyword) return true;
                 var postContent = String(post.content || "").toLowerCase();
                 var postUser = String(post.user_name || "").toLowerCase();
                 var dateText = toLocalDateKey(post.created_at);
@@ -8899,6 +8900,11 @@ function renderProfileActivityList(kind) {
                 var endEl = document.getElementById("postEndDate");
                 var visibilityEl = document.getElementById("postVisibilityFilter");
                 var mineEl = document.getElementById("postOnlyMine");
+                var invalidRange = !!(startEl && endEl && startEl.value && endEl.value && startEl.value > endEl.value);
+                var dateError = document.getElementById('postDateError');
+                if (dateError) dateError.hidden = !invalidRange;
+                [startEl,endEl].forEach(function(field) { if (field) { field.setCustomValidity(invalidRange ? '开始日期不能晚于结束日期' : ''); field.setAttribute('aria-invalid',String(invalidRange)); } });
+                if (invalidRange) { var summary=document.getElementById('postFilterSummary');if(summary)summary.textContent='请调整日期范围';return false; }
                 postSearchState = {
                     keyword: keywordEl ? keywordEl.value.trim() : "",
                     user: userEl ? userEl.value.trim() : "",
@@ -8907,10 +8913,12 @@ function renderProfileActivityList(kind) {
                     visibility: visibilityEl ? visibilityEl.value : "all",
                     onlyMine: !!(mineEl && mineEl.checked)
                 };
+                return true;
             }
 
             window.applyPostFilters = function() {
-                updatePostFilterStateFromDom();
+                var previousKeyword = getPostSearchState().keyword;
+                if (updatePostFilterStateFromDom() === false) return;
                 feedPage = 1;
                 feedLoadMoreFailed = false;
                 var errEl = document.getElementById('feedLoadMoreError');
@@ -8919,10 +8927,15 @@ function renderProfileActivityList(kind) {
                 if (feed) {
                     feed.innerHTML = getXtjLoadingHtml('内容加载中..', '', 'feed');
                 }
+                if (previousKeyword || getPostSearchState().keyword) {
+                    feedAllPosts=[];feedAllComments=[];feedAllLikes=[];feedLoadedPages=[];feedNextOffset=0;feedNextCursor=null;feedEndReached=false;
+                    markFeedStateChanged();clearFeedCache();return loadFeed(true);
+                }
                 renderFeed({ posts: feedAllPosts, comments: feedAllComments, likes: feedAllLikes });
             };
 
             window.clearPostFilters = function() {
+                var hadKeyword=!!getPostSearchState().keyword;
                 var ids = ["postSearchInput", "postUserFilter", "postStartDate", "postEndDate"];
                 ids.forEach(function(id) {
                     var el = document.getElementById(id);
@@ -8932,6 +8945,8 @@ function renderProfileActivityList(kind) {
                 var mineEl = document.getElementById("postOnlyMine");
                 if (visibilityEl) visibilityEl.value = "all";
                 if (mineEl) mineEl.checked = false;
+                ['postStartDate','postEndDate'].forEach(function(id) { var field=document.getElementById(id);if(field){field.setCustomValidity('');field.setAttribute('aria-invalid','false');} });
+                var dateError=document.getElementById('postDateError');if(dateError)dateError.hidden=true;
                 postSearchState = {
                     keyword: "",
                     user: "",
@@ -8950,6 +8965,7 @@ function renderProfileActivityList(kind) {
                 if (panel) panel.style.display = "none";
                 var btn = document.getElementById("filterToggleBtn");
                 if (btn) { btn.classList.remove("active"); btn.setAttribute("aria-expanded", "false"); }
+                if(hadKeyword){clearFeedCache();return loadFeed(true);}
                 renderPostFilterUsers();
                 renderFeed({ posts: feedAllPosts, comments: feedAllComments, likes: feedAllLikes });
             };
@@ -9123,6 +9139,7 @@ function renderProfileActivityList(kind) {
             }
 
             function persistFeedCacheSnapshotNow() {
+                if(getPostSearchState().keyword)return;
                 try {
                     var firstPage = (feedLoadedPages || []).find(function(page) { return page && page.offset === 0; });
                     var firstPageIds = new Set((firstPage && Array.isArray(firstPage.postIds) ? firstPage.postIds : (feedAllPosts || []).slice(0, FEED_PAGE_SIZE).map(function(post) {
@@ -9359,6 +9376,7 @@ function renderProfileActivityList(kind) {
             }
 
             async function fetchFeedPageChunk(offset, requestId, deferRelated) {
+                var searchState=getPostSearchState(),searchKeyword=String(searchState.keyword||'').trim();
                 var relationVersion = feedInteractionMutationVersion;
                 var start = Math.max(0, Number(offset) || 0);
                 var page = Math.floor(start / FEED_PAGE_SIZE);
@@ -9388,7 +9406,7 @@ function renderProfileActivityList(kind) {
                     } catch (eUser) { knownUser = ''; }
                     var hasToken = false;
                     try { hasToken = !!(typeof getUserToken === 'function' && getUserToken()); } catch (eTok) { hasToken = false; }
-                    var mayReuseAnonymousEarlyFeed = !knownUser && !hasToken;
+                    var mayReuseAnonymousEarlyFeed = !knownUser && !hasToken && !searchKeyword;
 
                     if (page === 0 && mayReuseAnonymousEarlyFeed && start === 0 && !usedApi && window.__xtjEarlyFeed && window.__xtjEarlyFeed.status === 'ok' && window.__xtjEarlyFeed.data) {
                         var early = window.__xtjEarlyFeed.data;
@@ -9420,6 +9438,12 @@ function renderProfileActivityList(kind) {
                         }
                     }
                     var feedPath = '/api/feed?page=' + page + '&limit=' + FEED_PAGE_SIZE;
+                    if(searchKeyword){
+                        var criteria=new URLSearchParams({q:searchKeyword,author:searchState.user||'',visibility:searchState.visibility||'all',only_mine:String(!!searchState.onlyMine),timezone:Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC'});
+                        if(searchState.startDate)criteria.set('from',new Date(searchState.startDate+'T00:00:00').toISOString());
+                        if(searchState.endDate){var until=new Date(searchState.endDate+'T00:00:00');until.setDate(until.getDate()+1);criteria.set('to',until.toISOString());}
+                        feedPath+='&'+criteria.toString();
+                    }
                     if (requestCursor && requestCursor.created_at && requestCursor.id) {
                         feedPath += '&cursor_created_at=' + encodeURIComponent(requestCursor.created_at) +
                             '&cursor_id=' + encodeURIComponent(requestCursor.id) + '&offset=' + start;
@@ -9442,6 +9466,7 @@ function renderProfileActivityList(kind) {
                         var apiData = await apiResp.json();
                         if (apiData && apiData.ok) {
                             posts = normalizePosts(apiData.posts || []);
+                            if(searchKeyword)posts=posts.map(function(post){return Object.assign({},post,{__searchKeyword:searchKeyword.toLowerCase()});});
                             comments = apiData.comments || [];
                             likes = apiData.likes || [];
                             endReached = apiData.endReached || false;
@@ -9461,6 +9486,7 @@ function renderProfileActivityList(kind) {
                 }
 
                 if (blockedFeedError) throw blockedFeedError;
+                if(searchKeyword&&!usedApi)throw new Error('帖子搜索暂不可用，请重试');
                 if (!usedApi) {
                     // 回退：Supabase 直连（RLS 仅返回公开帖子）
                     // VPN 下 supabase.co 也可能半开连接，必须有硬超时，否则永久转圈
@@ -10396,6 +10422,8 @@ function renderProfileActivityList(kind) {
                 var fileInpEl = document.getElementById("fileInp");
                 if (!postInpEl) { showToast("发布框未就绪，请刷新后重试"); return; }
                 var content = postInpEl.value.trim();
+                var submittedText = postInpEl.value;
+                var submittedMediaVersion = window.XtjPostComposerMedia && window.XtjPostComposerMedia.getVersion();
                 var selectedPostMedia = window.XtjPostComposerMedia ? window.XtjPostComposerMedia.getFiles() : Array.from((fileInpEl && fileInpEl.files) || []);
                 try { if (window.XtjPostMedia) window.XtjPostMedia.validateSelection(selectedPostMedia); }
                 catch (selectionError) { showToast(selectionError.message); return; }
@@ -10488,13 +10516,20 @@ function renderProfileActivityList(kind) {
                     touchUserSession(false);
                     if (window.XtjPostOriginals) window.XtjPostOriginals.prepare(selectedPostMedia, insertRes.data);
                     var publishMotion = window.XtjPostPublishMotion && window.XtjPostPublishMotion.capture(selectedPostMedia, plainText, function() { return currentUser === flight.owner && _authStateEpoch === flight.epoch; });
-                    resetPostComposer();
-                    // ★ 2026-09-27 修复（审计 P13-②：失败仍 resetPostPreview 导致
-                    //   "显示 0 个文件但文件还在"）：把预览清理移到**发布成功之后**。
-                    //   成功时 resetPostComposer 已清空 fileInp，这里同步回收预览界面与 blob URL；
-                    //   失败时（下方 catch/insertRes.!ok 分支）保留预览，用户可直接改文案重试，
-                    //   不必重新选文件。重新选择文件时 setPostPreview 会先 revoke 旧 blob，无泄漏。
-                    if (typeof window.resetPostPreview === "function") window.resetPostPreview();
+                    var textUnchanged = postInpEl.value === submittedText;
+                    if (textUnchanged) postInpEl.value = '';
+                    var mediaUnchanged = window.XtjPostComposerMedia
+                        ? window.XtjPostComposerMedia.getVersion() === submittedMediaVersion
+                        : selectedPostMedia.every(function(item,index) { return fileInpEl && fileInpEl.files[index] === item; }) && (!fileInpEl || fileInpEl.files.length === selectedPostMedia.length);
+                    if (mediaUnchanged) {
+                        if (fileInpEl) fileInpEl.value = '';
+                        if (window.XtjPostComposerMedia) window.XtjPostComposerMedia.clear();
+                        if (typeof window.resetPostPreview === 'function') window.resetPostPreview();
+                    }
+                    if (textUnchanged && visibilityEl && visibilityEl.value === visibility) visibilityEl.value = window.__xtjDefaultPostVisibility || 'public';
+                    if (textUnchanged && JSON.stringify(postLocationData || null) === JSON.stringify(publishLocation)) resetPostLocation();
+                    // Only the submitted media snapshot is cleared above.
+                    // Failed submissions retain their preview and retry files.
                     showToast(insertRes.fallback ? "发布成功，已兼容旧数据结构" : "发布成功");
                     if (!insertPublishedPostIntoFeed(insertRes.data, !!publishMotion)) {
                         clearFeedCache();
@@ -10554,7 +10589,7 @@ function renderProfileActivityList(kind) {
                     } catch (_ef) {}
                 }
                 bindPostFilterEvents();
-                if (!forceRefresh) {
+                if (!forceRefresh && !getPostSearchState().keyword) {
                     try {
                         var cached = window.safeStorage.get(CACHE_KEY);
                         if (cached) {
@@ -10671,6 +10706,11 @@ function renderProfileActivityList(kind) {
                 } catch (e) {
                     if (requestId !== feedLoadRequestId) return;
                     console.error(e);
+                    if (getPostSearchState().keyword && feed) {
+                        var searchRetry=document.createElement('button');searchRetry.id='feedBootError';searchRetry.type='button';searchRetry.className='loading feed-load-more-error';
+                        searchRetry.textContent='搜索失败，点击重试';searchRetry.onclick=function(){loadFeed(true);};feed.replaceChildren(searchRetry);
+                        return;
+                    }
                     var cacheFallbackShown = !!(hadLiveFeed && feed && feed.querySelector('.post'));
                     var quotaLimited = e && e.code === 'egress_quota_exceeded';
                     if (!hadLiveFeed && feed) feed.innerHTML = '<div class="loading" style="color:#ff3b60;">' + escapeHtml(quotaLimited ? e.message : '加载失败，请刷新重试') + '</div>';
@@ -12733,6 +12773,7 @@ function renderProfileActivityList(kind) {
  * DO NOT edit js/core.js directly — edit this file, then run: node scripts/assemble-core.js
  */
             window.switchDockTab = function(tab, skipReturn, options) {
+                if (tab !== 'chat') _chatContextSeq++;
                 options = options || {};
                 // ★ 小猫AI dock 中间 tab：打开独立二级浮层(panelAiChat)，不走 dock-panel 显隐
                 if (tab === 'ai-chat') {
@@ -13138,7 +13179,7 @@ function renderProfileActivityList(kind) {
                 cancelDmAiAsk();
                 if(_chatSendFlight){_chatSendFlight.controller.abort();_chatSendFlight=null;}
                 if (_chatSocialPanels) _chatSocialPanels.clear();
-                resetChatAttachmentQueue();_chatBatchSending=false;dockChatSending=false;
+                resetChatAttachmentQueue();_chatAttachmentDrafts.clear();_chatBatchFlight=null;_chatBatchSending=false;dockChatSending=false;_chatContextSeq++;
                 var gallery=document.getElementById('chatGallery');if(gallery)gallery.__close ? gallery.__close() : gallery.remove();
                 _chatPushOwner='';_chatPushEnabled=false;
                 setTimeout(function(){window.__xtjSyncChatPush?.();},0);
@@ -13452,6 +13493,7 @@ function renderProfileActivityList(kind) {
 
             function dockChatGoBack() {
                 var routeExit = prepareDockChatExit();
+                saveChatAttachmentDraft(); _chatContextSeq++;
                 cancelChatFlashSend();
                 closeAuthorSupport();
                 closeChatHistory(); cancelChatVoice(); clearChatMessageDraft(); clearDockChatFilePreview(false); _chatHistoryFocus = '';
@@ -13518,6 +13560,7 @@ function renderProfileActivityList(kind) {
             let restorePostsScroll = null;
 
             window.openChat = function(userName) {
+                saveChatAttachmentDraft(); _chatContextSeq++;
                 finishDockChatRoute();
                 cancelChatFlashSend();
                 if(_flashViewer)_flashViewer.close();
@@ -13557,6 +13600,7 @@ function renderProfileActivityList(kind) {
                 showDockChatPresence('',false);
                 closeDockChatConversationMenu(true);
                 restoreDockChatDraft(userName);
+                restoreChatAttachmentDraft(userName);
                 refreshDockChatPresence(userName);
                 touchDockChatPresence();
                 // ★ 2026-09-27 修复（C11）：直接进详情时，会话列表并未加载，
@@ -13674,7 +13718,8 @@ function renderProfileActivityList(kind) {
                 if (!el) return;
                 if (!window.currentUser) {
                     el.removeAttribute('data-list-owner');
-                    el.innerHTML = '<div class="chat-empty"><div style="color:var(--xtj-text-muted);font-size:13px;padding:20px 0;">登录后可查看消息</div></div>';
+                    el.innerHTML = '<div class="chat-empty"><p>登录后可查看消息</p><button type="button" class="chat-guest-login">登录</button></div>';
+                    el.querySelector('.chat-guest-login').onclick = function() { openAuthModal('login'); };
                     setUnreadBadgeCount(0);
                     renderDockChatFixedEntry(el);
                     syncDockChatLayoutState();
@@ -15415,6 +15460,7 @@ function renderProfileActivityList(kind) {
 
             var _chatSendFlight = null;
             async function sendDockChatMessageSingle(queuedFile, queuedText, retryOptions) {
+                _chatContextSeq++;
                 _chatHistoryFocus = '';
                 if (!currentUser) { showToast('请先登录'); return; }
                 if (isUserMuted()) { showToast("您已被禁言，无法发送消息"); return; }
@@ -16017,6 +16063,14 @@ function renderProfileActivityList(kind) {
 
             function onDmActionKeydown(e) {
                 if (e.key === 'Escape') { e.preventDefault(); closeDockMessageActions(); closeDockForwardPicker(); }
+                else if (_dmActionSheet && ['Tab','ArrowDown','ArrowUp','Home','End'].indexOf(e.key)>=0) {
+                    var buttons=Array.from(_dmActionSheet.querySelectorAll('button:not(:disabled)'));
+                    if (!buttons.length) return;
+                    var index=buttons.indexOf(document.activeElement),next;
+                    if(e.key==='Home')next=0;else if(e.key==='End')next=buttons.length-1;
+                    else next=(index+(e.key==='ArrowUp'||e.key==='Tab'&&e.shiftKey?-1:1)+buttons.length)%buttons.length;
+                    e.preventDefault();buttons[next].focus();
+                }
             }
 
             function closeDockMessageActions() {
@@ -16025,6 +16079,7 @@ function renderProfileActivityList(kind) {
                 var sheet = _dmActionSheet;
                 _dmActionSheet = null;
                 if (sheet._dmCleanup) sheet._dmCleanup();
+                if (sheet.contains(document.activeElement) && sheet._dmOpener && sheet._dmOpener.isConnected) sheet._dmOpener.focus({preventScroll:true});
                 sheet.style.pointerEvents = 'none'; sheet.inert=true;
                 var card=sheet.querySelector('.dm-action-panel');
                 if (card) card.style.transition='transform .14s ease, opacity .14s ease';
@@ -16079,7 +16134,8 @@ function renderProfileActivityList(kind) {
                 overlay.className = 'dm-action-overlay';
                 var panel = document.createElement('div');
                 panel.className = 'dm-action-panel';
-                panel.setAttribute('role', 'group');
+                panel.setAttribute('role', 'dialog');
+                panel.setAttribute('aria-modal', 'true');
                 panel.setAttribute('aria-label', '消息操作');
 
                 var grid = document.createElement('div');
@@ -16110,6 +16166,8 @@ function renderProfileActivityList(kind) {
                 overlay.addEventListener('click', function(ev) { if (ev.target === overlay) closeDockMessageActions(); });
                 document.body.appendChild(overlay);
                 _dmActionSheet = overlay;
+                overlay._dmOpener=rowEl.closest('.chat-msg-row') || rowEl;
+                overlay._dmOpener.tabIndex=-1;
                 var bubble = rowEl.classList && rowEl.classList.contains('chat-msg')
                     ? rowEl : rowEl.querySelector('.chat-msg');
                 if (!bubble) bubble = rowEl;
@@ -16152,6 +16210,7 @@ function renderProfileActivityList(kind) {
                     document.removeEventListener('scroll', dismissOnScroll, true);
                 };
                 document.addEventListener('keydown', onDmActionKeydown, true);
+                panel.querySelector('button').focus({preventScroll:true});
             }
             function runDockMessageAction(actionId, message) {
                 window.__xtjResetDmPress?.();
@@ -16388,7 +16447,7 @@ function renderProfileActivityList(kind) {
 
             // Search uses server keyset pagination; message actions use the same
             // authenticated boundary as sending. State is tied to account + peer.
-            var _chatSearchSeq = 0, _chatSearchCursor = null, _chatSearchMore = false, _chatSearchCriteria = '';
+            var _chatSearchSeq = 0, _chatContextSeq = 0, _chatSearchCursor = null, _chatSearchMore = false, _chatSearchCriteria = '';
             var _chatHistoryFocus = '', _chatHistoryAnchor = '', _chatHistoryRefreshSeq = 0, _chatReplyDraft = null, _chatEditDraft = null;
             var _chatRecordedFile = null, _chatVoice = null, _chatVoiceSeq = 0;
             var _chatSearchMode='messages';
@@ -16580,22 +16639,30 @@ function renderProfileActivityList(kind) {
                 finally { if (seq === _chatSearchSeq) button.disabled = false; }
             }
             async function jumpChatHistory(peer, id) {
-                var owner = window.currentUser;
+                var owner = window.currentUser, epoch = _authStateEpoch;
                 closeChatHistory(); window.openChat(peer);
+                var seq = ++_chatContextSeq;
                 try {
                     var result = await chatFeatureApi('history/context?peer=' + encodeURIComponent(peer) + '&message_id=' + encodeURIComponent(id));
-                    if (owner !== window.currentUser || dockChatActiveUser !== peer) return;
+                    if (seq !== _chatContextSeq || epoch !== _authStateEpoch || owner !== window.currentUser || dockChatActiveUser !== peer) return;
                     _dockChatLoadSeq++; _chatHistoryRefreshSeq++; _chatHistoryFocus = peer; _chatHistoryAnchor = result.focus_id;
                     _chatCache[getDockChatCacheKey(peer)] = result.data;
                     _chatRenderSignature[peer] = undefined; renderDockMessages(peer, result.data, false);
                     requestAnimationFrame(function() {
+                        if (seq !== _chatContextSeq || epoch !== _authStateEpoch || owner !== window.currentUser || dockChatActiveUser !== peer) return;
                         var row = document.querySelector('#dockChatMessages [data-message-id="' + result.focus_id + '"]');
                         if (row) { row.scrollIntoView({ block: 'center', behavior: 'auto' }); row.classList.add('chat-search-focus'); setTimeout(function() { row.classList.remove('chat-search-focus'); }, 1800); }
                         setDockChatJumpLatestVisible(true);
                     });
-                } catch (error) { if (owner === window.currentUser) showToast(error.message); }
+                } catch (error) { if (seq === _chatContextSeq && epoch === _authStateEpoch && owner === window.currentUser) showToast(error.message); }
             }
-            function clearChatMessageDraft() {
+            function clearChatMessageDraft(restore) {
+                var edit = _chatEditDraft, input = document.getElementById('dockChatInput');
+                if (restore !== false && edit && edit.owner === window.currentUser && edit.epoch === _authStateEpoch && edit.peer === dockChatActiveUser && input) {
+                    input.value = edit.previousText;
+                    rememberDockChatDraft(edit.peer, input.value);
+                    if (Number.isInteger(edit.selectionStart)) input.setSelectionRange(edit.selectionStart, edit.selectionEnd);
+                }
                 _chatReplyDraft = null; _chatEditDraft = null;
                 var preview = document.getElementById('chatMessageContext'); if (preview) preview.hidden = true;
             }
@@ -16616,7 +16683,7 @@ function renderProfileActivityList(kind) {
                     // Immediate draft retains the quote even when Send precedes the validation response.
                     // The send endpoint independently validates visibility and replaces the quote canonically.
                     var draft={id:String(message.id || ''),sender_name:String(message.user_name || ''),text:getDMMessageText(message) || '[附件]'};
-                    _chatEditDraft=null;_chatReplyDraft=draft;showChatMessageDraft('回复 '+draft.sender_name,draft.text);
+                    clearChatMessageDraft();_chatReplyDraft=draft;showChatMessageDraft('回复 '+draft.sender_name,draft.text);
                     try {
                         var result = await chatFeatureApi('messages/reply/validate', { peer: peer, message_id: message.id });
                         if (owner !== window.currentUser || peer !== dockChatActiveUser || _chatReplyDraft!==draft) return;
@@ -16626,8 +16693,13 @@ function renderProfileActivityList(kind) {
                         if(owner===window.currentUser && peer===dockChatActiveUser && _chatReplyDraft===draft){clearChatMessageDraft();showToast(error.message);}
                     }
                 } else if (action === 'edit') {
-                    _chatReplyDraft = null; _chatEditDraft = { id: message.id, peer: peer, owner: owner };
-                    document.getElementById('dockChatInput').value = getDMMessageText(message);
+                    clearChatMessageDraft();
+                    var editInput = document.getElementById('dockChatInput');
+                    if (_dockChatDraftTimer) { clearTimeout(_dockChatDraftTimer); _dockChatDraftTimer = null; }
+                    rememberDockChatDraft(peer, editInput.value);
+                    persistDockChatDraft(peer, editInput.value);
+                    _chatEditDraft = { id: message.id, peer: peer, owner: owner, epoch: _authStateEpoch, previousText: editInput.value, selectionStart: editInput.selectionStart, selectionEnd: editInput.selectionEnd };
+                    editInput.value = getDMMessageText(message);
                     showChatMessageDraft('编辑消息', getDMMessageText(message));
                 } else if (action === 'reaction') {
                     var panel = document.createElement('div'); panel.className = 'chat-reaction-picker';
@@ -16660,7 +16732,10 @@ function renderProfileActivityList(kind) {
                     _chatRenderSignature[draft.peer] = undefined;
                     if (draft.peer === dockChatActiveUser) {
                         renderDockMessages(draft.peer, _chatCache[getDockChatCacheKey(draft.peer)] || [], false);
-                        if (_chatEditDraft === draft && input && input.value === submittedInput) { clearChatMessageDraft(); input.value = ''; }
+                        if (_chatEditDraft === draft && input) {
+                            if (input.value === submittedInput) clearChatMessageDraft();
+                            else { clearChatMessageDraft(false); rememberDockChatDraft(draft.peer,input.value); persistDockChatDraft(draft.peer,input.value); }
+                        }
                     }
                     showToast('已编辑');
                 } catch (error) { if (currentEdit()) showToast(error.message); }
@@ -17016,7 +17091,20 @@ function renderProfileActivityList(kind) {
                     update();
                 });
             }
-            var _chatAttachmentQueue=[], _chatAttachmentUrls=new Map(), _chatBatchSending=false;
+            var _chatAttachmentQueue=[], _chatAttachmentUrls=new Map(), _chatBatchSending=false, _chatBatchFlight=null, _chatAttachmentDrafts=new Map();
+            function saveChatAttachmentDraft() {
+                if (_chatBatchFlight) { _chatBatchFlight.cancelled=true; _chatBatchFlight=null; _chatBatchSending=false; }
+                if (window.currentUser && dockChatActiveUser && _chatAttachmentQueue.length) {
+                    _chatAttachmentDrafts.set(dockChatActiveUser,{owner:window.currentUser,epoch:_authStateEpoch,files:_chatAttachmentQueue.slice()});
+                }
+            }
+            function restoreChatAttachmentDraft(peer) {
+                var draft=_chatAttachmentDrafts.get(peer);
+                if (!draft) return;
+                _chatAttachmentDrafts.delete(peer);
+                if(draft.owner!==window.currentUser || draft.epoch!==_authStateEpoch)return;
+                setChatAttachmentSelection(draft.files);
+            }
             function resetChatAttachmentQueue() {
                 _chatAttachmentQueue=[];
                 _chatAttachmentUrls.forEach(function(url) { URL.revokeObjectURL(url); }); _chatAttachmentUrls.clear();
@@ -17034,29 +17122,42 @@ function renderProfileActivityList(kind) {
                     [['←','前移',-1],['→','后移',1],['×','移除',0]].forEach(function(action){var button=document.createElement('button');button.type='button';button.textContent=action[0];button.setAttribute('aria-label',action[1]+'第 '+(index+1)+' 个附件');button.disabled=action[2] && (index+action[2]<0 || index+action[2]>=_chatAttachmentQueue.length);button.onclick=function(){
                         if(!action[2]){_chatAttachmentQueue.splice(index,1);var url=_chatAttachmentUrls.get(file);if(url)URL.revokeObjectURL(url);_chatAttachmentUrls.delete(file);}
                         else {var other=index+action[2];[_chatAttachmentQueue[index],_chatAttachmentQueue[other]]=[_chatAttachmentQueue[other],_chatAttachmentQueue[index]];}
-                        if(!_chatAttachmentQueue.length)clearDockChatFilePreview(false);else{showDockChatFilePreview(_chatAttachmentQueue[0]);renderChatAttachmentQueue();}
+                        if(!_chatAttachmentQueue.length)clearDockChatFilePreview(false);else setChatAttachmentSelection(_chatAttachmentQueue.slice());
                     };controls.appendChild(button);});item.appendChild(controls);host.appendChild(item);
                 });document.getElementById('dockChatFilePreview').appendChild(host);
             }
             function selectChatAttachments(files) {
-                if(dockChatSending || _chatBatchSending){showToast('请等待当前附件发送完成');return;}
+                if(dockChatSending || _chatBatchSending){syncChatAttachmentInput();showToast('请等待当前附件发送完成');return false;}
                 var valid=Array.from(files||[]).map(normalizeDockChatMediaFile).filter(function(f){return f && getChatUploadKind(f) && !isBlockedDmFile(f) && f.size>0 && f.size<=50*1024*1024;});
                 if(valid.length!==files.length)showToast('部分附件类型或大小不支持，已跳过');
-                if(valid.length>9 || valid.reduce(function(n,f){return n+f.size;},0)>200*1024*1024){showToast('每批最多 9 个附件，总大小不超过 200MB');return;}
+                if(valid.length>9 || valid.reduce(function(n,f){return n+f.size;},0)>200*1024*1024){syncChatAttachmentInput();showToast('每批最多 9 个附件，总大小不超过 200MB');return false;}
+                if(!valid.length){syncChatAttachmentInput();return false;}
+                setChatAttachmentSelection(valid);
+                return true;
+            }
+            function setChatAttachmentSelection(valid) {
                 resetChatAttachmentQueue();_chatRecordedFile=null;_chatAttachmentQueue=valid;
+                syncChatAttachmentInput();
                 if(valid.length){showDockChatFilePreview(valid[0]);renderChatAttachmentQueue();}else clearDockChatFilePreview(false);
             }
+            function syncChatAttachmentInput() {
+                var fileInput=document.getElementById('dockChatFileInp');
+                try { var transfer=new DataTransfer();_chatAttachmentQueue.forEach(function(file){transfer.items.add(file);});if(fileInput)fileInput.files=transfer.files; } catch(_) { if(fileInput)fileInput.value=''; }
+            }
             async function sendDockChatMessage() {
+                if(_chatEditDraft)return sendDockChatMessageSingle();
                 if(_chatBatchSending){showToast('附件正在依次发送');return;}
                 if(!_chatAttachmentQueue.length)return sendDockChatMessageSingle();
                 if(dockChatSending)return;
                 var files=_chatAttachmentQueue.slice(),peer=dockChatActiveUser,owner=window.currentUser,epoch=_authStateEpoch,text=document.getElementById('dockChatInput').value.trim();
                 if(!peer || !owner || isUserMuted())return sendDockChatMessageSingle();
-                _chatBatchSending=true;resetChatAttachmentQueue();
+                var batch={owner:owner,epoch:epoch,peer:peer,cancelled:false};
+                _chatBatchFlight=batch;_chatBatchSending=true;resetChatAttachmentQueue();
                 try {for(var i=0;i<files.length;i++){
-                    if(owner!==window.currentUser || epoch!==_authStateEpoch || peer!==dockChatActiveUser) {if(owner===window.currentUser && epoch===_authStateEpoch)showToast('会话已切换，剩余附件没有发送');break;}
+                    if(batch.cancelled || owner!==window.currentUser || epoch!==_authStateEpoch || peer!==dockChatActiveUser) {if(owner===window.currentUser && epoch===_authStateEpoch)showToast('剩余附件已保留，返回会话后可继续发送');break;}
+                    if(i+1<files.length)_chatAttachmentDrafts.set(peer,{owner:owner,epoch:epoch,files:files.slice(i+1)});else _chatAttachmentDrafts.delete(peer);
                     await sendDockChatMessageSingle(files[i],i===0?text:'');
-                }} finally {if(owner===window.currentUser && epoch===_authStateEpoch)_chatBatchSending=false;}
+                }} finally {if(_chatBatchFlight===batch){_chatBatchFlight=null;_chatBatchSending=false;}}
             }
             function bindChatReplyGestures() {
                 var host=document.getElementById('dockChatMessages');
@@ -17215,6 +17316,21 @@ function renderProfileActivityList(kind) {
                 var container = document.getElementById('dockChatMessages');
                 if (!container || container.__xtjMsgActionsBound) return;
                 container.__xtjMsgActionsBound = true;
+                container.tabIndex=0;
+                container.setAttribute('role','region');
+                container.setAttribute('aria-label','聊天消息，使用上下方向键选择消息，按回车打开操作');
+                container.addEventListener('keydown',function(event){
+                    var row=event.target.closest('.chat-msg-row'),interactive=event.target.closest('button,a,input,textarea,video,audio');
+                    if(interactive)return;
+                    var rows=Array.from(container.querySelectorAll('.chat-msg-row'));
+                    if(!rows.length)return;
+                    if(['ArrowUp','ArrowDown','Home','End'].indexOf(event.key)>=0){
+                        var index=rows.indexOf(row),next=event.key==='Home'?0:event.key==='End'?rows.length-1:index<0?(event.key==='ArrowUp'?rows.length-1:0):Math.max(0,Math.min(rows.length-1,index+(event.key==='ArrowUp'?-1:1)));
+                        event.preventDefault();rows[next].tabIndex=-1;rows[next].focus({preventScroll:true});rows[next].scrollIntoView({block:'nearest'});
+                    }else if(event.key==='Enter'||event.key==='ContextMenu'||event.key==='F10'&&event.shiftKey){
+                        event.preventDefault();openDockMessageActions(row||rows[rows.length-1]);
+                    }
+                });
                 var pressTimer = null;
                 var startX = 0, startY = 0, suppressedBubble = null, suppressUntil = 0;
                 function resetSuppression() { suppressedBubble = null; suppressUntil = 0; }
@@ -17452,26 +17568,7 @@ function renderProfileActivityList(kind) {
             }
 
             function assignDockChatFile(rawFile) {
-                var fileInput = document.getElementById('dockChatFileInp');
-                if (!fileInput || !rawFile) return false;
-                var file = normalizeDockChatMediaFile(rawFile);
-                var maxFileSize = 50 * 1024 * 1024;
-                if (file.size > maxFileSize) { showToast('文件大小不能超过50MB'); return false; }
-                // ★ M13：粘贴/拖拽入口统一走 isBlockedDmFile，拒绝 SVG（与文件选择入口同规则）
-                if (isBlockedDmFile(file)) { showToast('不支持 SVG 文件，支持图片、视频、音频及 PDF、TXT、CSV、RTF、DOCX、XLSX、PPTX、ZIP'); return false; }
-                var allowedTypes = ['image/', 'video/', 'audio/'];
-                var typeOk = !!getChatUploadKind(file);
-                if (!typeOk) { showToast('不支持的文件类型，支持图片、视频、音频及 PDF、TXT、CSV、RTF、DOCX、XLSX、PPTX、ZIP'); return false; }
-                try {
-                    var dt = new DataTransfer();
-                    dt.items.add(file);
-                    fileInput.files = dt.files;
-                } catch (e) {
-                    showToast('当前浏览器不支持粘贴/拖拽上传，请点 📷 选择文件');
-                    return false;
-                }
-                showDockChatFilePreview(file);
-                return true;
+                return rawFile ? selectChatAttachments([rawFile]) : false;
             }
 
             function pickFirstDockChatMedia(fileList) {
@@ -17556,9 +17653,7 @@ function renderProfileActivityList(kind) {
                         e.preventDefault();
                         dragDepth = 0;
                         setDropActive(false);
-                        var media = pickFirstDockChatMedia(e.dataTransfer && e.dataTransfer.files);
-                        if (media) assignDockChatFile(media);
-                        else showToast('请拖入图片、视频或音频文件');
+                        selectChatAttachments(e.dataTransfer && e.dataTransfer.files || []);
                     });
                     dropZone.addEventListener('dragend', function() {
                         dragDepth = 0;
@@ -17569,10 +17664,15 @@ function renderProfileActivityList(kind) {
 
             try {
                 var _dsb = document.getElementById('dockChatSendBtn'); if (_dsb) _dsb.addEventListener('click', sendDockChatMessage);
-                var _dci = document.getElementById('dockChatInput'); if (_dci) _dci.addEventListener('keydown', function(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendDockChatMessage(); } });
+                var _dci = document.getElementById('dockChatInput'); if (_dci) {
+                    var composing=false;
+                    _dci.addEventListener('compositionstart',function(){composing=true;});
+                    _dci.addEventListener('compositionend',function(){composing=false;});
+                    _dci.addEventListener('keydown', function(e) { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode!==229 && !composing) { e.preventDefault(); sendDockChatMessage(); } });
+                }
                 var _dib = document.getElementById('dockChatImgBtn'); if (_dib) _dib.addEventListener('click', function() { document.getElementById('dockChatFileInp').click(); });
                 var _dfi = document.getElementById('dockChatFileInp'); if (_dfi) _dfi.addEventListener('change', function() { _chatRecordedFile = null; if (this.files.length) selectChatAttachments(this.files); });
-                var _dcjl = document.getElementById('dockChatJumpLatest'); if (_dcjl) _dcjl.addEventListener('click', function() { if (_chatHistoryFocus) { _chatHistoryFocus = ''; loadDockChatMessages(dockChatActiveUser, true, true); } else scrollDockChatToLatest({ smooth: true }); });
+                var _dcjl = document.getElementById('dockChatJumpLatest'); if (_dcjl) _dcjl.addEventListener('click', function() { _chatContextSeq++; if (_chatHistoryFocus) { _chatHistoryFocus = ''; loadDockChatMessages(dockChatActiveUser, true, true); } else scrollDockChatToLatest({ smooth: true }); });
                 var _dcm = document.getElementById('dockChatMessages'); if (_dcm) _dcm.addEventListener('scroll', function() { if (isDockChatNearBottom(_dcm, 96) && !_chatHistoryFocus) setDockChatJumpLatestVisible(false); }, { passive: true });
                 var _dcr = document.getElementById('dockCfpRemove'); if (_dcr) _dcr.addEventListener('click', clearDockChatFilePreview);
                 bindDockChatPasteAndDrop();
@@ -17885,7 +17985,7 @@ function renderProfileActivityList(kind) {
                     if ((Number(local.draft_revision) || 0) > (Number(data.state.draft_revision) || 0)) return;
                     _dockChatConversationStates[peer] = Object.assign({},local,data.state);
                     if(_dockChatLocalDrafts[key]&&_dockChatLocalDrafts[key].epoch===epoch)return;
-                    if (input && input.value===initial) {
+                    if (input && !_chatEditDraft && input.value===initial) {
                         var conflictKey = owner + '\u0000' + peer;
                         input.value = Object.prototype.hasOwnProperty.call(_dockChatDraftConflicts,conflictKey)
                             ? _dockChatDraftConflicts[conflictKey] : (data.state.draft_text || '');
@@ -17925,7 +18025,7 @@ function renderProfileActivityList(kind) {
             if (_conversationInput) _conversationInput.addEventListener('input',function() {
                 var peer = dockChatActiveUser;
                 var value = _conversationInput.value;
-                rememberDockChatDraft(peer,value);
+                if (!_chatEditDraft) rememberDockChatDraft(peer,value);
                 if (_chatTypingStopTimer) clearTimeout(_chatTypingStopTimer);
                 if (value.trim() && !_chatEditDraft) {
                     sendDockChatTyping(true);
@@ -17934,6 +18034,7 @@ function renderProfileActivityList(kind) {
                     },4200);
                 } else sendDockChatTyping(false);
                 if (_dockChatDraftTimer) clearTimeout(_dockChatDraftTimer);
+                if (_chatEditDraft) { _dockChatDraftTimer=null; return; }
                 var draftOwner=window.currentUser,draftEpoch=window._authStateEpoch||0;
                 _dockChatDraftTimer = setTimeout(function() { _dockChatDraftTimer=null;if(draftOwner===window.currentUser&&draftEpoch===(window._authStateEpoch||0))persistDockChatDraft(peer,value); },650);
             });

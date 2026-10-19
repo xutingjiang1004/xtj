@@ -4,7 +4,7 @@ const research=require('../render-api/research-documents');
 const file=(name,text)=>({name,dataUrl:'data:text/plain;base64,'+Buffer.from(text).toString('base64')});
 test('later file questions reuse only private, undeleted documents from the same conversation',async()=>{
  const prepared=await research.prepareResearchDocuments([file('a.md','实际保留的段落')]),calls=[];
- const query={select(v){calls.push(['select',v]);return this;},eq(k,v){calls.push([k,v]);return this;},filter(k,op,v){calls.push([k,op,v]);return this;},order(){return this;},limit(){return Promise.resolve({data:[{media_url:JSON.stringify({convId:'OTHER',prepared_documents:prepared.documents})},{media_url:JSON.stringify({convId:'CURRENT1',deleted:true,prepared_documents:prepared.documents})},{media_url:JSON.stringify({convId:'CURRENT1',prepared_documents:prepared.documents})}]});}};
+ const query={select(v){calls.push(['select',v]);return this;},eq(k,v){calls.push([k,v]);return this;},filter(k,op,v){calls.push([k,op,v]);return this;},order(){return this;},range(){return Promise.resolve({data:[{media_url:JSON.stringify({convId:'OTHER',prepared_documents:prepared.documents})},{media_url:JSON.stringify({convId:'CURRENT1',deleted:true,prepared_documents:prepared.documents})},{media_url:JSON.stringify({convId:'CURRENT1',prepared_documents:prepared.documents})}]});}};
  const result=await research.loadConversationDocuments({from:()=>query},'alice','CURRENT1','ai_msg_conv_CURRENT1_%');assert.equal(result[0].paragraphs[0].text,'实际保留的段落');assert.ok(calls.some(([k,v])=>k==='user_name'&&v==='alice'));
 });
 test('all comparison files get stable identifiers and real extracted paragraph references without changing originals',async()=>{

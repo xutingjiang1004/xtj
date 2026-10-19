@@ -201,10 +201,11 @@ function cacheRuntime() {
   return { ctx, rows, saved: () => saved };
 }
 test('first-page-only cache never stores the final loaded page’s resume cursor or end state', () => {
-  const r = cacheRuntime(); r.ctx.persistFeedCacheSnapshotNow(); const snapshot = r.saved();
+  const r = cacheRuntime(); r.ctx.getPostSearchState=()=>({keyword:''});r.ctx.persistFeedCacheSnapshotNow(); const snapshot = r.saved();
   assert.equal(snapshot.data.posts.length, 20); assert.equal(snapshot.data.nextCursor.id, '019'); assert.equal(snapshot.data.nextOffset, 20); assert.equal(snapshot.data.endReached, false);
   const hydrated = r.ctx.normalizeFeedSnapshotCache(snapshot); const nextPage = r.rows.filter(p => p.created_at < hydrated.data.nextCursor.created_at).slice(0, 20);
   assert.equal(nextPage[0].id, '020'); assert.equal(nextPage.at(-1).id, '039');
+  r.ctx.getPostSearchState=()=>({keyword:'comment-only match'});r.ctx.feedAllPosts=[];r.ctx.persistFeedCacheSnapshotNow();assert.equal(r.saved(),snapshot,'search results cannot replace the ordinary feed cache');
 });
 test('older v7 caches with mismatched cursors resume after the oldest cached post, including pinned ordering', () => {
   const r = cacheRuntime(); const cached = r.rows.slice(0, 20); cached.unshift(cached.pop());
