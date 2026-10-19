@@ -27,6 +27,8 @@ test('PostgreSQL interaction permissions, retry receipts, cascade and uncapped c
     await db.query(fs.readFileSync('supabase/migrations/'+migration,'utf8'));
     const photoMigration=fs.readdirSync('supabase/migrations').find(x=>x.endsWith('_photo_wall_global_sort.sql'));
     await db.query(fs.readFileSync('supabase/migrations/'+photoMigration,'utf8'));
+    const searchMigration=fs.readdirSync('supabase/migrations').find(x=>x.endsWith('_post_comment_search.sql'));
+    await db.query(fs.readFileSync('supabase/migrations/'+searchMigration,'utf8'));
     const post=(await db.query("INSERT INTO posts(user_name,media_type,content) VALUES('alice','text','hello') RETURNING id")).rows[0].id;
     const comment=async(owner,content='hello',key=randomUUID(),target=post)=>(await db.query('SELECT xtj_create_comment($1,$2,$3,$4) AS body',[target,owner,content,key])).rows[0].body;
     await t.test('uncertain retries and concurrent identical submits create one row',async()=>{
@@ -77,8 +79,41 @@ test('PostgreSQL interaction permissions, retry receipts, cascade and uncapped c
         await db.query('SET ROLE '+role);
         await assert.rejects(db.query('SELECT public.xtj_create_comment($1,$2,$3,$4)',[post,'alice','attack',randomUUID()]),/permission denied/);
         await assert.rejects(db.query('SELECT public.xtj_feed_engagement(ARRAY[$1::uuid],$2)',[post,'alice']),/permission denied/);
+        await assert.rejects(db.query("SELECT * FROM public.xtj_search_feed('hello','alice')"),/permission denied/);
         await db.query('RESET ROLE');
       }
+    });
+    await t.test('full comment search finds text beyond the preview and excludes private, deleted and system parents',async()=>{
+      const token='完整检索needle';
+      await db.query('INSERT INTO comments(post_id,user_name,content) VALUES($1,$2,$3)',[post,'late-author',token]);
+      const preview=(await db.query('SELECT xtj_feed_engagement(ARRAY[$1::uuid],$2) AS body',[post,'alice'])).rows[0].body;
+      assert.ok(preview.comments.every(row=>row.content!==token));
+      const ids=[];
+      for(const [type,owner,visibility,deleted,content] of [['text','bob','public',false,'normal'],['text','bob','private',false,'private'],['text','bob','public',true,'deleted'],['__dm__','bob','public',false,'system'],['text','bob','public',false,'{"device_id":"x","page_load_id":"y"}']]){
+        const row=(await db.query('INSERT INTO posts(media_type,user_name,visibility,is_deleted,content) VALUES($1,$2,$3,$4,$5) RETURNING id',[type,owner,visibility,deleted,content])).rows[0];ids.push(row.id);
+        await db.query('INSERT INTO comments(post_id,user_name,content) VALUES($1,$2,$3)',[row.id,'late-author',token]);
+      }
+      const search=async(actor='',extra={})=>(await db.query('SELECT id FROM xtj_search_feed($1,$2,$3,$4,$5,$6,$7)',[token,actor,extra.author||'',extra.visibility||'all',!!extra.mine,extra.from||null,extra.to||null])).rows.map(r=>r.id);
+      assert.deepEqual(new Set(await search()),new Set([post,ids[0]]));
+      assert.deepEqual(new Set(await search('bob',{visibility:'private'})),new Set([ids[1]]));
+      assert.deepEqual(new Set(await search('alice',{mine:true})),new Set([post]));
+      assert.deepEqual(new Set(await search('',{author:'BoB'})),new Set([ids[0]]));
+      assert.deepEqual(await search('',{from:'2099-01-01',to:'2100-01-01'}),[]);
+      assert.ok((await db.query("SELECT id FROM xtj_search_feed('late-AUTHOR','')")).rows.some(row=>row.id===post));
+      await db.query('INSERT INTO comments(post_id,user_name,content) VALUES($1,$2,$3)',[post,'literal','literal 100%_done']);
+      assert.deepEqual((await db.query("SELECT id FROM xtj_search_feed('100%_done','')")).rows.map(r=>r.id),[post]);
+    });
+    await t.test('search compound cursors traverse all matches without a row cap, duplicate boundary or metadata match',async()=>{
+      await db.query("INSERT INTO posts(user_name,media_type,content,created_at) SELECT 'alice','text','cursor needle','2026-10-12T12:00:00.123456Z' FROM generate_series(1,125)");
+      const expected=(await db.query("SELECT id FROM posts WHERE content='cursor needle' ORDER BY created_at DESC,id DESC")).rows.map(r=>r.id);
+      const found=[];let at=null,id=null;
+      do{const rows=(await db.query("SELECT id,created_at::text AS stamp FROM xtj_search_feed('cursor needle','', '', 'all',false,NULL,NULL,$1,$2,20)",[at,id])).rows;found.push(...rows.map(r=>r.id));if(rows.length<20)break;at=rows.at(-1).stamp;id=rows.at(-1).id;}while(found.length<200);
+      assert.deepEqual(found,expected);
+      await db.query("INSERT INTO posts(user_name,media_type,content) VALUES('alice','text',$1)",[JSON.stringify({__type:'__xtj_post_v2__',text:'可见正文',meta:{location_name:'metadata-only-needle'}})]);
+      assert.equal((await db.query("SELECT id FROM xtj_search_feed('metadata-only-needle','')")).rowCount,0);
+      await db.query('GRANT SELECT ON posts,comments TO service_role; GRANT USAGE ON SCHEMA xtj_private TO service_role; SET ROLE service_role');
+      assert.ok((await db.query("SELECT id FROM xtj_search_feed('cursor needle','')")).rowCount>0);
+      await db.query('RESET ROLE');
     });
     await t.test('all five global photo sorts traverse the entire wall, including timestamp and sort-value ties',async()=>{
       await db.query(`INSERT INTO posts(user_name,media_type,media_url,content,views,created_at)

@@ -22,8 +22,11 @@ for (const width of [390,1024]) {
       assert.equal(rawRequests,0);
       assert.match(await f.page.locator('#feed .post-media-cell img').first().getAttribute('src'),new RegExp('/api/post/'+id+'/media/0'));
       await f.page.locator('#feed .post-media-cell').first().click();
-      await f.page.waitForFunction(()=>document.getElementById('photoPreviewImage')?.naturalWidth===1);
-      assert.match(await f.page.locator('#photoPreviewImage').getAttribute('src'),new RegExp('/api/post/'+id+'/media/0'));
+      // A decoded previous image can retain naturalWidth while the preview
+      // replaces its source. Observe the authorized URL and decoded image in
+      // the same browser frame rather than reading two different load states.
+      const source=await f.page.waitForFunction(path=>{const img=document.getElementById('photoPreviewImage'),src=img?.getAttribute('src');return img?.naturalWidth===1&&src?.includes(path)?src:false;},'/api/post/'+id+'/media/0');
+      assert.match(await source.jsonValue(),new RegExp('/api/post/'+id+'/media/0'));
       await f.page.evaluate(()=>forceClosePhotoPreview());
       await f.page.evaluate(id=>openPhotoPreview(0,{photos:[{id,imageUrl:location.origin+'/test-image/0-0.png'}]}),A);
       assert.equal(await f.page.locator('#photoPreviewOverlay.active').count(),0);
@@ -126,7 +129,10 @@ for(const mode of ['login','register'])test(`${mode} from the locked wall resume
     await page.locator(mode==='login'?'#loginNickInp':'#regNickInp').fill('alice');
     await page.locator(mode==='login'?'#loginPwInp':'#regPwInp').fill('test-only-password');
     await page.locator(mode==='login'?'#loginSubmitBtn':'#registerSubmitBtn').click();
-    await page.waitForFunction(()=>document.querySelector('#photoGrid .photo-wall-item img')?.naturalWidth>0);
+    try{await page.waitForFunction(()=>document.querySelector('#photoGrid .photo-wall-item img')?.naturalWidth>0);}catch(error){
+      const state=await page.evaluate(()=>({owner:currentUser,canonical:window._xtjCanonicalUser,tab:currentDockTab,grid:document.getElementById('photoGrid')?.innerText,error:window.photoWallLoadError?.message}));
+      throw new Error('Authenticated wall did not display its image: '+JSON.stringify({photoReads,state,errors:f.errors}),{cause:error});
+    }
     assert.ok(photoReads>0);assert.equal(await page.getByText('请登录查看所有照片',{exact:true}).isVisible(),false);
     const owners=await page.evaluate(()=>confirmedOwners);assert.ok(owners.length>0);assert.ok(owners.every(e=>e.owner==='alice'&&e.canonical==='alice'&&e.eventOwner==='alice'),JSON.stringify(owners));
     assert.deepEqual(f.errors,[]);
