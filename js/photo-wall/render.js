@@ -892,54 +892,40 @@
 
   var rendering = false;
   var pendingRender = false;
+  var pendingForce = false;
   var _renderPromise = null;
 
-  async function renderPhotoWall(){
+  async function renderPhotoWall(options){
     if (!window.currentUser) { renderSorted([]); return; }
+    pendingForce = pendingForce || !!(options && options.force);
     if (rendering) {
       pendingRender = true;
-      // ★ 返回当前渲染的 Promise，让调用者可以等待
       return _renderPromise;
     }
     rendering = true;
-    // ★ 递增 generation ID，废弃旧加载任务
-    _pwRenderGeneration += 1;
-    var currentGen = _pwRenderGeneration;
-
-    _renderPromise = (async function() {
-      var grid = document.getElementById('photoGrid');
-      if (!grid) {
-        rendering = false;
-        _renderPromise = null;
-        return;
-      }
-      var garden = document.getElementById('pwUploadGarden');
-      grid.innerHTML = '<div class="pw-wall-loading" role="status"><div class="pw-garden is-growing" aria-hidden="true">' +
-        (garden ? garden.innerHTML : '') + '</div><span>照片正在慢慢铺开</span></div>';
+    _renderPromise = Promise.resolve().then(async function() {
       try {
-        if (typeof window.loadPhotoWallData === 'function') await window.loadPhotoWallData();
-        // ★ 检查 generation，旧数据不覆盖
-        if (currentGen !== _pwRenderGeneration) {
-          rendering = false;
-          _renderPromise = null;
-          return;
-        }
-        var key = window.pwSortKey || 'date_desc';
-        renderSorted(sortPhotoWallData(window.photoWallData || [], key));
-      } catch (err) {
-        console.error('[PhotoWall] render failed', err);
-        if (currentGen === _pwRenderGeneration) {
-          grid.innerHTML = photoWallErrorHtml(err);
-        }
+        do {
+          pendingRender = false;
+          var force = pendingForce; pendingForce = false;
+          var currentGen = ++_pwRenderGeneration;
+          var grid = document.getElementById('photoGrid');
+          if (!grid) return;
+          var garden = document.getElementById('pwUploadGarden');
+          grid.innerHTML = '<div class="pw-wall-loading" role="status"><div class="pw-garden is-growing" aria-hidden="true">' +
+            (garden ? garden.innerHTML : '') + '</div><span>照片正在慢慢铺开</span></div>';
+          try {
+            if (typeof window.loadPhotoWallData === 'function') await window.loadPhotoWallData(force);
+            if (currentGen === _pwRenderGeneration) renderSorted(sortPhotoWallData(window.photoWallData || [], window.pwSortKey || 'date_desc'));
+          } catch (err) {
+            console.error('[PhotoWall] render failed', err);
+            if (currentGen === _pwRenderGeneration) grid.innerHTML = photoWallErrorHtml(err);
+          }
+        } while (pendingRender);
+      } finally {
+        rendering = false; _renderPromise = null;
       }
-      rendering = false;
-      _renderPromise = null;
-      if (pendingRender) {
-        pendingRender = false;
-        renderPhotoWall();
-      }
-    })();
-
+    });
     return _renderPromise;
   }
 

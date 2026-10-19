@@ -64,7 +64,7 @@ function researchFlowFixture({synthesisFails=false}={}) {
   let interrupt = true;
   const a = source.indexOf('async function runSelfResearchFlow('), b = source.indexOf("require('./ai-model-capabilities').installModelCapabilities",a);
   const run = vm.runInNewContext('(function(){'+source.slice(a,b)+';return runSelfResearchFlow;})()',{
-    require:name => require('../render-api/'+name.replace('./','')), AbortController,setTimeout,clearTimeout,setInterval,clearInterval,
+    deepSeekPricing:require('../render-api/deepseek-pricing'),require:name => require('../render-api/'+name.replace('./','')), AbortController,setTimeout,clearTimeout,setInterval,clearInterval,
     buildAiCorePrompt:()=> 'prompt',getPreferredDeepSeekModel:model=>model,DEEPSEEK_MODEL_REASONER:'selected-pro',DEEPSEEK_MODEL_FLASH:'selected-flash',
     SELF_RESEARCH_PLANNER_PROMPT:'planner',SELF_RESEARCH_SYNTH_PROMPT_FAST:'synth {{AGENT_COUNT}}',SELF_RESEARCH_SYNTH_PROMPT_DEEP:'synth',
     writeSse() {}, buildDefaultAgents:()=>[],cleanSearchResults:rows=>rows,

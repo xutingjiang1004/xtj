@@ -30,7 +30,7 @@ test('executeToolCall dispatches tavily_search and guards missing API key', () =
 });
 
 test('searchTavily forwards advanced options (search_depth / include_answer / time_range / topic)', () => {
-  const fnBlock = searchProviders.match(/async function searchTavily\(query, maxResults, extraOpts\) \{[\s\S]*?signal: AbortSignal\.timeout\(15000\)[\s\S]*?\n    \}\);/);
+  const fnBlock = searchProviders.match(/async function searchTavily\(query, maxResults, extraOpts\) \{[\s\S]*?signal: providerSignal\(extraOpts, 15000\)[\s\S]*?\n    \}\);/);
   assert.ok(fnBlock, 'searchTavily signature with extraOpts missing');
   assert.match(fnBlock[0], /search_depth: extraOpts\.search_depth === 'advanced' \? 'advanced' : 'basic'/);
   assert.match(fnBlock[0], /include_answer: !!extraOpts\.include_answer/);

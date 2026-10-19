@@ -55,7 +55,13 @@ test('contact slider reverses, cancels on resize and allows immediate keyboard a
  await p.evaluate(()=>{window._dockChatSocialTab='friends';window.transitions=[];window.renderDockChatSocialTab=tab=>{transitions.push(tab);setDockChatSocialTabState(tab);};});await p.addScriptTag({content:slice('js/core-parts/06-chat-and-nav.js','            function bindDockChatSocialSlider','            function chatSocialActionButton')});await p.evaluate(()=>setDockChatSocialTabState('friends'));
  const box=await p.locator('[data-chat-social-tab="friends"]').boundingBox(),x=box.x+box.width/2,y=box.y+box.height/2;
  await p.mouse.move(x,y);await p.mouse.down();await p.mouse.move(x+box.width,y);await p.mouse.move(x-box.width,y);await p.mouse.up();assert.equal(await p.evaluate(()=>_dockChatSocialTab),'search');
- await p.mouse.move(x,y);await p.mouse.down();await p.mouse.move(x+box.width,y);await p.setViewportSize({width:900,height:768});await p.waitForTimeout(30);await p.mouse.up();assert.equal(await p.evaluate(()=>_dockChatSocialTab),'search');assert.equal(await p.locator('#dockChatSocialTabs').evaluate(n=>n.classList.contains('is-dragging')),false);
+ await p.mouse.move(x,y);await p.mouse.down();await p.mouse.move(x+box.width,y);
+ await p.waitForFunction(()=>document.getElementById('dockChatSocialTabs').classList.contains('is-dragging'));
+ await p.setViewportSize({width:900,height:768});
+ // Resize events may arrive after the viewport command under browser load.
+ // Observe cancellation before releasing the pointer instead of guessing 30 ms.
+ await p.waitForFunction(()=>!document.getElementById('dockChatSocialTabs').classList.contains('is-dragging'));
+ await p.mouse.up();assert.equal(await p.evaluate(()=>_dockChatSocialTab),'search');assert.equal(await p.locator('#dockChatSocialTabs').evaluate(n=>n.classList.contains('is-dragging')),false);
  await p.locator('[data-chat-social-tab="search"]').focus();await p.keyboard.press('ArrowRight');assert.equal(await p.evaluate(()=>_dockChatSocialTab),'friends');
  const clicked=await p.evaluate(()=>{var result=false,button=document.querySelector('[data-chat-social-tab="requests"]');button.addEventListener('click',()=>result=true);button.click();return result;});assert.equal(clicked,true);
 });

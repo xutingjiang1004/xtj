@@ -57,6 +57,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     'deepseek-v4-flash-vision-exp': 'deepseek-flash',
     'deepseek-v4-flash': 'deepseek-flash',
     'deepseek-flash-4.1': 'deepseek-flash',
+    'deepseek-v4.1-flash-1017': 'deepseek-flash',
+    'deepseek-v4-1-flash-1017': 'deepseek-flash',
     'deepseek-v4.1-flash': 'deepseek-flash',
     'deepseek-v4-1-flash': 'deepseek-flash',
     'deepseek-chat': 'deepseek-flash',
@@ -126,7 +128,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   var CUSTOM_MODEL_PROVIDERS = [
     { key: 'qwen',    label: '千问 Qwen',      base: 'https://dashscope.aliyuncs.com/compatible-mode/v1', defaultModel: 'qwen-plus', models: ['qwen-turbo', 'qwen-plus', 'qwen-max', 'qwen-long'] },
     { key: 'doubao',  label: '豆包 Doubao',     base: 'https://ark.cn-beijing.volces.com/api/v3',           defaultModel: 'doubao-1-5-pro-32k', models: ['doubao-1-5-pro-32k', 'doubao-1-5-lite-32k', 'doubao-pro-32k'] },
-    { key: 'deepseek',label: 'DeepSeek',        base: 'https://api.deepseek.com',                           defaultModel: 'deepseek-chat', models: ['deepseek-chat', 'deepseek-reasoner'] },
+    { key: 'deepseek',label: 'DeepSeek',        base: 'https://api.deepseek.com',                           defaultModel: 'deepseek-flash', models: ['deepseek-flash', 'deepseek-v4-pro'] },
     { key: 'kimi',    label: 'Kimi 月之暗面',    base: 'https://api.moonshot.cn/v1',                         defaultModel: 'moonshot-v1-8k', models: ['moonshot-v1-8k', 'moonshot-v1-32k', 'moonshot-v1-128k'] },
     { key: 'zhipu',   label: '智谱 GLM',        base: 'https://open.bigmodel.cn/api/paas/v4',               defaultModel: 'glm-4-flash', models: ['glm-4-flash', 'glm-4-air', 'glm-4', 'glm-4-plus'] },
     { key: 'openai',  label: 'OpenAI',          base: 'https://api.openai.com/v1',                          defaultModel: 'gpt-4o-mini', models: ['gpt-4o-mini', 'gpt-4o', 'gpt-4.1-mini'] },
@@ -2857,9 +2859,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         // ★ U3: 动态 currency 符号
         var currency = usage.currency || 'CNY';
         var symbol = currency === 'USD' ? '$' : currency === 'CNY' ? '¥' : '';
-        parts.push(symbol + usage.cost.toFixed(6) + ' ' + currency);
+        parts.push((usage.cost_estimated ? '约 ' : '') + symbol + usage.cost.toFixed(6) + ' ' + currency + (usage.cost_incomplete ? '（部分未计）' : ''));
       }
     }
+    if(isAdmin && usage.web_usage){var web=usage.web_usage;parts.push('网页约 ¥' + Number(web.estimated_cost||0).toFixed(3));if(web.unknown)parts.push('另有 ' + web.unknown + ' 次费用待确认');}
     return parts.length ? parts.join(' · ') : null;
   }
 
@@ -4198,13 +4201,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         footer.appendChild(el('span', { class: 'ai-msg-thinking-badge', text: badgeText }));
       }
       if (msg.usage && isAdminUser()) {
-        var parts = [];
-        if (msg.usage.prompt_tokens) parts.push('输入 ' + msg.usage.prompt_tokens);
-        if (msg.usage.completion_tokens) parts.push('输出 ' + msg.usage.completion_tokens);
-        if (typeof msg.usage.prompt_cache_hit_tokens === 'number' && msg.usage.prompt_cache_hit_tokens > 0) parts.push('命中 ' + msg.usage.prompt_cache_hit_tokens);
-        if (typeof msg.usage.prompt_cache_miss_tokens === 'number' && msg.usage.prompt_cache_miss_tokens > 0) parts.push('未命中 ' + msg.usage.prompt_cache_miss_tokens);
-        if (typeof msg.usage.cost === 'number' && msg.usage.cost > 0) parts.push('¥' + msg.usage.cost.toFixed(6) + ' ' + (msg.usage.currency || 'CNY'));
-        if (parts.length) footer.appendChild(el('span', { class: 'ai-msg-usage', text: parts.join(' · ') }));
+        var historyUsageLine = buildUsageLine(msg.usage);
+        if(historyUsageLine) footer.appendChild(el('span', { class: 'ai-msg-usage', text: historyUsageLine }));
       }
     }
     // ★ 新增：AI 回复底部「复制 / 分享」显式操作按钮
@@ -6129,7 +6127,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   // 内置研究模型（对齐后端 DEEPSEEK_MODEL_REASONER / DEEPSEEK_MODEL_FAST）
   var RESEARCH_BUILTIN_MODELS = [
     { id: 'pro', label: 'V4 Pro · 深度推理', hint: '内置推理模型，多角度深度分析（默认）' },
-    { id: 'flash', label: 'V4.1 Flash · 快速', hint: '内置快速模型，响应更快、适合简要研究' }
+    { id: 'flash', label: 'DeepSeek-V4.1-Flash-1017 · 快速', hint: '内置快速模型，响应更快、适合简要研究' }
   ];
 
   // 重建模型下拉选项：内置两个 + 全部自定义（第三方 API）模型
@@ -12463,7 +12461,7 @@ function showChatMessages() {
     // + 菜单：额度/Pro/上传/搜索 + 系统级 select 选模型/思考
     var modelLabels = {
       'deepseek-v4-pro': 'V4 Pro',
-      'deepseek-flash': 'V4.1 Flash'
+      'deepseek-flash': 'DeepSeek-V4.1-Flash-1017'
     };
     var thinkLabels = { off: '关闭', low: '轻度', medium: '中度', high: '深度', max: '极致' };
 
@@ -12553,7 +12551,7 @@ function showChatMessages() {
                 '<span class="ai-panel-row-icon ai-panel-row-icon--model" aria-hidden="true">' + ICO.model + '</span>' +
                 '<span class="ai-panel-row-title">模型</span>' +
                 rowEnd(
-                  '<span class="ai-panel-row-value ai-panel-row-value--model" id="aiModelSummary">V4.1 Flash</span>',
+                  '<span class="ai-panel-row-value ai-panel-row-value--model" id="aiModelSummary">DeepSeek-V4.1-Flash-1017</span>',
                   '<span class="ai-panel-row-trail" aria-hidden="true">' + ICO.chev + '</span>'
                 ) +
               '</button>' +
@@ -12750,7 +12748,7 @@ function showChatMessages() {
     function buildModelOptions() {
       var opts = [
         { value: 'deepseek-v4-pro', label: 'V4 Pro' },
-        { value: 'deepseek-flash', label: 'V4.1 Flash' }
+        { value: 'deepseek-flash', label: 'DeepSeek-V4.1-Flash-1017' }
       ];
       var customs = loadCustomModels();
       customs.forEach(function(m) {
@@ -13909,7 +13907,7 @@ function showChatMessages() {
     function featureCurrent(){return S.active && input.isConnected && voiceLifecycle===S.lifecycleId && customModelIdentityCurrent(featureIdentity);}
     var menuGroup=panelShell.querySelector('.ai-panel-menu-list .ai-panel-group:last-child');
     function addFeatureEntry(label,action){var button=el('button',{type:'button',class:'ai-panel-row'});button.appendChild(el('span',{class:'ai-panel-row-icon','aria-hidden':'true',text:'✧'}));button.appendChild(el('span',{class:'ai-panel-row-title',text:label}));button.addEventListener('click',function(){closePanel(true);action();});menuGroup.appendChild(button);return button;}
-    addFeatureEntry('双模型对比',function(){var features=assistantFeatures();if(!features)return;if(S.sending){notify('当前回复完成或暂停后，可以开始双模型对比');return;}var models=[{id:'deepseek-flash',label:'V4.1 Flash'},{id:'deepseek-v4-pro',label:'V4 Pro'}];loadCustomModels().forEach(function(config){if(config.api_key&&config.model)models.push({id:'custom:'+config.uid,label:config.label||config.model,config:Object.assign({},config)});});var latestUser=S.messages.slice().reverse().find(function(m){return m.role==='user';});if(S._modelCompare)S._modelCompare.dispose();S._modelCompare=features.openCompare({models:models,thinkingMode:S.thinkingMode,question:input.value.trim() || latestUser&&latestUser.content || '',current:featureCurrent,notify:notify,renderMarkdown:renderMarkdown,context:function(){return buildAiConversationHistory(CONTEXT_LIMIT_NORMAL,MSG_MAX_CHARS_NORMAL,null,null);},run:runModelComparison});});
+    addFeatureEntry('双模型对比',function(){var features=assistantFeatures();if(!features)return;if(S.sending){notify('当前回复完成或暂停后，可以开始双模型对比');return;}var models=[{id:'deepseek-flash',label:'DeepSeek-V4.1-Flash-1017'},{id:'deepseek-v4-pro',label:'V4 Pro'}];loadCustomModels().forEach(function(config){if(config.api_key&&config.model)models.push({id:'custom:'+config.uid,label:config.label||config.model,config:Object.assign({},config)});});var latestUser=S.messages.slice().reverse().find(function(m){return m.role==='user';});if(S._modelCompare)S._modelCompare.dispose();S._modelCompare=features.openCompare({models:models,thinkingMode:S.thinkingMode,question:input.value.trim() || latestUser&&latestUser.content || '',current:featureCurrent,notify:notify,renderMarkdown:renderMarkdown,context:function(){return buildAiConversationHistory(CONTEXT_LIMIT_NORMAL,MSG_MAX_CHARS_NORMAL,null,null);},run:runModelComparison});});
     var capacity=el('div',{class:'ai-context-capacity',id:'aiContextCapacity'}),capacityWidget=null,lastContextBudget=null,capacityModel='',capacityConversation='';
     function contextMemory(){for(var i=S.messages.length-1;i>=0;i--){var memory=S.messages[i]&&S.messages[i].context_memory;if(memory&&memory.v===1&&memory.conversation_id===S.conversationId&&typeof memory.summary==='string'&&memory.summary.trim()&&memory.summary.length<=8000)return memory;}return null;}
     function contextWindowTokens(){var value=Number(scopedStorageGet('xtj_ai_context_window_'+S.selectedModel));return [32768,65536,131072].indexOf(value)>=0?value:65536;}

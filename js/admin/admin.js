@@ -5295,11 +5295,12 @@
                 html.push('<div class="ai-usage-cards">');
                 html.push('<div class="ai-usage-card"><div class="lbl">今日调用</div><div class="val">' + summary.today_calls + '</div></div>');
                 html.push('<div class="ai-usage-card"><div class="lbl">今日 Token</div><div class="val">' + (summary.today_total_tokens || 0).toLocaleString() + '</div></div>');
-                html.push('<div class="ai-usage-card"><div class="lbl">今日费用</div><div class="val">¥' + (summary.today_cost || 0).toFixed(6) + '</div><div class="sub">' + (summary.currency || 'CNY') + '</div></div>');
+                html.push('<div class="ai-usage-card"><div class="lbl">今日模型估算</div><div class="val">' + (summary.currency==='USD'?'$':summary.currency==='CNY'?'¥':'') + (summary.today_cost || 0).toFixed(6) + '</div><div class="sub">' + (summary.currency || 'CNY') + '</div></div>');
                 html.push('<div class="ai-usage-card"><div class="lbl">累计调用</div><div class="val">' + (summary.total_calls || 0).toLocaleString() + '</div></div>');
                 html.push('<div class="ai-usage-card"><div class="lbl">累计 Token</div><div class="val">' + (summary.total_tokens || 0).toLocaleString() + '</div></div>');
-                html.push('<div class="ai-usage-card"><div class="lbl">累计费用</div><div class="val">¥' + (summary.total_cost || 0).toFixed(6) + '</div><div class="sub">用户 ' + (summary.total_users || 0) + ' 人</div></div>');
+                html.push('<div class="ai-usage-card"><div class="lbl">累计模型估算</div><div class="val">' + (summary.currency==='USD'?'$':summary.currency==='CNY'?'¥':'') + (summary.total_cost || 0).toFixed(6) + '</div><div class="sub">用户 ' + (summary.total_users || 0) + ' 人</div></div>');
                 html.push('</div>');
+                html.push('<p style="font-size:12px;color:var(--text-muted)">网页调用估算：今日 ¥' + Number(summary.today_web_cost_cny || 0).toFixed(3) + '，本窗口 ¥' + Number(summary.total_web_cost_cny || 0).toFixed(3) + '（CNY）；' + Number(summary.total_web_requests || 0) + ' 次请求，另有 ' + Number(summary.unknown_web_requests || 0) + ' 次费用待确认。以服务商账单为准。</p>');
                 // ★ M-05/M-06：标注统计窗口；"今日"卡片始终是当日，与窗口无关，需说明避免误读
                 html.push('<div style="margin:-4px 0 12px;font-size:11px;color:var(--text-muted);">「今日」为当日实时数据，与时间窗无关；「累计」统计范围为 <b>' + (String(summaryWin) === 'all' ? '全部历史' : '近 ' + summaryWin + ' 天') + '</b>。</div>');
                 if (summaryTruncated) {

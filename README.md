@@ -74,6 +74,20 @@
 - `project.config.json`
   微信开发者工具项目配置（`miniprogramRoot` 指向 `miniprogram/`）。
 
+## DeepSeek 网页工具与估算费用（2026-10-19）
+
+内置 Flash 显示为 `DeepSeek-V4.1-Flash-1017`，实际请求 ID 仍为官方 `deepseek-flash`。新版本全名和历史别名会归一化。普通对话、深入研究继续由模型调用 `search_web` / `read_web_page`，不增加手动工具台。
+
+- 配置 `DEEPSEEK_API_KEY` 后，网页搜索优先使用官方 Search，失败时沿现有供应商链降级；网页读取优先使用 Fetch，失败或无法取得付费工具额度时回退既有安全读取器。可用 `DEEPSEEK_WEB_API_KEY` 单独配置网页工具凭据，`DEEPSEEK_WEB_ENABLED=false` 可关闭官方网页接口。
+- 用户自定义 DeepSeek 只有在其已验证的接口是 `https://api.deepseek.com` 时，网页工具才使用该用户的 Key，费用由该 Key 承担；其他自定义接口使用已配置的平台搜索能力。Key 不进入前端结果、缓存键明文或日志。
+- Search 与 Fetch 都先通过现有原子业务搜索额度；供应商费用独立记录为 `usage.web_usage`。业务额度不是厂商账单，缓存命中不会再次计厂商调用费用。官方 REST 成功且非空请求按每次 ¥0.005 估算；中断后无法确定服务商是否完成的调用标为费用待确认。Harness / Claude Code / Codex 的免费期不用于推定本站 REST 免费。
+- 每个服务进程对 Search、Fetch 分别限制 5 次/秒、最多 5 个在途、50 个排队请求。取消会清除排队项并中止在途连接；不自动重试付费请求。目标域名的额外限制由厂商执行，429 会走已有回退。多实例共享同一厂商账号时还需在网关统一限速，当前进程限流不宣称跨实例精确协调。
+- 每轮官方网页请求默认最多 40 次、保守费用预算 ¥0.20（失败与结果未知的尝试也占预算）；可用 `DEEPSEEK_WEB_MAX_REQUESTS_PER_TURN`（1–200）及 `DEEPSEEK_WEB_MAX_COST_CNY` 调整。所有排队、正文读取均受取消和超时控制，Markdown 最多提供 24,000 字符；URL 沿用公网 DNS、协议和凭据检查。
+- 模型费用按 Flash / Pro、缓存命中、北京时间工作日高峰（9–12、14–18）估算，保存价格版本和所用费率；2026 节假日按国办发明电〔2025〕7号，未来年份日历未确认会写入元数据。可用逗号分隔的 `DEEPSEEK_OFF_PEAK_DATES` 补充空闲日期。历史已存费用不会重算。
+- 费率可显式覆盖：`DEEPSEEK_FLASH_INPUT_PRICE_PER_1M` / `CACHE_HIT_PRICE_PER_1M` / `OUTPUT_PRICE_PER_1M`（后三段都带 `DEEPSEEK_FLASH_` 前缀），Pro 对应 `DEEPSEEK_PRO_`；旧的全局 `DEEPSEEK_INPUT_PRICE_PER_1M` 等显式配置继续生效，零值有效。官方默认使用 CNY，也支持 `DEEPSEEK_CURRENCY=USD` 的官方美元表；其他币种需完整配置三类费率。模型与网页费用分开显示，均以服务商账单为准。
+
+官方参考：[模型与价格](https://api-docs.deepseek.com/zh-cn/quick_start/pricing/)、[Search / Fetch](https://api-docs.deepseek.com/zh-cn/guides/search/)。
+
 ## 启动与构建
 
 根目录可用脚本：

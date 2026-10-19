@@ -18,9 +18,11 @@ for (const width of [390,1024]) {
       await f.page.route('**/storage/v1/object/public/uploads/posts/*',route=>{rawRequests++;return route.abort();});
       await f.page.route('**/api/post/*/media/*',route=>route.fulfill({contentType:'image/png',body:f.png}));
       await Promise.all([f.page.waitForResponse(response=>response.url().includes('/api/feed?')),f.page.reload({waitUntil:'domcontentloaded'})]);
-      await f.page.waitForFunction(()=>document.querySelector('#feed .post-media-cell img')?.naturalWidth===1);
+      // Bootstrap hydration may replace the feed between browser calls. Read
+      // the authorized source and decoded image from the same rendered node.
+      const loadedSource=await f.page.waitForFunction(path=>{const img=document.querySelector('#feed .post-media-cell img'),src=img?.getAttribute('src');return img?.naturalWidth===1&&src?.includes(path)?src:false;},'/api/post/'+id+'/media/0');
       assert.equal(rawRequests,0);
-      assert.match(await f.page.locator('#feed .post-media-cell img').first().getAttribute('src'),new RegExp('/api/post/'+id+'/media/0'));
+      assert.match(await loadedSource.jsonValue(),new RegExp('/api/post/'+id+'/media/0'));
       await f.page.locator('#feed .post-media-cell').first().click();
       // A decoded previous image can retain naturalWidth while the preview
       // replaces its source. Observe the authorized URL and decoded image in

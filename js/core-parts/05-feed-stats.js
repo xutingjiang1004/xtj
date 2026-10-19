@@ -1539,11 +1539,15 @@
             async function ensurePhotoWallVisibleContent(options) {
                 var opts = options || {};
                 if (!window.currentUser) { renderPhotoWallLockedState(); return; }
+                var owner = String(window.currentUser), identityEpoch = window.__xtjGetAuthEpoch ? window.__xtjGetAuthEpoch() : 0;
+                function sameIdentity() { return owner === String(window.currentUser || '') && identityEpoch === (window.__xtjGetAuthEpoch ? window.__xtjGetAuthEpoch() : 0); }
                 setPhotoWallLockedState(false);
                 await ensurePhotoWallLoaded();
+                if (!sameIdentity()) return;
                 if (typeof window.initPhotoWall === 'function') {
                     await window.initPhotoWall();
                 }
+                if (!sameIdentity()) return;
                 var grid = document.getElementById('photoGrid');
                 if (!grid) return;
                 var hasRenderedPhotos = !!grid.querySelector('.photo-wall-item');
@@ -1554,11 +1558,13 @@
                     if (typeof window.loadPhotoWallData === 'function') {
                         await window.loadPhotoWallData(true);
                     }
+                    if (!sameIdentity()) return;
                     if (typeof window.renderPhotoWall === 'function') {
                         await window.renderPhotoWall();
                     } else if (typeof window.renderPhotoWallWithoutReload === 'function') {
                         window.renderPhotoWallWithoutReload();
                     }
+                    if (!sameIdentity()) return;
                     grid = document.getElementById('photoGrid');
                     hasRenderedPhotos = !!(grid && grid.querySelector('.photo-wall-item'));
                     hasSkeleton = !!(grid && grid.querySelector('.pw-skeleton'));
@@ -1569,6 +1575,16 @@
                     grid.innerHTML = '<div class="photo-wall-empty"><div>暂无照片</div></div>';
                 }
             }
+
+            // This listener is in the eager core: a cold wall has not loaded the
+            // data module yet when registration publishes auth-ready.
+            window.addEventListener('auth-ready', function() {
+                var panel = document.getElementById('panelAi');
+                if (!window.currentUser || !panel || !panel.classList.contains('active')) return;
+                ensurePhotoWallVisibleContent().catch(function(error) {
+                    console.warn('[photo-wall] authenticated wall resume failed', error);
+                });
+            });
 
             function installDockIndicatorDrag() {
                 var dockBar = document.getElementById('dockBar');

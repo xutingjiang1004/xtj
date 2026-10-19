@@ -4,6 +4,7 @@
   var likeStates = new Map(), avatars = new Map(), commentAnimation = null, commentSequence = 0;
   var socialCache = new Map(), refreshTimer = 0, commentDrafts = new Map();
   var commentDraftIdentity = '';
+  var commentPages = null;
   function commentState(owner,id){
     var identity=authEpoch()+':'+owner;
     if(identity!==commentDraftIdentity){commentDrafts.clear();commentDraftIdentity=identity;}
@@ -132,17 +133,27 @@
       if(!valid(token,owner,id)||commentsAtStart!==commentVersion)return;
       body=Object.assign({},body,{comments:(body.comments||[]).slice()});
       previous=social;
+      var fresh=body.comments.slice();
+      if(!commentPages||!previous||!(previous.comments||[]).length){
+        var initial=previous&&(previous.comments||[]).length&&typeof previous.has_more==='boolean'?previous:body;
+        commentPages={historyMore:!!initial.has_more,historyCursor:initial.next_cursor,gaps:[],head:(initial.comments||[]).slice().sort(compareCommentRows)[0]};
+      }
+      if(previous&&previous.comments&&previous.comments.length&&fresh.length&&body.has_more&&body.next_cursor){
+        var previousNewest=commentPages.head || previous.comments.slice().sort(compareCommentRows)[0];
+        var freshOldest=fresh.slice().sort(compareCommentRows)[fresh.length-1];
+        // A new first page can be entirely ahead of the already loaded range.
+        // Keep its continuation until it reaches that range, then resume history.
+        if(compareCommentRows(freshOldest,previousNewest)<0)commentPages.gaps.unshift({cursor:body.next_cursor,until:previousNewest});
+      }
       if(previous&&previous.comments&&previous.comments.length){
         var refreshed=new Map((body.comments||[]).map(function(row){return [String(row.id),row];}));
         var authoritative=new Set((body.known_ids||[]).map(String));
         (body.retained_comments||[]).forEach(function(row){refreshed.set(String(row.id),row);});
         previous.comments.forEach(function(row){if(!authoritative.has(String(row.id))&&!refreshed.has(String(row.id)))refreshed.set(String(row.id),row);});
-        body.comments=Array.from(refreshed.values()).sort(function(a,b){return String(b.created_at).localeCompare(String(a.created_at))||compareCommentIds(b.id,a.id);});
-        // The continuation cursor belongs to the loaded history, not to this
-        // independent first-page statistics refresh.
-        body.has_more=previous.has_more;body.next_cursor=previous.next_cursor;
+        body.comments=Array.from(refreshed.values()).sort(compareCommentRows);
       }
-      social=body;var saved=likeStates.get(owner+':'+id);if(saved&&saved.authEpoch===storyAuthEpoch&&(saved.pending||version!==mutationVersion)){social.liked=saved.desired;social.like_count=Math.max(0,saved.count+Number(saved.desired)-Number(saved.confirmed));}else{likeStates.set(owner+':'+id,{confirmed:!!body.liked,desired:!!body.liked,count:body.like_count||0,pending:false,authEpoch:storyAuthEpoch});}current.views=Math.max(Number(current.views)||0,body.views||0);el('photoPreviewViewsCount').textContent=current.views;updateCounts();el('ppSocialStatus').textContent='';el('ppLikeBtn').disabled=false;renderComments();
+      if(fresh.length)commentPages.head=fresh.slice().sort(compareCommentRows)[0];
+      social=body;syncCommentCursor();var saved=likeStates.get(owner+':'+id);if(saved&&saved.authEpoch===storyAuthEpoch&&(saved.pending||version!==mutationVersion)){social.liked=saved.desired;social.like_count=Math.max(0,saved.count+Number(saved.desired)-Number(saved.confirmed));}else{likeStates.set(owner+':'+id,{confirmed:!!body.liked,desired:!!body.liked,count:body.like_count||0,pending:false,authEpoch:storyAuthEpoch});}current.views=Math.max(Number(current.views)||0,body.views||0);el('photoPreviewViewsCount').textContent=current.views;updateCounts();el('ppSocialStatus').textContent='';el('ppLikeBtn').disabled=false;renderComments();
     }catch(error){if(!valid(token,owner,id))return;el('ppSocialStatus').textContent='互动暂未加载，点击重试';el('ppSocialStatus').onclick=function(){loadSocial(epoch,window.currentUser||'',current.cloudId);};el('ppLikeBtn').disabled=!likeStates.has(owner+':'+id);}
     finally{if(valid(token,owner,id))scheduleRefresh(token,owner,id);}
   }
@@ -210,7 +221,7 @@
     el('ppStoryCaption').textContent=caption;el('ppStoryCaption').hidden=!caption;
     el('ppCaptionMore').hidden=true;el('ppCaptionMore').setAttribute('aria-expanded','false');
     showAvatar(photo);
-    epoch++;stopRefresh();if(controller)controller.abort();controller=new AbortController();social=null;expanded=false;mutationVersion=0;commentVersion=0;el('ppStoryCaption').classList.remove('expanded');el('ppCaptionMore').textContent='展开';
+    epoch++;stopRefresh();if(controller)controller.abort();controller=new AbortController();social=null;commentPages=null;expanded=false;mutationVersion=0;commentVersion=0;el('ppStoryCaption').classList.remove('expanded');el('ppCaptionMore').textContent='展开';
     commentsVisible(false,true);el('ppCommentInput').value='';el('ppCommentInput').disabled=false;el('ppCommentSend').disabled=false;el('ppCommentError').textContent='';el('ppCommentsList').replaceChildren();
     restoreCommentDraft();
     el('ppCommentsMore').disabled=false;el('ppCommentsMore').hidden=true;
@@ -255,14 +266,51 @@
     finally{entry.pending=false;if(likeStates.size>256){for(var pair of likeStates){if(!pair[1].pending){likeStates.delete(pair[0]);break;}}}}
   }
   function renderComments(){
-    var list=el('ppCommentsList');list.replaceChildren();
+    var list=el('ppCommentsList');
     if(!social){list.textContent='评论暂未加载，请关闭后重试';return;}
-
-    social.comments.forEach(function(row){
-      var item=document.createElement('article');item.className='pp-comment-row';var author=document.createElement('strong');author.textContent=row.user_name||'用户';var text=document.createElement('p');text.textContent=row.content||'';var time=document.createElement('time');time.textContent=new Date(row.created_at).toLocaleString('zh-CN');item.append(author,text,time);
-      if(window.currentUser&&(row.user_name===window.currentUser||(window.currentUser==='xxz'&&window.isAdmin&&window.isAdmin()))){var remove=document.createElement('button');remove.type='button';remove.textContent='删除';remove.setAttribute('aria-label','删除自己的评论');remove.onclick=function(){deleteComment(row,remove);};item.appendChild(remove);}
-      list.appendChild(item);
-    });el('ppCommentsMore').hidden=!social.has_more;
+    var oldRows=Array.from(list.children), focused=document.activeElement;
+    var focusedIndex=oldRows.findIndex(function(node){return node.contains(focused);});
+    var top=list.getBoundingClientRect().top, anchors=[];
+    if(list.scrollTop>0){
+      var first=oldRows.findIndex(function(node){return node.getBoundingClientRect().bottom>top;});
+      if(first>=0)anchors=oldRows.slice(first).concat(oldRows.slice(0,first).reverse()).map(function(node){return {node:node,offset:node.getBoundingClientRect().top-top};});
+    }
+    var existing=new Map(oldRows.map(function(node){return [node.dataset.commentId,node];}));
+    var keep=new Set();
+    // Remove a previous loading/error text without replacing existing comment nodes.
+    Array.from(list.childNodes).forEach(function(node){if(node.nodeType===3)node.remove();});
+    social.comments.forEach(function(row,index){
+      var id=String(row.id),item=existing.get(id);keep.add(id);
+      if(!item){
+        item=document.createElement('article');item.className='pp-comment-row';item.dataset.commentId=id;
+        item.append(document.createElement('strong'),document.createElement('p'),document.createElement('time'));
+      }
+      item._commentData=row;
+      var values=[row.user_name||'用户',row.content||'',new Date(row.created_at).toLocaleString('zh-CN')];
+      values.forEach(function(value,i){if(item.children[i].textContent!==value)item.children[i].textContent=value;});
+      var remove=item.querySelector('button');
+      var canDelete=window.currentUser&&(row.user_name===window.currentUser||(window.currentUser==='xxz'&&window.isAdmin&&window.isAdmin()));
+      if(canDelete&&!remove){remove=document.createElement('button');remove.type='button';remove.textContent='删除';remove.setAttribute('aria-label','删除评论');remove.onclick=function(){deleteComment(item._commentData,this);};item.appendChild(remove);}
+      else if(!canDelete&&remove)remove.remove();
+      var at=list.children[index];if(at!==item)list.insertBefore(item,at||null);
+    });
+    oldRows.forEach(function(node){if(!keep.has(node.dataset.commentId))node.remove();});
+    var anchor=anchors.find(function(entry){return entry.node.isConnected;});
+    if(anchor)list.scrollTop+=anchor.node.getBoundingClientRect().top-top-anchor.offset;
+    if(focused&&focused.isConnected&&list.contains(focused)&&document.activeElement!==focused)focused.focus({preventScroll:true});
+    else if(focusedIndex>=0&&focused&&!focused.isConnected){
+      var neighbor=list.children[Math.min(focusedIndex,list.children.length-1)];
+      var action=neighbor&&neighbor.querySelector('button')||el('ppCommentsClose');
+      if(action)action.focus({preventScroll:true});
+      el('ppCommentError').textContent='当前评论已移除';
+    }
+    el('ppCommentsMore').hidden=!social.has_more;
+  }
+  function compareCommentRows(a,b){return String(b.created_at).localeCompare(String(a.created_at))||compareCommentIds(b.id,a.id);}
+  function syncCommentCursor(){
+    if(!social||!commentPages)return;
+    var gap=commentPages.gaps[0];social.has_more=!!gap||commentPages.historyMore;
+    social.next_cursor=gap?gap.cursor:commentPages.historyCursor;
   }
   function compareCommentIds(a,b){var x=String(a),y=String(b);if(/^\d+$/.test(x)&&/^\d+$/.test(y))return x.length-y.length||x.localeCompare(y);return x.localeCompare(y);}
   function newCommentRequestId(){
@@ -273,9 +321,25 @@
   }
   function openComments(){if(!current||!isWall(current))return;commentsVisible(true);renderComments();if(!social)loadSocial(epoch,window.currentUser||'',current.cloudId);}
   async function moreComments(){
-    if(!social||!social.next_cursor||el('ppCommentsMore').disabled)return;var token=epoch,owner=window.currentUser||'',id=current.cloudId,version=commentVersion;var button=el('ppCommentsMore');button.disabled=true;
-    try{var body=await json('/api/photo/'+id+'/social?before='+encodeURIComponent(social.next_cursor),{background:true,signal:controller.signal});if(!valid(token,owner,id)||version!==commentVersion)return;var rows=social.comments.concat(body.comments),seen=new Set();social.comments=rows.filter(function(r){if(seen.has(r.id))return false;seen.add(r.id);return true;});social.has_more=body.has_more;social.next_cursor=body.next_cursor;renderComments();}
-    catch(error){if(valid(token,owner,id))el('ppCommentError').textContent=error.message;}finally{if(token===epoch)button.disabled=false;}
+    if(!social||!social.next_cursor||el('ppCommentsMore').disabled)return;
+    if(!commentPages)commentPages={historyMore:!!social.has_more,historyCursor:social.next_cursor,gaps:[],head:social.comments.slice().sort(compareCommentRows)[0]};
+    var token=epoch,owner=window.currentUser||'',id=current.cloudId,version=commentVersion;
+    var pages=commentPages,gap=pages.gaps[0],cursor=social.next_cursor;
+    var button=el('ppCommentsMore');button.disabled=true;
+    try{
+      var body=await json('/api/photo/'+id+'/social?before='+encodeURIComponent(cursor),{background:true,signal:controller.signal});
+      if(!valid(token,owner,id)||version!==commentVersion)return;
+      var rows=new Map(social.comments.map(function(row){return [String(row.id),row];}));
+      (body.comments||[]).forEach(function(row){rows.set(String(row.id),row);});
+      social.comments=Array.from(rows.values()).sort(compareCommentRows);
+      if(gap){
+        var oldest=(body.comments||[]).slice().sort(compareCommentRows).pop();
+        if(!body.has_more||!body.next_cursor||(oldest&&compareCommentRows(oldest,gap.until)>=0))pages.gaps=pages.gaps.filter(function(item){return item!==gap;});
+        else gap.cursor=body.next_cursor;
+      }else{pages.historyMore=!!body.has_more;pages.historyCursor=body.next_cursor;}
+      syncCommentCursor();renderComments();
+    }catch(error){if(valid(token,owner,id))el('ppCommentError').textContent=error.message;}
+    finally{if(token===epoch)button.disabled=false;}
   }
   async function sendComment(event){
     event.preventDefault();if(!current||!isWall(current)||el('ppCommentSend').disabled)return;
