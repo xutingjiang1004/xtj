@@ -14711,7 +14711,13 @@ app.get('/api/feed', optionalAuth, rateLimit(60000, 60), async (req, res) => {
     var scannedCount = 0;
     var nextCursor = null;
     var endReached = false;
-    if (!cursorMode) {
+    if (req.query.q) {
+      var searchPage = await require('./feed-search').readFeedSearch(supabase,req.query,req.userName,selectFields);
+      posts=searchPage.posts.filter(function(post){return isNormalPost(post)&&!looksLikeSystemTelemetry(post.content)&&
+        (post.visibility==='public'||post.user_name===(req.userName||'')||isAdmin);});
+      scannedCount=searchPage.posts.length;nextCursor=searchPage.nextCursor;endReached=searchPage.endReached;
+      res.set('Cache-Control','no-store');
+    } else if (!cursorMode) {
       var firstResult = await buildFeedQuery(null, true).range(from, from + limit - 1);
       if (firstResult.error) return res.status(500).json({ error: '获取帖子失败', code: 'feed_query_failed' });
       var rawPosts = firstResult.data || [];
@@ -14816,7 +14822,7 @@ app.get('/api/feed', optionalAuth, rateLimit(60000, 60), async (req, res) => {
     });
   } catch (e) {
     console.error('[API] feed:', e && e.message);
-    return res.status(500).json({ error: '获取帖子列表失败', code: 'feed_failed' });
+    return res.status(e.status || 500).json({ ok:false,error:e.status?e.message:'获取帖子列表失败',code:e.code||'feed_failed',retryable:e.retryable });
   }
 });
 
@@ -26498,7 +26504,7 @@ app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, 
     if (!checkpointJob && req.body && Array.isArray(req.body.attachments) && req.body.attachments.length) {
       var preparedDocuments = await require('./research-documents').prepareResearchDocuments(req.body.attachments,{parseDocumentBuffer:parseDocumentBuffer,ocrImageBuffer:ocrImageBuffer,sharp:sharp,signal:_researchAbort.signal,onDocument:function(document){writeSse(res,{type:'research_document',document:document});}});
       documents=preparedDocuments.documents;documentFingerprint=preparedDocuments.fingerprint;
-      if(!documents.some(function(d){return d.status==='read';}))throw Error('文件没有提取到可用文字，请检查文件或使用工作台的图片分析。');
+      if(!documents.some(function(d){return d.status==='read';}))throw Error('文件没有提取到可用文字，请检查格式和大小；图片也可在普通对话中分析。');
     }
     var cacheKey = researchCacheKey(userName, query, model, mode + '|' + researchModel + '|' + (allowResearchSearch?'web':'files') + '|' + documentFingerprint, req.accountId);
     if (forceRefresh) {

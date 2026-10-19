@@ -442,3 +442,129 @@ Render 免费服务连续 15 分钟无请求就会休眠，定时访问可减少
 3. `js/core.js` 中站内 changelog 数据
 
 这样可以避免“仓库版本、站内版本、关于页版本”再次分裂。
+
+### Cloudflare Pages 独立预览（迁移中）
+
+此阶段发布前端、公开配置与登录会话接口，不是可替代正式站的完整部署。
+`GET/HEAD /api/config/public` 已迁到 Pages Worker，只返回公开 URL 与经过分类的 anon／publishable 配置；未绑定公开密钥时返回 null，绝不回退到 service-role 或签名密钥。此接口不读取或修改用户数据。
+`GET/HEAD /admin/verify` 的只读校验使用既有 HMAC 签名及当前令牌的数据库吊销记录。
+原 Render 配置现已实际逐页读取，仅将缺失的原签名、数据库、公开配置及管理员口令安全转入独立预览的绑定；密钥未重新生成、输出或落盘，原服务配置和生产环境保持。
+
+`POST /api/user/login`、`/api/user/refresh`、`/api/user/logout`、`/admin/login`、`/admin/logout`，以及 `GET/HEAD /api/user/profile`、`/api/user/restrictions` 已适配 Worker。沿用原 scrypt／PBKDF2／SHA 历史密码验证、旧口令升级、HMAC 格式、15 分钟 access／90 天滑动 refresh、账号生命周期、数据库封禁与持久限流，以及数据库原子刷新轮换和吊销记录；不创建替代账号、表或密钥。Cookie 仍为 HttpOnly／Secure，同源写入检查不放宽。数据库失败返回可重试 503，不清 Cookie；并发刷新返回 409，不删除另一请求已更新的会话。只读身份接口不会写入数据库。
+
+登录／退出接口仅在用户主动请求时写入相应凭证升级、会话、限流和登录安全记录；部署与验收不登录真实账号、不创建测试内容、不执行数据迁移或清理。普通密码登录复用真实认证事件 RPC，刷新不冒充新登录。后台 IP 地区富化和自动安全提醒仍待适配；注册、其他管理功能、媒体、聊天和 AI 仍未迁移。没有把 Node 端测试通过当成线上完整恢复：本地 workerd 另用隔离出站数据验证密码派生、登录、刷新与管理员校验，线上成功登录仍需用户主动验证。免费 Workers 的每请求 CPU 预算对原强密码哈希有风险，本地运行时不模拟云端预算；保持原哈希强度、不擅自启用付费，云端密码派生的 CPU 余量仍未验收，不能宣称登录已完整恢复。
+其余未迁移的
+`/api`、`/health`、`/share` 及其子路径、`/admin/*` 返回 HTTP 503 JSON；`/admin.html`（Pages 中规范化为 `/admin`）仍是静态入口。不代理已暂停的 Render，
+不运行生产清理、数据迁移或启动任务。上传、私密媒体、分享及 AI 等功能须等后端迁移后验收。
+未知路径返回 404，不回退成成功的首页。预览设置 noindex，但这不代替访问控制。
+
+构建与校验：
+
+```sh
+npm ci
+npm run build:pages
+npm run test:pages
+```
+
+Pages 构建命令为 `npm run build:pages`，发布目录只能选择
+`output/cloudflare-pages`，不能选择仓库根目录。使用 Node 22 或以上版本。
+构建复用现有资源生成和一致性校验；导出仅包含受版本控制的前端
+JS/CSS、两个 HTML 入口、图标及两个 Service Worker，不复制用户上传内容。
+产物继承服务器 CSP 等安全头，保留原图与私密访问机制。
+
+先创建独立的免费 Pages 项目 `xtj-preview`，不要附加正式域名或启用付费功能。
+使用 Git 集成时选择迁移分支，避免生产 main 的自动部署；也可以在授权后的
+Wrangler CLI 中向该独立项目上传预览分支。`wrangler.jsonc` 声明预览项目和仅供 preview 的公开 Supabase URL，
+不包含账号 ID、密钥、存储绑定或生产资源。Pages 会移除未在 Wrangler 中声明的明文变量，因此公开 URL 必须显式声明；发布工具遇到其他未声明的既有明文绑定会停止，并在上传后核对绑定保留及生产配置未改变。加密密钥仍由运行时绑定保存，不写入 Wrangler 文件。
+
+部署前必须完成 Cloudflare 账号授权，并确认执行环境可访问 Cloudflare API。
+浏览器里已登录 Cloudflare 不代表远端命令行已授权。不要把 service-role 或
+AI 提供商密钥填入静态构建变量。后端绑定、访问控制和真实在线验证尚未完成，
+不要将这个阶段的前端预览切换为正式站。
+
+回退此阶段：停止使用独立预览链接即可，现有 Render、Supabase 和正式域名
+不受影响；独立预览未向现有 Render 发布新版本。
+
+已授权的现有独立预览可用一条命令发布：
+
+```sh
+# 凭据由受保护的环境注入；在干净的迁移分支执行。
+npm run cloudflare:deploy
+```
+
+Account ID 是 32 位十六进制账号标识，不是 API Token。账户 API 令牌的验证接口是
+`/client/v4/accounts/{account_id}/tokens/verify`；用户级 `/user/tokens/verify`
+返回 401 不能据此判定账户令牌失效。需要目标账号的 Cloudflare Pages 编辑权限，
+不能把浏览器或控制台里的全选权限等同于执行环境已经正确绑定凭据。
+
+账号、项目与预览分支由 `cloudflare/preview-target.js` 记录已核实的公开资源标识；
+Account ID 本身不是密钥。工具自动处理缺失或代理占位的账号变量，只在命令
+子进程中使用该标识，不再要求人工覆盖长期绑定；不同的明确账号选择会被拒绝。
+令牌仍只从受保护的环境读取，代理与 CA 配置保留。完整发布先运行构建、
+`npm test` 与语法检查，再重建允许清单并扫描凭据；源码变化、正式域名或生产
+部署出现时停止上传。日志经脱敏写入系统临时目录，不回显服务商错误正文。
+发布后核对 API 返回的预览分支、提交及成功阶段；HTTP 验收状态单独报告。
+
+可先运行只读预检 `npm run cloudflare:preflight`。它检查已核实的 Account ID、
+账户／用户令牌作用域、独立预览项目边界与公开配置接口连通性，不创建资源或
+修改配置，也不输出密钥或服务商原始错误。
+
+原 Render 配置可直接转入独立预览，无需逐项复制或重新生成密钥：
+
+```sh
+npm run cloudflare:sync-config
+npm run cloudflare:sync-config -- --apply
+npm run cloudflare:deploy
+```
+
+第一条只检查；`--apply` 只补充 `xtj-preview` 缺少的预览绑定，之后须重新部署
+才能验证运行时。需要安全绑定 `RENDER_API_KEY`（目标域名 `api.render.com`）
+与既有 Cloudflare 凭据。只读访问已核实的原 Render 服务，逐页读取配置，核对
+仓库、账号与 Supabase 来源；仅复制原 URL、签名、服务端、公开及历史加密配置。
+密钥在同一个进程内转入 Pages 的加密绑定，不输出、不写本地文件，不传入命令
+参数；登录阶段另补充原管理员口令／哈希和会话时长，不复制 Render／Cloudflare 管理令牌或其他供应商凭据。已有绑定及生产
+配置保持原样，不能据此认定已有密钥值正确；异常分页或项目边界变化时停止。
+这不会启动已暂停的 Render，不执行数据库写入，也不代表其他后端已适配。
+
+发布环境配置后，仍须核对当前任务运行实例是否加载了新版绑定。若实例仍缺少
+`RENDER_API_KEY` 或所需网络域名，应将新版环境应用到任务，或使用该环境启动
+新任务；重新创建 Cloudflare 令牌、编辑本地网络策略文件都不能替代这一步。
+
+若预检报告 `proxy_connect_denied`，说明执行环境代理在建立 HTTPS 连接前拒绝
+目标主机。应在执行环境的网络设置中加入
+`migration-preview.xtj-preview.pages.dev`，应用设置后重新运行预检；Cloudflare
+控制台的 API 权限、Worker URL 开关与 WAF 设置不控制这个代理。实际站点返回的
+HTTP 403 会单独报告，不能一律当作代理拒绝。预检成功也仅代表预览可访问，
+不代表登录、私有媒体或 AI 后端已经迁移；缺少的原后端绑定会单独列出。
+此限制不阻止通过已允许的 Cloudflare API 上传预览；自动发布继续完成上传，
+并明确报告页面 HTTP 验收尚未通过，不绕过代理。
+
+Cloudflare 控制台中的 Workers Builds 与 Pages 是不同的发布流程。
+不要从尚无 Pages 配置的 `main` 运行 `npx wrangler deploy`，让自动配置把
+`assets.directory` 设为 `.`：这会把依赖和后端文件一同扫描，可能报
+`Asset too large`，也违反本项目的发布范围。应使用此迁移分支、
+`npm run cloudflare:deploy`，其内部使用 `wrangler pages deploy`；现有 Worker
+`xtj` 的 URL 开关不代表 Pages 预览或完整后端已经部署成功。
+该旧 Worker 构建设置已通过 API 核实，并把生产构建的 `path_excludes` 设为
+`["*"]`，暂停因仓库文件变化触发的错误自动构建；既有 Worker、构建命令、
+正式域名和 Pages 预览均保留。需要恢复该旧流水线时，可将其路径排除列表恢复
+为原来的 `[]`；恢复前仍须先修正其发布目标和资源目录。
+
+生产分支使用未部署的占位名称，上传只生成独立项目的预览部署。工具仅使用
+已核实的独立项目。执行环境须允许访问 `api.cloudflare.com`；再允许
+实际返回的预览主机，逐项验证 HTTP 状态、安全头和权限；不能用本地通过替代云端验收。
+
+后续迁移需保留既有会话签名与加密密钥的有效值／派生关系，避免已有会话或
+加密供应商密钥失效。Supabase 数据及私有桶先保持原处；Cloudflare 页面本身
+不会消除 Supabase 出站额度。Express 的 HTTP 适配与原生依赖是不同问题：
+`sharp`、`isolated-vm`、文档／正则工作线程和常驻任务都需单独替代及验证，
+不能通过关闭强隔离、公开私密图片或减少功能来完成迁移。
+
+此迁移分支还将闪照孤儿文件列表扫描限制为每五分钟一次，列表失败同样退避；
+孤儿候选仍须超过 24 小时，分页和重试语义保留。撤销／删除记录仍由原有
+15 秒清理周期处理，原图加密、解密和授权不变。这减少列表请求，不代表已
+证实历史图片流量归因或等比例减少总带宽。正式后端尚未部署此变更。
+
+现有 `render.yaml` 声明 `plan: starter`，与用户说明的现有 Free 服务不同。
+本迁移不使用它重建服务或调整套餐；后续操作须核对 Dashboard 的实际方案，
+不能用该蓝图意外创建付费实例。

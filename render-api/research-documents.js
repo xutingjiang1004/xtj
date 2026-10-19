@@ -9,7 +9,7 @@ async function prepareResearchDocuments(attachments,deps={}){
   for(let i=0;i<attachments.length;i++){
     if(deps.signal&&deps.signal.aborted)throw Error('研究已暂停');
     const value=attachments[i]||{};
-    const upload=decodeUpload({name:value.name,dataUrl:value.dataUrl||value.data_url},20*1024*1024);
+    const upload=decodeUpload({name:value.name,dataUrl:value.dataUrl||value.data_url},50*1024*1024);
     total+=upload.buffer.length;if(total>54*1024*1024)throw Error('研究文件合计最多 54MiB');
     const ext=upload.name.split('.').pop().toLowerCase(),id='F'+(i+1);
     const document={id,name:upload.name,bytes:upload.buffer.length,sha256:createHash('sha256').update(upload.buffer).digest('hex'),status:'read',paragraphs:[],truncated:false,limitation:''};
@@ -52,14 +52,19 @@ function documentsContext(documents){
 }
 function publicDocuments(documents){return (documents||[]).map(d=>({id:d.id,name:d.name,bytes:d.bytes,status:d.status,truncated:d.truncated,total_paragraphs:d.total_paragraphs,used_paragraphs:(d.paragraphs||[]).length,limitation:d.limitation}));}
 async function loadConversationDocuments(db,userName,conversationId,actorPattern){
-  const result=await db.from('posts').select('media_url').eq('user_name',userName).eq('media_type','__ai_agent_msg__').filter('actor_key','like',actorPattern).order('created_at',{ascending:false}).limit(20);
-  if(!result||result.error)throw Error('本会话资料暂时无法读取，请重试或重新上传');
-  for(const row of result.data||[]){
-    let meta;try{meta=JSON.parse(row.media_url||'{}');}catch(_){continue;}
-    if(meta.deleted||meta.convId!==conversationId||!Array.isArray(meta.prepared_documents))continue;
-    const documents=meta.prepared_documents;
-    if(documents.length<=10&&Buffer.byteLength(JSON.stringify(documents))<=1024*1024&&documents.every(d=>d&&typeof d.id==='string'&&Array.isArray(d.paragraphs)&&d.paragraphs.every(p=>p&&typeof p.id==='string'&&typeof p.text==='string')))return documents;
+  const pageSize=50;
+  // Ordinary turns do not contain prepared documents. Filter them out before
+  // pagination so the source files remain available in long conversations.
+  for(let offset=0;;offset+=pageSize){
+    const result=await db.from('posts').select('media_url').eq('user_name',userName).eq('media_type','__ai_agent_msg__').filter('actor_key','like',actorPattern).filter('media_url','like','%"prepared_documents"%').order('created_at',{ascending:false}).order('id',{ascending:false}).range(offset,offset+pageSize-1);
+    if(!result||result.error||!Array.isArray(result.data))throw Error('本会话资料暂时无法读取，请重试或重新上传');
+    for(const row of result.data){
+      let meta;try{meta=JSON.parse(row.media_url||'{}');}catch(_){continue;}
+      if(!meta||meta.deleted||meta.convId!==conversationId||!Array.isArray(meta.prepared_documents))continue;
+      const documents=meta.prepared_documents;
+      if(documents.length<=10&&Buffer.byteLength(JSON.stringify(documents))<=1024*1024&&documents.every(d=>d&&typeof d.id==='string'&&Array.isArray(d.paragraphs)&&d.paragraphs.every(p=>p&&typeof p.id==='string'&&typeof p.text==='string')))return documents;
+    }
+    if(result.data.length<pageSize)return [];
   }
-  return [];
 }
 module.exports={prepareResearchDocuments,documentsContext,publicDocuments,loadConversationDocuments,INSTRUCTION};

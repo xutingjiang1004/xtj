@@ -20,20 +20,36 @@ function similar(a,b){
   return shared/Math.max(aa.size,bb.size)>=0.9;
 }
 function dedupeSources(rows,max=50){
-  const groups=[];let rawCount=0;
+  const byUrl=new Map();let rawCount=0;
   for(const source of Array.isArray(rows)?rows:[]){
     if(!source)continue;const url=canonicalUrl(source.url);if(!url)continue;rawCount++;
     const body=bodyText(source),complete=source.content_complete!==false && String(source.content||source.text||'').length<=50000;
     const hash=body.length>=400 && complete?createHash('sha256').update(body).digest('hex'):'';
-    const match=groups.find(g=>g.canonical===url||hash&&g.hash===hash);
     const alias={title:String(source.title||url).slice(0,300),url:String(source.url),published_at:source.published_at||''};
-    if(match){if(!match.aliases.some(a=>a.url===alias.url))match.aliases.push(alias);continue;}
-    const possiblyRelated=groups.some(g=>similar(body,g.body));
-    groups.push({canonical:url,body,hash,aliases:[alias],source,possiblyRelated});
+    let group=byUrl.get(url);
+    if(!group){group={canonical:url,body,hash,aliases:[],source,bodyHashes:new Set()};byUrl.set(url,group);}
+    if(!group.aliases.some(a=>a.url===alias.url))group.aliases.push(alias);
+    if(hash)group.bodyHashes.add(hash);
+    // A later fetch can supply text missing from the original search result.
+    // Prefer complete evidence, then the longer available preview.
+    if(hash&&!group.hash||Boolean(hash)===Boolean(group.hash)&&body.length>group.body.length){
+      group.body=body;group.hash=hash;
+      group.source={...source,title:source.title||group.source.title,published_at:source.published_at||group.source.published_at,source:source.source||group.source.source};
+    }
+  }
+  const groups=[];
+  for(const group of byUrl.values()){
+    // Conflicting snapshots of one URL are not proof that another article has
+    // the same facts. Keep that URL group independent when bodies disagree.
+    if(group.bodyHashes.size>1)group.hash='';
+    const match=group.hash&&groups.find(g=>g.hash===group.hash);
+    if(match){for(const alias of group.aliases)if(!match.aliases.some(a=>a.url===alias.url))match.aliases.push(alias);continue;}
+    group.possiblyRelated=groups.some(g=>similar(group.body,g.body));
+    groups.push(group);
   }
   const sources=groups.slice(0,max).map(g=>({
     title:String(g.source.title||g.canonical).slice(0,300),url:g.canonical,
-    snippet:String(g.source.snippet||g.source.content||'').slice(0,1500),source:g.source.source||'web',
+    snippet:String(g.source.content||g.source.text||g.source.snippet||'').slice(0,1500),source:g.source.source||'web',
     published_at:g.source.published_at||'',aliases:g.aliases.slice(0,20),
     dedupe_basis:g.hash?'body':'url',content_checked:g.body.length>=400,possible_repost:g.possiblyRelated,content_unavailable:g.source.content_unavailable===true,content_truncated:g.source.content_complete===false
   }));

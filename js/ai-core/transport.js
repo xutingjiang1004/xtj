@@ -84,7 +84,7 @@
       if (signal) {
         try { signal.removeEventListener('abort', cancel); } catch (e) {}
       }
-      try { reader.cancel(); } catch (e) {}
+      cancelReader(reader);
     }
 
     function cancel() {
@@ -151,6 +151,13 @@
     }
 
     return pump();
+  }
+
+  // Cancelling an already errored native stream rejects asynchronously. Every
+  // cleanup path must consume that rejection as well as synchronous failures.
+  function cancelReader(reader) {
+    try { return Promise.resolve(reader && reader.cancel()).catch(function() {}); }
+    catch (e) { return Promise.resolve(); }
   }
 
   function processSSEBuffer(rawBuffer, onEvent, options, sseState) {
