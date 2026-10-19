@@ -151,6 +151,10 @@
     wrap.classList.remove('is-idle', 'is-synced', 'is-syncing', 'is-offline', 'is-error');
     wrap.classList.add('is-' + (state || 'idle'));
     text.textContent = label || '已同步';
+    var retry=byId('pwSyncRetry');
+    if(!retry){retry=document.createElement('button');retry.id='pwSyncRetry';retry.type='button';retry.textContent='重新加载';retry.onclick=function(){loadPhotoWallData(true);};wrap.appendChild(retry);}
+    retry.hidden=state!=='error'||!!(window.photoWallLoadError&&window.photoWallLoadError.retryable===false);
+    wrap.setAttribute('role',state==='error'?'alert':'status');
   }
 
   function saveLocalPhotoWallData(){
@@ -350,7 +354,8 @@
       requestState.controller = controller;
     }
     var timeout = timeoutMs || 10000;
-    var timer = setTimeout(function() { controller.abort(); }, timeout);
+    var timedOut = false;
+    var timer = setTimeout(function() { timedOut=true; controller.abort(); }, timeout);
     var onAbort = function() { controller.abort(); };
     function isCurrentRequest(){
       var stateIsCurrent = !requestState || (_fetchPhotoPageState[stateKey] === requestState && requestState.generation === currentGen);
@@ -380,6 +385,9 @@
       var rows=result.data||[];
       Object.defineProperty(rows,'__page',{value:{sort:result.sort,has_more:result.has_more,next_cursor:result.next_cursor||null}});
       return rows;
+    } catch(error) {
+      if(timedOut && !(externalSignal && externalSignal.aborted))throw Object.assign(new Error('照片加载超时，请重试'),{name:'TimeoutError',retryable:true});
+      throw error;
     } finally {
       clearTimeout(timer);
       if (externalSignal) externalSignal.removeEventListener('abort', onAbort);
@@ -515,7 +523,14 @@
       window.photoWallDataLoadedAt = lastFailureAt;
       if (!isAbort) {
         window.photoWallLoadError = err;
-        setPhotoWallSyncStatus('error', err.retryable === false ? (err.message || '服务暂不可用，请等待恢复') : '同步失败');
+        if(photoLoadedSort!==(window.pwSortKey||'date_desc')){
+          window.pwSortKey=photoLoadedSort;photoSortNeedsReset=false;
+          var select=byId('pwAlbumSort');if(select)select.value=photoLoadedSort;
+          // The previous cursor was discarded by the sort change; refresh its
+          // first page before loading any more of the retained order.
+          photoPaginationDirty=true;
+        }
+        setPhotoWallSyncStatus('error', (err.retryable === false ? (err.message || '服务暂不可用，请等待恢复') : '照片加载失败')+(window.photoWallData.length?'，当前显示缓存照片':'，请稍后重试'));
       }
       // ★ 修复：断网且无缓存时，UI 会停留在「还没有照片」（空态），
       //   而不是「同步失败 + 重新加载」。原因是 render.js 的空态分支靠

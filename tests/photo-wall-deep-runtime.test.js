@@ -1,5 +1,17 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
+test('photo request timeout is a retryable failure while a replaced request stays a silent abort',async()=>{
+  const code=fs.readFileSync('js/photo-wall/data.js','utf8'),start=code.indexOf('  async function fetchPhotoPage('),end=code.indexOf('  async function loadPhotoWallData(',start);
+  for(const timeout of [true,false]){
+    let timer,started=false;const external=new AbortController();
+    const c={window:{currentUser:'alice',pwSortKey:'date_desc',__xtjGetAuthEpoch:()=>1,getUserAuthHeaders:async()=>({})},PAGE_SIZE:60,photoNextCursor:null,photoLoadGeneration:1,_fetchPhotoPageState:{},AbortController,apiUrl:p=>p,
+      setTimeout(fn){timer=fn;return 1;},clearTimeout(){},createPhotoAbortError(){return Object.assign(new Error('replaced'),{name:'AbortError'});},fetch:async(_url,options)=>{started=true;return new Promise((_resolve,reject)=>options.signal.addEventListener('abort',()=>reject(Object.assign(new Error('aborted'),{name:'AbortError'})),{once:true}));}};
+    vm.createContext(c);vm.runInContext(code.slice(start,end),c);const task=c.fetchPhotoPage(0,100,external.signal,'request',1);
+    const rejected=assert.rejects(task,e=>timeout?e.name==='TimeoutError'&&e.retryable===true:e.name==='AbortError');
+    while(!started)await new Promise(resolve=>setImmediate(resolve));if(timeout)timer();else external.abort();await rejected;
+    assert.equal(Object.keys(c._fetchPhotoPageState).length,0);
+  }
+});
 const source=f=>fs.readFileSync('js/photo-wall/'+f,'utf8');
 function inject(s,code){return s.replace(/\}\)\(\);\s*$/,code+'\n})();');}
 function deferred(){let resolve;const promise=new Promise(r=>resolve=r);return{promise,resolve};}

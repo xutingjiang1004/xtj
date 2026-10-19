@@ -39,6 +39,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   var _isTouchMobile = typeof window !== 'undefined' && 'ontouchstart' in window && 'visualViewport' in window;
   var escapeHtml = window.escapeHtml || function(s) { return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g, '&#39;'); };
 
+  function cancelAiStreamReader(reader) {
+    try { return Promise.resolve(reader && reader.cancel()).catch(function() {}); }
+    catch (_) { return Promise.resolve(); }
+  }
+
   // ★ P0-1 修复: 唯一默认思考程度常量。状态优先级固定为
   //   后端配置 (applyConfigToUI) > localStorage > DEFAULT_THINKING_MODE
   //   之前 S 对象内出现两个 thinkingMode 字段 (low/medium)，后者静默覆盖前者，
@@ -478,6 +483,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     oldestCursor: null,
     hasMore: false,
     sending: false,
+    deletingConversations: new Set(),
     loading: false,
     loadingMore: false,
     thinkingMode: resolveInitialThinkingMode(),
@@ -3687,6 +3693,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }
     root.style.setProperty('--ai-input-height', Math.max(64, bar.offsetHeight || 0) + 'px');
     var rootBounds=root.getBoundingClientRect(),barBounds=bar.getBoundingClientRect();
+    var chatHeader=root.querySelector('.ai-chat-header');
+    root.style.setProperty('--ai-header-height', (chatHeader ? chatHeader.offsetHeight : 56) + 'px');
     if(rootBounds.height>0 && barBounds.height>0)root.style.setProperty('--ai-new-content-bottom',Math.max(12,rootBounds.bottom-barBounds.top+12)+'px');
   }
 
@@ -6051,7 +6059,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var inputBar = panel.querySelector('.dt-input-bar');
     if (inputBar && !panel.querySelector('.dt-research-mode-bar')) {
       var modeBar = el('div', { class: 'dt-research-mode-bar', style: 'display:flex;align-items:center;gap:8px;padding:8px 16px 0;flex:0 0 auto;' });
-      modeBar.appendChild(el('span', { text: '研究强度', style: 'font-size:11px;color:rgba(100,130,120,.9);flex:0 0 auto;' }));
+      modeBar.appendChild(el('span', { text: '研究强度', style: 'font-size:11px;color:var(--dt-setting-text,#536c61);flex:0 0 auto;' }));
       var seg = el('div', { style: 'display:inline-flex;gap:2px;padding:2px;border:1px solid rgba(140,196,158,.3);border-radius:12px;background:rgba(140,196,158,.14);' });
       var modes = [
         ['mini', '快速', '约 1 分钟 · 简要结论'],
@@ -6074,7 +6082,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var hint = el('div', {
         class: 'dt-research-mode-hint',
         text: '深度：约 2–3 分钟 · 多角度分析',
-        style: 'font-size:11px;color:rgba(100,130,120,.85);margin-left:4px;flex:1 1 auto;'
+        style: 'font-size:11px;color:var(--dt-setting-text,#536c61);margin-left:4px;flex:1 1 auto;'
       });
       modeBar.appendChild(hint);
       inputBar.parentNode.insertBefore(modeBar, inputBar);
@@ -6086,7 +6094,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     //   模型池与小猫AI 共用 loadCustomModels()，无需重复配置。
     if (inputBar && !panel.querySelector('.dt-research-model-bar')) {
       var modelBar = el('div', { class: 'dt-research-model-bar', style: 'display:flex;align-items:center;gap:8px;padding:6px 16px 0;flex:0 0 auto;flex-wrap:wrap;' });
-      modelBar.appendChild(el('span', { text: '模型', style: 'font-size:11px;color:rgba(100,130,120,.9);flex:0 0 auto;' }));
+      modelBar.appendChild(el('span', { text: '模型', style: 'font-size:11px;color:var(--dt-setting-text,#536c61);flex:0 0 auto;' }));
       var modelSel = el('select', {
         class: 'dt-research-model-select',
         'aria-label': '选择研究模型',
@@ -6104,7 +6112,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var modelHint = el('div', {
         class: 'dt-research-model-hint',
         text: '',
-        style: 'font-size:11px;color:rgba(100,130,120,.85);flex:1 1 auto;min-width:0;'
+        style: 'font-size:11px;color:var(--dt-setting-text,#536c61);flex:1 1 auto;min-width:0;'
       });
       modelBar.appendChild(modelHint);
       inputBar.parentNode.insertBefore(modelBar, inputBar);
@@ -6191,7 +6199,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var active = opts[i]._mode === S.dtResearchMode;
       if (active) activeHint = opts[i]._hint || opts[i].getAttribute('title') || '';
       opts[i].style.cssText = active
-        ? 'border:0;padding:5px 13px;border-radius:9px;font-size:12px;cursor:pointer;background:linear-gradient(135deg,rgba(64,167,116,.95),rgba(82,182,160,.95));color:#fff;font-weight:600;'
+        ? 'border:0;padding:5px 13px;border-radius:9px;font-size:12px;cursor:pointer;background:linear-gradient(135deg,rgba(64,167,116,.95),rgba(82,182,160,.95));color:#08251a;font-weight:600;'
         : 'border:0;padding:5px 13px;border-radius:9px;font-size:12px;cursor:pointer;background:transparent;color:' + (isDark ? 'rgba(214,236,229,.92)' : 'rgba(66,95,85,.95)') + ';';
     }
     var hintEl = panel.querySelector('.dt-research-mode-hint');
@@ -7148,7 +7156,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (isResearchCard(progressCard)) {
           markResearchCardOutcome(progressCard, 'timeout', '\u8d85\u8fc7 45 \u79d2\u672a\u6536\u5230\u65b0\u6570\u636e\uff0c\u672c\u6b21\u7814\u7a76\u5df2\u505c\u6b62\u3002');
         }
-        try { reader.cancel(); } catch (e) {}
+        cancelAiStreamReader(reader);
         if (abortedRef) abortedRef.value = true;
       }
     }, 5000);
@@ -7253,7 +7261,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             if (!isResearchCard(progressCard) && opts.onErrorNoContent) opts.onErrorNoContent();
           }
           if (opts.onResetSending) opts.onResetSending();
-          if (reader) try { reader.cancel(); } catch (e) {}
+          cancelAiStreamReader(reader);
           if (abortedRef) abortedRef.value = true;
           if (doneReceivedRef) doneReceivedRef.value = true;
           // ★ 2026-09-24 修复：error 分支提前 return 后，循环尾守卫（doneReceived 已置位）
@@ -7309,7 +7317,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             markResearchCardOutcome(progressCard, 'timeout', '思考超时，请重试');
           }
         }
-        if (reader) try { reader.cancel(); } catch (e) {}
+        cancelAiStreamReader(reader);
         break;
       }
       var readResult;
@@ -7659,6 +7667,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   }
 
   function closeDeepThinkPage() {
+    _dtFileSelectionSeq += 1;
+    _dtFilesLoading = false;
     var panel = document.getElementById('panelDeepThink');
     if(S._dtReading){S._dtReading.reader.dispose();S._dtReading=null;}
     if(panel)panel.querySelectorAll('.ai-research-card').forEach(function(card){if(card._exportAbort)card._exportAbort.abort();});
@@ -7716,6 +7726,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   // 文件上传状态 (dt 页面)
   var _dtFileData = null;
   var _dtFileSelectionSeq = 0;
+  var _dtFilesLoading = false;
 
   function consumeAiAttachment(fileData) {
     if (!fileData || typeof fileData.onSuccess !== 'function') return;
@@ -7724,6 +7735,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
   async function handleDeepThinkPageSend(text, fileData, sendOptions) {
     sendOptions = sendOptions || {};
+    if (_dtFilesLoading && !sendOptions.preserveDraft) { notify('正在读取研究文件，请稍候再发送'); return; }
     text = String(text || '').trim();
     if (!text && !fileData) return;
     var dtMessagesEl = document.getElementById('dtMessages');
@@ -8326,6 +8338,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // 文件上传（按钮选择 / 粘贴 / 拖拽）
     function clearDtFilePreview() {
       _dtFileSelectionSeq += 1;
+      _dtFilesLoading = false;
       _dtFileData = null;
       if (filePreview) { filePreview.style.display = 'none'; filePreview.innerHTML = ''; }
       if (fileInput) fileInput.value = '';
@@ -8333,13 +8346,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     function renderDtFiles(){
       if(!filePreview)return;filePreview.replaceChildren();var files=Array.isArray(_dtFileData)?_dtFileData:(_dtFileData?[_dtFileData]:[]);
       filePreview.style.display=files.length?'flex':'none';filePreview.style.flexWrap='wrap';
-      files.forEach(function(file,index){var chip=el('div',{class:'ai-file-chip'});if(String(file.type||'').startsWith('image/'))chip.appendChild(el('img',{class:'ai-file-thumb',src:file.dataUrl,alt:''}));chip.appendChild(el('span',{class:'ai-file-info',text:file.name+' · '+Math.round((file.size||file.dataUrl.length*3/4)/1024)+'KB'}));var remove=el('button',{type:'button',class:'ai-file-remove','aria-label':'移除 '+file.name,text:'×'});remove.addEventListener('click',function(){_dtFileSelectionSeq++;var next=files.filter(function(_,i){return i!==index;});_dtFileData=next.length?next:null;renderDtFiles();});chip.appendChild(remove);filePreview.appendChild(chip);});
+      files.forEach(function(file,index){var chip=el('div',{class:'ai-file-chip'});if(String(file.type||'').startsWith('image/'))chip.appendChild(el('img',{class:'ai-file-thumb',src:file.dataUrl,alt:''}));chip.appendChild(el('span',{class:'ai-file-info',text:file.name+' · '+Math.round((file.size||file.dataUrl.length*3/4)/1024)+'KB'}));var remove=el('button',{type:'button',class:'ai-file-remove','aria-label':'移除 '+file.name,text:'×'});remove.addEventListener('click',function(){_dtFileSelectionSeq++;_dtFilesLoading=false;var next=files.filter(function(_,i){return i!==index;});_dtFileData=next.length?next:null;renderDtFiles();});chip.appendChild(remove);filePreview.appendChild(chip);});
     }
     function acceptDtFiles(rawFiles){
       var fileSeq=++_dtFileSelectionSeq,fileLife=S.dtLifecycleId,fileOwner=window.currentUser||'',fileAuthEpoch=readAiAuthEpoch();
+      _dtFilesLoading = true;
       var files=Array.isArray(_dtFileData)?_dtFileData.slice():(_dtFileData?[_dtFileData]:[]),pending=Array.prototype.slice.call(rawFiles||[]),skipped=0;
       function currentFile(){return fileSeq===_dtFileSelectionSeq&&fileLife===S.dtLifecycleId&&fileOwner===(window.currentUser||'')&&fileAuthEpoch===readAiAuthEpoch()&&document.getElementById('panelDeepThink')&&!document.getElementById('panelDeepThink')._dtClosed;}
-      function next(index){if(!currentFile())return;if(index>=pending.length){_dtFileData=files.length?files:null;renderDtFiles();if(skipped)notify('部分文件无法读取或超过研究大小/10个文件限制，其余文件已保留');return;}var file=pending[index],bytes=files.reduce(function(n,f){return n+(f.size||f.dataUrl.length*3/4);},0),ext=String(file.name||'').split('.').pop().toLowerCase();
+      function next(index){if(!currentFile())return;if(index>=pending.length){_dtFilesLoading=false;_dtFileData=files.length?files:null;renderDtFiles();if(skipped)notify('部分文件无法读取或超过研究大小/10个文件限制，其余文件已保留');return;}var file=pending[index],bytes=files.reduce(function(n,f){return n+(f.size||f.dataUrl.length*3/4);},0),ext=String(file.name||'').split('.').pop().toLowerCase();
         if(files.length>=10||bytes+file.size>54*1024*1024||ext==='pdf'&&file.size>8*1024*1024||['docx','xlsx','xls'].includes(ext)&&file.size>20*1024*1024){skipped++;next(index+1);return;}
         var accepted=readAiAttachmentFile(file,function(data){if(!currentFile())return;files.push(data);_dtFileData=files.slice();renderDtFiles();next(index+1);},{isCurrent:currentFile,onError:function(){skipped++;next(index+1);}});if(!accepted){skipped++;next(index+1);}
       }next(0);
@@ -8383,6 +8397,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         // A new research conversation must not inherit a pending attachment
         // from the previous one.
         _dtFileSelectionSeq++;
+        _dtFilesLoading = false;
         _dtFileData = null;
         if (filePreview) { filePreview.style.display = 'none'; filePreview.innerHTML = ''; }
         if (fileInput) fileInput.value = '';
@@ -9201,6 +9216,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var text = String(input.value || '').trim();
     var originalUserText = text;
     if (S._newChatBusy) { notify('正在创建新对话，请稍候'); return; }
+    if (S.deletingConversations.has(S.conversationId)) { notify('正在删除当前对话，请稍候'); return; }
+    if (S._aiChatFilesLoading && input === S.inputEl) { notify('正在读取附件，请稍候再发送'); return; }
     // ★ 多文件：支持数组（最多 10 个），兼容旧的单文件调用
     var fileList = Array.isArray(fileData) ? fileData.slice(0, 10) : (fileData ? [fileData] : []);
     var sendFingerprint = originalUserText + '\u0000' + fileList.map(function(f) {
@@ -10305,21 +10322,21 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (Date.now() - _lastDataTime > idleThreshold) {
           timedOut = true;
           if (controller && controller.abort) { try { controller.abort(); } catch (e) {} }
-          if (reader) { try { reader.cancel(); } catch (e) {} }
+          cancelAiStreamReader(reader);
         }
       }, 5000);
 
       while (true) {
         if ((S._currentReqId !== reqId || !customModelIdentityCurrent(sendIdentity)) || controller.signal.aborted) {
           aborted = true;
-          if (reader) try { reader.cancel(); } catch (e) {}
+          cancelAiStreamReader(reader);
           break;
         }
         
         var readResult;
         try { readResult = await reader.read(); } catch (e) { throw e; }
         if (readResult.done) {
-          if (!S.active) { aborted = true; if (reader) try { reader.cancel(); } catch (e) {} break; }
+          if (!S.active) { aborted = true; cancelAiStreamReader(reader); break; }
           // ★ 修复（M55）：EOF 时 flush 解码器残留与半行缓冲，避免最后事件（done/error）
           // 非换行结尾时被静默丢弃（同文件 DT/Tavily 读取器均有 EOF flush）。
           buffer += decoder.decode();
@@ -11138,7 +11155,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             if (doneReceived) {
               if (!_finalized && aiContent) finishAiMessage(assistantNode, aiContent, aiReasoning, null);
               resetSendingIfCurrent();
-              if (reader) try { reader.cancel(); } catch (e) {}
+              cancelAiStreamReader(reader);
               aborted = true;
               break;
             }
@@ -11160,7 +11177,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             }
             
             resetSendingIfCurrent();
-            if (reader) try { reader.cancel(); } catch (e) {}
+            cancelAiStreamReader(reader);
             aborted = true;
             break;
           }
@@ -11181,7 +11198,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             }
             
             resetSendingIfCurrent();
-            if (reader) try { reader.cancel(); } catch (e) {}
+            cancelAiStreamReader(reader);
             aborted = true;
             break;
           }
@@ -11918,25 +11935,31 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         more.disabled = true;
         try { if (await fetchConversations(true)) renderConversationListStyled(container); }
         catch (_) { if (more.isConnected) { more.disabled = false; more.textContent = '加载失败，点击重试'; } }
+        finally { if (more.isConnected) more.disabled = false; }
       });
       container.appendChild(more);
     }
   }
 
   async function deleteConversation(cid, itemEl) {
-    if (!cid || S._newChatBusy || (S.sending && cid === S.conversationId)) return;
+    if (!cid || S._newChatBusy || S.deletingConversations.has(cid) || (S.sending && cid === S.conversationId)) return;
+    var deletions = S.deletingConversations;
+    deletions.add(cid);
     var deleteLife = S.lifecycleId, deleteOwner = window.currentUser || '', deleteEpoch = readAiAuthEpoch();
     function currentDelete() { return deleteLife === S.lifecycleId && deleteOwner === (window.currentUser || '') && deleteEpoch === readAiAuthEpoch(); }
     try {
       var r = await apiRequest('POST', '/chat/delete', { conversation_id: cid });
       if (!currentDelete()) return;
       if (r && r.ok) {
+        S.conversationRequestId += 1;
         clearAiConversationHistoryCache(cid, 'normal');
+        if (S._forgetAiComposerDraft) S._forgetAiComposerDraft(cid);
         if (itemEl && itemEl.parentElement) itemEl.remove();
         // 从 S.conversations 中移除
         S.conversations = (S.conversations || []).filter(function(c) { return c.conversation_id !== cid; });
         // 如果删除的是当前对话，重置
         if (cid === S.conversationId) {
+          if (S._aiChatFilesCleanup) S._aiChatFilesCleanup();
           abortCurrentRequest('chat'); S.historyRequestId += 1; S._currentReqId = null;
           S._pendingLocalMsgs = [];
           S.conversationId = null;
@@ -11944,18 +11967,20 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           S.oldestCursor = null;
           S.hasMore = false;
           if (S.messagesEl) S.messagesEl.innerHTML = '';
+          if (S._updateContextCapacity) S._updateContextCapacity();
           setAiRootState('ai-empty');
           // ★ 修复：同步清除本地记录的上次会话 id，避免刷新后
           // 用已软删除的旧会话继续发消息（写入被删会话）
           if (typeof writeConvId === 'function') { try { writeConvId(null); } catch (_) {} }
         }
+        if (S.conversationsEl) renderConversationListStyled(S.conversationsEl);
         showConversationList();
       } else {
         if (currentDelete()) notify('删除失败');
       }
     } catch (e) {
       if (currentDelete()) notify('删除失败');
-    }
+    } finally { deletions.delete(cid); }
   }
 
   async function switchConversation(cid) {
@@ -11968,6 +11993,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     hideConversationListPage();
     if (_histBtn) syncAiHeaderButtons(_histBtn, _newBtn);
     if (cid === S.conversationId && S.messages.length > 0) return;
+    if (S._switchAiComposerDraft) S._switchAiComposerDraft(cid);
     if (S._aiChatFilesCleanup) S._aiChatFilesCleanup();
     abortCurrentRequest();
     // ★★ 2026-09-29（审计 S2「切会话后旧流仍继续收尾，污染新会话」）：
@@ -11989,6 +12015,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     S.conversationId = cid;
     writeConvId(cid);
     S.messages = [];
+    if (S._updateContextCapacity) S._updateContextCapacity();
     S.oldestCursor = null;
     S.hasMore = false;
     if (S.messagesEl) {
@@ -12239,26 +12266,38 @@ function showChatMessages() {
     delBtn.addEventListener('click', async function(ev) {
       ev.preventDefault();
       ev.stopPropagation();
-      if (!S.conversationId || S.sending || S._newChatBusy) return;
+      if (!S.conversationId || S.sending || S._newChatBusy || S.deletingConversations.has(S.conversationId)) return;
       var deleteCid = S.conversationId, deleteLife = S.lifecycleId, deleteOwner = window.currentUser || '', deleteEpoch = readAiAuthEpoch();
-      function currentDelete() { return deleteLife === S.lifecycleId && deleteOwner === (window.currentUser || '') && deleteEpoch === readAiAuthEpoch() && (S.conversationId === deleteCid || !S.conversationId); }
+      var recreateSeq = 0;
+      function currentDeleteOwner() { return deleteLife === S.lifecycleId && deleteOwner === (window.currentUser || '') && deleteEpoch === readAiAuthEpoch(); }
+      function currentDelete() { return currentDeleteOwner() && (S.conversationId === deleteCid || !S.conversationId); }
       if (!confirm('确定删除当前对话吗？删除后不可恢复。')) return;
+      var deletions = S.deletingConversations;
+      deletions.add(deleteCid);
       delBtn.disabled = true;
       try {
         var dr = await apiRequest('POST', '/chat/delete', { conversation_id: deleteCid });
-        if (!currentDelete()) return;
+        if (!currentDeleteOwner()) return;
         if (dr && dr.ok) {
+          S.conversationRequestId += 1;
+          S.conversations = (S.conversations || []).filter(function(row) { return row.conversation_id !== deleteCid; });
+          if (S._forgetAiComposerDraft) S._forgetAiComposerDraft(deleteCid);
+          clearAiConversationHistoryCache(deleteCid, 'normal');
+          if (!currentDelete()) return;
           abortCurrentRequest('chat'); S.historyRequestId += 1; S._currentReqId = null;
           S._pendingLocalMsgs = [];
-          clearAiConversationHistoryCache(deleteCid, 'normal'); writeConvId(null);
+          writeConvId(null);
           if (S._aiChatFilesCleanup) S._aiChatFilesCleanup();
           S.messages = [];
           S.oldestCursor = null;
           S.hasMore = false;
           S.conversationId = null;
           if (S.messagesEl) S.messagesEl.innerHTML = '';
+          if (S._updateContextCapacity) S._updateContextCapacity();
           setAiRootState('ai-empty');
           // 开启新对话
+          recreateSeq = S._newChatRequestId = (S._newChatRequestId || 0) + 1;
+          S._newChatBusy = true;
           var r2 = await apiRequest('POST', '/chat/new', null);
           if (!currentDelete()) return;
           if (r2 && r2.ok && r2.data && r2.data.conversation_id) {
@@ -12270,6 +12309,7 @@ function showChatMessages() {
               if (typeof appendEmptyState === 'function') appendEmptyState(S.messagesEl);
             }
           } else {
+            notify('对话已删除，新对话创建失败，请点击“新对话”重试');
             if (S.messagesEl) {
               S.messagesEl.innerHTML = '';
               if (typeof appendEmptyState === 'function') appendEmptyState(S.messagesEl);
@@ -12279,8 +12319,10 @@ function showChatMessages() {
           if (currentDelete()) notify('删除失败');
         }
       } catch (e) {
-        if (currentDelete()) notify('删除失败');
+        if (currentDelete()) notify(recreateSeq ? '对话已删除，新对话创建失败，请点击“新对话”重试' : '删除失败');
       } finally {
+        if (recreateSeq && recreateSeq === S._newChatRequestId) S._newChatBusy = false;
+        deletions.delete(deleteCid);
         delBtn.disabled = false;
       }
     });
@@ -12313,17 +12355,20 @@ function showChatMessages() {
         var r = await apiRequest('POST', '/chat/new', null);
         if (!currentCreate()) return;
         if (r && r.ok && r.data && r.data.conversation_id) {
+          if (S._switchAiComposerDraft) S._switchAiComposerDraft(r.data.conversation_id);
           abortCurrentRequest('chat');
           S.historyRequestId += 1;
           S._pendingLocalMsgs = [];
         // Pending attachments belong to the current conversation only.
         _aiChatFiles = []; _aiChatFileSelectionSeq++;
+        S._aiChatFilesLoading = false;
         if (filePreview) { filePreview.style.display = 'none'; filePreview.innerHTML = ''; }
         if (fileInput) fileInput.value = '';
 
           S.conversationId = r.data.conversation_id;
           writeConvId(r.data.conversation_id);
           S.messages = [];
+          if (S._updateContextCapacity) S._updateContextCapacity();
           S.oldestCursor = null;
           S.hasMore = false;
           if (S.messagesEl) {
@@ -13912,12 +13957,32 @@ function showChatMessages() {
     // 文件上传逻辑（按钮多选 / 粘贴 / 拖拽）—— 支持任意格式与多文件
     var _aiChatFileSelectionSeq = 0;
     var _aiChatFiles = []; // [{ name, type, dataUrl, size }]
+    S._aiChatFilesLoading = false;
+    // Text drafts live only for this open panel and never cross accounts.
+    // Attachments retain the existing clear-on-conversation-change policy.
+    var composerDrafts = new Map();
+    S._switchAiComposerDraft = function(nextCid) {
+      var key = S.conversationId || '', nextKey = nextCid || '';
+      if (key === nextKey) return;
+      if (input.value) { composerDrafts.delete(key); composerDrafts.set(key, { text: input.value, start: input.selectionStart, end: input.selectionEnd }); }
+      else composerDrafts.delete(key);
+      while (composerDrafts.size > 50) composerDrafts.delete(composerDrafts.keys().next().value);
+      var draft = composerDrafts.get(nextKey);
+      input.value = draft ? draft.text : '';
+      if (draft) input.setSelectionRange(draft.start, draft.end);
+      autoresize();
+    };
+    S._forgetAiComposerDraft = function(cid) {
+      composerDrafts.delete(cid || '');
+      if (cid === S.conversationId) { input.value = ''; autoresize(); }
+    };
     S._aiChatFileSelectionVersion = function() { return _aiChatFileSelectionSeq; };
     // ★ 加固：_aiChatFiles 是 renderAiRoot 的闭包变量，closeAiChat 在外部作用域无法直接访问，
     //   此前关闭聊天/登出后附件数组不会被清理（会话残留）。此处把清理函数挂到 S 上，
     //   由 closeAiChat 统一调用；函数每次 renderAiRoot 重建，指向当前闭包，无泄漏。
     S._aiChatFilesCleanup = function() {
       try { _aiChatFiles = []; _aiChatFileSelectionSeq++; } catch (e) {}
+      S._aiChatFilesLoading = false;
       filePreview.style.display = 'none'; filePreview.innerHTML = ''; fileInput.value = '';
     };
     // ★ 2026-09-29（审计 M5「发送失败只回填文字，附件不可恢复」）：
@@ -13932,6 +13997,7 @@ function showChatMessages() {
     };
     function clearAiChatFilePreview() {
       _aiChatFileSelectionSeq++;
+      S._aiChatFilesLoading = false;
       _aiChatFiles = [];
       filePreview.style.display = 'none';
       filePreview.innerHTML = '';
@@ -13943,7 +14009,7 @@ function showChatMessages() {
       if (!files.length) { filePreview.style.display = 'none'; updateInputMetrics(); return; }
       var first = files[0];
       var thumb = String(first.type || '').indexOf('image/') === 0
-        ? el('img', { src: first.dataUrl, class: 'ai-file-thumb' })
+        ? el('img', { src: first.dataUrl, class: 'ai-file-thumb', alt: '' })
         : el('div', { class: 'ai-file-icon' }, '📄');
       var totalKB = 0;
       for (var fi = 0; fi < files.length; fi++) totalKB += Math.round(((files[fi].dataUrl || '').length * 3 / 4) / 1024);
@@ -13951,7 +14017,7 @@ function showChatMessages() {
         ? (first.name + ' (' + Math.max(1, Math.round((first.size || totalKB) / 1024)) + 'KB)')
         : (first.name + ' 等 ' + files.length + ' 个文件（约 ' + totalKB + 'KB）');
       var info = el('span', { class: 'ai-file-info', text: label });
-      var removeBtn = el('button', { type: 'button', class: 'ai-file-remove' }, '×');
+      var removeBtn = el('button', { type: 'button', class: 'ai-file-remove', 'aria-label': '移除所选附件' }, '×');
       removeBtn.addEventListener('click', clearAiChatFilePreview);
       filePreview.appendChild(thumb);
       filePreview.appendChild(info);
@@ -13967,13 +14033,15 @@ function showChatMessages() {
       function currentFiles() { return fileSeq === _aiChatFileSelectionSeq && fileLifecycle === S.lifecycleId &&
         fileOwner === (window.currentUser || '') && fileEpoch === readAiAuthEpoch(); }
       var list = Array.prototype.slice.call(rawFiles || []);
-      if (!list.length) { notify('没有可上传的文件'); return; }
+      if (!list.length) { S._aiChatFilesLoading = false; notify('没有可上传的文件'); return; }
+      S._aiChatFilesLoading = true;
       var attachments = [];
       var totalBytes = 0;
       var skipped = 0;
       function next(i) {
         if (!currentFiles()) return;
         if (i >= list.length) {
+          S._aiChatFilesLoading = false;
           if (!attachments.length) {
             notify(list.length ? '文件都超过 50MB 或数量超限（最多 10 个、合计约 50MB），请选择更小的文件' : '没有可上传的文件');
             return;
@@ -14210,6 +14278,7 @@ function showChatMessages() {
     S.lifecycleId += 1;
     S._newChatRequestId = (S._newChatRequestId || 0) + 1;
     S._newChatBusy = false;
+    S.deletingConversations = new Set();
     S._historyBusy = false;
     S.sendSeq = (S.sendSeq || 0) + 1;
     S.historyRequestId += 1;
@@ -14225,6 +14294,7 @@ function showChatMessages() {
     S._dtCreating = false; S._dtDeleting = false;
     S._dtCreateSeq = (S._dtCreateSeq || 0) + 1;
     _dtFileSelectionSeq += 1;
+    _dtFilesLoading = false;
     S._dtCurrentReqId = null;
     if (S._dtFetchTimeoutTimer) { clearTimeout(S._dtFetchTimeoutTimer); S._dtFetchTimeoutTimer = null; }
     if (S._dtAbortController && S._dtAbortController !== S.deepThinkJob) {
@@ -14273,6 +14343,9 @@ function showChatMessages() {
       try { S._aiChatFilesCleanup(); } catch (eFiles) {}
       S._aiChatFilesCleanup = null;
     }
+    S._aiChatFilesLoading = false;
+    S._switchAiComposerDraft = null; S._forgetAiComposerDraft = null;
+    S._restoreAiChatFiles = null; S._aiChatFileSelectionVersion = null;
     if (S.statusTimer) {
       try { clearInterval(S.statusTimer); } catch (e3) {}
       S.statusTimer = null;

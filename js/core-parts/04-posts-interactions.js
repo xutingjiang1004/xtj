@@ -3419,6 +3419,11 @@
                 var endEl = document.getElementById("postEndDate");
                 var visibilityEl = document.getElementById("postVisibilityFilter");
                 var mineEl = document.getElementById("postOnlyMine");
+                var invalidRange = !!(startEl && endEl && startEl.value && endEl.value && startEl.value > endEl.value);
+                var dateError = document.getElementById('postDateError');
+                if (dateError) dateError.hidden = !invalidRange;
+                [startEl,endEl].forEach(function(field) { if (field) { field.setCustomValidity(invalidRange ? '开始日期不能晚于结束日期' : ''); field.setAttribute('aria-invalid',String(invalidRange)); } });
+                if (invalidRange) { var summary=document.getElementById('postFilterSummary');if(summary)summary.textContent='请调整日期范围';return false; }
                 postSearchState = {
                     keyword: keywordEl ? keywordEl.value.trim() : "",
                     user: userEl ? userEl.value.trim() : "",
@@ -3427,10 +3432,12 @@
                     visibility: visibilityEl ? visibilityEl.value : "all",
                     onlyMine: !!(mineEl && mineEl.checked)
                 };
+                return true;
             }
 
             window.applyPostFilters = function() {
-                updatePostFilterStateFromDom();
+                var previousKeyword = getPostSearchState().keyword;
+                if (updatePostFilterStateFromDom() === false) return;
                 feedPage = 1;
                 feedLoadMoreFailed = false;
                 var errEl = document.getElementById('feedLoadMoreError');
@@ -3439,10 +3446,15 @@
                 if (feed) {
                     feed.innerHTML = getXtjLoadingHtml('内容加载中..', '', 'feed');
                 }
+                if (previousKeyword || getPostSearchState().keyword) {
+                    feedAllPosts=[];feedAllComments=[];feedAllLikes=[];feedLoadedPages=[];feedNextOffset=0;feedNextCursor=null;feedEndReached=false;
+                    markFeedStateChanged();clearFeedCache();return loadFeed(true);
+                }
                 renderFeed({ posts: feedAllPosts, comments: feedAllComments, likes: feedAllLikes });
             };
 
             window.clearPostFilters = function() {
+                var hadKeyword=!!getPostSearchState().keyword;
                 var ids = ["postSearchInput", "postUserFilter", "postStartDate", "postEndDate"];
                 ids.forEach(function(id) {
                     var el = document.getElementById(id);
@@ -3452,6 +3464,8 @@
                 var mineEl = document.getElementById("postOnlyMine");
                 if (visibilityEl) visibilityEl.value = "all";
                 if (mineEl) mineEl.checked = false;
+                ['postStartDate','postEndDate'].forEach(function(id) { var field=document.getElementById(id);if(field){field.setCustomValidity('');field.setAttribute('aria-invalid','false');} });
+                var dateError=document.getElementById('postDateError');if(dateError)dateError.hidden=true;
                 postSearchState = {
                     keyword: "",
                     user: "",
@@ -3470,6 +3484,7 @@
                 if (panel) panel.style.display = "none";
                 var btn = document.getElementById("filterToggleBtn");
                 if (btn) { btn.classList.remove("active"); btn.setAttribute("aria-expanded", "false"); }
+                if(hadKeyword){clearFeedCache();return loadFeed(true);}
                 renderPostFilterUsers();
                 renderFeed({ posts: feedAllPosts, comments: feedAllComments, likes: feedAllLikes });
             };
@@ -3643,6 +3658,7 @@
             }
 
             function persistFeedCacheSnapshotNow() {
+                if(getPostSearchState().keyword)return;
                 try {
                     var firstPage = (feedLoadedPages || []).find(function(page) { return page && page.offset === 0; });
                     var firstPageIds = new Set((firstPage && Array.isArray(firstPage.postIds) ? firstPage.postIds : (feedAllPosts || []).slice(0, FEED_PAGE_SIZE).map(function(post) {
@@ -3879,6 +3895,7 @@
             }
 
             async function fetchFeedPageChunk(offset, requestId, deferRelated) {
+                var searchState=getPostSearchState(),searchKeyword=String(searchState.keyword||'').trim();
                 var relationVersion = feedInteractionMutationVersion;
                 var start = Math.max(0, Number(offset) || 0);
                 var page = Math.floor(start / FEED_PAGE_SIZE);
@@ -3908,7 +3925,7 @@
                     } catch (eUser) { knownUser = ''; }
                     var hasToken = false;
                     try { hasToken = !!(typeof getUserToken === 'function' && getUserToken()); } catch (eTok) { hasToken = false; }
-                    var mayReuseAnonymousEarlyFeed = !knownUser && !hasToken;
+                    var mayReuseAnonymousEarlyFeed = !knownUser && !hasToken && !searchKeyword;
 
                     if (page === 0 && mayReuseAnonymousEarlyFeed && start === 0 && !usedApi && window.__xtjEarlyFeed && window.__xtjEarlyFeed.status === 'ok' && window.__xtjEarlyFeed.data) {
                         var early = window.__xtjEarlyFeed.data;
@@ -3940,6 +3957,12 @@
                         }
                     }
                     var feedPath = '/api/feed?page=' + page + '&limit=' + FEED_PAGE_SIZE;
+                    if(searchKeyword){
+                        var criteria=new URLSearchParams({q:searchKeyword,author:searchState.user||'',visibility:searchState.visibility||'all',only_mine:String(!!searchState.onlyMine),timezone:Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC'});
+                        if(searchState.startDate)criteria.set('from',new Date(searchState.startDate+'T00:00:00').toISOString());
+                        if(searchState.endDate){var until=new Date(searchState.endDate+'T00:00:00');until.setDate(until.getDate()+1);criteria.set('to',until.toISOString());}
+                        feedPath+='&'+criteria.toString();
+                    }
                     if (requestCursor && requestCursor.created_at && requestCursor.id) {
                         feedPath += '&cursor_created_at=' + encodeURIComponent(requestCursor.created_at) +
                             '&cursor_id=' + encodeURIComponent(requestCursor.id) + '&offset=' + start;
@@ -3962,6 +3985,7 @@
                         var apiData = await apiResp.json();
                         if (apiData && apiData.ok) {
                             posts = normalizePosts(apiData.posts || []);
+                            if(searchKeyword)posts=posts.map(function(post){return Object.assign({},post,{__searchKeyword:searchKeyword.toLowerCase()});});
                             comments = apiData.comments || [];
                             likes = apiData.likes || [];
                             endReached = apiData.endReached || false;
@@ -3981,6 +4005,7 @@
                 }
 
                 if (blockedFeedError) throw blockedFeedError;
+                if(searchKeyword&&!usedApi)throw new Error('帖子搜索暂不可用，请重试');
                 if (!usedApi) {
                     // 回退：Supabase 直连（RLS 仅返回公开帖子）
                     // VPN 下 supabase.co 也可能半开连接，必须有硬超时，否则永久转圈
@@ -4916,6 +4941,8 @@
                 var fileInpEl = document.getElementById("fileInp");
                 if (!postInpEl) { showToast("发布框未就绪，请刷新后重试"); return; }
                 var content = postInpEl.value.trim();
+                var submittedText = postInpEl.value;
+                var submittedMediaVersion = window.XtjPostComposerMedia && window.XtjPostComposerMedia.getVersion();
                 var selectedPostMedia = window.XtjPostComposerMedia ? window.XtjPostComposerMedia.getFiles() : Array.from((fileInpEl && fileInpEl.files) || []);
                 try { if (window.XtjPostMedia) window.XtjPostMedia.validateSelection(selectedPostMedia); }
                 catch (selectionError) { showToast(selectionError.message); return; }
@@ -5008,13 +5035,20 @@
                     touchUserSession(false);
                     if (window.XtjPostOriginals) window.XtjPostOriginals.prepare(selectedPostMedia, insertRes.data);
                     var publishMotion = window.XtjPostPublishMotion && window.XtjPostPublishMotion.capture(selectedPostMedia, plainText, function() { return currentUser === flight.owner && _authStateEpoch === flight.epoch; });
-                    resetPostComposer();
-                    // ★ 2026-09-27 修复（审计 P13-②：失败仍 resetPostPreview 导致
-                    //   "显示 0 个文件但文件还在"）：把预览清理移到**发布成功之后**。
-                    //   成功时 resetPostComposer 已清空 fileInp，这里同步回收预览界面与 blob URL；
-                    //   失败时（下方 catch/insertRes.!ok 分支）保留预览，用户可直接改文案重试，
-                    //   不必重新选文件。重新选择文件时 setPostPreview 会先 revoke 旧 blob，无泄漏。
-                    if (typeof window.resetPostPreview === "function") window.resetPostPreview();
+                    var textUnchanged = postInpEl.value === submittedText;
+                    if (textUnchanged) postInpEl.value = '';
+                    var mediaUnchanged = window.XtjPostComposerMedia
+                        ? window.XtjPostComposerMedia.getVersion() === submittedMediaVersion
+                        : selectedPostMedia.every(function(item,index) { return fileInpEl && fileInpEl.files[index] === item; }) && (!fileInpEl || fileInpEl.files.length === selectedPostMedia.length);
+                    if (mediaUnchanged) {
+                        if (fileInpEl) fileInpEl.value = '';
+                        if (window.XtjPostComposerMedia) window.XtjPostComposerMedia.clear();
+                        if (typeof window.resetPostPreview === 'function') window.resetPostPreview();
+                    }
+                    if (textUnchanged && visibilityEl && visibilityEl.value === visibility) visibilityEl.value = window.__xtjDefaultPostVisibility || 'public';
+                    if (textUnchanged && JSON.stringify(postLocationData || null) === JSON.stringify(publishLocation)) resetPostLocation();
+                    // Only the submitted media snapshot is cleared above.
+                    // Failed submissions retain their preview and retry files.
                     showToast(insertRes.fallback ? "发布成功，已兼容旧数据结构" : "发布成功");
                     if (!insertPublishedPostIntoFeed(insertRes.data, !!publishMotion)) {
                         clearFeedCache();
@@ -5074,7 +5108,7 @@
                     } catch (_ef) {}
                 }
                 bindPostFilterEvents();
-                if (!forceRefresh) {
+                if (!forceRefresh && !getPostSearchState().keyword) {
                     try {
                         var cached = window.safeStorage.get(CACHE_KEY);
                         if (cached) {
@@ -5191,6 +5225,11 @@
                 } catch (e) {
                     if (requestId !== feedLoadRequestId) return;
                     console.error(e);
+                    if (getPostSearchState().keyword && feed) {
+                        var searchRetry=document.createElement('button');searchRetry.id='feedBootError';searchRetry.type='button';searchRetry.className='loading feed-load-more-error';
+                        searchRetry.textContent='搜索失败，点击重试';searchRetry.onclick=function(){loadFeed(true);};feed.replaceChildren(searchRetry);
+                        return;
+                    }
                     var cacheFallbackShown = !!(hadLiveFeed && feed && feed.querySelector('.post'));
                     var quotaLimited = e && e.code === 'egress_quota_exceeded';
                     if (!hadLiveFeed && feed) feed.innerHTML = '<div class="loading" style="color:#ff3b60;">' + escapeHtml(quotaLimited ? e.message : '加载失败，请刷新重试') + '</div>';

@@ -2468,6 +2468,7 @@ function isAdmin() {
                 if (userFilter && String(post.user_name || "").toLowerCase().indexOf(userFilter) < 0) return false;
                 if ((state.startDate || state.endDate) && !isPostInDateRange(post, state.startDate, state.endDate)) return false;
                 if (!keyword) return true;
+                if (post.__searchKeyword === keyword) return true;
                 var postContent = String(post.content || "").toLowerCase();
                 var postUser = String(post.user_name || "").toLowerCase();
                 var dateText = toLocalDateKey(post.created_at);

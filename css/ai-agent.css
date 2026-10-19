@@ -2984,7 +2984,7 @@ html[data-xtj-motion="off"] .ai-chat-input-bar {
    以卡片浮层展示（非全屏覆盖），滑入/滑出带缓动，关闭或选中会话后回到聊天区。 */
 .ai-conv-page-shell {
   position: absolute;
-  inset: 0;
+  inset: var(--ai-header-height, 56px) 0 0;
   z-index: 60;
   display: flex;
   align-items: stretch;
@@ -5434,6 +5434,14 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
   white-space: nowrap;
   color: rgba(70, 95, 85, .9);
   font-size: 11px;
+}
+[data-theme="dark"] .ai-file-info,
+.dark .ai-file-info {
+  color: #d6ece5;
+}
+[data-theme="dark"] #panelDeepThink,
+.dark #panelDeepThink {
+  --dt-setting-text: #b8d6cb;
 }
 .ai-file-remove {
   flex-shrink: 0;

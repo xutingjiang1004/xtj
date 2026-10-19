@@ -5914,6 +5914,12 @@
             box-shadow: inset 0 1px 0 rgba(255,255,255,0.45);
         }
         .photo-wall-sync-status { display: none; }
+        .photo-wall-sync-status.is-error { display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:8px 12px; color:var(--text-main); background:var(--bg-card); border:1px solid var(--border-color); border-radius:10px; }
+        .photo-wall-sync-status button { font:inherit; color:inherit; background:transparent; border:1px solid currentColor; border-radius:7px; padding:5px 9px; }
+        .post-date-label { display:flex; flex:1; min-width:0; flex-direction:column; gap:4px; font-size:12px; }
+        .post-date-label .post-filter-input { flex:0 0 auto; width:100%; min-width:0; }
+        #postDateError { color:#ac3434; font-size:12px; }
+        [data-theme="dark"] #postDateError { color:#ffabab; }
         @keyframes pwSyncPulse {
             0% { box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.35); }
             70% { box-shadow: 0 0 0 8px rgba(56, 189, 248, 0); }
@@ -16827,6 +16833,12 @@ html.perf-lite .ai-chat-bubble {
 #panelChat #dockChatContainer .chat-msg.has-image { width: min(200px,65vw); }
 #panelChat #dockChatContainer .chat-msg .msg-time,
 #panelChat #dockChatContainer .chat-msg .msg-read-status { color: var(--chat-muted) !important; opacity: 1 !important; }
+[data-theme="dark"] #panelChat .chat-file-link { color:#b3f3cc; }
+[data-theme="dark"] #panelChat #dockChatContainer .msg-time,
+[data-theme="dark"] #panelChat #dockChatContainer .msg-read-status,
+[data-theme="dark"] #panelChat #dockChatContainer .chat-msg .msg-time,
+[data-theme="dark"] #panelChat #dockChatContainer .chat-msg .msg-read-status { color:#bed1c6 !important; opacity:1 !important; }
+#panelChat .chat-msg-row:focus-visible, #dockChatMessages:focus-visible { outline:2px solid var(--primary,#287b55); outline-offset:-2px; border-radius:10px; }
 #panelChat #dockChatContainer .chat-msg .msg-fail-mark { color: #b84c4c; }
 #panelChat #dockChatContainer .chat-history-panel { background: var(--chat-surface); border: 1px solid var(--chat-line); backdrop-filter: none; -webkit-backdrop-filter: none; box-shadow: 0 12px 32px rgba(30,60,45,.08); }
 
