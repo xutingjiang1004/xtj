@@ -8445,6 +8445,13 @@ function renderProfileActivityList(kind) {
                     return !session.isClosed && requestId === session.requestId &&
                         postActionIdentityCurrent(session.identity) && session.output.isConnected !== false;
                 }
+                var receivedContent = false, reachedDone = false, failed = false;
+                function showFailure() {
+                    if (!isCurrentRequest() || failed) return;
+                    failed = true;
+                    session.output.textContent = receivedContent ? session.output.textContent + '\n（回复中断，点击锐评重试）' : 'AI 暂时不可用。';
+                    session.output.classList.add('is-error');
+                }
                 session.output.textContent = 'AI 正在锐评...';
                 session.output.classList.remove('is-error');
                 session.controller.abort();
@@ -8456,43 +8463,51 @@ function renderProfileActivityList(kind) {
                 }).then(function(reader) {
                     if (!reader) return;
                     var decoder = new TextDecoder(), buffer = '';
-                    var receivedContent = false;
+                    function consumeEvent(event) {
+                        if (!isCurrentRequest() || failed) return;
+                        var lines = event.split('\n'), dataLines = [], eventType = '';
+                        lines.forEach(function(line) {
+                            if (line.indexOf('data:') === 0) dataLines.push(line.slice(5).replace(/^ /, ''));
+                            else if (line.indexOf('event:') === 0) eventType = line.slice(6).trim();
+                        });
+                        if (eventType === 'done') { reachedDone = true; return; }
+                        var data; try { data = JSON.parse(dataLines.join('\n')); } catch (_) { return; }
+                        if (!data || typeof data !== 'object') return;
+                        if (data.error) { showFailure(); return; }
+                        if (typeof data.content === 'string' && data.content) {
+                            receivedContent = true;
+                            session.conversationId = data.conversation_id || session.conversationId;
+                            session.output.textContent = eventType === 'delta'
+                                ? (session.output.textContent === 'AI 正在锐评...' ? '' : session.output.textContent) + data.content : data.content;
+                        }
+                    }
+                    function consumeBuffer(final) {
+                        // Keep a trailing CR until its possible LF arrives in
+                        // the next network chunk; parse the final complete JSON too.
+                        buffer = buffer.replace(/\r\n/g, '\n').replace(/\r(?!$)/g, '\n');
+                        if (final) buffer = buffer.replace(/\r$/, '\n');
+                        var events = buffer.split('\n\n'); buffer = events.pop();
+                        events.forEach(consumeEvent);
+                        if (final && buffer.trim()) { consumeEvent(buffer); buffer = ''; }
+                    }
                     function read() { return reader.read().then(function(chunk) {
                         if (!isCurrentRequest()) {
                             return reader.cancel().catch(function() {});
                         }
                         if (chunk.done) {
-                            if (!receivedContent) {
-                                session.output.textContent = 'AI 暂时不可用。';
-                                session.output.classList.add('is-error');
-                            }
+                            buffer += decoder.decode();
+                            consumeBuffer(true);
+                            if (!receivedContent || !reachedDone) showFailure();
                             return;
                         }
                         buffer += decoder.decode(chunk.value, { stream: true });
-                        var events = buffer.split('\n\n'); buffer = events.pop();
-                        events.forEach(function(event) {
-                            var dataLine = event.split('\n').filter(function(line) { return line.indexOf('data: ') === 0; })[0];
-                            if (!dataLine || session.isClosed || requestId !== session.requestId) return;
-                            var data; try { data = JSON.parse(dataLine.slice(6)); } catch (e) { return; }
-                            if (data.content) {
-                                receivedContent = true;
-                                session.conversationId = data.conversation_id || session.conversationId;
-                                // 按 event: 行判定增量/整段，而不是对整块字符串做 indexOf 前缀匹配。
-                                // 后者在事件块前有 SSE 心跳注释(: ...)或空白行时会误判为整段覆盖，
-                                // 导致锐评"闪一下"或只剩半句。
-                                var eventLine = event.split('\n').filter(function(line) { return line.indexOf('event: ') === 0; })[0];
-                                var isDeltaEvent = !!(eventLine && eventLine.slice(7).trim() === 'delta');
-                                session.output.textContent = isDeltaEvent ? (session.output.textContent === 'AI 正在锐评...' ? '' : session.output.textContent) + data.content : data.content;
-                            }
-                            if (data.error) { session.output.textContent = 'AI 暂时不可用。'; session.output.classList.add('is-error'); }
-                        });
+                        consumeBuffer(false);
                         return read();
                     }); }
-                    return read();
+                    return read().finally(function() { try { reader.releaseLock(); } catch (_) {} });
                 }).catch(function(error) {
-                    if (error.name !== 'AbortError' && isCurrentRequest()) {
-                        session.output.textContent = 'AI 暂时不可用。';
-                        session.output.classList.add('is-error');
+                    if (isCurrentRequest() && (error.name !== 'AbortError' || !session.controller.signal.aborted)) {
+                        showFailure();
                     }
                 });
             }
@@ -17200,22 +17215,29 @@ function renderProfileActivityList(kind) {
                 host.addEventListener('pointerup',function(e){finish(e,false);});host.addEventListener('pointercancel',function(e){finish(e,true);});
             }
             window.openChatGallery=function(src,trigger){
-                var peer=dockChatActiveUser,owner=window.currentUser,opener=trigger;
+                var peer=dockChatActiveUser,owner=window.currentUser,epoch=_authStateEpoch,opener=trigger;
                 if(!peer || !owner)return;
                 var items=(_chatCache[getDockChatCacheKey(peer)]||[]).filter(function(m){var media=resolveDockChatMedia(m);return media && media.kind==='image' && !(getDMMessagePayload(m)||{}).withdrawn;}).map(function(m){return {id:m.id,url:sanitizeUrl(resolveDockChatMedia(m).src),date:m.created_at};});
                 var row=trigger.closest('.chat-msg-row'),current=items.findIndex(function(i){return row && i.id===row.dataset.messageId;});if(current<0)current=0;
                 var old=document.getElementById('chatGallery');if(old)old.__close ? old.__close() : old.remove();
                 var overlay=document.createElement('section');overlay.id='chatGallery';overlay.className='chat-gallery';overlay.setAttribute('role','dialog');overlay.setAttribute('aria-modal','true');overlay.setAttribute('aria-label','聊天图片');
                 overlay.innerHTML='<header><button type="button" data-gallery="close" aria-label="关闭图片">×</button><span class="chat-gallery-title"></span><button type="button" data-gallery="save">保存</button></header><div class="chat-gallery-stage"><img alt="聊天图片" draggable="false" /></div><footer><button type="button" data-gallery="previous" aria-label="上一张图片">‹</button><button type="button" data-gallery="jump">定位原消息</button><button type="button" data-gallery="next" aria-label="下一张图片">›</button></footer>';
-                var img=overlay.querySelector('img'),scale=1,pointer=null,panX=0,panY=0,pointers=new Map(),pinch=null;var closed=false,cursor=null,hasMore=true,loading=false;
+                var img=overlay.querySelector('img'),scale=1,pointer=null,panX=0,panY=0,pointers=new Map(),pinch=null;var closed=false,cursor=null,hasMore=true,loading=false,saveController=null,historyController=null;
+                function currentGallery(){return !closed&&owner===window.currentUser&&epoch===_authStateEpoch&&peer===dockChatActiveUser;}
                 function paint(){if(!items[current])return;if(img.getAttribute('src')!==items[current].url){scale=1;panX=panY=0;pointers.clear();pinch=null;pointer=null;img.style.transform='';img.src=items[current].url;}overlay.querySelector('.chat-gallery-title').textContent=(current+1)+' / '+items.length+' · '+new Date(items[current].date).toLocaleDateString();overlay.querySelector('[data-gallery="previous"]').disabled=current===0 && (!hasMore || loading);overlay.querySelector('[data-gallery="next"]').disabled=current===items.length-1;}
-                function close(){closed=true;window.removeEventListener('keydown',keys);overlay.remove();if(opener && opener.isConnected)opener.focus?.({preventScroll:true});}
+                function close(){closed=true;if(saveController)saveController.abort();if(historyController)historyController.abort();window.removeEventListener('keydown',keys);overlay.remove();if(opener && opener.isConnected)opener.focus?.({preventScroll:true});}
                 function keys(event){if(event.key==='Escape')close();else if(event.key==='ArrowLeft')move(-1);else if(event.key==='ArrowRight')move(1);else if(event.key==='Tab'){var buttons=Array.from(overlay.querySelectorAll('button:not(:disabled)'));var first=buttons[0],last=buttons[buttons.length-1];if(event.shiftKey && document.activeElement===first){event.preventDefault();last.focus();}else if(!event.shiftKey && document.activeElement===last){event.preventDefault();first.focus();}}}
-                function move(delta){if(owner!==window.currentUser || peer!==dockChatActiveUser){close();return;}if(delta<0 && current===0 && hasMore){loadOlder(true);return;}current=Math.max(0,Math.min(items.length-1,current+delta));paint();}
+                function move(delta){if(!currentGallery()){close();return;}if(delta<0 && current===0 && hasMore){loadOlder(true);return;}current=Math.max(0,Math.min(items.length-1,current+delta));paint();}
                 overlay.addEventListener('click',async function(event){var b=event.target.closest('[data-gallery]');if(!b)return;var action=b.dataset.gallery;
                     if(action==='close')close();if(action==='previous')move(-1);if(action==='next')move(1);
                     if(action==='jump'){var id=items[current].id;close();jumpChatHistory(peer,id);}
-                    if(action==='save'){b.disabled=true;try{var response=await fetch(items[current].url);if(!response.ok)throw Error();var blob=await response.blob();if(owner!==window.currentUser || closed)return;var url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;var extension={'image/png':'png','image/webp':'webp','image/gif':'gif','image/avif':'avif','image/heic':'heic','image/svg+xml':'svg'}[blob.type]||'jpg';a.download='chat-photo-'+current+'.'+extension;a.click();setTimeout(function(){URL.revokeObjectURL(url);},30000);}catch(_){showToast('图片暂时无法保存，请重试');}finally{b.disabled=false;}}
+                    if(action==='save'){
+                        if(!currentGallery()||!items[current]||saveController)return;
+                        var selectedUrl=items[current].url,selectedIndex=current,controller=new AbortController();saveController=controller;b.disabled=true;
+                        try{var response=await fetch(selectedUrl,{signal:controller.signal});if(!response.ok)throw Error();var blob=await response.blob();if(!currentGallery()||controller.signal.aborted)return;var url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;var extension={'image/png':'png','image/webp':'webp','image/gif':'gif','image/avif':'avif','image/heic':'heic','image/svg+xml':'svg'}[blob.type]||'jpg';a.download='chat-photo-'+selectedIndex+'.'+extension;a.click();setTimeout(function(){URL.revokeObjectURL(url);},30000);}
+                        catch(_){if(currentGallery()&&!controller.signal.aborted)showToast('图片暂时无法保存，请重试');}
+                        finally{if(saveController===controller){saveController=null;if(b.isConnected)b.disabled=false;}}
+                    }
                 });
                 img.addEventListener('error',function(){if(!closed)showToast('图片暂时不可用，请返回会话刷新');});
                 var stage=overlay.querySelector('.chat-gallery-stage');
@@ -17243,9 +17265,10 @@ function renderProfileActivityList(kind) {
                 stage.addEventListener('wheel',function(e){e.preventDefault();zoom(scale*(e.deltaY<0?1.12:1/1.12));},{passive:false});
                 overlay.__close=close;document.body.appendChild(overlay);window.addEventListener('keydown',keys);paint();overlay.querySelector('[data-gallery="close"]').focus();
                 // Load one authorized metadata page at a time, retaining the displayed image and zoom.
-                async function loadOlder(moveBack){if(loading || !hasMore || closed)return;loading=true;paint();var active=items[current]?.id;
-                    try{var result=await chatFeatureApi('history/search?peer='+encodeURIComponent(peer)+'&kind=image&limit=50'+(cursor?'&cursor_at='+encodeURIComponent(cursor.at)+'&cursor_id='+encodeURIComponent(cursor.id):''));
-                        if(closed || owner!==window.currentUser || peer!==dockChatActiveUser)return;
+                async function loadOlder(moveBack){if(loading || !hasMore || !currentGallery())return;loading=true;paint();var active=items[current]?.id,controller=new AbortController();historyController=controller;
+                    try{var result=await chatFeatureApi('history/search?peer='+encodeURIComponent(peer)+'&kind=image&limit=50'+(cursor?'&cursor_at='+encodeURIComponent(cursor.at)+'&cursor_id='+encodeURIComponent(cursor.id):''),null,{signal:controller.signal});
+                        if(!currentGallery())return;
+                        var selected=items[current]?.id,moveBackCurrent=moveBack&&selected===active;active=selected;
                         (result.items||[]).forEach(function(item){
                             var media=item.payload && item.payload.media,url=media && sanitizeUrl(media.url);
                             if(!url)return;
@@ -17257,8 +17280,8 @@ function renderProfileActivityList(kind) {
                         });
                         items.sort(function(a,b){return Date.parse(a.date)-Date.parse(b.date);});current=Math.max(0,items.findIndex(function(i){return i.id===active;}));
                         hasMore=!!result.has_more && !!result.next_cursor_id;cursor={at:result.next_cursor_at,id:result.next_cursor_id};
-                        if(moveBack && current>0)current--;
-                    }catch(_){showToast('历史图片加载失败，请重试');}finally{loading=false;if(!closed)paint();}
+                        if(moveBackCurrent && current>0)current--;
+                    }catch(_){if(currentGallery()&&!controller.signal.aborted)showToast('历史图片加载失败，请重试');}finally{if(historyController===controller){historyController=null;loading=false;if(currentGallery())paint();}}
                 }
                 loadOlder(false);
             };

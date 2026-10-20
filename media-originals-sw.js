@@ -8,6 +8,7 @@ const ORIGINAL_MAX_FILE_BYTES = 64 * 1024 * 1024;
 const ORIGINAL_MAX_AGE = 30 * 86400000;
 let originalGeneration = 0, originalWrites = Promise.resolve();
 let originalSeeds = Promise.resolve(), originalSeedPending = 0;
+let originalSeedController = null;
 function originalKey(request) {
   const url = new URL(request.url);
   if (request.method !== 'GET' || url.origin !== self.location.origin || request.headers.has('range')) return null;
@@ -89,6 +90,7 @@ self.addEventListener('message', event => {
   if (!source?.url || new URL(source.url).origin !== self.location.origin) return;
   if (event.data?.type === 'XTJ_CLEAR_ORIGINAL_MEDIA') {
     originalGeneration++;
+    if (originalSeedController) originalSeedController.abort();
     event.waitUntil(originalWrite(() => caches.delete(ORIGINAL_CACHE)).catch(() => {}).then(() => event.ports?.[0]?.postMessage({ ok: true })));
   }
   if (event.data?.type === 'XTJ_SEED_ORIGINAL_MEDIA') {
@@ -103,7 +105,16 @@ self.addEventListener('message', event => {
       if (!key || new URL(key.url).search) return false;
       // A new HEAD checks current ownership, deletion and the exact stored
       // version without transferring the original body back to its uploader.
-      const head = await fetch(new Request(key, { method: 'HEAD', credentials: 'include', cache: 'no-store', redirect: 'error' }));
+      const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 15000);
+      originalSeedController = controller;
+      let head;
+      try {
+        head = await fetch(new Request(key, { method: 'HEAD', credentials: 'include', cache: 'no-store', redirect: 'error', signal: controller.signal }));
+      } finally {
+        clearTimeout(timer);
+        if (originalSeedController === controller) originalSeedController = null;
+      }
+      if (generation !== originalGeneration || controller.signal.aborted) return false;
       if (!head.ok || Number(head.headers.get('Content-Length')) !== blob.size || !/^image\//i.test(head.headers.get('Content-Type') || '')) return false;
       if (!await XtjMediaDigest.matches(blob, head.headers.get('ETag'))) return false;
       const headers = new Headers(head.headers);

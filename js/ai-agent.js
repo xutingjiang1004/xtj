@@ -11718,7 +11718,6 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             .replace(/【图片 OCR[\s\S]*?(?=【|$)/g, ' ')
             .replace(/!\[[^\]]*\]\(data:[^)]+\)/g, ' ')
             .replace(/data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=\s]+/g, ' ')
-            .replace(/\s+/g, ' ')
             .trim();
           var imgMarkdown = atts.map(function(a, i) { return '![图片' + (i + 1) + '](' + a.data_url + ')'; }).join('\n');
           m.content = (visualText ? visualText + '\n' : '') + imgMarkdown;

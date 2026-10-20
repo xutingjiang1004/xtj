@@ -450,6 +450,8 @@
 
   var loadMoreObserver = null;
   var loadingMore = false;
+  var loadMoreGeneration = 0;
+  var loadMoreScope = '';
   // ★ 修复：防级联防抖——渲染重建哨兵后若仍在视口（例如分组视图下新页照片
   // 都不属于当前分组，网格高度不变），300ms 内不自动加载，改为点击触发，
   // 避免"IO 立即回调 → 再翻页 → 再重建 → 再回调"的无限翻页循环。
@@ -488,8 +490,11 @@
 
   async function showNextPhotoBatch(){
     if (loadingMore) return;
+    var generation = ++loadMoreGeneration;
+    var owner = window.currentUser, epoch = window.__xtjGetAuthEpoch ? window.__xtjGetAuthEpoch() : 0;
     var start = photoBatchStart;
     var viewKey = currentPhotoWallViewKey();
+    function current(){return generation === loadMoreGeneration && photoBatchStart === start && viewKey === currentPhotoWallViewKey() && owner === window.currentUser && epoch === (window.__xtjGetAuthEpoch ? window.__xtjGetAuthEpoch() : 0);}
     var sorted = sortPhotoWallData(window.photoWallData || [], window.pwSortKey || 'date_desc');
     var viewPhotos = currentPhotoWallList(sorted);
     if (viewPhotos.length > start + MAX_DOM_PHOTOS) {
@@ -505,12 +510,12 @@
       // Bound each click so sparse groups cannot keep the UI busy indefinitely.
       for (var attempt = 0; attempt < 30; attempt++) {
         await window.loadMorePhotos();
-        if (viewKey !== currentPhotoWallViewKey()) return;
+        if (!current()) return;
         sorted = sortPhotoWallData(window.photoWallData || [], window.pwSortKey || 'date_desc');
         viewPhotos = currentPhotoWallList(sorted);
         if (viewPhotos.length > start + MAX_DOM_PHOTOS || !window.hasMorePhotos()) break;
       }
-      if (viewKey !== currentPhotoWallViewKey()) return;
+      if (!current()) return;
       // Only advance when there is at least one photo in the requested batch.
       // A final server page may contain only filtered videos/deleted rows, so
       // `viewPhotos.length > start` alone can land on a blank batch.
@@ -523,9 +528,10 @@
         resetSentinelText(document.getElementById('photoGrid'), stillHasMore ? '当前相册暂无更多照片，点击继续查找' : '没有更多照片', stillHasMore);
       }
     } catch (err) {
+      if (!current()) return;
       resetSentinelText(document.getElementById('photoGrid'), err && err.retryable === false ? err.message : '加载失败，点击重试', !(err && err.retryable === false));
     } finally {
-      loadingMore = false;
+      if (generation === loadMoreGeneration) loadingMore = false;
     }
   }
 
@@ -563,7 +569,10 @@
     };
 
     function doLoadMore(){
-      if (loadingMore) return;
+      if (loadingMore || sentinel.isConnected === false) return;
+      var generation = ++loadMoreGeneration, viewKey = currentPhotoWallViewKey(), batchStart = photoBatchStart;
+      var owner = window.currentUser, epoch = window.__xtjGetAuthEpoch ? window.__xtjGetAuthEpoch() : 0;
+      function current(){return generation === loadMoreGeneration && photoBatchStart === batchStart && viewKey === currentPhotoWallViewKey() && owner === window.currentUser && epoch === (window.__xtjGetAuthEpoch ? window.__xtjGetAuthEpoch() : 0);}
       var sortedBefore = sortPhotoWallData(window.photoWallData || [], window.pwSortKey || 'date_desc');
       var visibleBefore = currentPhotoWallList(sortedBefore);
       if (visibleBefore.length > photoBatchStart + MAX_DOM_PHOTOS) {
@@ -574,6 +583,7 @@
       loadingMore = true;
       setSentinelText('加载中...', false);
       Promise.resolve(window.loadMorePhotos()).then(function(more){
+        if (!current()) return;
         if (more && more.length) {
           // ★ 修复：判断"新加载的照片里是否包含当前分组日期的照片"。
           // 之前用 groupByDate(more) 判断——groupByDate 把新页照片按各自日期分组，
@@ -608,6 +618,7 @@
           if (!hasNextPage && !(window.photoWallData || []).length) renderSorted([], true);
         }
       }).catch(function(err){
+        if (!current()) return;
         var isAbort = !!(err && (err.name === 'AbortError' || /abort/i.test(String(err && err.code || '')) || /abort/i.test(String(err && err.message || ''))));
         if (isAbort) {
           // 被刷新/视图切换/新请求取代：静默恢复，不误报"加载失败"
@@ -620,7 +631,7 @@
           if (err && err.retryable === false && loadMoreObserver) loadMoreObserver.disconnect();
         }
       }).finally(function(){
-        loadingMore = false;
+        if (generation === loadMoreGeneration) loadingMore = false;
       });
     }
 
@@ -816,6 +827,12 @@
   }
 
   function renderSorted(photos, preserveBatch){
+    // Invalidate previous views while allowing this page's own pruning refresh
+    // to keep its pending batch navigation alive.
+    var scope = JSON.stringify([window.currentUser || '', window.__xtjGetAuthEpoch ? window.__xtjGetAuthEpoch() : 0, currentPhotoWallViewKey()]);
+    if (scope !== loadMoreScope) loadMoreGeneration++;
+    loadMoreScope = scope;
+    loadingMore = false;
     if (!window.currentUser) {
       window.pwCurrentSortedPhotos = [];
       if (window.renderPhotoWallLockedState) window.renderPhotoWallLockedState();
@@ -829,9 +846,6 @@
     if (!grid) return;
     if (!preserveBatch) photoBatchStart = 0;
     else photoBatchStart = Math.min(photoBatchStart, Math.max(0, Math.floor((currentPhotoWallList(photos).length - 1) / MAX_DOM_PHOTOS) * MAX_DOM_PHOTOS));
-    // ★ 修复 C3：每次重渲染复位 loadingMore，避免分组切换/返回相册后
-    // 旧哨兵的 loadingMore=true 残留，导致新分组哨兵首次 intersect 不触发加载。
-    loadingMore = false;
     var toggle = document.getElementById('pwAlbumToggle');
     if (toggle) {toggle.classList.toggle('active', !!window.pwAlbumView);toggle.setAttribute('aria-pressed',String(!!window.pwAlbumView));}
     grid.classList.toggle('pw-album-overview',!!window.pwAlbumView&&!window.pwAlbumGroupKey);

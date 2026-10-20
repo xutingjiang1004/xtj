@@ -36,10 +36,27 @@ test('post tools guard against duplicate UI elements', () => {
   assert.match(core, /var existing = host\.querySelector\('\.post-tool-critique'\)/);
 });
 
-test('post chat SSE correctly detects empty streams to avoid infinite loading', () => {
-  assert.match(core, /var receivedContent = false;/);
-  assert.match(core, /if \(!receivedContent\)/);
-  assert.match(core, /receivedContent = true;/);
+test('post chat SSE correctly detects empty streams to avoid infinite loading', {timeout:45000}, async () => {
+  const { postBrowserFixture } = require('./helpers/post-browser-fixture');
+  const fixture = await postBrowserFixture({counts:[1]});
+  try {
+    const replies = ['', 'event:done\ndata:{}\n\n', 'event:message\ndata:{"content":"完整锐评"}\n\nevent:done\ndata:{}'];
+    let calls = 0;
+    await fixture.page.route('**/api/agent/post-chat/stream', route => {
+      const body = replies[calls++];
+      return route.fulfill({contentType:'text/event-stream', body});
+    });
+    for (let i = 0; i < 2; i++) {
+      await fixture.page.evaluate(id => openPostAiChat(id), fixture.posts[0].id);
+      await fixture.page.waitForSelector('.post-tool-critique.is-error');
+      assert.equal(await fixture.page.locator('.post-tool-critique').textContent(), 'AI 暂时不可用。');
+    }
+    await fixture.page.evaluate(id => openPostAiChat(id), fixture.posts[0].id);
+    await fixture.page.waitForFunction(() => document.querySelector('.post-tool-critique')?.textContent === '完整锐评');
+    assert.equal(await fixture.page.locator('.post-tool-critique').evaluate(node => node.classList.contains('is-error')), false);
+    assert.equal(calls, 3);
+    assert.deepEqual(fixture.errors, []);
+  } finally { await fixture.close(); }
 });
 
 test('server post chat stream avoids premature abort on req.close', () => {
