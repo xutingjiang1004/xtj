@@ -2964,6 +2964,13 @@
                     return !session.isClosed && requestId === session.requestId &&
                         postActionIdentityCurrent(session.identity) && session.output.isConnected !== false;
                 }
+                var receivedContent = false, reachedDone = false, failed = false;
+                function showFailure() {
+                    if (!isCurrentRequest() || failed) return;
+                    failed = true;
+                    session.output.textContent = receivedContent ? session.output.textContent + '\n（回复中断，点击锐评重试）' : 'AI 暂时不可用。';
+                    session.output.classList.add('is-error');
+                }
                 session.output.textContent = 'AI 正在锐评...';
                 session.output.classList.remove('is-error');
                 session.controller.abort();
@@ -2975,43 +2982,51 @@
                 }).then(function(reader) {
                     if (!reader) return;
                     var decoder = new TextDecoder(), buffer = '';
-                    var receivedContent = false;
+                    function consumeEvent(event) {
+                        if (!isCurrentRequest() || failed) return;
+                        var lines = event.split('\n'), dataLines = [], eventType = '';
+                        lines.forEach(function(line) {
+                            if (line.indexOf('data:') === 0) dataLines.push(line.slice(5).replace(/^ /, ''));
+                            else if (line.indexOf('event:') === 0) eventType = line.slice(6).trim();
+                        });
+                        if (eventType === 'done') { reachedDone = true; return; }
+                        var data; try { data = JSON.parse(dataLines.join('\n')); } catch (_) { return; }
+                        if (!data || typeof data !== 'object') return;
+                        if (data.error) { showFailure(); return; }
+                        if (typeof data.content === 'string' && data.content) {
+                            receivedContent = true;
+                            session.conversationId = data.conversation_id || session.conversationId;
+                            session.output.textContent = eventType === 'delta'
+                                ? (session.output.textContent === 'AI 正在锐评...' ? '' : session.output.textContent) + data.content : data.content;
+                        }
+                    }
+                    function consumeBuffer(final) {
+                        // Keep a trailing CR until its possible LF arrives in
+                        // the next network chunk; parse the final complete JSON too.
+                        buffer = buffer.replace(/\r\n/g, '\n').replace(/\r(?!$)/g, '\n');
+                        if (final) buffer = buffer.replace(/\r$/, '\n');
+                        var events = buffer.split('\n\n'); buffer = events.pop();
+                        events.forEach(consumeEvent);
+                        if (final && buffer.trim()) { consumeEvent(buffer); buffer = ''; }
+                    }
                     function read() { return reader.read().then(function(chunk) {
                         if (!isCurrentRequest()) {
                             return reader.cancel().catch(function() {});
                         }
                         if (chunk.done) {
-                            if (!receivedContent) {
-                                session.output.textContent = 'AI 暂时不可用。';
-                                session.output.classList.add('is-error');
-                            }
+                            buffer += decoder.decode();
+                            consumeBuffer(true);
+                            if (!receivedContent || !reachedDone) showFailure();
                             return;
                         }
                         buffer += decoder.decode(chunk.value, { stream: true });
-                        var events = buffer.split('\n\n'); buffer = events.pop();
-                        events.forEach(function(event) {
-                            var dataLine = event.split('\n').filter(function(line) { return line.indexOf('data: ') === 0; })[0];
-                            if (!dataLine || session.isClosed || requestId !== session.requestId) return;
-                            var data; try { data = JSON.parse(dataLine.slice(6)); } catch (e) { return; }
-                            if (data.content) {
-                                receivedContent = true;
-                                session.conversationId = data.conversation_id || session.conversationId;
-                                // 按 event: 行判定增量/整段，而不是对整块字符串做 indexOf 前缀匹配。
-                                // 后者在事件块前有 SSE 心跳注释(: ...)或空白行时会误判为整段覆盖，
-                                // 导致锐评"闪一下"或只剩半句。
-                                var eventLine = event.split('\n').filter(function(line) { return line.indexOf('event: ') === 0; })[0];
-                                var isDeltaEvent = !!(eventLine && eventLine.slice(7).trim() === 'delta');
-                                session.output.textContent = isDeltaEvent ? (session.output.textContent === 'AI 正在锐评...' ? '' : session.output.textContent) + data.content : data.content;
-                            }
-                            if (data.error) { session.output.textContent = 'AI 暂时不可用。'; session.output.classList.add('is-error'); }
-                        });
+                        consumeBuffer(false);
                         return read();
                     }); }
-                    return read();
+                    return read().finally(function() { try { reader.releaseLock(); } catch (_) {} });
                 }).catch(function(error) {
-                    if (error.name !== 'AbortError' && isCurrentRequest()) {
-                        session.output.textContent = 'AI 暂时不可用。';
-                        session.output.classList.add('is-error');
+                    if (isCurrentRequest() && (error.name !== 'AbortError' || !session.controller.signal.aborted)) {
+                        showFailure();
                     }
                 });
             }
