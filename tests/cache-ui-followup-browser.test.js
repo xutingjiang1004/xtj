@@ -161,6 +161,8 @@ test('local cache can be cleared during a profile service outage without losing 
     await p.evaluate(async () => { const cache = await caches.open('xtj-original-media-v1'); await cache.put('/api/photo/8c1cb02d-74d0-4e45-9e15-000000000001/media', new Response('test bytes')); localStorage.setItem('xtj_cache_followup', 'old'); });
     await p.locator('[data-tab="profile"]').filter({ visible: true }).first().click();
     await p.waitForFunction(() => document.getElementById('profilePreferences').dataset.syncState === 'error');
+    await p.locator('#xtjMediaSaveDataBtn').click();
+    assert.equal(await p.locator('#xtjMediaSaveDataBtn').getAttribute('aria-pressed'), 'false');
     await p.evaluate(() => {
       const clearOriginals = window.xtjClearOriginalMediaCache;
       const pending = new Promise(resolve => { window.__xtjReleaseCacheClear = resolve; });
@@ -177,5 +179,7 @@ test('local cache can be cleared during a profile service outage without losing 
     assert.equal(await p.evaluate(() => localStorage.getItem('xtj_cache_followup')), null);
     assert.equal(await p.evaluate(() => localStorage.getItem('xtj_user')), 'alice');
     assert.equal(await p.evaluate(() => currentUser), 'alice'); assert.deepEqual(f.errors, []);
+    assert.equal(await p.evaluate(() => localStorage.getItem('xtj_media_save_data')), 'off', 'clearing cached files preserves the device preference');
+    assert.equal(await p.locator('#xtjMediaSaveDataBtn').getAttribute('aria-pressed'), 'false');
   } finally { await f.close(); }
 });

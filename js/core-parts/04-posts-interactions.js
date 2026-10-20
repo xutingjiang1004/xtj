@@ -3153,7 +3153,8 @@
                         ' data-post-user="' + escapeHtml(post.user_name || '') + '" data-post-created-at="' + escapeHtml(post.created_at || '') + '" data-post-views="' + escapeHtml(String(post.views || 0)) + '"' +
                         ' data-file-size="' + escapeHtml(String(item.file_size || '')) + '" data-actor-key="' + escapeHtml(post.actor_key || '') + '" data-can-delete="' + (canDeletePost(post) ? '1' : '0') + '"';
                     var dims = validDims ? ' width="' + width + '" height="' + height + '"' : '';
-                    var displayUrl = window.XtjPostOriginals ? window.XtjPostOriginals.displayUrl(url) : url;
+                    var listUrl = item.preview_url || (window.xtjMediaPreviewUrl ? window.xtjMediaPreviewUrl(url) : url);
+                    var displayUrl = window.XtjPostOriginals ? window.XtjPostOriginals.displayUrl(listUrl) : listUrl;
                     // Local upload previews stay immediate. Network originals
                     // start when the image scheduler brings them into view.
                     var source = window.xtjPostImageScheduling && !displayUrl.startsWith('blob:') ? 'data-post-src' : 'src';
@@ -3168,11 +3169,13 @@
             window.markPostImageFailed = function(img, options) {
                 var cell = img && img.closest('.post-media-cell');
                 var original = img && img.getAttribute('data-media-url');
+                var requested = img && (img.getAttribute('src') || img.getAttribute('data-post-src')) || original;
+                if (requested && requested.indexOf('blob:') === 0) requested = original;
                 if (!(options && options.skipAuthRecovery) && img && img.complete && window.xtjRecoverMediaImage &&
-                    window.xtjRecoverMediaImage(img, original, function() { window.markPostImageFailed(img, { skipAuthRecovery: true }); })) return;
+                    window.xtjRecoverMediaImage(img, requested, function() { window.markPostImageFailed(img, { skipAuthRecovery: true }); })) return;
                 if (cell && img.complete && original && window.xtjRetryOriginalImageUrl && img._xtjAutoRetryOriginal !== original) {
-                    var retry = window.xtjRetryOriginalImageUrl(original);
-                    if (retry !== original) {
+                    var retry = window.xtjRetryOriginalImageUrl(requested);
+                    if (retry !== requested) {
                         img._xtjAutoRetryOriginal = original;
                         img.src = retry;
                         return;
@@ -3183,6 +3186,7 @@
             window.retryPostImage = function(cell) {
                 var img = cell && cell.querySelector('img');
                 var url = img && sanitizeUrl(img.getAttribute('data-media-url') || '');
+                if (window.xtjMediaPreviewUrl) url = window.xtjMediaPreviewUrl(url);
                 if (!url) return;
                 cell.classList.remove('post-image-failed');
                 img.removeAttribute('src'); img.src = window.xtjRetryOriginalImageUrl ? window.xtjRetryOriginalImageUrl(url) : url;

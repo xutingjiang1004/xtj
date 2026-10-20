@@ -239,7 +239,7 @@
         // keep auth keys（M63：xtj_user_session 等会话/身份键此前被 ^xtj_user$ 精确匹配漏保而误删，导致用户被登出）
         // ★ 2026-09-22：xtj_device_id 必须保活 —— 它是"本机 30 天免登录"的锚点，
         //   一旦被清理，下次登录会生成一个新 ID，等于设备身份丢失。
-        if (/^xtj_user$|^xtj_user_session$|^xtj_admin_session$|^xtj_username$|^xtj_user_name$|^xtj_user_id$|^xtj_pw_hash$|^xtj_device_id$|^xtj_.*token|^xtj_theme|^xtj-notif/.test(k)) continue;
+        if (/^xtj_user$|^xtj_user_session$|^xtj_admin_session$|^xtj_username$|^xtj_user_name$|^xtj_user_id$|^xtj_pw_hash$|^xtj_device_id$|^xtj_media_save_data$|^xtj_.*token|^xtj_theme|^xtj-notif/.test(k)) continue;
         if (k.indexOf('xtj_') === 0 || k.indexOf('xtj-') === 0) keys.push(k);
       }
       keys.forEach(function (k) {
@@ -324,10 +324,23 @@
 
     var cacheRow = row('清理本机缓存', '<button type="button" class="btn btn-ghost profile-mini-btn" id="xtjClearCacheBtn">清理</button>');
     var exportRow = row('导出我的数据', '<button type="button" class="btn btn-ghost profile-mini-btn" id="xtjExportDataBtn">导出</button>');
+    var saveDataRow = row('减少原图预加载', '<button type="button" class="btn btn-ghost profile-mini-btn" id="xtjMediaSaveDataBtn" aria-pressed="true">已开启</button>');
     var target = document.querySelector('#panelProfile .profile-general-settings') || box;
     var about = target.lastElementChild;
     target.insertBefore(cacheRow,about);
     target.insertBefore(exportRow,about);
+    target.insertBefore(saveDataRow,about);
+    var saveDataBtn = document.getElementById('xtjMediaSaveDataBtn');
+    function syncSaveData() {
+      var enabled = window.xtjMediaSaveData ? window.xtjMediaSaveData() : true;
+      saveDataBtn.setAttribute('aria-pressed', String(enabled)); saveDataBtn.textContent = enabled ? '已开启' : '已关闭';
+      saveDataBtn.title = '开启后仅按需加载当前原图；列表保留高质量预览，原文件不变。';
+    }
+    syncSaveData();
+    saveDataBtn.addEventListener('click', function () {
+      try { localStorage.setItem('xtj_media_save_data', window.xtjMediaSaveData && window.xtjMediaSaveData() ? 'off' : 'on'); } catch (_) {}
+      syncSaveData();
+    });
     var clearBtn = document.getElementById('xtjClearCacheBtn');
     if (clearBtn) clearBtn.addEventListener('click', clearLocalCache);
     var exportBtn = document.getElementById('xtjExportDataBtn');

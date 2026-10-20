@@ -19,7 +19,7 @@ for(const [name,count] of [['text',0],['three original images',3]])test('phone: 
   const result=await page.evaluate(()=>({frames:testMotionFrames,sources:testMotionSources,created:testUrlsCreated,revoked:testUrlsRevoked,post:document.querySelector('#feed > .post').dataset.postId,images:Array.from(document.querySelectorAll('#feed > .post:first-child .post-media-cell img')).map(e=>({src:e.src,visible:getComputedStyle(e).visibility}))}));
   assert.equal(result.post,'8c1cb02d-74d0-4e45-9e15-000000009999');assert.ok(result.frames.length>=4);
   const first=result.frames.find(frame=>frame.length),last=result.frames.filter(frame=>frame.length).at(-1);assert.ok(first.length>0);
-  if(count){assert.equal(result.sources.items.length,count);const initial=first.find(i=>i.src),final=last.find(i=>i.src);assert.ok(initial&&final);assert.ok(Math.abs(initial.top-result.sources.items[0].top)<45);assert.ok(Math.abs(initial.top-final.top)>10||Math.abs(initial.left-final.left)>10);assert.equal(result.images.length,3);assert.ok(result.images.every(i=>i.visible==='visible'));await page.waitForFunction(()=>testUrlsCreated.every(u=>testUrlsRevoked.includes(u)));}
+  if(count){assert.equal(result.sources.items.length,count);const initial=first.find(i=>i.src),final=last.find(i=>i.src);assert.ok(initial&&final);assert.ok(Math.abs(initial.top-result.sources.items[0].top)<45);assert.ok(Math.abs(initial.top-final.top)>10||Math.abs(initial.left-final.left)>10);assert.equal(result.images.length,3);assert.ok(result.images.every(i=>i.visible==='visible'&&i.src.startsWith('blob:')));await page.evaluate(()=>XtjPostOriginals.clear());await page.waitForFunction(()=>testUrlsCreated.every(u=>testUrlsRevoked.includes(u)));}
   else{assert.ok(result.sources.text);assert.ok(Math.abs(first[0].top-result.sources.text.top)<45);assert.ok(Math.abs(last[0].top-first[0].top)>10);}
   assert.deepEqual(await page.locator('#dockBar').evaluate(e=>[e.offsetWidth,e.offsetHeight,e.querySelectorAll('.dock-tab').length]),dock);assert.deepEqual(f.errors,[]);
  }finally{await f.close();}
@@ -32,14 +32,14 @@ for (const [name,viewport,count,engine] of [
  ['portrait original',{width:390,height:844},1,'chromium'],
  ['three large originals',{width:1024,height:768},3,'chromium'],
  ...(process.env.XTJ_TEST_WEBKIT==='1'?[['WebKit portrait original',{width:390,height:844},1,'webkit']]:[])
-]) test(name+': decoded previews follow a shared clock into stable targets and survive a slow server image', {timeout:45000}, async t => {
+]) test(name+': decoded previews follow a shared clock into stable targets and reuse local originals without a Storage read', {timeout:45000}, async t => {
  const sharp=require('sharp');
  const original=await sharp(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="2400" height="3200"><rect width="2400" height="3200" fill="#d5eae1"/><path d="M0 3200L1200 500L2400 3200" fill="#77ac99"/><circle cx="1850" cy="500" r="230" fill="#fff3d8"/></svg>')).jpeg({quality:95}).toBuffer();
- const f=await postBrowserFixture({counts:[3],viewport,engine});let releaseRemote;
+ const f=await postBrowserFixture({counts:[3],viewport,engine});let releaseRemote,originalReads=0;
  const remoteWait=new Promise(resolve=>releaseRemote=resolve);
  try {
   const {page}=f;
-  await page.route('**/test-supabase/storage/v1/object/public/uploads/**',async route=>{await remoteWait;await route.fulfill({body:original,contentType:'image/jpeg'}).catch(()=>{});});
+  await page.route('**/test-supabase/storage/v1/object/public/uploads/**',async route=>{originalReads++;await remoteWait;await route.fulfill({body:original,contentType:'image/jpeg'}).catch(()=>{});});
   await page.emulateMedia({reducedMotion:'no-preference'});
   await page.evaluate(()=>{
    document.documentElement.setAttribute('data-xtj-motion','full'); window.testMotionSamples=[];window.testUrlsCreated=[];window.testUrlsRevoked=[];
@@ -71,11 +71,15 @@ for (const [name,viewport,count,engine] of [
    assert.ok(moving.every(frame=>Math.abs(frame.ghosts[i].sx-frame.ghosts[i].sy)/Math.max(frame.ghosts[i].sx,frame.ghosts[i].sy)<.012),'single-picture crop must never stretch the original');
   }
   assert.ok(result.images.every(i=>i.src.startsWith('blob:')&&i.width===2400&&i.complete&&i.visibility==='visible'),'slow Storage downloads must not make the sent originals disappear');
-  assert.ok(result.capture.urls.every(u=>!result.revoked.includes(u)),'original URLs stay alive until the remote handoff');
+  assert.ok(result.capture.urls.every(u=>!result.revoked.includes(u)),'the browser without a worker retains its bounded local originals');
+  assert.equal(originalReads,0,'finishing the publish motion does not redownload the uploaded originals');
   const intervals=moving.slice(1).map((frame,i)=>frame.time-moving[i].time).sort((a,b)=>a-b);
   t.diagnostic(moving.length+' moving frames; median frame interval '+intervals[Math.floor(intervals.length/2)].toFixed(1)+'ms in '+engine);
   releaseRemote();
-  await page.waitForFunction(()=>testUrlsCreated.every(u=>testUrlsRevoked.includes(u))&&Array.from(document.querySelectorAll('#feed > .post:first-child .post-media-cell img')).every(e=>!e.src.startsWith('blob:')&&e.complete&&e.naturalWidth===2400));
+  assert.equal(await page.locator('#feed > .post:first-child .post-media-cell img').evaluateAll(imgs=>imgs.every(e=>e.src.startsWith('blob:')&&e.complete&&e.naturalWidth===2400)),true);
+  await page.evaluate(()=>XtjPostOriginals.clear());
+  await page.waitForFunction(()=>testUrlsCreated.every(u=>testUrlsRevoked.includes(u)));
+  assert.equal(originalReads,0);
   assert.deepEqual(f.errors,[]);
  } finally {releaseRemote();await f.close()}
 });

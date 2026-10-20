@@ -1,6 +1,7 @@
 'use strict';
 const crypto = require('node:crypto');
-const { Readable } = require('node:stream');
+const { Readable, Transform } = require('node:stream');
+const { mediaTraffic } = require('./media-traffic');
 const { pipeline } = require('node:stream/promises');
 const { parsePostMediaUrl } = require('./post-media');
 const { loadPostAttachments } = require('./post-attachments');
@@ -53,7 +54,7 @@ function photoPayload(row, mediaUrl = photoMediaUrl(row.id)) {
   for (const key of ['type','caption','mediaKind','fileSize','originalSize','mimeType','width','height','duration','exif','sha256']) {
     if (Object.prototype.hasOwnProperty.call(source, key)) content[key] = source[key];
   }
-  content.thumb = '';
+  content.thumb = mediaUrl + '?preview=1';
   return { ...row, media_url: mediaUrl, content: JSON.stringify(content) };
 }
 function shareCodec(secret, now = () => Date.now()) {
@@ -153,7 +154,13 @@ async function migratePhotoStorage(supabase) {
   return moved;
 }
 
-async function streamOriginal(req, res, { supabase, bucket, path, fetchImpl = fetch, allowDownload = false }) {
+async function streamOriginal(req, res, { supabase, bucket, path, fetchImpl = fetch, allowDownload = false, previews }) {
+  mediaTraffic.identify(bucket, path, req.params && req.params.id);
+  if (req.query && req.query.preview !== undefined) {
+    if (req.query.preview !== '1' || !previews) return res.status(400).json({ ok:false, code:'invalid_preview' });
+    if (req.headers.range) return res.status(416).end();
+    return previews.stream(req, res, { bucket, path });
+  }
   const range = req.headers.range;
   if (range && !/^bytes=(?:\d+-\d*|-\d+)$/.test(range)) return res.status(416).end();
   const signed = await supabase.storage.from(bucket).createSignedUrl(path, 60);
@@ -165,6 +172,7 @@ async function streamOriginal(req, res, { supabase, bucket, path, fetchImpl = fe
     if (range) { headers.Range = range; if (req.headers['if-range']) headers['If-Range'] = req.headers['if-range']; }
     else if (req.headers['if-none-match']) headers['If-None-Match'] = req.headers['if-none-match'];
     else if (req.headers['if-modified-since']) headers['If-Modified-Since'] = req.headers['if-modified-since'];
+    if (req.method !== 'HEAD') mediaTraffic.request(bucket, path);
     const response = await fetchImpl(signed.data.signedUrl, { method: req.method === 'HEAD' ? 'HEAD' : 'GET', headers, redirect: 'error', signal: controller.signal });
     if (![200,206,304,416].includes(response.status) || (response.status === 304 && (range || (!headers['If-None-Match'] && !headers['If-Modified-Since'])))) throw Error('media_download_unavailable');
     const type = String(response.headers.get('content-type') || '').split(';')[0];
@@ -177,12 +185,14 @@ async function streamOriginal(req, res, { supabase, bucket, path, fetchImpl = fe
     if (downloadType) res.set('Content-Disposition','attachment');
     for (const name of ['etag','last-modified','accept-ranges']) { const value = response.headers.get(name); if (value) res.set(name, value); }
     if (response.status !== 304) for (const name of ['content-type','content-length','content-range']) { const value = response.headers.get(name); if (value) res.set(name, value); }
+    if (response.status === 304) mediaTraffic.revalidated();
     if (req.method === 'HEAD' || [304,416].includes(response.status)) { if (response.body) await response.body.cancel(); return res.end(); }
     if (!response.body) throw Error('media_body_unavailable');
-    await pipeline(Readable.fromWeb(response.body), res);
+    const meter = new Transform({ transform(chunk, encoding, done) { mediaTraffic.read(bucket, path, chunk.length); done(null, chunk); } });
+    await pipeline(Readable.fromWeb(response.body), meter, res);
   } finally { clearTimeout(timer); res.removeListener('close', closed); }
 }
-function createPhotoAccess({ app, supabase, supabaseUrl, secret, authenticateUser, verifyToken, optionalAuth, rateLimit, adminName = 'xxz', fetchImpl, normalPostAllowed = () => true, activeSession = async () => false }) {
+function createPhotoAccess({ app, supabase, supabaseUrl, secret, authenticateUser, verifyToken, optionalAuth, rateLimit, adminName = 'xxz', fetchImpl, previews, normalPostAllowed = () => true, activeSession = async () => false }) {
   const codec = shareCodec(secret);
   // Album cells arrive together. Share only unfinished reads, never completed
   // permission decisions: a later request must see deletion/privacy changes.
@@ -228,7 +238,7 @@ function createPhotoAccess({ app, supabase, supabaseUrl, secret, authenticateUse
       const path = originalPhotoPath(row, supabaseUrl);
       if (!path) return missing(res);
       await protectPhotoPath(supabase, path);
-      await streamOriginal(req,res,{supabase,bucket:PHOTO_BUCKET,path,fetchImpl});
+      await streamOriginal(req,res,{supabase,bucket:PHOTO_BUCKET,path,fetchImpl,previews});
     } catch (_) { unavailable(res); }
   });
   app.post('/api/photo/share', authenticateUser, rateLimit(60000,30), async(req,res) => {
@@ -252,7 +262,7 @@ function createPhotoAccess({ app, supabase, supabaseUrl, secret, authenticateUse
       const path = originalPhotoPath(row, supabaseUrl);
       if (!path) return missing(res);
       await protectPhotoPath(supabase,path);
-      await streamOriginal(req,res,{supabase,bucket:PHOTO_BUCKET,path,fetchImpl});
+      await streamOriginal(req,res,{supabase,bucket:PHOTO_BUCKET,path,fetchImpl,previews});
     } catch (_) { unavailable(res); }
   });
   app.get('/share/photos/:token', limited, async(req,res) => {
@@ -287,7 +297,7 @@ function createPhotoAccess({ app, supabase, supabaseUrl, secret, authenticateUse
       const item = (posts[0].media_items || [])[Number(req.params.position)];
       const path = item && parsePostMediaUrl(item.media_url, supabaseUrl);
       if (!path) return missing(res);
-      await streamOriginal(req,res,{supabase,bucket:'uploads',path,fetchImpl});
+      await streamOriginal(req,res,{supabase,bucket:'uploads',path,fetchImpl,previews});
     } catch (_) { unavailable(res); }
   });
   app.get('/share/posts/:id', limited, async(req,res) => {
@@ -304,7 +314,7 @@ function createPhotoAccess({ app, supabase, supabaseUrl, secret, authenticateUse
 }
 function html(value) { return String(value || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function renderSharePage(rows, token) {
-  const images = rows.map((row,index) => `<article><p class="author">${html(row.user_name)} <time>${html(String(row.created_at || '').slice(0,10))}</time></p><button class="photo" aria-label="查看第${index+1}张照片"><img src="${html(row.share_media_url || '/api/photo/shared/' + token + '/' + row.id + '/media')}" alt="${html(metadata(row).caption || '作者分享的照片')}" loading="${index ? 'lazy' : 'eager'}"></button>${metadata(row).caption ? '<p>' + html(metadata(row).caption) + '</p>' : ''}<button class="retry" hidden>图片未加载 · 点击重试</button></article>`).join('');
-  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="referrer" content="no-referrer"><title>分享的照片 · XTJ</title><style>body{margin:0;background:#f0faf7;color:#233c37;font:16px/1.6 system-ui,sans-serif}header,main,footer{max-width:960px;margin:auto;padding:20px}header{display:flex;justify-content:space-between}a{color:#247d6c}main{display:grid;gap:24px}article{background:#ffffff70;border-radius:18px;padding:18px}p{white-space:pre-wrap;overflow-wrap:anywhere}.author{margin:0 0 12px}time{margin-left:12px;color:#718680;font-size:13px}button{font:inherit;color:inherit;cursor:pointer}.photo{display:block;width:100%;border:0;padding:0;background:transparent}.photo img{display:block;max-width:100%;max-height:70vh;width:auto;height:auto;margin:auto;border-radius:12px}.retry{border:0;background:transparent}footer{color:#718680;font-size:14px}dialog{padding:0;border:0;background:transparent;max-width:100vw;max-height:100dvh}dialog::backdrop{background:#10211feb}.viewer{display:flex;align-items:center;justify-content:center;width:100vw;height:100dvh;overflow:auto}.viewer img{max-width:100%;max-height:100%;object-fit:contain}.close{position:fixed;right:20px;top:20px;border:0;background:#ffffffdf;border-radius:50%;width:44px;height:44px;font-size:24px}.viewer{touch-action:none}.viewer.is-zoomed{touch-action:auto}.viewer img.zoomed{max-width:none;max-height:none}@media(min-width:720px){main{grid-template-columns:repeat(2,minmax(0,1fr))}}</style><script src="/js/photo-share.min.js" defer></script></head><body><header><strong>XTJ · 照片分享</strong><a href="/">打开网站</a></header><main>${images || '<p>这份分享已过期，或照片已被作者移除。</p>'}</main><footer>${rows.length ? '本次分享包含' + rows.length + '张照片，更多照片需登录网站查看。' : ''}</footer><dialog><div class="viewer"><img alt="照片预览"></div><button class="close" aria-label="关闭预览">×</button></dialog></body></html>`;
+  const images = rows.map((row,index) => `<article><p class="author">${html(row.user_name)} <time>${html(String(row.created_at || '').slice(0,10))}</time></p><button class="photo" aria-label="查看第${index+1}张照片"><img data-original="${html(row.share_media_url || '/api/photo/shared/' + token + '/' + row.id + '/media')}" src="${html((row.share_media_url || '/api/photo/shared/' + token + '/' + row.id + '/media') + '?preview=1')}" alt="${html(metadata(row).caption || '作者分享的照片')}" loading="${index ? 'lazy' : 'eager'}"></button>${metadata(row).caption ? '<p>' + html(metadata(row).caption) + '</p>' : ''}<button class="retry" hidden>图片未加载 · 点击重试</button></article>`).join('');
+  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="referrer" content="no-referrer"><title>分享的照片 · XTJ</title><style>body{margin:0;background:#f0faf7;color:#233c37;font:16px/1.6 system-ui,sans-serif}header,main,footer{max-width:960px;margin:auto;padding:20px}header{display:flex;justify-content:space-between}a{color:#247d6c}main{display:grid;gap:24px}article{background:#ffffff70;border-radius:18px;padding:18px}p{white-space:pre-wrap;overflow-wrap:anywhere}.author{margin:0 0 12px}time{margin-left:12px;color:#718680;font-size:13px}button{font:inherit;color:inherit;cursor:pointer}.photo{display:block;width:100%;border:0;padding:0;background:transparent}.photo img{display:block;max-width:100%;max-height:70vh;width:auto;height:auto;margin:auto;border-radius:12px}.retry{border:0;background:transparent}footer{color:#718680;font-size:14px}dialog{padding:0;border:0;background:transparent;max-width:100vw;max-height:100dvh}dialog::backdrop{background:#10211feb}.viewer{display:flex;align-items:center;justify-content:center;width:100vw;height:100dvh;overflow:auto}.viewer img{max-width:100%;max-height:100%;object-fit:contain}.close{position:fixed;right:20px;top:20px;border:0;background:#ffffffdf;border-radius:50%;width:44px;height:44px;font-size:24px}.viewer{touch-action:none}.viewer.is-zoomed{touch-action:auto}.viewer img.zoomed{max-width:none;max-height:none}@media(min-width:720px){main{grid-template-columns:repeat(2,minmax(0,1fr))}}</style><script src="/js/media-cache.min.js?v=hq1920-v1" defer></script><script src="/js/photo-share.min.js?v=hq1920-v1" defer></script></head><body><header><strong>XTJ · 照片分享</strong><a href="/">打开网站</a></header><main>${images || '<p>这份分享已过期，或照片已被作者移除。</p>'}</main><footer>${rows.length ? '本次分享包含' + rows.length + '张照片，更多照片需登录网站查看。' : ''}</footer><dialog><div class="viewer"><img alt="照片预览"></div><button class="close" aria-label="关闭预览">×</button></dialog></body></html>`;
 }
 module.exports = { PHOTO_BUCKET, PHOTO_COOKIE, POST_MEDIA_COOKIE, setPhotoSession, photoStoragePath, safePhotoPath, originalPhotoPath, livePhoto, canReadPhoto, canReadSharedPhoto, photoMediaUrl, photoPayload, shareCodec, protectPhotoPath, migratePhotoStorage, streamOriginal, createPhotoAccess, renderSharePage };

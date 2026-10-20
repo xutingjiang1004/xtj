@@ -6,10 +6,10 @@
     image.addEventListener('error', function () { retry.hidden = false; });
     image.addEventListener('load', function () { retry.hidden = true; });
     if (image.complete && !image.naturalWidth) retry.hidden = false;
-    retry.addEventListener('click', function () { var url = new URL(image.src); url.searchParams.set('retry', Date.now()); image.src = url.href; });
+    retry.addEventListener('click', function () { var url = new URL(image.src); url.searchParams.set('xtj_retry', Date.now()); image.src = url.href; });
     article.querySelector('.photo').addEventListener('click', function () {
-      if (!dialog || !image.naturalWidth) return;
-      viewer.classList.remove('zoomed'); viewer.parentElement.classList.remove('is-zoomed'); viewer.src = image.src; viewer.alt = image.alt; dialog.showModal();
+      if (!dialog) return;
+      viewer.classList.remove('zoomed'); viewer.parentElement.classList.remove('is-zoomed'); viewer.src = image.getAttribute('data-original') || image.src; viewer.alt = image.alt; dialog.showModal();
     });
   });
   if (dialog) {

@@ -8,6 +8,9 @@ const assistantOutput = require('./ai-assistant-output');
 const { aiConversationActorPattern, parseAiHistoryCursor, queryAiHistoryPage } = require('./ai-history');
 const { createComment, readRelationPage, readFeedEngagement } = require('./post-interactions');
 const { readPhotoWallPage } = require('./photo-wall-page');
+const { createAdaptivePoller } = require('./adaptive-poller');
+const { createMediaPreviews } = require('./media-previews');
+const { mediaTraffic } = require('./media-traffic');
 
 const cors = require('cors');
 const crypto = require('crypto');
@@ -7075,6 +7078,7 @@ async function createCatReplyJob(sourceCommentId, postId, requestUserName) {
       console.error('[CAT_AI] create job error:', error);
       return null;
     }
+    if (catWorkerPoller) catWorkerPoller.wake();
     return data;
   } catch (e) {
     console.error('[CAT_AI] create job exception:', e && e.message);
@@ -7588,48 +7592,39 @@ async function reconcileCatJobs() {
 // ★ 审计修复：常驻定时器补 .unref()，否则会持有 event loop 引用、阻止进程优雅退出
 //   （与 556/3902/3999/4486 等处已有的 .unref() 模式保持一致）。
 setInterval(function() {
-  reconcileCatJobs().catch(function() {});
+  if (!supabaseAvailability.restricted()) reconcileCatJobs().catch(function() {});
 }, 300000).unref();
 
 let currentCatAiWorkers = 0;
 const MAX_CAT_AI_WORKERS = 3;
-
-// 处理下一个 pending 小猫任务
+// Query the idle queue once per tick, not once per unused worker. Atomic job
+// claims inside processCatReplyJob still protect multiple server instances.
 async function processNextCatJob() {
-  if (currentCatAiWorkers >= MAX_CAT_AI_WORKERS) return;
-  currentCatAiWorkers++;
-  try {
-    var nowIso = new Date().toISOString();
-    // 只领取到期任务：next_retry_at 为空或已过期
-    var queryResult = await supabase.from('ai_comment_reply_jobs')
-      .select('*').eq('status', 'pending')
-      .or('next_retry_at.is.null,next_retry_at.lte.' + nowIso)
-      .order('created_at', { ascending: true }).limit(1);
-    // 区分 query_failed / job_found / queue_empty
-    if (queryResult.error) {
-      console.error('[CAT_AI] processNext query failed:', queryResult.error.message);
-      return; // query_failed
-    }
-    if (!queryResult.data || !queryResult.data.length) return; // queue_empty
-    await processCatReplyJob(queryResult.data[0]); // job_found
-  } catch (e) {
-    console.error('[CAT_AI] processNext error:', e && e.message);
-  } finally {
-    currentCatAiWorkers--;
+  if (currentCatAiWorkers >= MAX_CAT_AI_WORKERS) return 'idle';
+  const available = MAX_CAT_AI_WORKERS - currentCatAiWorkers;
+  const queryResult = await supabase.from('ai_comment_reply_jobs')
+    .select('*').eq('status', 'pending')
+    .or('next_retry_at.is.null,next_retry_at.lte.' + new Date().toISOString())
+    .order('created_at', { ascending: true }).limit(available);
+  if (queryResult.error) throw queryResult.error;
+  if (!queryResult.data || !queryResult.data.length) return 'idle';
+  for (const job of queryResult.data) {
+    currentCatAiWorkers++;
+    Promise.resolve().then(() => processCatReplyJob(job)).catch(() => {}).finally(() => {
+      currentCatAiWorkers--;
+      catWorkerPoller.wake();
+    });
   }
+  return 'worked';
 }
-
-// 小猫任务 worker（每 3 秒）
-// B8：旧实现每个 tick 只领取 1 个任务，突发多条 @小猫 时即便并发上限是 3 也会逐条排队。
-// processNextCatJob 在 await 之前同步占用一个 worker 名额，因此这里按空闲名额循环补满，
-// 达到 MAX_CAT_AI_WORKERS 即停。
-setInterval(function() {
-  recoverStaleCatJobs().catch(function() {});
-  for (var __i = 0; __i < MAX_CAT_AI_WORKERS; __i++) {
-    if (currentCatAiWorkers >= MAX_CAT_AI_WORKERS) break;
-    processNextCatJob().catch(function() {});
-  }
-}, 3000).unref(); // ★ 审计修复：worker 轮询不应阻止进程退出
+var catWorkerPoller = createAdaptivePoller({ task:processNextCatJob,
+  isRestricted:() => supabaseAvailability.restricted(),
+  onError:code => console.warn('[CAT_AI] queue temporarily unavailable:',code) });
+catWorkerPoller.start();
+const catRecoveryPoller = createAdaptivePoller({ baseDelay:60000,idleDelay:300000,
+  isRestricted:() => supabaseAvailability.restricted(),
+  task:async () => { await recoverStaleCatJobs(); return 'idle'; } });
+catRecoveryPoller.start();
 
 // D2：配额表兜底清理。生产优先用 pg_cron（迁移 039 已在扩展可用时注册每小时任务），
 // 这里在后端进程内再做一层每小时清理，避免无 pg_cron 时 ai_cat_rate_limits 无限膨胀。
@@ -11956,7 +11951,11 @@ async function authenticateUser(req, res, next) {
 
 const dmPrivateStorage = createDmPrivateStorage(supabase, { supabaseUrl: SUPABASE_URL });
 app.use(dmPrivateStorage.middleware);
-const photoAccess = createPhotoAccess({ app, supabase, supabaseUrl:SUPABASE_URL, secret:API_SECRET,
+const mediaPreviews = createMediaPreviews({ supabase, sharp, isRestricted: () => supabaseAvailability.restricted() });
+app.get('/admin/media-traffic', verifyToken, rateLimit(60000, 20), (req, res) => {
+  res.set('Cache-Control','no-store').json({ ok:true, media_traffic:mediaTraffic.snapshot() });
+});
+const photoAccess = createPhotoAccess({ app, supabase, supabaseUrl:SUPABASE_URL, secret:API_SECRET, previews:mediaPreviews,
   authenticateUser, verifyToken, optionalAuth, rateLimit, adminName:ADMIN_USERNAME,
   normalPostAllowed: row => isNormalPost(row) && !looksLikeSystemTelemetry(row.content),
   activeSession: async function(id,actor) {
@@ -12940,7 +12939,10 @@ app.post('/api/photo/create', authenticateUser, rateLimit(60000, 20), async (req
       userName: req.userName,
       supabase: supabase,
       supabaseUrl: SUPABASE_URL,
-      inspectOriginal: function(params) { return inspectPhotoOriginal(Object.assign({}, params, { sharp: sharp })); },
+      inspectOriginal: async function(params) {
+        return await mediaPreviews.inspectedUpload(PHOTO_BUCKET, params.storagePath, req.userName) ||
+          inspectPhotoOriginal(Object.assign({}, params, { sharp: sharp }));
+      },
       logger: console
     });
     if (createResult.body && createResult.body.data) createResult.body.data = photoPayload(createResult.body.data);
@@ -13145,6 +13147,10 @@ app.post('/api/photo/upload', authenticateUser, rateLimit(3600000, 60), photoUpl
     // 字节确实落到 Storage 了 → 额度不再回滚。此前所有 return（含上面各类 4xx
     // 拒绝）都会走到 finally 回滚，所以不存在「拒了也扣」。
     reservation.committed = true;
+    // Reuse the bytes already received by this upload. Keep only verified small
+    // metadata and a bounded display copy; no second Storage body download.
+    try { await mediaPreviews.rememberUpload({ bucket:PHOTO_BUCKET, path, owner:req.userName, input:buf, metadata:decodedMeta }); }
+    catch (_) { /* The original remains valid when an optional preview fails. */ }
     // Identifier accepted by photo/create; this private bucket has no public read.
     var publicUrl = supabase.storage.from(PHOTO_BUCKET).getPublicUrl(path).data.publicUrl;
     return res.json({ ok: true, public_url: publicUrl });

@@ -3,8 +3,8 @@ const test = require('node:test'), assert = require('node:assert/strict');
 const express = require('express'), request = require('supertest');
 const { createSupabaseAvailability } = require('../render-api/supabase-availability');
 test('quota restrictions have a precise non-retryable error and recover on a successful upstream request', async () => {
-  let status = 402;
-  const availability = createSupabaseAvailability({ fetchImpl: async () => new Response(status === 402 ? JSON.stringify({ message: 'restricted: exceed_egress_quota' }) : '[]', { status }) });
+  let status = 402, now = 1000, calls = 0;
+  const availability = createSupabaseAvailability({ now:()=>now, fetchImpl: async () => { calls++; return new Response(status === 402 ? JSON.stringify({ message: 'restricted: exceed_egress_quota' }) : '[]', { status }); } });
   const app = express(); app.use(availability.middleware);
   app.get('/api/profile/posts/alice', async (req, res) => { await availability.transport('https://supabase.test/rest/v1/posts'); res.status(503).json({ ok: false, error: 'generic failure', retryable: true }); });
   app.get('/api/photos/public', async (req, res) => { await availability.transport('https://supabase.test/rest/v1/posts'); res.status(503).json({ ok: false, error: 'generic failure' }); });
@@ -15,7 +15,8 @@ test('quota restrictions have a precise non-retryable error and recover on a suc
   assert.equal((await request(app).get('/api/photos/public').expect(402)).body.code, 'egress_quota_exceeded');
   const media = await request(app).get('/api/uploads/media').expect(402);
   assert.equal(media.body.code, 'egress_quota_exceeded'); assert.equal(media.body.retryable, false);
-  status = 200; const recovered = await request(app).get('/api/profile/posts/alice').expect(503);
+  assert.equal(calls,1,'known quota failures short-circuit background and foreground SDK calls');
+  status = 200; now += 60001; const recovered = await request(app).get('/api/profile/posts/alice').expect(503);
   assert.equal(recovered.body.error, 'generic failure'); assert.equal(availability.restricted(), false);
   assert.equal((await request(app).get('/api/uploads/media').expect(503)).body.code, 'media_unavailable');
 });

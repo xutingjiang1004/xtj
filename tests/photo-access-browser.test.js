@@ -81,9 +81,11 @@ test('the standalone website share page shows its author and opens the granted o
   try {
     const html=renderSharePage([{id:A,user_name:'原创作者',created_at:'2026-10-07',content:'{"caption":"分享给你的照片"}'}],'opaque-grant');
     await f.page.route('**/share/photos/opaque-grant',route=>route.fulfill({contentType:'text/html',body:html}));
-    await f.page.route('**/api/photo/shared/opaque-grant/*/media',route=>route.fulfill({contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480"><rect width="640" height="480" fill="#17836d"/></svg>'}));
+    const variants=[];
+    await f.page.route('**/api/photo/shared/opaque-grant/*/media*',route=>{variants.push(new URL(route.request().url()).searchParams.get('preview'));return route.fulfill({contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480"><rect width="640" height="480" fill="#17836d"/></svg>'});});
     await f.page.goto(f.origin+'/share/photos/opaque-grant',{waitUntil:'domcontentloaded'});
     await f.page.waitForFunction(()=>document.querySelector('article img')?.naturalWidth===640);
+    assert.deepEqual(variants,['1'],'the share list loads only the high-quality preview');
     assert.equal(await f.page.locator('article').count(),1);
     assert.match(await f.page.locator('.author').textContent(),/原创作者/);
     assert.equal(await f.page.getByRole('link',{name:'打开网站'}).getAttribute('href'),'/');
@@ -91,6 +93,8 @@ test('the standalone website share page shows its author and opens the granted o
     await f.page.locator('.photo').click();
     await f.page.waitForFunction(()=>document.querySelector('dialog')?.open&&document.querySelector('.viewer img')?.naturalWidth===640);
     assert.match(await f.page.locator('.viewer img').getAttribute('src'),new RegExp('/api/photo/shared/opaque-grant/'+A+'/media'));
+    assert.equal(new URL(await f.page.locator('.viewer img').getAttribute('src'),f.origin).searchParams.has('preview'),false);
+    assert.ok(variants.includes(null),'opening a shared photo loads its granted original');
     const box=await f.page.locator('.viewer').boundingBox();
     await f.page.mouse.move(box.x+box.width/2,box.y+box.height/3);
     await f.page.mouse.down();await f.page.mouse.move(box.x+box.width/2,box.y+box.height/3+160,{steps:8});await f.page.mouse.up();

@@ -13,7 +13,7 @@ const ROOT = path.resolve(__dirname, '..');
 const OUT = path.join(ROOT, 'output', 'cloudflare-pages');
 // Current product decision retires the manual workbench from production assets.
 const RETIRED_FILES = new Set(['css/ai-workbench.css', 'css/ai-workbench.min.css', 'js/ai-core/tool-workbench.js', 'js/ai-core/tool-workbench.min.js']);
-const ROOT_FILES = new Set(['index.html', 'admin.html', 'icon.svg', 'media-originals-sw.js', 'chat-notifications-sw.js']);
+const ROOT_FILES = new Set(['index.html', 'admin.html', 'icon.svg', 'media-digest.js', 'media-originals-sw.js', 'chat-notifications-sw.js']);
 function allowed(file) {
   if (RETIRED_FILES.has(file)) return false;
   if (file.split('/').some(segment => segment.startsWith('.'))) return false;

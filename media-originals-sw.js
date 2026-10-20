@@ -1,4 +1,5 @@
 'use strict';
+importScripts('/media-digest.js');
 // Persistent original bytes are never an authorization cache. Every reuse must
 // receive a fresh 304 from the server after its current permission checks.
 const ORIGINAL_CACHE = 'xtj-original-media-v1';
@@ -6,14 +7,16 @@ const ORIGINAL_MAX_BYTES = 256 * 1024 * 1024;
 const ORIGINAL_MAX_FILE_BYTES = 64 * 1024 * 1024;
 const ORIGINAL_MAX_AGE = 30 * 86400000;
 let originalGeneration = 0, originalWrites = Promise.resolve();
+let originalSeeds = Promise.resolve(), originalSeedPending = 0;
 function originalKey(request) {
   const url = new URL(request.url);
   if (request.method !== 'GET' || url.origin !== self.location.origin || request.headers.has('range')) return null;
   if (!/^\/api\/(?:photo\/(?:[0-9a-f-]{36}|shared\/[A-Za-z0-9_-]{60,6000}\/[0-9a-f-]{36})\/media|post\/[0-9a-f-]{36}\/media\/(?:0|[1-9]\d?))$/i.test(url.pathname)) return null;
   // Retry nonces must not create another copy of the same original. Do not
   // intercept requests carrying any other query parameter or credentials.
-  if ([...url.searchParams.keys()].some(key => key !== 'xtj_retry')) return null;
-  url.search = ''; return new Request(url.href);
+  if ([...url.searchParams.keys()].some(key => !['xtj_retry','preview'].includes(key)) || (url.searchParams.has('preview') && url.searchParams.get('preview') !== '1')) return null;
+  const preview = url.searchParams.get('preview');
+  url.search = ''; if (preview) url.searchParams.set('preview', '1'); return new Request(url.href);
 }
 function originalWrite(work) {
   originalWrites = originalWrites.catch(() => {}).then(work);
@@ -55,7 +58,11 @@ async function originalResponse(event, key) {
     const reusedHeaders = new Headers(saved.headers);
     reusedHeaders.set('Cache-Control', 'private, no-cache, must-revalidate');
     reusedHeaders.set('X-XTJ-Media-Cache', 'revalidated');
-    return new Response(saved.body, { status: 200, headers: reusedHeaders });
+    reusedHeaders.set('X-XTJ-Cached-At', String(Date.now()));
+    const reused = new Response(saved.body, { status: 200, headers: reusedHeaders });
+    const copy = reused.clone();
+    event.waitUntil(originalWrite(() => generation === originalGeneration ? cache.put(key, copy) : null).catch(() => {}));
+    return reused;
   }
   // Fail closed on offline, 401, 404, quota limits and server errors. Never
   // return an old body as an offline or stale-while-revalidate fallback.
@@ -79,7 +86,37 @@ self.addEventListener('fetch', event => {
 });
 self.addEventListener('message', event => {
   const source = event.source;
-  if (event.data?.type !== 'XTJ_CLEAR_ORIGINAL_MEDIA' || !source?.url || new URL(source.url).origin !== self.location.origin) return;
-  originalGeneration++;
-  event.waitUntil(originalWrite(() => caches.delete(ORIGINAL_CACHE)).catch(() => {}).then(() => event.ports?.[0]?.postMessage({ ok: true })));
+  if (!source?.url || new URL(source.url).origin !== self.location.origin) return;
+  if (event.data?.type === 'XTJ_CLEAR_ORIGINAL_MEDIA') {
+    originalGeneration++;
+    event.waitUntil(originalWrite(() => caches.delete(ORIGINAL_CACHE)).catch(() => {}).then(() => event.ports?.[0]?.postMessage({ ok: true })));
+  }
+  if (event.data?.type === 'XTJ_SEED_ORIGINAL_MEDIA') {
+    const generation = originalGeneration;
+    if (originalSeedPending >= 24) { event.ports?.[0]?.postMessage({ ok:false }); return; }
+    originalSeedPending++;
+    const seed = originalSeeds.catch(() => {}).then(async () => {
+      if (generation !== originalGeneration) return false;
+      const blob = event.data.blob;
+      if (!(blob instanceof Blob) || !blob.size || blob.size > ORIGINAL_MAX_FILE_BYTES) return false;
+      const key = originalKey(new Request(new URL(event.data.url, self.location.origin)));
+      if (!key || new URL(key.url).search) return false;
+      // A new HEAD checks current ownership, deletion and the exact stored
+      // version without transferring the original body back to its uploader.
+      const head = await fetch(new Request(key, { method: 'HEAD', credentials: 'include', cache: 'no-store', redirect: 'error' }));
+      if (!head.ok || Number(head.headers.get('Content-Length')) !== blob.size || !/^image\//i.test(head.headers.get('Content-Type') || '')) return false;
+      if (!await XtjMediaDigest.matches(blob, head.headers.get('ETag'))) return false;
+      const headers = new Headers(head.headers);
+      headers.set('Cache-Control', 'private, no-cache, must-revalidate');
+      headers.set('X-XTJ-Cached-At', String(Date.now())); headers.set('X-XTJ-Cached-Bytes', String(blob.size));
+      headers.delete('Content-Encoding'); headers.delete('Vary');
+      return originalWrite(async () => {
+        if (generation !== originalGeneration) return false;
+        const cache = await caches.open(ORIGINAL_CACHE);
+        await cache.put(key, new Response(blob, { headers })); await trimOriginals(cache); return true;
+      });
+    }).catch(() => false);
+    originalSeeds = seed;
+    event.waitUntil(seed.then(ok => event.ports?.[0]?.postMessage({ ok })).finally(() => { originalSeedPending--; }));
+  }
 });

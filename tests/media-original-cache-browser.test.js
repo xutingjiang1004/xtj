@@ -21,7 +21,7 @@ test('persistent original cache revalidates across browser restarts and fails cl
       return res.writeHead(200, { ETag: etag, 'Content-Type': 'image/svg+xml', 'Content-Length': Buffer.byteLength(image), 'Cache-Control': 'private, no-cache' }).end(image);
     }
     if (file === '/') return res.writeHead(200, { 'Content-Type': 'text/html' }).end('<!doctype html><title>Original cache fixture</title><script src="/js/media-cache.js"></script>');
-    if (['/chat-notifications-sw.js', '/media-originals-sw.js', '/js/media-cache.js'].includes(file)) return res.writeHead(200, { 'Content-Type': 'application/javascript', 'Cache-Control': 'no-cache' }).end(fs.readFileSync(path.join(process.cwd(), file)));
+    if (['/chat-notifications-sw.js', '/media-originals-sw.js', '/media-digest.js', '/js/media-cache.js'].includes(file)) return res.writeHead(200, { 'Content-Type': 'application/javascript', 'Cache-Control': 'no-cache' }).end(fs.readFileSync(path.join(process.cwd(), file)));
     res.writeHead(404).end();
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));

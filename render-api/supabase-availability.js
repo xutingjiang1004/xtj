@@ -5,6 +5,11 @@ function createSupabaseAvailability({ fetchImpl = (...args) => fetch(...args), n
   let restrictedAt = 0, sequence = 0, observed = 0;
   function restricted() { return restrictedAt > 0 && now() - restrictedAt < 60000; }
   async function transport(...args) {
+    // Short-circuit both foreground and background SDK calls during a known
+    // quota restriction. Do not extend the cooldown on these synthetic replies:
+    // the first real request after it expires must be able to observe recovery.
+    if (restricted()) return new Response(JSON.stringify({ message: 'exceed_egress_quota', code: QUOTA_CODE }),
+      { status: 402, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
     const order = ++sequence, response = await fetchImpl(...args);
     let limited = false;
     if (response.status === 402) {
