@@ -32,6 +32,7 @@
     }
     function k(e) {
         for (var t = n, o = -1; o <= 1; o++) {
+            if (o !== 0 && window.xtjMediaSaveData && window.xtjMediaSaveData()) continue;
             var i = e + o;
             i >= 0 && i < t.length && t[i].imageUrl && U(t[i].imageUrl);
         }
@@ -116,6 +117,7 @@
     }
     function D(e, t, forceReload) {
         if (e) {
+            if (e.id !== 'photoPreviewImage' && window.xtjMediaSaveData && window.xtjMediaSaveData()) t = null;
             if (!t) {
                 clearPreviewImageLoad(e, !0);
                 e.style.opacity = "0";
@@ -1053,12 +1055,10 @@
                     if (!e || e.fileSize || !e.imageUrl) return e ? e.fileSize : null;
                     if (L[e.imageUrl]) return e.fileSize = L[e.imageUrl], e.fileSize;
                     try {
-                        var t = await fetch(e.imageUrl, {
-                            cache: "force-cache"
-                        });
+                        var t = await fetch(e.imageUrl, { method: 'HEAD', credentials: 'include', cache: 'no-store' });
                         if (!t || !t.ok) return null;
-                        var o = await t.blob();
-                        return o && o.size ? (L[e.imageUrl] = o.size, e.fileSize = o.size, o.size) : null;
+                        var size = Number(t.headers.get('Content-Length'));
+                        return size > 0 ? (L[e.imageUrl] = size, e.fileSize = size, size) : null;
                     } catch (e) {
                         return null;
                     }

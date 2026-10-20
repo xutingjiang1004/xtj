@@ -176,7 +176,8 @@
     return Array.isArray(list) ? list.filter(function(item){
       return item && item.id && item.imageUrl && item.mediaKind !== 'video' && !/^video\//i.test(item.mimeType || '');
     }).map(function(item){
-      return Object.assign({},item,{imageUrl:originalPhotoUrl(item.imageUrl,parseContent(item.content)),thumbUrl:'',thumb:''});
+      var original=originalPhotoUrl(item.imageUrl,parseContent(item.content));
+      return Object.assign({},item,{imageUrl:original,thumbUrl:window.xtjMediaPreviewUrl?window.xtjMediaPreviewUrl(original):'',thumb:''});
     }) : [];
   }
 
@@ -254,7 +255,7 @@
       caption: typeof meta.caption === 'string' ? meta.caption : '',
       width: meta.width || null, height: meta.height || null,
       imageUrl: url,
-      thumbUrl: '',
+      thumbUrl: window.xtjMediaPreviewUrl ? window.xtjMediaPreviewUrl(url) : '',
       thumb: '',
       mediaKind: 'image',
       mimeType: mime,

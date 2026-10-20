@@ -67,7 +67,8 @@ for (const surface of ['post', 'preview']) {
         return img.complete && img.naturalWidth > 0;
       });
       await page.clock.install();
-      const url = f.origin + '/storage/v1/object/public/uploads/posts/retry.png';
+      const originalUrl = surface === 'post' ? f.origin + '/api/post/8c1cb02d-74d0-4e45-9e15-000000000001/media/0' : f.origin + '/storage/v1/object/public/uploads/posts/retry.png';
+      const url = originalUrl + (surface === 'post' ? '?preview=1' : '');
       let count = 0;
       let requestStarted;
       const started = new Promise(resolve => { requestStarted = resolve; });
@@ -76,15 +77,15 @@ for (const surface of ['post', 'preview']) {
         if (count === 1) { requestStarted(); await pending; }
         await route.fulfill({ contentType: 'image/png', body: f.png }).catch(() => {});
       });
-      await page.evaluate(({ url, surface }) => {
+      await page.evaluate(({ url, originalUrl, surface }) => {
         XTJ_CONFIG.SUPABASE_URL = location.origin;
         if (surface === 'preview') openPhotoPreview(0, { photos: [{ id: 'stalled', imageUrl: url, thumbUrl: url }] });
         else {
           const img = document.querySelector('#feed .post-media-cell img');
-          img.setAttribute('data-media-url', url);
+          img.setAttribute('data-media-url', originalUrl);
           img.src = url;
         }
-      }, { url, surface });
+      }, { url, originalUrl, surface });
       await started;
       // IntersectionObserver runs on real rendering frames, independently of
       // the fake clock. Wait until the watchdog can observe the visible image

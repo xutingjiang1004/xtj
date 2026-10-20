@@ -3071,7 +3071,7 @@
         if(el.innerHTML && el.innerHTML.indexOf('skeleton-pulse')<0 && el.innerHTML.indexOf('role="alert"')<0) {el.__xtjLastSuccessfulHtml=el.innerHTML;el.__xtjLastSuccessfulNodes=Array.from(el.childNodes || []);}
         el.innerHTML = skeletonHtml;
         try {
-            var summary, dailyData;
+            var summary, dailyData, mediaStats;
             if (API_BASE) {
                 var dailyQuery = '/admin/stats/daily';
                 var summaryQuery = '/admin/stats';
@@ -3084,6 +3084,7 @@
                 }
                 summary = await apiCall('GET', summaryQuery);
                 dailyData = await apiCall('GET', dailyQuery);
+                try { var mediaResult = await apiCall('GET', '/admin/media-traffic'); mediaStats = mediaResult && mediaResult.media_traffic; } catch (_) {}
             }
             if (!summary) {
                 el.innerHTML = '<div class="empty-state"><div class="icon">📳</div><div class="text">统计数据加载失败：API返回为空</div><div style="font-size:12px;color:var(--text-muted);margin-top:8px;">请检查后端服务是否正常运行</div></div>';
@@ -3108,6 +3109,16 @@
             h += '<div class="stat-box"><div class="val">' + (summary.total_visits || 0) + '</div><div class="lbl">访问总次数</div></div>';
             h += '</div>';
             h += '<div id="userVisitStatsContainer"></div>';
+            if (mediaStats && Array.isArray(mediaStats.days)) {
+                var mediaDay = mediaStats.days[mediaStats.days.length - 1] || {};
+                h += '<div class="card"><h3>媒体流量观察（北京时间）</h3><p>' + escapeHtml(mediaStats.note || '') + '</p>';
+                h += '<p>今日读取文件约 <strong>' + (Number(mediaDay.source_bytes || 0) / 1000000).toFixed(2) + ' MB</strong> · 条件复用 ' + Number(mediaDay.revalidated || 0) + ' 次 · 服务端预览命中 ' + Number(mediaDay.preview_hits || 0) + ' 次</p>';
+                if (mediaDay.budget_warning) h += '<p role="status">今日媒体读取已达到建议日预算的 80%，请检查下方重复下载；此提示不限制账号登录。</p>';
+                h += '<p>建议日预算 ' + (Number(mediaStats.daily_budget_bytes || 0) / 1000000).toFixed(0) + ' MB；当前进程自 ' + escapeHtml(mediaStats.started_at || '') + ' 开始统计。</p>';
+                h += '<div class="table-wrap"><table><thead><tr><th>文件指纹</th><th>对应内容 ID</th><th>读取请求</th><th>读取 MB</th></tr></thead><tbody>';
+                (mediaDay.top_resources || []).forEach(function (item) { h += '<tr><td>' + escapeHtml(item.resource) + '</td><td>' + escapeHtml(item.content_id || '其他媒体') + '</td><td>' + Number(item.requests || 0) + '</td><td>' + (Number(item.bytes || 0) / 1000000).toFixed(2) + '</td></tr>'; });
+                h += '</tbody></table></div></div>';
+            }
             if (summary.cached_at) h += '<div style="text-align:center;font-size:11px;color:var(--text-muted);padding:8px;">数据缓存时间: ' + formatTime(summary.cached_at) + '（每60秒刷新）</div>';
             el.innerHTML = h;
             el.__xtjLastSuccessfulHtml=h;

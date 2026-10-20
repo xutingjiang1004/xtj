@@ -41,8 +41,8 @@
     byId("profilePreferences")
       .querySelectorAll("input,select,button")
       .forEach(function (control) {
-        // Clearing this browser's cache does not depend on server settings.
-        if (control.id === "xtjClearCacheBtn") return;
+        // Device cache and preloading preferences do not depend on server settings.
+        if (control.id === "xtjClearCacheBtn" || control.id === "xtjMediaSaveDataBtn") return;
         control.disabled = !value;
       });
     byId("profileSettingsRetry").disabled = false;

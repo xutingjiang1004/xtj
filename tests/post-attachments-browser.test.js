@@ -65,7 +65,11 @@ test('real composer appends, removes, rejects mixing; upload/create failures ret
   assert.equal(f.uploads.size,0);assert.equal(await page.evaluate(()=>selectedPostMedia.length),4);assert.ok(f.calls.some(c=>c.path==='/api/post/create'));
   f.setFailCreate(false);await page.locator('#pubBtn').click();await page.waitForFunction(()=>!document.getElementById('pubBtn').disabled&&selectedPostMedia.length===0);
   const created=f.getCreated();assert.equal(created.attachments.length,4);assert.deepEqual(created.attachments.map(a=>a.position),[0,1,2,3]);assert.equal(new Set(created.attachments.map(a=>a.upload_id)).size,4);assert.equal(new Set(created.attachments.map(a=>a.storage_path)).size,4);assert.ok(created.attachments.every(a=>a.width===1&&a.height===1));assert.equal(created.media_type,'album');
-  assert.equal(await page.locator('#postInp').inputValue(),'');assert.equal(await page.locator(`#feed .post[data-post-id="${created.id}"] .post-media-cell`).count(),4);await page.waitForFunction(()=>createdPostUrls.length>=5&&createdPostUrls.every(url=>revokedPostUrls.includes(url)));assert.equal(await page.locator(`#feed .post[data-post-id="${created.id}"] img`).evaluateAll(imgs=>imgs.every(img=>!img.src.startsWith('blob:')&&img.complete&&img.naturalWidth>0)),true);assert.deepEqual(f.errors,[]);
+  assert.equal(await page.locator('#postInp').inputValue(),'');assert.equal(await page.locator(`#feed .post[data-post-id="${created.id}"] .post-media-cell`).count(),4);
+  await page.waitForFunction(()=>Array.from(document.querySelectorAll('#feed > .post:first-child .post-media-cell img')).every(img=>img.src.startsWith('blob:')&&img.complete&&img.naturalWidth>0));
+  await page.evaluate(()=>XtjPostOriginals.clear());
+  await page.waitForFunction(()=>createdPostUrls.length>=5&&createdPostUrls.every(url=>revokedPostUrls.includes(url)));
+  assert.deepEqual(f.errors,[]);
  }finally{await f.close();}
 });
 
@@ -158,11 +162,12 @@ test('tablet keyboard preserves desktop media rules until the keyboard closes; p
  }finally{await f.close();}
 });
 
-test('new wall upload shows the original local File while the server image is pending and switches after decode',{timeout:30000},async()=>{
- const f=await postBrowserFixture({counts:[1]});let release;try{
+test('new wall upload keeps its local File until verified seeding succeeds and then releases it after decode',{timeout:30000},async()=>{
+ const f=await postBrowserFixture({counts:[1]});let release,gets=0;try{
   const {page}=f;await page.addScriptTag({path:'js/photo-wall/render.js'});const pending=new Promise(resolve=>release=resolve);
-  await page.route('**/new-wall-original.svg',async route=>{await pending;await route.fulfill({contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="300" height="400"><rect width="300" height="400" fill="#84c2aa"/></svg>'});});
+  await page.route('**/new-wall-original.svg',async route=>{gets++;await pending;await route.fulfill({contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="300" height="400"><rect width="300" height="400" fill="#84c2aa"/></svg>'});});
   await page.evaluate(async()=>{
+   window.xtjSeedOriginalMedia=()=>new Promise(resolve=>{window.confirmWallSeed=resolve;});
    const svg='<svg xmlns="http://www.w3.org/2000/svg" width="300" height="400"><rect width="300" height="400" fill="#84c2aa"/></svg>';
    const file=new File([svg],'original.svg',{type:'image/svg+xml'});
    const photo={id:'instant-upload',imageUrl:location.origin+'/new-wall-original.svg',username:'alice',timestamp:Date.now(),width:300,height:400};
@@ -171,7 +176,9 @@ test('new wall upload shows the original local File while the server image is pe
   const img=page.locator('#photoGrid img[data-recent-upload-id="instant-upload"]');await page.waitForFunction(()=>document.querySelector('#photoGrid img[data-recent-upload-id]')?.naturalHeight===400);
   assert.match(await img.getAttribute('src'),/^blob:/);assert.equal(await img.getAttribute('data-src'),null);
   await page.evaluate(()=>window.dispatchEvent(new CustomEvent('auth-ready')));assert.match(await img.getAttribute('src'),/^blob:/,'same-user token refresh keeps local image');
-  release();await page.waitForFunction(()=>{const img=document.querySelector('#photoGrid img');return img?.src.endsWith('/new-wall-original.svg')&&!img.hasAttribute('data-recent-upload-id')&&img.naturalHeight===400;});assert.deepEqual(f.errors,[]);
+  assert.equal(gets,0,'registration does not start an original download');
+  await page.evaluate(()=>confirmWallSeed(true));
+  release();await page.waitForFunction(()=>{const img=document.querySelector('#photoGrid img');return img?.src.endsWith('/new-wall-original.svg')&&!img.hasAttribute('data-recent-upload-id')&&img.naturalHeight===400;});assert.equal(gets,1);assert.deepEqual(f.errors,[]);
  }finally{if(release)release();await f.close();}
 });
 

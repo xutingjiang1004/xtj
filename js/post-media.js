@@ -22,12 +22,14 @@
         .map(function(item, index) { return Object.assign({}, item, { width: item.width || (!item.id && (post.media_width || post.width || (post._contentMeta && post._contentMeta.w))) || null,
           height: item.height || (!item.id && (post.media_height || post.height || (post._contentMeta && post._contentMeta.h))) || null,
           media_url: mediaUrl(post, item.media_url, Number.isInteger(item.position) ? item.position : index),
+          preview_url: typeof window !== 'undefined' && window.xtjMediaPreviewUrl ? window.xtjMediaPreviewUrl(mediaUrl(post, item.media_url, Number.isInteger(item.position) ? item.position : index)) : mediaUrl(post, item.media_url, Number.isInteger(item.position) ? item.position : index),
           position: Number.isInteger(item.position) ? item.position : index }); })
         .sort(function(a, b) { return a.position - b.position; });
     }
     if (!post.media_url) return [];
     var meta = post._contentMeta || {};
-    return [{ media_url: mediaUrl(post, post.media_url, 0), media_type: /^(video|audio)$/.test(post.media_type) ? post.media_type : 'image', position: 0,
+    var original = mediaUrl(post, post.media_url, 0);
+    return [{ media_url: original, preview_url: typeof window !== 'undefined' && window.xtjMediaPreviewUrl ? window.xtjMediaPreviewUrl(original) : original, media_type: /^(video|audio)$/.test(post.media_type) ? post.media_type : 'image', position: 0,
       width: post.media_width || post.width || meta.w || null, height: post.media_height || post.height || meta.h || null,
       file_size: meta.fileSize || null }];
   }

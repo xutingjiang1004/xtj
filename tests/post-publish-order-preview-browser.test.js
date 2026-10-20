@@ -64,7 +64,7 @@ for (const width of [390, 1280]) test(`${width}px: create acknowledgement shows 
     });
     assert.ok(await p.evaluate(() => performance.now() - testCreateAck < 1000), 'acknowledged post must render before unrelated metadata/download requests finish');
     assert.equal(await p.locator('#feed > .post:first-child .post-image-failed').count(), 0);
-    assert.ok(remoteRequests <= 2, 'background original handoff limits simultaneous decoding');
+    assert.equal(remoteRequests, 0, 'upload acknowledgement must not redownload the uploader\'s original files');
     assert.equal(await p.evaluate(() => {
       const before = testClearedDeadlines.length;
       window.dispatchEvent(new Event('online'));
@@ -77,7 +77,7 @@ for (const width of [390, 1280]) test(`${width}px: create acknowledgement shows 
     assert.ok(await p.locator('#photoPreviewImage').evaluate(i => i.complete && i.naturalWidth > 0));
     await p.evaluate(() => closePhotoPreview());
     release();
-    await p.waitForFunction(() => Array.from(document.querySelectorAll('#feed > .post:first-child .post-media-cell img')).every(i => !i.src.startsWith('blob:') && i.complete && i.naturalWidth > 0));
+    assert.ok(await p.evaluate(() => Array.from(document.querySelectorAll('#feed > .post:first-child .post-media-cell img')).every(i => i.src.startsWith('blob:') && i.complete && i.naturalWidth > 0)), 'a browser without persistent worker support keeps the bounded local preview');
     assert.deepEqual(f.errors, []);
   } finally { release(); await f.close(); }
 });
@@ -86,6 +86,7 @@ test('ready neighbor is promoted intact; repeated next/previous never flash a lo
   const f = await postBrowserFixture({ counts: [9] });
   try {
     const p = f.page;
+    await p.evaluate(() => localStorage.setItem('xtj_media_save_data','off'));
     await p.locator('#feed .post-media-cell').first().click();
     await p.waitForFunction(() => document.getElementById('ppNextImg')?.complete && document.getElementById('ppNextImg').naturalWidth > 0);
     await p.waitForTimeout(350);
@@ -115,4 +116,43 @@ test('ready neighbor is promoted intact; repeated next/previous never flash a lo
     }
     assert.deepEqual(f.errors, []);
   } finally { await f.close(); }
+});
+
+test('default reduced preloading requests only the selected original and can be switched to neighbor preloading', { timeout:45000 },async()=>{
+  const f=await postBrowserFixture({counts:[1]});
+  try{
+    const p=f.page,seen=[];
+    await p.route('**/save-data-*.png',route=>{seen.push(new URL(route.request().url()).pathname);return route.fulfill({body:f.png,contentType:'image/png'})});
+    async function open(mode){await p.evaluate(mode=>{
+      if(mode==='off')localStorage.setItem('xtj_media_save_data','off');
+      openPhotoPreview(0,{photos:Array.from({length:3},(_,i)=>({id:mode+i,imageUrl:location.origin+'/save-data-'+mode+'-'+i+'.png',fileSize:68,username:'alice'}))});
+    },mode);}
+    await open('on');await p.waitForFunction(()=>document.getElementById('photoPreviewImage')?.naturalWidth>0);await p.waitForTimeout(250);
+    assert.ok(seen.includes('/save-data-on-0.png'));assert.ok(!seen.some(url=>/on-[12]\.png$/.test(url)));
+    await p.evaluate(()=>ppNextPhoto());await p.waitForFunction(()=>document.getElementById('photoPreviewImage')?.src.includes('on-1.png')&&document.getElementById('photoPreviewImage').naturalWidth>0);
+    assert.ok(!seen.includes('/save-data-on-2.png'));
+    await p.evaluate(()=>closePhotoPreview());await p.waitForTimeout(350);await open('off');
+    await p.waitForFunction(()=>document.getElementById('ppNextImg')?.naturalWidth>0);assert.ok(seen.includes('/save-data-off-1.png'));
+    assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+test('real post URLs load the list preview first and request the full original only when opened', {timeout:45000},async()=>{
+  const f=await postBrowserFixture({counts:[1]});
+  try{
+    const p=f.page,seen=[],post=f.posts[0];
+    const stored=f.origin+'/storage/v1/object/public/uploads/posts/high-quality.jpg';
+    post.media_url=stored;post.media_items[0].media_url=stored;
+    await p.route('**/api/post/'+post.id+'/media/0*',route=>{
+      seen.push(new URL(route.request().url()).searchParams.get('preview'));
+      return route.fulfill({contentType:'image/png',body:f.png});
+    });
+    await p.evaluate(async()=>{XTJ_CONFIG.SUPABASE_URL=location.origin;await loadFeed(true)});
+    await p.waitForFunction(()=>{const i=document.querySelector('#feed .post-media-cell img');return i?.src.includes('preview=1')&&i.naturalWidth>0});
+    assert.ok(seen.length>0&&seen.every(variant=>variant==='1'));
+    const original=await p.locator('#feed .post-media-cell img').first().getAttribute('data-media-url');assert.ok(!original.includes('preview='));
+    await p.locator('#feed .post-media-cell').first().click();await p.waitForFunction(()=>document.getElementById('photoPreviewImage')?.naturalWidth>0);
+    assert.ok(seen.some(variant=>variant===null),'opening a preview must retain the real original path');
+    assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
 });
