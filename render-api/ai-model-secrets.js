@@ -28,7 +28,7 @@ function decrypt(blob, env = process.env) {
   throw new Error('ai_models_encryption_key_unavailable');
 }
 async function migrateSecrets(db, env = process.env) {
-  if (!env.ENCRYPTION_KEY) return;
+  if (!env.ENCRYPTION_KEY && !env.API_SECRET && !env.SUPABASE_SERVICE_KEY) return;
   let after = null;
   while (true) {
     let query = db.from('posts').select('id,content').eq('media_type', '__custom_ai_models__').order('id').limit(100);
@@ -40,7 +40,9 @@ async function migrateSecrets(db, env = process.env) {
       const content = JSON.parse(row.content), models = Array.isArray(content.models) ? content.models : [];
       let changed = false;
       for (const model of models) {
-        if (model.api_key_enc && model.api_key_enc.version !== 2) {
+        if (model.api_key) {
+          model.api_key_enc=encrypt(model.api_key,env);delete model.api_key;changed=true;
+        } else if (env.ENCRYPTION_KEY && model.api_key_enc && model.api_key_enc.version !== 2) {
           model.api_key_enc = encrypt(decrypt(model.api_key_enc, env), env); changed = true;
         }
       }

@@ -107,7 +107,7 @@ test('failed AI requests remove the temporary typing bubble and reveal quota out
   // ★ 优化后：打字三点动画已移除，节点改为初始隐藏的空白占位（display:none），
   // 首个内容事件到达时 ensureAssistantBubbleReady 恢复显示。错误路径仍会移除节点。
   const typingStart = sendBody.indexOf("var assistantBubble = el('div', { class: 'ai-msg-bubble' })");
-  const fetchStart = sendBody.indexOf('var resp = await fetch(url');
+  const fetchStart = sendBody.indexOf('var resp = await aiFeatureFetch(url');
   assert.ok(typingStart >= 0 && fetchStart > typingStart);
   assert.ok(sendBody.indexOf('function hideAssistantTyping()', typingStart) < fetchStart);
   const httpErrorBody = sendBody.slice(sendBody.indexOf('if (!resp.ok)'), sendBody.indexOf('if (!resp.body)'));

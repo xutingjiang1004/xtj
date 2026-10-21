@@ -127,4 +127,8 @@ async function fetchPage(url, options = {}) {
   if (!content.trim()) throw new Error('Empty web page');
   return { url, title: String(data.title || '').slice(0, 300), content: content.slice(0, 24000), bytes: Buffer.byteLength(content), truncated: content.length > 24000, content_type: 'text/markdown', via_deepseek: true };
 }
-module.exports = { search, fetchPage, credentials, middleware, enrichUsage, createLimiter };
+module.exports = {
+  search: async (...args) => require('./ai-request-features').search(() => search(...args)),
+  fetchPage: async (...args) => { require('./ai-request-features').assertNetwork(); return fetchPage(...args); },
+  credentials, middleware, enrichUsage, createLimiter
+};

@@ -165,12 +165,12 @@ test('tool-helpers：extractLinksFromHtml 区分内外链', () => {
   assert.ok(r.external_count >= 1, '未识别外链');
 });
 
-test('A 档：generate_pdf 对中文改用 HTML 交付（不再硬拒绝）', () => {
+test('A 档：generate_pdf 中文复用真实 PDF 导出器', () => {
   // ★ 2026-09-13 行为变更：旧实现发现中文直接报错拒绝，导致模型拿到硬错误后卡壳，
   //   用户侧表现为"生成 PDF 卡壳无法使用"。现改为：
   //     纯 ASCII → 真 PDF；含中文 → HTML 文档（浏览器可另存为 PDF），两者都成功返回。
   assert.match(serverSrc, /isPureAscii\(gpAllText\)/, 'generate_pdf 仍应据 isPureAscii 分流');
-  assert.match(serverSrc, /buildHtmlBuffer/, '含中文时应走 buildHtmlBuffer');
+  assert.match(serverSrc, /require\('\.\/ai-report-export'\)\.buildReportPdf/, '含中文时应复用中文 PDF 导出器');
   const idx = serverSrc.indexOf("case 'generate_pdf':");
   const seg = serverSrc.slice(idx, idx + 5000);
   assert.doesNotMatch(seg, /error: 'PDF 生成仅支持英文\/数字内容/,

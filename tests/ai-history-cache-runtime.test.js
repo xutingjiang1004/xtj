@@ -188,12 +188,12 @@ function customModelFixture({localModels=[],deleted=[],pending=null,fetchImpl}={
   localStorage.setItem('xtj_ai_models_deleted_uids__A',JSON.stringify(deleted));
   if(pending)localStorage.setItem('xtj_ai_models_pending__A',JSON.stringify(pending));
   const context=vm.createContext({window:{currentUser:'A',_authStateEpoch:1},localStorage,AbortController,setTimeout,clearTimeout,
-    CUSTOM_MODEL_LIMIT:20,CUSTOM_MODELS_KEY:'xtj_ai_custom_models',CUSTOM_MODEL_PREFIX:'custom:',DEFAULT_AI_MODEL:'deepseek-flash',API_BASE:'/api/agent',S:{selectedModel:'deepseek-flash'},
+    conversationMetadata:new Map(),CUSTOM_MODEL_LIMIT:20,CUSTOM_MODELS_KEY:'xtj_ai_custom_models',CUSTOM_MODEL_PREFIX:'custom:',DEFAULT_AI_MODEL:'deepseek-flash',API_BASE:'/api/agent',S:{selectedModel:'deepseek-flash'},
     isCustomModelId:value=>value.startsWith('custom:'),getUserAuthPayload:async()=>({token:'token',headers:{Authorization:'Bearer token'}}),
     fetch:async(url,options={})=>{const call={url,method:options.method,body:options.body?JSON.parse(options.body):null};calls.push(call);return fetchImpl?fetchImpl(call):{ok:true,json:async()=>({ok:true,models:[],deleted_uids:[]})};}});
   const start=aiSource.indexOf('  function aiStorageScopeName()');const end=aiSource.indexOf('  function genCustomModelUid()',start);
   vm.runInContext(aiSource.slice(start,end)+'\nglobalThis.models={sync:syncCustomModelsFromServer,save:saveCustomModels,markDeleted:markModelUidsDeleted,load:loadCustomModels,pref:persistResearchModelPref};',context);
-  vm.runInContext(aiSource.slice(aiSource.indexOf('  function getConversationTitleOverride('),aiSource.indexOf('  function renameConversation('))+
+  vm.runInContext(aiSource.slice(aiSource.indexOf('  function getConversationTitleOverride('),aiSource.indexOf('  async function renameConversation('))+
     '\nmodels.titleGet=getConversationTitleOverride;models.titleSet=setConversationTitleOverride;',context);
   return {context,values,calls,models:context.models};
 }
@@ -240,4 +240,9 @@ test('research preferences do not upload stale model lists and newer deletion re
  const f=customModelFixture({localModels:[staleModel],deleted:Array.from({length:200},(_,i)=>'old-'+i)});
  f.models.markDeleted(['last']);assert.equal(f.models.load().length,0);f.models.pref('flash');await new Promise(resolve=>setImmediate(resolve));
  assert.equal(f.calls[0].body.models.length,0);assert.ok(f.calls[0].body.deleted_uids.includes('last'));assert.equal(f.calls[0].body.ai_prefs.research_model,'flash');
+});
+test('a legacy cached Key cannot overwrite the latest server Key during a metadata-only pending mutation',async()=>{
+ const reference={uid:'last',model:'GLM-5-Base',provider:'custom',base_url:'https://fixture.invalid/v1',key_configured:true,stored_reference:true};
+ const f=customModelFixture({localModels:[staleModel],pending:{models:[reference],deleted_uids:[],merge:true},fetchImpl:async()=>({ok:true,json:async()=>({ok:true,models:[reference],deleted_uids:[]})})});
+ assert.equal(await f.models.sync(),true);const write=f.calls.find(call=>call.method==='PUT');assert.ok(write);assert.equal(write.body.models[0].api_key,undefined);assert.equal(write.body.models[0].key_configured,true);assert.doesNotMatch(f.values.get('xtj_ai_custom_models__A'),/fixture-key|api_key/);
 });

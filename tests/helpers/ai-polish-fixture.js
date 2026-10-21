@@ -2,9 +2,10 @@
 const { postBrowserFixture } = require('./post-browser-fixture');
 async function aiPolishFixture(options = {}) {
   const f = await postBrowserFixture({ counts: [1], publicPosts: true, ...options });
+  try {
   await f.page.evaluate(options => {
     const base = fetch;
-    window.aiPolish = { calls: [], streams: [], models: options.models || [], serverModels:options.serverModels || [], modelWriteStatus: options.modelWriteStatus || 200, checkpoints:options.checkpoints || [], capabilityResults:options.capabilityResults || [] };
+    window.aiPolish = { historyTitles:{}, calls: [], streams: [], models: options.models || [], serverModels:options.serverModels || [], modelWriteStatus: options.modelWriteStatus || 200, checkpoints:options.checkpoints || [], capabilityResults:options.capabilityResults || [] };
     window.fetch = async (url, opts = {}) => {
       const u = new URL(url, location.href), path = u.pathname;
       if (!path.startsWith('/api/agent/')) return base(url, opts);
@@ -18,8 +19,10 @@ async function aiPolishFixture(options = {}) {
           if (aiPolish.modelWriteStatus !== 200) return json({ ok: false, error: 'Isolated save failure' }, aiPolish.modelWriteStatus);
           aiPolish.models = body.models || aiPolish.models;
         }
-        return json({ ok: true, models: aiPolish.models, server_models:aiPolish.serverModels, deleted_uids: [], ai_prefs: {} });
+        return json({ ok: true, models: aiPolish.models.map(model=>{const copy={...model,key_configured:!!(model.api_key||model.key_configured),stored_reference:true,config_revision:'isolated-config-revision'};delete copy.api_key;delete copy.api_key_enc;return copy;}), server_models:aiPolish.serverModels, deleted_uids: [], ai_prefs: {} });
       }
+      if(path.endsWith('/chat/metadata/read'))return json({ok:true,records:(body.conversation_ids||[]).map(cid=>aiPolish.historyTitles[cid]).filter(Boolean)});
+      if(path.endsWith('/chat/metadata')){const old=aiPolish.historyTitles[body.conversation_id]||{revision:0};const record={conversation_id:body.conversation_id,title:body.title,revision:old.revision+1};aiPolish.historyTitles[body.conversation_id]=record;return json({ok:true,record});}
       if (path.endsWith('/chat/history')) return json({ ok: true, conversation_id: u.searchParams.get('conversation_id') || 'POLISH01', messages: [], has_more: false });
       if (path.endsWith('/chat/conversations')) return json({ ok: true, conversations: [{ conversation_id: 'POLISH01', title: '本地测试对话', preview: '模拟历史内容', message_count: 4, updated_at: '2026-10-13T08:00:00Z' }], has_more: false });
       if (path.endsWith('/research/history')) return json({ ok: true, items: [], has_more: false });
@@ -40,6 +43,7 @@ async function aiPolishFixture(options = {}) {
   await f.page.waitForSelector('#aiChatMsgInput');
   await f.page.waitForFunction(() => aiPolish.calls.some(x => x.path.endsWith('/chat/history')) && document.activeElement.id === 'aiChatMsgInput');
   return f;
+  }catch(error){error.message+='\nAI fixture browser errors: '+JSON.stringify(f.errors);await f.close();throw error;}
 }
 async function openModelPicker(page) {
   await page.locator('.ai-plus-btn').click();

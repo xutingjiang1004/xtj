@@ -62,7 +62,7 @@ test('model task policy names advertised tools and accurately describes file del
   for(const name of new Set(policy.match(/\b[a-z]+(?:_[a-z]+)+\b/g)||[]))assert.ok(names.has(name),'Unadvertised tool in task policy: '+name);
   const file=definitions.find(tool=>tool.function.name==='make_file').function;
   assert.deepEqual(file.parameters.properties.format.enum,['xlsx','csv']);assert.match(policy,/单工作表/);assert.match(policy,/不支持 TXT 或多工作表/);
-  const pdf=definitions.find(tool=>tool.function.name==='generate_pdf').function.description;assert.match(pdf,/HTML/);assert.match(policy,/含中文或其他非 ASCII 内容交付 HTML/);
+  const pdf=definitions.find(tool=>tool.function.name==='generate_pdf').function.description;assert.match(pdf,/中文与英文均输出真正的 PDF/);assert.match(policy,/中文使用内嵌字体/);
 });
 test('history reconciliation uses the durable revision, preserves deleted rows and never joins different message IDs',()=>{
   const fs=require('node:fs'),vm=require('node:vm'),source=fs.readFileSync('js/ai-agent.js','utf8');

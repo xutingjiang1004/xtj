@@ -484,8 +484,8 @@ async function searchWeb(query, maxResults, options) {
 }
 
 module.exports = {
-  searchWeb: searchWeb,
-  searchTavily: searchTavily,
+  searchWeb: async (...args) => require('./ai-request-features').search(() => searchWeb(...args)),
+  searchTavily: async (...args) => require('./ai-request-features').search(() => searchTavily(...args)),
   searchBrave: searchBrave,
   searchSerper: searchSerper,
   searchCustomApi: searchCustomApi,

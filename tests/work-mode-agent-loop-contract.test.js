@@ -149,7 +149,7 @@ test('修复③：工作模式在非流式 /chat 路径同样生效', () => {
   );
   assert.match(
     serverSrc,
-    /function aiToolsForWorkMode\(\)\s*\{\s*return AI_TOOLS;/,
+    /function aiToolsForWorkMode\(\)\s*\{\s*return typeof aiRequestFeatures[^;]+aiRequestFeatures.tools\(AI_TOOLS\);/,
     '工作模式工具集应恒返回全量 AI_TOOLS'
   );
 });
