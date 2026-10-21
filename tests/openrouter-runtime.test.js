@@ -30,7 +30,7 @@ function routeFixture(options={}) {
   const events=[],calls=[],rows=[],toolContexts=[],usage=[],timers=[]; let handler;
   const req=new EventEmitter(),res=new EventEmitter(); req.userName=options.userName===undefined?'xxz':options.userName; req.body={...body(),...options.body};
   Object.assign(res,{writableEnded:false,headers:{},setHeader(k,v){this.headers[k]=v;},flushHeaders(){},end(){this.writableEnded=true;}});
-  const c={app:{post(_path,...handlers){handler=handlers.at(-1);}},express:{json(){}},authenticateUser(){},aiChatConcurrencyGate(){},rateLimit(){},
+  const c={app:{post(_path,...handlers){handler=handlers.at(-1);}},express:{json(){}},authenticateUser(){},aiChatConcurrencyGate(){},aiRequestMiddleware(){},resolveAiModelReference(){},rateLimit(){},
     openRouter,ADMIN_USERNAME:'xxz',AI_CHAT_HOURLY_IP_LIMIT:10,AI_CHAT_MESSAGE_MAX_LEN:60000,AI_AGENT_MESSAGE_MARKER:'__ai_agent_msg__',
     URL,TextDecoder,AbortController,Date,console:{log(){},warn(){},error(){}},require:n=>require('../render-api/'+n.slice(2)),
     setTimeout(fn,ms){const t={fn,ms};timers.push(t);return t;},clearTimeout(t){if(t)t.cleared=true;},setInterval(){return 1;},clearInterval(){},
@@ -149,9 +149,10 @@ test('model catalog API never decrypts managed keys or caches any secret respons
   const a=server.indexOf("app.get('/api/agent/custom-models'"),b=server.indexOf('// PUT /api/agent/custom-models',a);
   vm.runInNewContext(server.slice(a,b),{app:{get(_path,...h){handler=h.at(-1);}},authenticateUser(){},rateLimit(){},openRouter,ADMIN_USERNAME:'xxz',
     fetchLatestAiModelsSnapshot:async()=>({models:[{uid:'old',provider:'openrouter',api_key_enc:'legacy-cipher'},{uid:'personal',provider:'qwen',api_key_enc:'personal-cipher'}],deletedUids:[]}),
+    publicAiModel:vm.runInNewContext('('+server.slice(server.indexOf('function publicAiModel('),server.indexOf('async function resolveAiModelReference(')).trim()+')'),
     decryptAiModelSecret(){decrypts++;return'personal-test-only-key';},console:{error(){}}});
   const res={headers:{},setHeader(k,v){this.headers[k]=v;},json(value){this.body=value;return this;}};await handler({userName:'xxz'},res);
-  assert.equal(decrypts,1);assert.equal(res.headers['Cache-Control'],'no-store');assert.equal(res.body.models.length,1);assert.equal(res.body.server_models[0].uid,openRouter.MODEL_UID);assert.equal(res.body.server_models[0].api_key,undefined);assert.doesNotMatch(JSON.stringify(res.body),new RegExp(TEST_KEY));
+  assert.equal(decrypts,0);assert.equal(res.body.models[0].api_key,undefined);assert.equal(res.body.models[0].api_key_enc,undefined);assert.equal(res.body.models[0].stored_reference,true);assert.equal(res.headers['Cache-Control'],'no-store');assert.equal(res.body.models.length,1);assert.equal(res.body.server_models[0].uid,openRouter.MODEL_UID);assert.equal(res.body.server_models[0].api_key,undefined);assert.doesNotMatch(JSON.stringify(res.body),new RegExp(TEST_KEY));
   await handler({userName:'alice'},res);assert.equal(res.body.server_models.length,0);
 });
 test('the free search path skips paid providers even when their keys are configured',async t=>{

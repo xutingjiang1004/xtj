@@ -84,13 +84,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   var MSG_MAX_CHARS_MAX = 32000;
 
   // ── 自定义第三方模型（千问/豆包/DeepSeek/Kimi/智谱/OpenAI/自定义）────────────
-  // ★ 账号级同步：模型配置（含 API Key）既存本地 localStorage，也在登录后同步到
-  //   服务端（/api/agent/custom-models，Key 加密存储），换设备/更新后自动恢复。
-  //   未登录或同步失败时静默降级为仅本地，不影响离线使用。
+  // 模型 Key 加密保存在服务端；浏览器缓存元数据与账号引用。
+  // 未同步的 Key 仅在本页内存暂留，刷新前需完成保存。
   var CUSTOM_MODELS_KEY = 'xtj_ai_custom_models';
   var CUSTOM_MODEL_PREFIX = 'custom:';
   var CUSTOM_MODEL_LIMIT = 20;
-  // ★ 账号级隔离：自定义模型（含 API Key）按当前登录账号存 localStorage，
+  // 账号级缓存仅保存模型元数据与后端引用；未同步 Key 只在当前页面内存暂留。
+  // 自定义模型按当前登录账号隔离，
   //   换账号互不可见；旧版全局键仅作回退，首次写入后自动迁移并清除。
   function aiStorageScopeName() {
     var u = '';
@@ -101,21 +101,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   }
   function scopedStorageGet(base) {
     try {
-      var k = String(base) + '__' + aiStorageScopeName();
-      var v = localStorage.getItem(k);
-      if (v !== null && v !== undefined) return v;
-      // ★ 2026-09-26（审计 P1-10）：**不再回退到未做账号隔离的全局旧键**。
-      //   旧键 `xtj_ai_custom_models` 里可能残留上一个账号（甚至匿名）写入的自定义
-      //   模型配置，其中 api_key 是明文第三方凭据。原实现回退读取 → B 账号能看到
-      //   A 账号的 Key，配合"编辑"回填（apiKeyInput.value = m.api_key）与"保存"
-      //   （pushServerCustomModels）还会把 A 的 Key 写进 B 的账号，属真实凭据泄露。
-      //   现在只做"清理"不做"读取"：命中全局键即删除，配置改由服务端同步路径
-      //   （syncCustomModelsFromServer）按当前账号恢复。
-      try {
-        if (localStorage.getItem(base) !== null) localStorage.removeItem(base);
-      } catch (_rm) { /* 隐私模式下可能失败，忽略 */ }
-      return null;
-    } catch (e) { return null; }
+      // Never import old unscoped credentials into the current account.
+      if(localStorage.getItem(base)!==null)localStorage.removeItem(base);
+      return localStorage.getItem(String(base)+'__'+aiStorageScopeName());
+    } catch (_) { return null; }
   }
   function scopedStorageSet(base, value) {
     try {
@@ -148,23 +137,38 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   function toStoredModel(m) {
     if (!m || m.server_managed || m.provider === 'openrouter') return null;
     var pl = m.providerLabel || m.provider_label || '';
-    return Object.assign({}, m, { providerLabel: pl, provider_label: pl });
+    var key=String(m.api_key||modelKeyDrafts().get(String(m.uid))||'');
+    var copy=Object.assign({},m,{providerLabel:pl,provider_label:pl,key_configured:!!(key||m.key_configured)});
+    delete copy.api_key_enc;delete copy.key_unchanged;
+    if(key)copy.api_key=key;else delete copy.api_key;
+    return copy;
+  }
+  var modelDraftOwner='',modelDraftKeys=new Map();
+  function modelKeyDrafts(){var owner=JSON.stringify(customModelIdentity());if(owner!==modelDraftOwner){modelDraftKeys.clear();modelDraftOwner=owner;}return modelDraftKeys;}
+  function publicModelRecord(m,rememberDraft){var copy=Object.assign({},m);if(rememberDraft!==false&&copy.api_key)modelKeyDrafts().set(String(copy.uid),String(copy.api_key));copy.key_configured=!!(copy.api_key||copy.key_configured);delete copy.api_key;delete copy.api_key_enc;return copy;}
+  function readModelPending(){
+    var value;try{value=JSON.parse(scopedStorageGet(CUSTOM_MODEL_PENDING_KEY)||'null');}catch(_){localStorage.removeItem(CUSTOM_MODEL_PENDING_KEY+'__'+aiStorageScopeName());return null;}
+    if(value&&Array.isArray(value.models)){value.models=value.models.map(publicModelRecord);scopedStorageSet(CUSTOM_MODEL_PENDING_KEY,JSON.stringify(value));}
+    return value;
   }
   function loadCustomModels() {
+    // Scrub old credentials for inactive accounts without retaining their keys
+    // in this account's memory or copying them into its server configuration.
+    try{var scope=aiStorageScopeName();for(var index=localStorage.length-1;index>=0;index--){var key=localStorage.key(index),prefix=[CUSTOM_MODELS_KEY,CUSTOM_MODEL_PENDING_KEY].find(function(base){return key&&key.indexOf(base+'__')===0;});if(!prefix||key===prefix+'__'+scope)continue;var old;try{old=JSON.parse(localStorage.getItem(key)||'null');}catch(_){localStorage.removeItem(key);continue;}var models=Array.isArray(old)?old:old&&old.models;if(!Array.isArray(models))continue;var dirty=false;models.forEach(function(model){if(model&&typeof model==='object'&&('api_key' in model||'api_key_enc' in model)){model.key_configured=!!(model.api_key||model.api_key_enc||model.key_configured);delete model.api_key;delete model.api_key_enc;dirty=true;}});if(dirty)localStorage.setItem(key,JSON.stringify(old));}}catch(_){}
     var personal = [];
     try {
       var list = JSON.parse(scopedStorageGet(CUSTOM_MODELS_KEY) || '[]');
       var deleted = loadDeletedModelUids();
       if (Array.isArray(list)) {
-        personal = list.filter(function(m) { return m && m.uid && m.uid !== OPENROUTER_MODEL_UID && m.api_key && m.provider !== 'openrouter' && !m.server_managed && deleted.indexOf(String(m.uid)) < 0; }).map(normalizeCustomModelRecord);
-        if (personal.length !== list.length) saveCustomModelsLocal(personal);
+        personal = list.filter(function(m) { return m && m.uid && m.uid !== OPENROUTER_MODEL_UID && (m.api_key||m.key_configured) && m.provider !== 'openrouter' && !m.server_managed && deleted.indexOf(String(m.uid)) < 0; }).map(normalizeCustomModelRecord).map(function(m){return publicModelRecord(m,false);});
+        if (personal.length !== list.length||list.some(function(m){return m&&m.api_key;})) saveCustomModelsLocal(personal);
       }
     } catch (e) {}
     return personal.concat(serverModelIdentity && customModelIdentityCurrent(serverModelIdentity) ? serverModelCatalog : []);
   }
   function saveCustomModelsLocal(list) {
     try {
-      var stored = (list || []).map(toStoredModel).filter(Boolean).slice(0, CUSTOM_MODEL_LIMIT);
+      var stored = (list || []).map(toStoredModel).filter(Boolean).map(publicModelRecord).slice(0, CUSTOM_MODEL_LIMIT);
       scopedStorageSet(CUSTOM_MODELS_KEY, JSON.stringify(stored));
     } catch (e) {}
   }
@@ -196,6 +200,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   function markModelUidsDeleted(uids) {
     var cur = loadDeletedModelUids();
     (uids || []).forEach(function(uid) {
+      modelKeyDrafts().delete(String(uid));
       if (uid && cur.indexOf(uid) < 0) cur.push(uid);
     });
     saveDeletedModelUids(cur);
@@ -278,7 +283,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // Capture the account, mutation and payload before any auth/network await.
     var owner = customModelIdentity(), seq = ++customModelMutationSeq;
     var pending;
-    try { pending = JSON.parse(scopedStorageGet(CUSTOM_MODEL_PENDING_KEY) || 'null'); } catch (_) {}
+    try { pending = readModelPending(); } catch (_) {}
     var modelMap = Object.create(null);
     ((pending && pending.models) || []).concat(list || []).forEach(function(m) { var stored = toStoredModel(m); if (stored && stored.uid) modelMap[stored.uid] = stored; });
     var deleted = loadDeletedModelUids().concat(deletedUids || []);
@@ -286,7 +291,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var payload = { models: Object.keys(modelMap).filter(function(uid) { return deleted.indexOf(uid) < 0; }).map(function(uid) { return modelMap[uid]; }).slice(0, 20),
       deleted_uids: deleted, merge: true };
     if ((pending && pending.ai_prefs) || aiPrefs) payload.ai_prefs = Object.assign({}, pending && pending.ai_prefs || {}, aiPrefs || {});
-    scopedStorageSet(CUSTOM_MODEL_PENDING_KEY, JSON.stringify(payload));
+    scopedStorageSet(CUSTOM_MODEL_PENDING_KEY, JSON.stringify(Object.assign({},payload,{models:payload.models.map(publicModelRecord)})));
     var work = async function() {
       if (!customModelIdentityCurrent(owner)) return false;
       var timer, controller = new AbortController();
@@ -302,7 +307,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (!data || !data.ok) return false;
         if (Array.isArray(data.deleted_uids)) markModelUidsDeleted(data.deleted_uids);
         if (seq === customModelMutationSeq) {
-          if (Array.isArray(data.models)) saveCustomModelsLocal(data.models.map(normalizeCustomModelRecord));
+          if (Array.isArray(data.models)) { data.models.forEach(function(m){if(m.stored_reference)modelKeyDrafts().delete(String(m.uid));});saveCustomModelsLocal(data.models.map(normalizeCustomModelRecord)); }
           localStorage.removeItem(CUSTOM_MODEL_PENDING_KEY + '__' + owner.scope);
         }
         return true;
@@ -348,7 +353,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         //   因为本地代表用户最近一次显式选择）。
         try {
           var prefModel = data.ai_prefs && data.ai_prefs.research_model;
-          var pendingPreference = JSON.parse(scopedStorageGet(CUSTOM_MODEL_PENDING_KEY) || 'null');
+          var pendingPreference = readModelPending();
           if (pendingPreference && pendingPreference.ai_prefs && pendingPreference.ai_prefs.research_model) prefModel = pendingPreference.ai_prefs.research_model;
           if (prefModel && typeof prefModel === 'string') {
             S.dtResearchModel = prefModel;
@@ -357,9 +362,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         } catch (ePref2) {}
         var tombstones = loadDeletedModelUids();
         return data.models.filter(function(m) {
-          if (!m || !m.uid || m.uid === OPENROUTER_MODEL_UID || !m.api_key || m.provider === 'openrouter' || m.server_managed) return false;
+          if (!m || !m.uid || m.uid === OPENROUTER_MODEL_UID || !m.api_key&&!m.key_configured || m.provider === 'openrouter' || m.server_managed) return false;
           return tombstones.indexOf(String(m.uid)) < 0; // 墓碑兜底：即使服务端返回也丢弃
-        }).map(normalizeCustomModelRecord);
+        }).map(function(m){return publicModelRecord(normalizeCustomModelRecord(m),false);});
       }
       return null;
     } catch (e) { return null; }
@@ -372,11 +377,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   //   用户在「模型管理」里的显式增删操作（saveCustomModels）驱动，且删除会带 deleted_uids 墓碑。
   async function syncCustomModelsFromServer() {
     var owner = customModelIdentity();
+    loadCustomModels(); // scrub legacy device credentials before the authoritative read
     try {
       await customModelWriteQueue;
       if (!customModelIdentityCurrent(owner)) return false;
       var pending;
-      try { pending = JSON.parse(scopedStorageGet(CUSTOM_MODEL_PENDING_KEY) || 'null'); } catch (_) {}
+      try { pending = readModelPending(); } catch (_) {}
       var deleted = loadDeletedModelUids();
       if (pending || deleted.length) {
         await pushServerCustomModels(pending ? pending.models : [], deleted, pending && pending.ai_prefs);
@@ -389,8 +395,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       // The authenticated account is authoritative. Local caches are never
       // merged back unless they contain an explicit, unsynced user mutation.
       var pending;
-      try { pending = JSON.parse(scopedStorageGet(CUSTOM_MODEL_PENDING_KEY) || 'null'); } catch (_) {}
-      if (!pending) saveCustomModelsLocal(server);
+      try { pending = readModelPending(); } catch (_) {}
+      if (!pending) {modelKeyDrafts().clear();saveCustomModelsLocal(server);}
       // 当前选中的自定义模型 uid 若已不存在，回退到第一个自定义模型或默认模型
       if (S.selectedModel && isCustomModelId(S.selectedModel)) {
         var uid = S.selectedModel.slice(CUSTOM_MODEL_PREFIX.length);
@@ -424,6 +430,17 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       else S._voiceConversation.speak(typeof content === 'function' ? content() : content,false);
     });
     row.appendChild(button);
+    var bookmark = el('button',{type:'button',class:'ai-msg-act ai-msg-act-bookmark','aria-label':'收藏回复',text:'收藏'});
+    bookmark.addEventListener('click',async function(event){
+      event.preventDefault();event.stopPropagation();if(bookmark.disabled)return;
+      var host=row.closest('.ai-msg'),message=host&&host._msgRef,identity=customModelIdentity(),life=S.lifecycleId,cid=S.conversationId;
+      if(!message||message._pendingSync||!message.id&&!message.client_request_id||!cid){notify('请等待回复保存后再收藏；未保存的回复可先复制保留');return;}
+      bookmark.disabled=true;
+      try{var result=await apiRequest('POST','/chat/bookmarks',{conversation_id:cid,message_id:message.id,client_request_id:message.client_request_id});if(!customModelIdentityCurrent(identity)||life!==S.lifecycleId||!row.isConnected)return;if(!result.ok)throw Error(result.data&&result.data.error||result.error||'收藏失败，请重试');if(result.data.message_id)message.id=result.data.message_id;bookmark.textContent='已收藏';notify('已收藏到当前账号，可在历史会话中查看');}
+      catch(error){if(customModelIdentityCurrent(identity)&&life===S.lifecycleId&&row.isConnected)notify(error.message);}
+      finally{if(row.isConnected&&customModelIdentityCurrent(identity))bookmark.disabled=false;}
+    });
+    row.appendChild(bookmark);
   }
   function customModelDisplayName(mid) {
     if (!isCustomModelId(mid)) return '';
@@ -433,8 +450,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     return (m.label || m.model || '自定义模型') + (m.providerLabel ? ' · ' + m.providerLabel : '');
   }
   // 解析自定义模型的选项值 → 配置对象（含 provider/base/api_key/model）
+  function networkSettings() {
+    return {networkMode:S.networkMode==='off'?'off':S.webSearchEnabled?'required':'auto',taskBudget:Object.assign({},S.taskBudget)};
+  }
   var modelCapabilityCache = new Map();
-  function capabilityKey(config) { return JSON.stringify([config.provider,config.base_url,config.model,config.api_key]); }
+  function capabilityKey(config) { return JSON.stringify([config.provider,config.base_url,config.model,config.model_uid||config.uid||'',config.config_revision||'',config.api_key||'']); }
   function resolveCustomModelConfig(mid) {
     if (!isCustomModelId(mid)) return null;
     var uid = mid.slice(CUSTOM_MODEL_PREFIX.length);
@@ -446,12 +466,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     return {
       provider: m.provider,
       providerLabel: m.providerLabel || (p && p.label) || '自定义',
-      api_key: m.server_managed ? undefined : String(m.api_key || ''),
-      model_uid: m.server_managed ? m.uid : undefined,
+      api_key: undefined,
+      model_uid: m.uid,
+      config_revision: m.config_revision,
       server_managed: m.server_managed === true,
       model: String(m.model || (p && p.defaultModel) || ''),
       base_url: String(m.base_url || (p && p.base) || ''),
-      reasoning_effort_supported: !!(modelCapabilityCache.get(capabilityKey({provider:m.provider,base_url:String(m.base_url || (p && p.base) || ''),model:String(m.model || (p && p.defaultModel) || ''),api_key:String(m.api_key || '')})) || {}).reasoning
+      reasoning_effort_supported: !!(modelCapabilityCache.get(capabilityKey({provider:m.provider,base_url:String(m.base_url || (p && p.base) || ''),model:String(m.model || (p && p.defaultModel) || ''),model_uid:m.uid,config_revision:m.config_revision})) || {}).reasoning
     };
   }
 
@@ -573,6 +594,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     lastSendFingerprint: '',
     lastSendAt: 0,
     webSearchEnabled: false,
+    networkMode: null,
+    taskBudget: {},
     // ★ 工作模式（work_mode）：在当前对话框直接切换，AI 自主拆解任务并调用全部工具完成，
     //   输出"任务结果"而非研究报告（区别于深入研究 deep_think，那是独立二级页面出报告）。
     //   开启时同时继承原「思考Max」的长上下文特性（不自动压缩）。
@@ -2754,6 +2777,15 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }
   }
 
+  var aiFeatureRequestClient=null;
+  async function aiFeatureFetch(url,options){
+    if(/\/(?:custom-chat\/(?:stream|deep-stream)|research\/stream)$/.test(String(url))){var identity=customModelIdentity();await customModelWriteQueue;if(!customModelIdentityCurrent(identity))throw new DOMException('请求已取消','AbortError');}
+    var features=window.XtjAiCore&&window.XtjAiCore.AssistantFeatures;
+    if(!features||!features.createRequestClient)return fetch(url,options);
+    if(!aiFeatureRequestClient)aiFeatureRequestClient=features.createRequestClient({identity:function(){return JSON.stringify([readUserName(),readAiAuthEpoch()]);},fetch:function(target,init){return fetch(target,init);}});
+    return aiFeatureRequestClient.fetch(url,options);
+  }
+
   async function apiRequest(method, path, body, opts) {
     var owner = readUserName(), authEpoch = window.__xtjGetAuthEpoch ? window.__xtjGetAuthEpoch() : 0;
     function sameIdentity() { return owner === readUserName() && authEpoch === (window.__xtjGetAuthEpoch ? window.__xtjGetAuthEpoch() : 0); }
@@ -2968,6 +3000,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     convert_data: '转换数据格式', process_json: '处理数据', regex_test: '校验表达式',
     encode_decode: '编码转换', run_code: '运行代码',
     // 文件生成/读取类
+    search_document:'检索文件原文',read_document_section:'读取文件段落',
     read_document: '读取文档', read_zip: '读取压缩包', make_file: '生成文件',
     generate_pdf: '生成 PDF', make_chart: '生成图表', markdown_table: '生成表格',
     qr_code: '生成二维码', image_info: '查看图片信息', image_process: '处理图片',
@@ -2998,7 +3031,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // 检索类 —— 走"已搜索 N 个网页"专用句式，这里只标记类型
     search_web: '网页', tavily_search: '网页', read_web_page: '网页',
     web_extract: '网页', extract_links: '链接', page_meta: '网页信息',
-    search_social: '社交内容',
+    search_social: '社交内容',search_document:'文件原文',read_document_section:'文件段落',
     // 实时信息类
     get_weather: '天气工具', get_current_time: '时间工具',
     get_exchange_rate: '汇率工具', get_stock_quote: '行情工具',
@@ -6543,12 +6576,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           if (settled) return;
           if (!customModelIdentityCurrent(requestIdentity)) { fail(Object.assign(new Error('账号已切换'), { code: 'identity_changed', cancelled: true })); return; }
           var authHeaders = (authPayload && authPayload.headers) || {};
-          resp = await fetch(API_BASE + '/research/stream', {
+          resp = await aiFeatureFetch(API_BASE + '/research/stream', {
             method: 'POST',
             headers: authHeaders,
             credentials: 'include',
             body: JSON.stringify({
-              query: String(query || ''),attachments:opts&&opts.attachments,web_search:opts&&opts.webSearch,reuse_documents:true,
+              query: String(query || ''),attachments:opts&&opts.attachments,web_search:opts&&opts.webSearch,network_mode:opts&&opts.networkMode,task_budget:opts&&opts.taskBudget,reuse_documents:true,
               checkpoint: true, checkpoint_id: opts && opts.checkpointId || undefined,
               client_request_id: opts && opts.requestId || undefined,
               model: (opts && opts.model) || 'pro',
@@ -6874,7 +6907,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           }
         }
         if (prog.sources) sources = prog.sources;
-      }, { model: researchModel, researchModel: opts.researchModel, mode: opts.mode || 'hybrid', rewrite: opts.rewrite !== false, controller: controller, refresh: opts.refresh === true, requestId: reqId, checkpointId: opts.checkpointId,attachments:opts.attachments,webSearch:opts.webSearch });
+      }, { model: researchModel, researchModel: opts.researchModel, mode: opts.mode || 'hybrid', rewrite: opts.rewrite !== false, controller: controller, refresh: opts.refresh === true, requestId: reqId, checkpointId: opts.checkpointId,attachments:opts.attachments,webSearch:opts.webSearch,networkMode:opts.networkMode,taskBudget:opts.taskBudget });
       var result = await researchPromise;
       if (S._dtCurrentReqId !== reqId || !customModelIdentityCurrent(flowIdentity) || S.dtLifecycleId !== flowLifecycle) return 'done';
       answer = (result && result.answer) || '';
@@ -6917,7 +6950,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var isConcurrent = errCode === 'concurrent' || /上一个(研究)?请求|请等待上一个/.test(errMsg);
       var isQuota = /quota_exceeded|search_limit|rate_limited|daily_limit|hourly_limit|pro_required|insufficient|not_enough/.test(errCode)
         || /次数已达上限|额度|开通 Pro|访问过于频繁/.test(errMsg);
-      if (isConcurrent || isQuota || String(opts && opts.researchModel || '') === CUSTOM_MODEL_PREFIX + OPENROUTER_MODEL_UID || /^checkpoint_/.test(errCode) || errCode === 'research_incomplete' || (progressCard && progressCard.dataset && progressCard.dataset.checkpointId) || (err && err.retryable === false) || answer) {
+      if (isConcurrent || isQuota || /^task_(?:search_)?budget_/.test(errCode) || errCode==='network_disabled' || String(opts && opts.researchModel || '') === CUSTOM_MODEL_PREFIX + OPENROUTER_MODEL_UID || /^checkpoint_/.test(errCode) || errCode === 'research_incomplete' || (progressCard && progressCard.dataset && progressCard.dataset.checkpointId) || (err && err.retryable === false) || answer) {
         console.warn('[AI] Tavily research 终结于不可回退错误:', errCode || errMsg);
         var terminalMsg = isConcurrent
           ? '上一个请求仍在进行中，请等它结束后重试'
@@ -7791,9 +7824,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var dtOwner = window.currentUser || '', dtAuthEpoch = readAiAuthEpoch();
     var dtResearchModel = S.dtResearchModel || 'pro';
     var dtCustomConfig = isCustomModelId(dtResearchModel) ? resolveCustomModelConfig(dtResearchModel) : null;
-    var dtSettings = { effort: S.dtResearchMode === 'mini' ? 'low' : S.deepThinkEffort || 'max', webSearch: S.webSearchEnabled === true,
+    var dtSettings = Object.assign(networkSettings(),{ effort: S.dtResearchMode === 'mini' ? 'low' : S.deepThinkEffort || 'max', webSearch: S.webSearchEnabled === true,
       model: dtResearchModel === 'flash' ? DEFAULT_AI_MODEL : 'deepseek-v4-pro', mode: S.dtResearchMode || 'pro', researchModel: dtResearchModel,
-      custom: dtCustomConfig && Object.assign({},dtCustomConfig) };
+      custom: dtCustomConfig && Object.assign({},dtCustomConfig) });
     if (isCustomModelId(dtResearchModel) && !dtSettings.custom) { notify('研究模型配置已失效，请重新选择'); releaseDeepPreflightLock(); return; }
     var dtPanel = document.getElementById('panelDeepThink');
     S._dtClientRequestId = (S._dtClientRequestId || 0) + 1;
@@ -7891,7 +7924,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var tavilyOutcome;
       // ★ 修复: Tavily 深入研究同样消耗每日第三方搜索次数。超限时不发起研究请求，
       //   直接回退到下方深入研究流程（与 Tavily 流程失败时的行为一致）。
-      if (!sendOptions.checkpointId && (!researchFileList.length || dtSettings.webSearch) && S.quota && searchQuotaExhausted(S.quota)) {
+      if (dtSettings.networkMode!=='off' && !sendOptions.checkpointId && (!researchFileList.length || dtSettings.webSearch) && S.quota && searchQuotaExhausted(S.quota)) {
         notify('今日网页搜索次数已达上限，开通 Pro 可无限搜索');
         tavilyOutcome = 'fallback';
       } else {
@@ -7900,7 +7933,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             messagesEl: dtMessagesEl,
             text: text,
             originalUserText: originalUserText,
-            fileData: fileData,attachments:attachmentPayload,webSearch:researchFileList.length?dtSettings.webSearch:undefined,
+            fileData: fileData,attachments:attachmentPayload,webSearch:researchFileList.length?dtSettings.webSearch:undefined,networkMode:dtSettings.networkMode,taskBudget:dtSettings.taskBudget,
             reqId: reqId,
             model: dtSettings.mode,
             researchModel: dtSettings.researchModel,
@@ -7983,7 +8016,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       // Omit the field for ordinary messages so the server's response cache
       // remains eligible; an empty attachments array is truthy in JS.
       attachments: attachmentPayload || undefined,
-      web_search: dtSettings.webSearch,
+      web_search: dtSettings.webSearch,network_mode:dtSettings.networkMode,task_budget:dtSettings.taskBudget,
       model: dtSettings.model
     }, dtSettings.custom || {}));
 
@@ -8187,7 +8220,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var ar = { value: null }, cr = { value: null }, as = { value: false }, dr = { value: false }, eh = { value: false };
     var sc = { value: null }, ab = { value: false };
     try {
-      var resp = await fetch(url, {
+      var resp = await aiFeatureFetch(url, {
         method: 'POST',
         headers: headers,
         body: fetchBody,
@@ -9252,7 +9285,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var _sendThinkingMode = (ALLOWED_THINKING_MODES.indexOf(S.thinkingMode) >= 0)
       ? S.thinkingMode
       : DEFAULT_THINKING_MODE;
-    var sendSettings = { model: S.selectedModel, thinkMax: S.thinkMax === true, workMode: S.workMode === true, webSearch: S.webSearchEnabled === true, responseProfile: S.responseProfile,contextManaged:S._contextManaged===true,contextWindowTokens:S._contextWindowTokens?S._contextWindowTokens():65536,contextMemory:S._contextMemoryResolver?S._contextMemoryResolver():null };
+    var sendSettings = Object.assign(networkSettings(),{ model: S.selectedModel, thinkMax: S.thinkMax === true, workMode: S.workMode === true, webSearch: S.webSearchEnabled === true, responseProfile: S.responseProfile,contextManaged:S._contextManaged===true,contextWindowTokens:S._contextWindowTokens?S._contextWindowTokens():65536,contextMemory:S._contextMemoryResolver?S._contextMemoryResolver():null });
     var sendCustomCfg = isCustomModelId(sendSettings.model) ? Object.assign({}, resolveCustomModelConfig(sendSettings.model)) : null;
     // Lock synchronously before the first await (auth/token acquisition), so
     // two clicks in the same event loop cannot create two streams.
@@ -9584,7 +9617,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         thinking_mode: _sendThinkingMode,
         thinking_max: sendSettings.thinkMax === true,
         work_mode: sendSettings.workMode === true,
-        web_search: sendSettings.webSearch === true,
+        web_search: sendSettings.webSearch === true,network_mode:sendSettings.networkMode,task_budget:sendSettings.taskBudget,
         tools_enabled: (sendSettings.webSearch === true || sendSettings.thinkMax === true || sendSettings.workMode === true),
         // ★ 修复：自定义模型通道此前漏发 attachments，文件内容无法传给模型
         attachments: attachmentPayload || undefined,
@@ -9617,13 +9650,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         work_mode: sendSettings.workMode === true,
         response_profile: sendSettings.responseProfile === 'enhanced' ? 'enhanced' : 'normal',
         attachments: attachmentPayload || undefined,
-        web_search: sendSettings.webSearch,
+        web_search: sendSettings.webSearch,network_mode:sendSettings.networkMode,task_budget:sendSettings.taskBudget,
         model: sendSettings.model
       });
     }
     
     try {
-      var resp = await fetch(url, {
+      var resp = await aiFeatureFetch(url, {
         method: 'POST',
         headers: headers,
         body: fetchBody,
@@ -9649,7 +9682,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           try {
             var _auth2 = await getUserAuthPayload({ forceNoToken: false });
             if ((sendToken !== S.sendSeq || !customModelIdentityCurrent(sendIdentity)) || (S._currentReqId !== reqId || !customModelIdentityCurrent(sendIdentity)) || controller.signal.aborted) return;
-            var _resp2 = await fetch(url, {
+            var _resp2 = await aiFeatureFetch(url, {
               method: 'POST',
               headers: (_auth2 && _auth2.headers) || headers,
               body: fetchBody,
@@ -11845,6 +11878,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       }));
       S.conversationHasMore = r.data.has_more === true;
       S.conversationCursor = r.data.next_cursor || null;
+      await refreshConversationMetadata(r.data.conversations.map(function(row){return row.conversation_id;}),current);
+      if (!current()) return false;
       return true;
     } catch (error) {
       if (!current()) return false;
@@ -11852,10 +11887,20 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }
   }
 
-  // 切换会话
-  // ★ 新增：会话自定义标题（localStorage 覆盖，仅本设备生效，不动后端）
+  var conversationMetadata = new Map(), conversationTitleDrafts = new Map(), historyExports = new Set();
+  async function refreshConversationMetadata(ids,current) {
+    if(!ids.length)return;
+    try { var result=await apiRequest('POST','/chat/metadata/read',{conversation_ids:ids},{timeoutMs:10000,background:true});
+      if(!current()||!result.ok||!result.data||!Array.isArray(result.data.records))return;
+      ids.forEach(function(id){conversationMetadata.set(id,{title:'',revision:0});});
+      result.data.records.forEach(function(record){if(ids.indexOf(record.conversation_id)>=0)conversationMetadata.set(record.conversation_id,record);});
+    } catch(_) {}
+  }
+  // Account metadata is authoritative; legacy device titles remain a fallback
+  // until the user next edits them and synchronizes the explicit change.
   function getConversationTitleOverride(cid) {
     if (!cid) return '';
+    var record=conversationMetadata.get(cid);if(record&&record.revision>0)return record.title||'';
     try { var m = JSON.parse(scopedStorageGet('xtj_ai_conv_titles') || '{}'); return m[cid] || ''; } catch (e) { return ''; }
   }
   function setConversationTitleOverride(cid, title) {
@@ -11863,17 +11908,34 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     try {
       var m = JSON.parse(scopedStorageGet('xtj_ai_conv_titles') || '{}');
       var clean = String(title || '').trim();
-      if (clean) m[cid] = clean.slice(0, 40); else delete m[cid];
+      if (clean) m[cid] = clean.slice(0, 80); else delete m[cid];
       scopedStorageSet('xtj_ai_conv_titles', JSON.stringify(m));
     } catch (e) {}
   }
-  function renameConversation(cid) {
+  async function renameConversation(cid) {
     if (!cid) return;
-    var current = getConversationTitleOverride(cid) || '';
-    var next = prompt('输入新的会话名称（留空恢复默认）：', current);
+    var identity=customModelIdentity(),life=S.lifecycleId;
+    function current(){return customModelIdentityCurrent(identity)&&life===S.lifecycleId;}
+    if(!conversationMetadata.has(cid))await refreshConversationMetadata([cid],current);
+    if(!current())return;
+    if(!conversationMetadata.has(cid)){notify('暂时无法读取账号标题，请稍后重试');return;}
+    var next = prompt('输入会话名称（最多 80 字，留空恢复默认；保存到当前账号）：', conversationTitleDrafts.has(cid)?conversationTitleDrafts.get(cid):getConversationTitleOverride(cid)||'');
     if (next === null) return;
-    setConversationTitleOverride(cid, next);
-    if (S.conversationsEl) renderConversationListStyled(S.conversationsEl);
+    next=next.trim();if(next.length>80){notify('会话名称最多 80 字');return;}conversationTitleDrafts.set(cid,next);
+    var revision=conversationMetadata.get(cid).revision;
+    try{var result=await apiRequest('POST','/chat/metadata',{conversation_id:cid,title:next,revision:revision});if(!current())return;
+      if(!result.ok){if(result.status===409)await refreshConversationMetadata([cid],current);throw Error(result.data&&result.data.error||result.error||'标题未同步，请稍后重试');}
+      conversationMetadata.set(cid,result.data.record);conversationTitleDrafts.delete(cid);setConversationTitleOverride(cid,next);
+      if(S.conversationsEl)renderConversationListStyled(S.conversationsEl);notify('会话标题已同步');
+    }catch(error){if(current())notify(error.message+'；输入已暂留在当前页面');}
+  }
+  async function exportSavedHistory(cid,bookmarks,button,filters) {
+    var features=assistantFeatures();if(!features||!features.downloadHistory||button&&button.disabled)return;
+    var identity=customModelIdentity(),life=S.lifecycleId,controller=new AbortController();historyExports.add(controller);if(button)button.disabled=true;
+    function current(){return customModelIdentityCurrent(identity)&&life===S.lifecycleId&&!controller.signal.aborted;}
+    try{var count=await features.downloadHistory({conversationId:cid,bookmarks:bookmarks,filters:filters||{},request:apiRequest,current:current,signal:controller.signal});if(current())notify('已导出 '+count+' 条已保存消息');}
+    catch(error){if(current()&&error.name!=='AbortError')notify(error.message);}
+    finally{historyExports.delete(controller);if(button&&button.isConnected&&customModelIdentityCurrent(identity)&&life===S.lifecycleId)button.disabled=false;}
   }
 
   function renderConversationListStyled(container) {
@@ -11919,6 +11981,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           });
         })(conv.conversation_id);
         meta.appendChild(renameBtn);
+        var exportBtn=el('button',{type:'button',class:'ai-conv-export','aria-label':'导出此对话 Markdown',text:'导出'});
+        exportBtn.addEventListener('click',function(event){event.stopPropagation();exportSavedHistory(conv.conversation_id,false,exportBtn);});meta.appendChild(exportBtn);
         // 删除按钮
         var delBtn = el('button', { type: 'button', class: 'ai-conv-del', title: '删除此对话', 'aria-label': '删除对话' }, '×');
         (function(cid, elRef) {
@@ -11962,6 +12026,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (!currentDelete()) return;
       if (r && r.ok) {
         S.conversationRequestId += 1;
+        conversationMetadata.delete(cid);conversationTitleDrafts.delete(cid);setConversationTitleOverride(cid,'');
         clearAiConversationHistoryCache(cid, 'normal');
         if (S._forgetAiComposerDraft) S._forgetAiComposerDraft(cid);
         if (itemEl && itemEl.parentElement) itemEl.remove();
@@ -12091,6 +12156,15 @@ function showChatMessages() {
     // 把会话列表与提示栏移入浮层卡片（保留原引用，逻辑不变）
     var infoBar = document.getElementById('aiChatHistoryInfo');
     if (infoBar) card.appendChild(infoBar);
+    var features=assistantFeatures();
+    if(features&&features.createHistoryPanel){
+      var identity=customModelIdentity(),life=S.lifecycleId;
+      var history=features.createHistoryPanel({list:S.conversationsEl,request:apiRequest,renderMarkdown:renderMarkdown,
+        current:function(){return customModelIdentityCurrent(identity)&&life===S.lifecycleId&&S.showingHistory;},
+        open:function(item){hideConversationListPage();window.__xtjAiAgent.openConversation(item.conversation_id,item.chat_mode);},
+        exportBookmarks:function(button,filters){exportSavedHistory(null,true,button,filters);},exportConversation:function(item,button,filters){exportSavedHistory(item.conversation_id,false,button,filters);}});
+      shell._historyFeatures=history;card.appendChild(history.root);
+    }
     card.appendChild(S.conversationsEl);
     shell.appendChild(card);
     root.appendChild(shell);
@@ -12104,10 +12178,12 @@ function showChatMessages() {
     var infoBar = document.getElementById('aiChatHistoryInfo');
     if (infoBar) infoBar.style.display = '';
     if (S.conversationsEl) {
+      S.conversationsEl.hidden = false;
       S.conversationsEl.style.display = '';
       renderConversationListStyled(S.conversationsEl);
     }
     var shell = ensureConversationPageShell();
+    if(shell&&shell._historyFeatures)shell._historyFeatures.reset();
     if (shell && shell.__closeTimer) { clearTimeout(shell.__closeTimer); shell.__closeTimer = null; }
     if (shell) { shell.classList.remove('is-leaving'); shell.inert = false; shell.removeAttribute('aria-hidden'); }
     S.showingHistory = true;
@@ -12131,6 +12207,8 @@ function showChatMessages() {
     var root = getAiRoot();
     var shell = root ? root.querySelector('.ai-conv-page-shell') : null;
     if (!shell) return;
+    if(shell._historyFeatures)shell._historyFeatures.cancel();
+    historyExports.forEach(function(controller){controller.abort();});historyExports.clear();
     if (shell.__closeTimer) clearTimeout(shell.__closeTimer);
     shell.inert = true; shell.setAttribute('aria-hidden', 'true');
     var focus = root.querySelector('.ai-chat-hist-btn');
@@ -12456,6 +12534,9 @@ function showChatMessages() {
     try {
       var savedWebSearch = localStorage.getItem('xtj_ai_web_search');
       S.webSearchEnabled = savedWebSearch === 'true';
+      S.networkMode = localStorage.getItem('xtj_ai_network_mode')==='off'?'off':null;
+      if(S.networkMode==='off')S.webSearchEnabled=false;
+      try{var savedBudget=JSON.parse(localStorage.getItem('xtj_ai_task_budget')||'{}');S.taskBudget={};if([1,3,6,12,30].indexOf(savedBudget.max_searches)>=0)S.taskBudget.max_searches=savedBudget.max_searches;if([60,120,240,600].indexOf(savedBudget.max_duration_seconds)>=0)S.taskBudget.max_duration_seconds=savedBudget.max_duration_seconds;}catch(_){S.taskBudget={};}
       // ★ 修复: 恢复搜索开关时校验额度。若额度显示搜索已不可用，自动关闭该开关，
       //   避免刷新后带着超限状态继续触发第三方搜索。额度未拉到（S.quota 为 null）时
       //   交给 applyQuota 在额度到达后兜底关闭。
@@ -12575,12 +12656,12 @@ function showChatMessages() {
                   '<span class="ai-panel-row-trail" aria-hidden="true">' + ICO.chev + '</span>'
                 ) +
               '</button>' +
-              '<button type="button" class="ai-panel-row ai-panel-row-toggle" role="switch" data-action="search" aria-checked="false" title="开启后，本轮必须实际执行网页检索；关闭时由 AI 自主判断">' +
+              '<button type="button" class="ai-panel-row" data-action="search" title="点击切换：自动判断、必须检索、仅当前资料">' +
                 '<span class="ai-panel-row-icon ai-panel-row-icon--search" aria-hidden="true">' + ICO.search + '</span>' +
                 '<span class="ai-panel-row-title">网页搜索</span>' +
                 rowEnd(
                   '<span class="ai-panel-row-value" id="aiSearchRemainHint">—</span>',
-                  '<span class="ai-search-switch" id="aiSearchStatus" aria-hidden="true"><i></i></span>'
+                  '<span class="ai-panel-row-value" id="aiSearchStatus">自动</span>'
                 ) +
               '</button>' +
             '</div>' +
@@ -12812,27 +12893,25 @@ function showChatMessages() {
         if (flash) flashPanelValue(sum);
       }
     }
+    var budgetBox=el('fieldset',{class:'ai-task-budget'});
+    budgetBox.appendChild(el('legend',{text:'单次任务限额（可选）'}));
+    function budgetSelect(key,label,values,unit){
+      var wrap=el('label',{text:label}),select=el('select',{'aria-label':label});select.appendChild(el('option',{value:'',text:'沿用原有限额'}));
+      values.forEach(function(value){select.appendChild(el('option',{value:String(value),text:value+unit}));});select.value=S.taskBudget[key]==null?'':String(S.taskBudget[key]);
+      select.addEventListener('change',function(){if(select.value)S.taskBudget[key]=Number(select.value);else delete S.taskBudget[key];try{localStorage.setItem('xtj_ai_task_budget',JSON.stringify(S.taskBudget));}catch(_){}});wrap.appendChild(select);budgetBox.appendChild(wrap);
+    }
+    budgetSelect('max_searches','最多检索',[1,3,6,12,30],' 次');budgetSelect('max_duration_seconds','最长耗时',[60,120,240,600],' 秒');
+    budgetBox.appendChild(el('small',{text:'从下一次发送生效。检索按动作计数，重试和服务商计费可能不同；停止不能保证远端立即停止计费。'}));
+    panelShell.querySelector('.ai-panel-menu-list .ai-panel-group:last-child').appendChild(budgetBox);
+
     function updateSearchStatus() {
       var st = panelShell.querySelector('#aiSearchStatus');
       var btn = panelShell.querySelector('[data-action="search"]');
       var hint = panelShell.querySelector('#aiSearchRemainHint');
       var q = S.quota;
-      if (st) {
-        // 开关形态：不再写「开/关」文字，用 .on 控制样式
-        if (st.tagName === 'SPAN' && st.classList.contains('ai-search-switch')) {
-          st.setAttribute('data-on', S.webSearchEnabled ? '1' : '0');
-        } else {
-          st.textContent = S.webSearchEnabled ? '开' : '关';
-        }
-        st.classList.toggle('on', !!S.webSearchEnabled);
-      }
-      if (btn) {
-        btn.setAttribute('aria-checked', S.webSearchEnabled ? 'true' : 'false');
-        btn.classList.toggle('is-selected', !!S.webSearchEnabled);
-        var blocked = !!(q && !q.search_unlimited && q.can_search === false);
-        btn.classList.toggle('is-disabled', blocked);
-        btn.setAttribute('aria-disabled', blocked ? 'true' : 'false');
-      }
+      var mode=networkSettings().networkMode,label={auto:'自动',required:'必须检索',off:'仅当前资料'}[mode];
+      if(st){st.textContent=label;st.classList.toggle('on',mode==='required');}
+      if(btn){btn.setAttribute('aria-label','网页搜索：'+label+'，点击切换');btn.classList.toggle('is-selected',mode==='required');btn.removeAttribute('aria-checked');btn.removeAttribute('aria-disabled');btn.classList.remove('is-disabled');}
       if (hint) {
         if (q && (q.search_unlimited === true || Number(q.search_limit) < 0)) {
           hint.textContent = '无限';
@@ -13377,12 +13456,12 @@ function showChatMessages() {
       var capabilityAbort = null, capabilitySeq = 0;
       var modalOwner = bindAiModalIdentity(modal,function() { capabilitySeq++; if (capabilityAbort) capabilityAbort.abort(); });
       var checkBtn = modal.querySelector('#aiCmCheckBtn'), capabilityBox = modal.querySelector('#aiCmCapabilities');
-      function testConfig() { var managed = providerSelect.value === 'openrouter'; return {provider:providerSelect.value,model:modelInput.value.trim(),api_key:managed ? undefined : apiKeyInput.value.trim(),model_uid:managed ? OPENROUTER_MODEL_UID : undefined,base_url:baseInput.value.trim()}; }
+      function testConfig() { var managed = providerSelect.value === 'openrouter',key=apiKeyInput.value.trim(); return {provider:providerSelect.value,model:modelInput.value.trim(),api_key:managed ? undefined : key||undefined,model_uid:managed ? OPENROUTER_MODEL_UID : !key&&editingUid ? editingUid : undefined,config_revision:!key&&editingUid&&findCustomModel(editingUid)?findCustomModel(editingUid).config_revision:undefined,base_url:baseInput.value.trim()}; }
       [providerSelect,modelInput,apiKeyInput,baseInput].forEach(function(field) { field.addEventListener('input', invalidateCapability); field.addEventListener('change', invalidateCapability); });
       function invalidateCapability() { capabilitySeq++; if (capabilityAbort) capabilityAbort.abort(); checkBtn.disabled = false; checkBtn.textContent = '检测模型能力'; capabilityBox.replaceChildren(); }
       checkBtn.addEventListener('click', async function() {
         var config = testConfig();
-        if (!config.model || !config.api_key && config.provider !== 'openrouter' || !config.base_url) { capabilityBox.textContent = '请先填入模型名称、Key 和接口地址。'; return; }
+        if (!config.model || !config.api_key && !config.model_uid && config.provider !== 'openrouter' || !config.base_url) { capabilityBox.textContent = '请先填入模型名称、Key 和接口地址。'; return; }
         if (capabilityAbort) capabilityAbort.abort(); capabilityAbort = new AbortController();
         var seq = ++capabilitySeq, key = capabilityKey(config);
         checkBtn.disabled = true; checkBtn.textContent = '正在检测…'; capabilityBox.textContent = '正在检查对话、工具、图片、思考与流式输出…';
@@ -13620,9 +13699,9 @@ function showChatMessages() {
         var keepExistingKey = false;
         if (!apiKey && editingUid) {
           var _prev = findCustomModel(editingUid);
-          if (_prev && _prev.api_key) { apiKey = _prev.api_key; keepExistingKey = true; }
+          if (_prev && (_prev.stored_reference||modelKeyDrafts().has(String(_prev.uid)))) { keepExistingKey = true; }
         }
-        if (!apiKey) { feedback.className = 'ai-invite-code-feedback is-bad'; feedback.textContent = '请输入 API Key'; return; }
+        if (!apiKey && !keepExistingKey) { feedback.className = 'ai-invite-code-feedback is-bad'; feedback.textContent = '请输入 API Key'; return; }
         var model = String(modelInput.value || '').trim();
         var isCustom = p.key === 'custom';
         if (!model && !isCustom) model = p.defaultModel || '';
@@ -13630,6 +13709,7 @@ function showChatMessages() {
         var baseValue = String(baseInput.value || '').trim();
         if (!baseValue) baseValue = isCustom ? '' : (p.base || '');
         if (isCustom && !baseValue) { feedback.className = 'ai-invite-code-feedback is-bad'; feedback.textContent = '请填写接口地址'; return; }
+        if(keepExistingKey&&_prev&&(p.key!==_prev.provider||baseValue.replace(/\/+$/,'')!==String(_prev.base_url||'').replace(/\/+$/,''))){feedback.className='ai-invite-code-feedback is-bad';feedback.textContent='更换服务商或接口地址时，请重新输入 API Key';return;}
         var labelVal = String(labelInput.value || '').trim();
         var label = labelVal || model;
         var customs = loadCustomModels();
@@ -13638,6 +13718,7 @@ function showChatMessages() {
           providerLabel: p.label,
           label: label,
           api_key: apiKey,
+          key_configured: !!(apiKey||keepExistingKey),
           model: model,
           base_url: baseValue
         };
@@ -13663,10 +13744,10 @@ function showChatMessages() {
           updateModelUI(true);
           renderList();
           resetForm();
-          notify('修改已保存在本机，正在同步到账号…');
+          notify('正在安全保存模型配置到账号…');
           var editSynced = await editSync;
           if (modalOwner.identityCurrent() && editSeq === customModelMutationSeq) {
-            notify(editSynced ? '修改已同步到账号：' + label + (keepExistingKey ? '（API Key 未变更）' : '') : '修改已保存在本机，联网后同步到账号');
+            notify(editSynced ? '修改已同步到账号：' + label + (keepExistingKey ? '（API Key 未变更）' : '') : '配置待同步；密钥仅暂留本页，请勿刷新后丢失');
           }
         } else {
           record.uid = genCustomModelUid();
@@ -13682,7 +13763,7 @@ function showChatMessages() {
           notify('已添加并切换到：' + label + '，正在同步到账号…');
           var addSynced = await addSync;
           if (modalOwner.identityCurrent() && addSeq === customModelMutationSeq) {
-            notify(addSynced ? '模型已同步到账号：' + label : '模型已保存在本机，联网后同步到账号');
+            notify(addSynced ? '模型已同步到账号：' + label : '模型尚未同步；密钥仅暂留本页，请勿刷新后丢失');
           }
         }
       });
@@ -13740,23 +13821,15 @@ function showChatMessages() {
         return;
       }
       if (action === 'search') {
-        var q = S.quota;
-        if (!S.webSearchEnabled) {
-          // ★ 修复: 从关到开时完整校验搜索额度（can_search===false 或 search_remaining<=0），
-          //   同时额度信息缺失（拉取失败）时也不放行，避免绕过第三方搜索次数限制。
-          if (!q) {
-            notify('额度信息暂不可用，请稍后重试或刷新页面');
-            return;
-          }
-          if (searchQuotaExhausted(q)) {
-            notify('今日网页搜索次数已用完，开通 Pro 可无限搜索');
-            return;
-          }
+        var mode=networkSettings().networkMode,next=mode==='auto'?'required':mode==='required'?'off':'auto';
+        if(next==='required'&&(!S.quota||searchQuotaExhausted(S.quota))){
+          // Always allow the safe local-only choice even when quota is exhausted.
+          next='off';notify('当前搜索额度不可用，已切换为仅当前资料');
         }
-        S.webSearchEnabled = !S.webSearchEnabled;
-        try { localStorage.setItem('xtj_ai_web_search', S.webSearchEnabled ? 'true' : 'false'); } catch (err) {}
+        S.networkMode=next;S.webSearchEnabled=next==='required';
+        try{localStorage.setItem('xtj_ai_network_mode',next);localStorage.setItem('xtj_ai_web_search',S.webSearchEnabled?'true':'false');}catch(_){}
         updateSearchStatus();
-        notify(S.webSearchEnabled ? '强制网页搜索已开启' : '已恢复自动判断是否搜索');
+        notify({auto:'由 AI 自动判断是否检索',required:'本次必须实际检索，仍受账号额度与任务限额约束',off:'仅使用当前对话和已提供资料，不读取网络或其他站内记录'}[next]);
       }
     });
 
@@ -13939,7 +14012,7 @@ function showChatMessages() {
     function featureCurrent(){return S.active && input.isConnected && voiceLifecycle===S.lifecycleId && customModelIdentityCurrent(featureIdentity);}
     var menuGroup=panelShell.querySelector('.ai-panel-menu-list .ai-panel-group:last-child');
     function addFeatureEntry(label,action){var button=el('button',{type:'button',class:'ai-panel-row'});button.appendChild(el('span',{class:'ai-panel-row-icon','aria-hidden':'true',text:'✧'}));button.appendChild(el('span',{class:'ai-panel-row-title',text:label}));button.addEventListener('click',function(){closePanel(true);action();});menuGroup.appendChild(button);return button;}
-    addFeatureEntry('双模型对比',function(){var features=assistantFeatures();if(!features)return;if(S.sending){notify('当前回复完成或暂停后，可以开始双模型对比');return;}var models=[{id:'deepseek-flash',label:'DeepSeek-V4.1-Flash-1017'},{id:'deepseek-v4-pro',label:'V4 Pro'}];loadCustomModels().forEach(function(config){if((config.api_key||config.server_managed)&&config.model)models.push({id:'custom:'+config.uid,label:config.label||config.model,config:Object.assign({},config)});});var latestUser=S.messages.slice().reverse().find(function(m){return m.role==='user';});if(S._modelCompare)S._modelCompare.dispose();S._modelCompare=features.openCompare({models:models,thinkingMode:S.thinkingMode,question:input.value.trim() || latestUser&&latestUser.content || '',current:featureCurrent,notify:notify,renderMarkdown:renderMarkdown,context:function(){return buildAiConversationHistory(CONTEXT_LIMIT_NORMAL,MSG_MAX_CHARS_NORMAL,null,null);},run:runModelComparison});});
+    addFeatureEntry('双模型对比',function(){var features=assistantFeatures();if(!features)return;if(S.sending){notify('当前回复完成或暂停后，可以开始双模型对比');return;}var models=[{id:'deepseek-flash',label:'DeepSeek-V4.1-Flash-1017'},{id:'deepseek-v4-pro',label:'V4 Pro'}];loadCustomModels().forEach(function(config){if((config.key_configured||config.server_managed)&&config.model)models.push({id:'custom:'+config.uid,label:config.label||config.model,config:Object.assign({},config)});});var latestUser=S.messages.slice().reverse().find(function(m){return m.role==='user';});if(S._modelCompare)S._modelCompare.dispose();S._modelCompare=features.openCompare({models:models,thinkingMode:S.thinkingMode,question:input.value.trim() || latestUser&&latestUser.content || '',current:featureCurrent,notify:notify,renderMarkdown:renderMarkdown,context:function(){return buildAiConversationHistory(CONTEXT_LIMIT_NORMAL,MSG_MAX_CHARS_NORMAL,null,null);},run:runModelComparison});});
     var capacity=el('div',{class:'ai-context-capacity',id:'aiContextCapacity'}),capacityWidget=null,lastContextBudget=null,capacityModel='',capacityConversation='';
     function contextMemory(){for(var i=S.messages.length-1;i>=0;i--){var memory=S.messages[i]&&S.messages[i].context_memory;if(memory&&memory.v===1&&memory.conversation_id===S.conversationId&&typeof memory.summary==='string'&&memory.summary.trim()&&memory.summary.length<=8000)return memory;}return null;}
     function contextWindowTokens(){var value=Number(scopedStorageGet('xtj_ai_context_window_'+S.selectedModel));return [32768,65536,131072].indexOf(value)>=0?value:65536;}
@@ -13949,11 +14022,11 @@ function showChatMessages() {
     input.addEventListener('input',function(){updateCapacity();});S._updateContextCapacity=updateCapacity;updateCapacity();
     inputBar.appendChild(capacity);
     async function runModelComparison(model,text,history,signal,onEvent){
-      var config=model.config,body={message:text,messages:history,messages_include_current:false,context_management:true,context_window_tokens:contextWindowTokens(),model:model.id,thinking_mode:model.thinkingMode,client_request_id:'compare_'+Date.now()+'_'+Math.random().toString(36).slice(2),web_search:false,followup_suggestions:false};
-      if(config)Object.assign(body,{provider:config.provider,api_key:config.api_key,model_uid:config.server_managed?config.uid:undefined,model:config.model,base_url:config.base_url,reasoning_effort_supported:config.reasoning_effort_supported===true});
+      var config=model.config,body={message:text,messages:history,messages_include_current:false,context_management:true,context_window_tokens:contextWindowTokens(),model:model.id,thinking_mode:model.thinkingMode,client_request_id:'compare_'+Date.now()+'_'+Math.random().toString(36).slice(2),web_search:false,network_mode:networkSettings().networkMode,task_budget:networkSettings().taskBudget,followup_suggestions:false};
+      if(config)Object.assign(body,{provider:config.provider,api_key:undefined,model_uid:config.uid,model:config.model,base_url:config.base_url,reasoning_effort_supported:config.reasoning_effort_supported===true});
       var auth=await getUserAuthPayload({forceNoToken:false});if(!featureCurrent()||signal.aborted)throw Error('对比已取消');
       var timeout=setTimeout(function(){if(S._modelCompare)S._modelCompare.dispose();},300000),reader=null,content='',done=false,usage=null;
-      try {var response=await fetch(API_BASE+(config?'/custom-chat/stream':'/chat/stream'),{method:'POST',headers:auth.headers||{},credentials:'include',body:JSON.stringify(body),signal:signal});if(!response.ok||!response.body)throw Error('模型请求失败（'+response.status+'）');reader=response.body.getReader();var decoder=new TextDecoder(),pending='';
+      try {var response=await aiFeatureFetch(API_BASE+(config?'/custom-chat/stream':'/chat/stream'),{method:'POST',headers:auth.headers||{},credentials:'include',body:JSON.stringify(body),signal:signal});if(!response.ok||!response.body)throw Error('模型请求失败（'+response.status+'）');reader=response.body.getReader();var decoder=new TextDecoder(),pending='';
         while(!signal.aborted&&featureCurrent()){var packet=await reader.read();pending+=packet.done?decoder.decode():decoder.decode(packet.value,{stream:true});if(packet.done)pending+='\n';if(pending.length>4*1024*1024)throw Error('模型数据包过大');var lines=pending.split('\n');pending=lines.pop();for(var i=0;i<lines.length;i++){if(!lines[i].startsWith('data:'))continue;if(lines[i].length>2*1024*1024)throw Error('模型单条数据超过上限');var event;try{event=JSON.parse(lines[i].slice(5).trim());}catch(_){continue;}if(event.type==='content')content+=String(event.text||event.chunk||'');if(content.length>500000)throw Error('模型回复超过长度上限');if(event.type==='done'){done=true;content=event.content||content;usage=event.usage||null;if(content.length>500000)throw Error('模型回复超过长度上限');}onEvent(event);}if(packet.done||done)break;}
         if(!done&&!signal.aborted)throw Error('模型回复提前中断');return {content:content,usage:usage};
       } finally {clearTimeout(timeout);if(reader)try{await reader.cancel();}catch(_){} }
@@ -14291,6 +14364,7 @@ function showChatMessages() {
   }
 
   function closeAiChat(force) {
+    if(aiFeatureRequestClient)aiFeatureRequestClient.clear();
     if(S._toolRetryFlights){S._toolRetryFlights.forEach(function(abort){abort.abort();});S._toolRetryFlights.clear();}
     closeAiOwnedModals();
     document.querySelectorAll('.ai-research-card').forEach(function(card){if(card._exportAbort)card._exportAbort.abort();});
@@ -14506,6 +14580,9 @@ function showChatMessages() {
   // Auth cleanup is independent of panel visibility: closed research/search
   // surfaces can still hold private DOM and a pending auth/history request.
   function resetAiAccountState() {
+    conversationMetadata.clear();conversationTitleDrafts.clear();historyExports.forEach(function(controller){controller.abort();});historyExports.clear();
+    modelDraftKeys.clear();modelDraftOwner='';
+    if(aiFeatureRequestClient)aiFeatureRequestClient.clear();
     modelCapabilityCache.clear();
     serverModelCatalog = []; serverModelIdentity = null;
     if (S.selectedModel === CUSTOM_MODEL_PREFIX + OPENROUTER_MODEL_UID) {

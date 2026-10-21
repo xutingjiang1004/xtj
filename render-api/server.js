@@ -79,6 +79,7 @@ const {
 } = require('./search-providers');
 const deepseekWeb = require('./deepseek-web');
 const openRouter = require('./openrouter');
+const aiRequestFeatures = require('./ai-request-features');
 const deepSeekPricing = require('./deepseek-pricing');
 const { queryWeather, queryWeatherData, formatWeatherText, CITY_COORDS } = require('./weather');
 const { fetchSafeWebPage, assertSafeWebUrl, requestPinnedStream, fetchSafeRaw, fetchSafeBuffer, fetchSafeRedirectBuffer } = require('./web-fetch');
@@ -499,7 +500,8 @@ function getDeepSeekProbeSnapshot() {
   };
 }
 // 文件解析器 — 共用模块
-const { getPdfParser, getMammothParser, getXlsxParser, parsePdfBuffer, parseDocumentBuffer } = require('./file-parsers');
+const { getPdfParser, getMammothParser, getXlsxParser, parsePdfBuffer, parseDocumentBuffer: parseDocumentBufferRaw } = require('./file-parsers');
+function parseDocumentBuffer(buffer,kind) { return aiRequestFeatures.parseCached(buffer,kind,parseDocumentBufferRaw); }
 
 // ===================== P: 深度研究模式 (Deep Research / Multi-Agent) =====================
 // P 改动:
@@ -612,7 +614,9 @@ function buildAiCacheKey(userName, message, ctx, reqBody, accountId) {
     String(reqBody.thinking_mode || ''),
     String(reqBody.chat_mode || ''),
     String(normalizeDeepSeekUsageModel(reqBody.model || '', reqBody.model || DEEPSEEK_MODEL_REASONER) || ''),
-    String(reqBody.config_version || '')
+    String(reqBody.config_version || ''),
+    String(reqBody.network_mode || 'auto'),
+    JSON.stringify(reqBody.task_budget || {})
   ];
   return crypto.createHash('sha256').update(parts.join('|')).digest('hex');
 }
@@ -1172,7 +1176,7 @@ const AI_TOOLS = [
     type: 'function',
     function: {
       name: 'generate_pdf',
-      description: '把结构化内容生成为可下载的文档。当用户要求"导出 PDF""生成报告""做成文档"时使用。\n- 支持标题（h1/h2/h3）、段落（p）、列表（ul/ol）、表格（table）、分隔线（hr）、引用（quote）、代码块（code）\n- 输出格式自动选择：纯英文/数字内容 → 真正的 PDF；含中文内容 → HTML 文档（浏览器打开后可"打印 → 另存为 PDF"，中文不会乱码）\n- ★ 无论输出哪种格式都视为**成功**，请如实告知用户"文档已生成，点卡片下载"，不要道歉、不要声称失败或"不支持中文"\n- 需要表格化数据（Excel/CSV）时优先用 make_file；需要图表用 make_chart',
+      description: '把结构化内容生成为可下载的文档。当用户要求"导出 PDF""生成报告""做成文档"时使用。\n- 支持标题（h1/h2/h3）、段落（p）、列表（ul/ol）、表格（table）、分隔线（hr）、引用（quote）、代码块（code）\n- 输出格式自动选择：中文与英文均输出真正的 PDF；中文复用内嵌字体，无需打印转换\n- 仅在工具真实成功时告知用户"PDF 已生成，点卡片下载"；失败或取消须如实说明\n- 需要表格化数据（Excel/CSV）时优先用 make_file；需要图表用 make_chart',
       parameters: {
         type: 'object',
         properties: {
@@ -1412,6 +1416,8 @@ const AI_TOOLS = [
   }
 ];
 
+AI_TOOLS.push(...aiRequestFeatures.DOCUMENT_TOOLS);
+
 // ===================== 代码沙箱（受限执行，零依赖 / 零成本） =====================
 // ★ 安全设计（对齐项目既有 safeEvalMath 的"自建解释器、不 eval"思路）：
 //   不直接 eval 用户代码，而是在隔离环境执行，并做多重封堵：
@@ -1551,7 +1557,7 @@ function aiToolsForSearch(includeTavily) {
     if (name === 'tavily_search' && !includeTavily) continue;
     filtered.push(AI_TOOLS[i]);
   }
-  return filtered;
+  return typeof aiRequestFeatures === 'undefined' ? filtered : aiRequestFeatures.tools(filtered);
 }
 
 // 工作模式专用：恒定返回**完整** 35 个工具。
@@ -1559,7 +1565,7 @@ function aiToolsForSearch(includeTavily) {
 //   也不因第三方配额而裁剪任何工具。搜索类工具的额度由 executeToolCall 在真正
 //   调用时 gate 并返回可读提示，模型可如实转述给用户，而不是"看不到工具"。
 function aiToolsForWorkMode() {
-  return AI_TOOLS;
+  return typeof aiRequestFeatures === 'undefined' ? AI_TOOLS : aiRequestFeatures.tools(AI_TOOLS);
 }
 
 // ★ 搜索配额过滤（2026-09-13 语义修正）：
@@ -1715,6 +1721,18 @@ async function executeToolCall(toolCall, context) {
   var rawArgs = toolCall.function && toolCall.function.arguments ? toolCall.function.arguments : '{}';
   var args;
   try { args = JSON.parse(rawArgs); } catch (e) { args = {}; }
+
+  if (typeof aiRequestFeatures !== 'undefined') {
+    try { aiRequestFeatures.guardTool(name); }
+    catch (error) { return {tool_name:name,error:error.message,code:error.code}; }
+    // Reserve the per-task allowance before the existing account quota. Nested
+    // provider retries share this single logical search and cannot double count.
+    if (['search_web','tavily_search','search_social'].includes(name) && aiRequestFeatures.current() && !aiRequestFeatures.current().searchDepth) {
+      try { return await aiRequestFeatures.search(() => executeToolCall(toolCall,context)); }
+      catch (error) { return {tool_name:name,error:error.message,code:error.code}; }
+    }
+    if (name === 'search_document' || name === 'read_document_section') return aiRequestFeatures.executeDocument(name,args,parseDocumentBufferRaw);
+  }
 
   if (AI_SITE_TOOL_REGISTRY[name]) {
     return executeAiSiteTool(name, args, context || {});
@@ -2748,20 +2766,8 @@ async function executeToolCall(toolCall, context) {
       if (!gpBlocks.length) return { tool_name: name, error: 'blocks 内容为空：请传入 blocks 数组，每项形如 {"type":"p","text":"段落文字"}；也可传 content/text 字段由系统自动分段' };
       var gpName = String(args.filename || '文档').replace(/[\\/:*?"<>|]/g, '').slice(0, 60) || '文档';
       var gpTitle = toolHelpers.clampText(args.title || '', 200);
-      // ★ 2026-09-13 修复（"生成 PDF 卡壳"）：
-      //   旧逻辑发现内容含中文就**直接报错拒绝**（"PDF 生成仅支持英文/数字内容"），
-      //   模型拿到这个硬错误后往往无法自愈 → 用户侧表现为"生成 PDF 卡壳无法使用"。
-      //
-      //   根因是 PDF 内置字体（Helvetica/Courier + WinAnsiEncoding）不含 CJK 字形，
-      //   写中文必乱码。内嵌中文字体需要 CIDFontType0 + FontFile3 + ToUnicode CMap，
-      //   即便子集化也要 ~3MB 且出错面大，对交付文档功能不划算。
-      //
-      //   新策略（免费、零依赖、绝不乱码、绝不卡壳）：
-      //     ① 纯 ASCII 内容 → 照旧生成真正的 PDF（保留既有能力，不退化）；
-      //     ② 含中文/非 ASCII → 生成**自包含 HTML 文档**交付。用户下载后用浏览器
-      //        打开，「打印 → 另存为 PDF」即得排版完美的中文 PDF（含 A4 打印样式）。
-      //        中文不依赖任何内嵌字体（走系统字体栈），因此任何部署环境都不会乱码。
-      //     ③ 两种情况下都**成功返回**，并明确告知模型交付物是什么，供其正确转述。
+      // Reuse the existing bounded report exporter and embedded Chinese font.
+      // ASCII documents keep their established compact PDF implementation.
       var gpAllText = JSON.stringify(gpBlocks) + gpTitle;
       var gpAsciiOnly = toolHelpers.isPureAscii(gpAllText);
       try {
@@ -2773,11 +2779,11 @@ async function executeToolCall(toolCall, context) {
           gpKindNote = 'PDF 文档';
           gpCardTitle = 'PDF 文档已生成';
         } else {
-          gpBuf = toolHelpers.buildHtmlBuffer(gpTitle, gpBlocks);
-          gpExt = '.html';
-          gpMime = 'text/html';
-          gpKindNote = '网页文档（HTML）';
-          gpCardTitle = '中文文档已生成（HTML）';
+          gpBuf = await require('./ai-report-export').buildReportPdf({ title: gpTitle || gpName, blocks: gpBlocks, signal: context && context.signal });
+          gpExt = '.pdf';
+          gpMime = 'application/pdf';
+          gpKindNote = 'PDF 文档';
+          gpCardTitle = '中文 PDF 文档已生成';
         }
         if (!gpBuf || gpBuf.length > 4 * 1024 * 1024) {
           return { tool_name: name, error: '文档过大（超过 4MB），请减少内容后重试' };
@@ -2789,11 +2795,8 @@ async function executeToolCall(toolCall, context) {
           gpContent = '【PDF 已生成】文件名：' + gpFileName + '（' + toolHelpers.formatBytes(gpBuf.length) +
             '）。用户可通过下方卡片下载。请如实告知用户"PDF 已生成，可点击卡片下载"。';
         } else {
-          // 明确告诉模型为什么是 HTML 而不是 PDF，避免它向用户解释错误或道歉
-          gpContent = '【中文文档已生成】文件名：' + gpFileName + '（' + toolHelpers.formatBytes(gpBuf.length) +
-            '）。交付格式为 HTML 网页文档：因为 PDF 内置字体不含中文字形，直接生成中文 PDF 会变成乱码，' +
-            '故改用 HTML 交付 —— 用户下载后用浏览器打开，选择"打印 → 另存为 PDF"即可得到排版完整的中文 PDF。' +
-            '请如实告知用户：文档已生成，点卡片下载后用浏览器打开即可阅读或另存为 PDF；不要道歉，也不要声称生成失败。';
+          gpContent = '【中文 PDF 已生成】文件名：' + gpFileName + '（' + toolHelpers.formatBytes(gpBuf.length) +
+            '）。文件包含中文字体，可直接下载阅读，无需另行打印转换。';
         }
         return {
           tool_name: name,
@@ -2804,7 +2807,7 @@ async function executeToolCall(toolCall, context) {
             bytes: gpBuf.length,
             blocks: gpBlocks.length,
             format: gpExt.slice(1),
-            is_html_delivery: !gpAsciiOnly
+            is_html_delivery: false
           })]
         };
       } catch (eGp) {
@@ -4399,6 +4402,7 @@ app.use(function corsErrorHandler(err, req, res, next) {
 // larger parser only after authentication and IP rate limiting; otherwise an
 // unauthenticated request could make Express allocate and parse 80 MB bodies.
 var LARGE_JSON_POST_PATHS = {
+  '/api/agent/attachments': true,
   '/api/agent/research/export': true,
   '/api/agent/chat': true,
   '/api/agent/chat/stream': true,
@@ -11187,6 +11191,8 @@ async function canUseThirdPartySearch(userName) {
 // F-1: searchApiCounter 为可选的请求级计数器对象（{ n }），仅在真实发起搜索后自增，
 // 供 recordAiTurnUsage 按真实次数而非"轮次"记账（失败/未发起不计）。
 async function searchWebForUser(userName, query, maxResults, searchApiCounter) {
+  if(typeof aiRequestFeatures!=='undefined'&&aiRequestFeatures.current()&&!aiRequestFeatures.current().searchDepth)
+    return aiRequestFeatures.search(()=>searchWebForUser(userName,query,maxResults,searchApiCounter));
   var shared = searchApiCounter && typeof searchApiCounter === 'object' ? searchApiCounter : {};
   shared.userName = userName;
   var gate = await claimSearchSlot(shared);
@@ -20744,7 +20750,8 @@ function buildAiCorePrompt(config) {
     //   3) 本轮已实测过：模型在工具报错后常直接编造天气/汇率数据，或以"换个城市名"敷衍过去。
     '工具使用规范：① 查天气时 location 只传规范城市名（如“成都”“大阪”“Los Angeles”），不要传省市区全称、不要带“市/区/县”后缀；② 查汇率/行情只传标准代码（如 USD、CNY、AAPL）；③ 工具返回中若含 recoverable=true，可修正参数重试一次；若 recoverable=false，说明是服务侧故障，直接如实告诉用户“该服务暂时不可用”，绝不编造数据、不反复重试同一工具；④ 绝不要把工具返回里的英文错误码或 JSON 原文念给用户，要用自然中文转述；⑤ 工具失败时告知真实原因（参数问题 vs 服务问题），不要笼统地说“换个城市名试试”来敷衍。',
     '回复规则：优先直接回答，按内容使用段落、列表或表格；不写“作为一个 AI”开场白，不用括号动作描写；图片消息只依据其中文字回答业务问题，不讨论 OCR/识别引擎；只答对话内容，不编造已执行操作，不查他人记录。中文回复。',
-    aiTaskPolicy.TASK_POLICY
+    aiTaskPolicy.TASK_POLICY,
+    typeof aiRequestFeatures==='undefined'?'':aiRequestFeatures.instructions()
   ];
 
   return lines.filter(Boolean).join('\n');
@@ -21728,6 +21735,9 @@ async function handleDeepThinkChat(req, res) {
 }
 
 // POST /api/agent/chat/cancel - 取消正在进行的深度思考
+require('./ai-conversation-features').install(app,{db:supabase,authenticateUser,rateLimit});
+const aiRequestMiddleware = aiRequestFeatures.install(app,{ authenticateUser, rateLimit, writeSse, jsonMiddleware:express.json({limit:'80mb'}) });
+
 app.post('/api/agent/chat/cancel', authenticateUser, async (req, res) => {
   try {
     var convId = String(req.body && req.body.conversation_id || '').trim();
@@ -21754,7 +21764,7 @@ app.post('/api/agent/chat/cancel', authenticateUser, async (req, res) => {
 });
 
 // POST /api/agent/chat
-app.post('/api/agent/chat', authenticateUser, aiChatConcurrencyGate, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), express.json({ limit: '80mb' }), async (req, res) => {
+app.post('/api/agent/chat', authenticateUser, aiChatConcurrencyGate, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), express.json({ limit: '80mb' }), aiRequestMiddleware, async (req, res) => {
   var aborted = false;
   // 客户端断开时 abort 底层 DeepSeek 调用，避免请求结束后仍占用 3-5 分钟资源
   var requestAbortCtrl = new AbortController();
@@ -22195,7 +22205,7 @@ app.post('/api/agent/chat', authenticateUser, aiChatConcurrencyGate, rateLimit(3
 //     后服务端执行并把结果回喂模型继续推理（多轮，最多 CUSTOM_TOOL_MAX_ROUNDS 轮），
 //     同时推送 tool_calls/tool_pending/tool_result/tool_error SSE 供前端展示时间线。
 //     上游不支持 function calling（400/404/422）时自动回退为不带工具重试。
-app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGate, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), express.json({ limit: '80mb' }), async (req, res) => {
+app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGate, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), express.json({ limit: '80mb' }), aiRequestMiddleware, resolveAiModelReference, async (req, res) => {
   var customStartedAt = Date.now(), customTurnFinished = false;
   var aborted = false;
   var _heartbeatTimer = null;
@@ -22810,7 +22820,7 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
 //   meta / deep_think_init / deep_think_stage / deep_think_planned / deep_think_tool /
 //   thinking_chunk{agent_role} / answer_chunk / content / done{agent_count,sources,search_count} / error
 // ─────────────────────────────────────────────────────────────
-app.post('/api/agent/custom-chat/deep-stream', authenticateUser, aiChatConcurrencyGate, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), express.json({ limit: '80mb' }), async (req, res) => {
+app.post('/api/agent/custom-chat/deep-stream', authenticateUser, aiChatConcurrencyGate, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), express.json({ limit: '80mb' }), aiRequestMiddleware, resolveAiModelReference, async (req, res) => {
   var aborted = false;
   var _heartbeatTimer = null;
   function clearHeartbeat() { if (_heartbeatTimer) { try { clearInterval(_heartbeatTimer); } catch (_) {} _heartbeatTimer = null; } }
@@ -23211,7 +23221,7 @@ function cleanAiModelIn(m) {
   var provider = String(m.provider || '').trim().slice(0, 32);
   var model = String(m.model || '').trim().slice(0, 64);
   var apiKey = String(m.api_key || '').trim().slice(0, 512);
-  if (!uid || uid === 'or_minimax_m31_free' || !provider || !model || !apiKey) return null;
+  if (!uid || uid === 'or_minimax_m31_free' || !provider || !model || !apiKey && !m.key_configured && !m.key_unchanged) return null;
   return {
     uid: uid,
     provider: provider,
@@ -23219,8 +23229,32 @@ function cleanAiModelIn(m) {
     label: String(m.label || model).trim().slice(0, 40),
     model: model,
     base_url: String(m.base_url || '').trim().slice(0, 200),
-    api_key_enc: encryptAiModelSecret(apiKey)
+    ...(apiKey ? {api_key_enc:encryptAiModelSecret(apiKey)} : {key_unchanged:true})
   };
+}
+function publicAiModel(model, revision) {
+  var copy={};
+  ['uid','provider','provider_label','label','model','base_url'].forEach(function(key){copy[key]=String(model[key]||'');});
+  copy.key_configured=!!(model.api_key_enc||model.api_key);copy.stored_reference=true;copy.config_revision=String(revision||'');
+  return copy;
+}
+async function resolveAiModelReference(req,res,next) {
+  var body=req.body||{},uid=String(body.model_uid||'');
+  if(!uid||uid==='or_minimax_m31_free'||body.provider==='openrouter')return next();
+  try {
+    var snapshot=await fetchLatestAiModelsSnapshot(req.userName,req.accountId);
+    if(req.aiRequestScope&&req.aiRequestScope.controller.signal.aborted||res.writableEnded||res.destroyed)return;
+    var saved=snapshot.models.find(function(item){return item.uid===uid&&snapshot.deletedUids.indexOf(uid)<0;});
+    if(!saved)throw Object.assign(Error('模型已删除或不可用，请重新选择'),{status:404,code:'saved_model_missing'});
+    var defaults={qwen:'https://dashscope.aliyuncs.com/compatible-mode/v1',doubao:'https://ark.cn-beijing.volces.com/api/v3',deepseek:'https://api.deepseek.com',kimi:'https://api.moonshot.cn/v1',zhipu:'https://open.bigmodel.cn/api/paas/v4',openai:'https://api.openai.com/v1'};
+    var base=String(saved.base_url||defaults[saved.provider]||'').replace(/\/+$/,'');
+    if(body.provider&&body.provider!==saved.provider||body.model&&body.model!==saved.model||body.base_url&&String(body.base_url).replace(/\/+$/,'')!==base)
+      throw Object.assign(Error('模型配置已变化，请刷新模型列表后重试'),{status:409,code:'saved_model_changed'});
+    body.provider=saved.provider;body.model=saved.model;body.base_url=base;
+    body.api_key=saved.api_key_enc?decryptAiModelSecret(saved.api_key_enc):String(saved.api_key||'');
+    if(!body.api_key)throw Object.assign(Error('模型密钥不可用，请重新配置'),{status:400,code:'saved_model_key_missing'});
+    next();
+  }catch(error){res.status(error.status||503).json({ok:false,code:error.code||'saved_model_unavailable',error:error.status?error.message:'模型配置暂时无法读取，请重试'});}
 }
 // ★ 2026-09-24 修复（课题②「删除的模型自动复活」）：
 //   旧实现 GET 会把该账号最近 20 行快照按 uid 合并，只要某个 uid 出现在任意一行旧快照里
@@ -23248,9 +23282,10 @@ function cleanAiPrefs(input) {
   return out;
 }
 // 取该账号最新一行快照（不合并历史行）
-async function fetchLatestAiModelsSnapshot(userName) {
+async function fetchLatestAiModelsSnapshot(userName, expectedAccountId) {
   var identity = await readAccountIdentity(supabase, userName, ADMIN_USERNAME);
   if (!identity) throw Error('account_missing');
+  if(expectedAccountId&&String(identity.id)!==String(expectedAccountId))throw Object.assign(Error('账号状态已变化，请重新登录'),{status:401,code:'account_changed'});
   var lookup = await supabase.from('posts').select('content,created_at')
     .eq('user_name', userName).eq('media_type', CUSTOM_AI_MODELS_MARKER).gte('created_at', identity.created_at)
     .order('created_at', { ascending: false }).order('id', { ascending: false }).limit(1);
@@ -23272,7 +23307,7 @@ function cleanDeletedUidList(input) {
   }
   return out;
 }
-// GET /api/agent/custom-models - 读取当前账号的自定义模型（解密 Key 后返回）
+// GET /api/agent/custom-models - 读取当前账号的自定义模型（只返回无密钥引用）
 app.get('/api/agent/custom-models', authenticateUser, rateLimit(60000, 60), async (req, res) => {
   res.setHeader('Cache-Control','no-store');
   var serverModels = openRouter.catalog(req.userName, ADMIN_USERNAME);
@@ -23281,21 +23316,17 @@ app.get('/api/agent/custom-models', authenticateUser, rateLimit(60000, 60), asyn
     //   原实现拉取最近 20 行快照并按 uid 逐行合并，最新行里没有的 uid 只要在任意旧行存在
     //   就会被复活，导致用户删除的第三方模型反复出现。现改为：只读最新一行快照，
     //   并以快照内 deleted_uids 墓碑二次剔除。历史残留行不再参与合并，复活路径彻底断开。
-    var snap = await fetchLatestAiModelsSnapshot(req.userName);
+    var snap = await fetchLatestAiModelsSnapshot(req.userName,req.accountId);
     var deletedSet = {};
     snap.deletedUids.forEach(function(uid) { deletedSet[uid] = 1; });
     var models = snap.models.filter(function(m) {
       if (!m || !m.uid || m.uid === 'or_minimax_m31_free' || m.provider === 'openrouter' || m.server_managed) return false;
       return !deletedSet[String(m.uid)];
     });
-    var out = models.map(function(m) {
-      var copy = Object.assign({}, m);
-      if (copy.api_key_enc) { copy.api_key = decryptAiModelSecret(copy.api_key_enc); delete copy.api_key_enc; }
-      else { copy.api_key = String(copy.api_key || ''); }
-      return copy;
-    });
+    var out = models.map(function(m) { return publicAiModel(m,snap.updatedAt); });
     return res.json({ ok: true, models: out, server_models: serverModels, deleted_uids: snap.deletedUids, ai_prefs: snap.aiPrefs || {} });
   } catch (e) {
+    if(e&&e.code==='account_changed')return res.status(401).json({ok:false,code:e.code,error:e.message});
     console.error('[ai-models] 读取失败:', e && e.message);
     return res.status(500).json({ error: '读取自定义模型失败', code: 'ai_models_read_error', server_models: serverModels });
   }
@@ -23324,13 +23355,14 @@ app.put('/api/agent/custom-models', authenticateUser, rateLimit(60000, 30), asyn
     var deletedUids = saved.data.deleted_uids;
     var savedPrefs = saved.data.ai_prefs;
     var echo = models.filter(function(m) { return m.provider !== 'openrouter' && !m.server_managed; }).map(function(m) {
-      var copy = Object.assign({}, m);
-      copy.api_key = decryptAiModelSecret(copy.api_key_enc);
-      delete copy.api_key_enc;
-      return copy;
+      return publicAiModel(m,saved.data.updated_at);
     });
     return res.json({ ok: true, models: echo, deleted_uids: deletedUids, ai_prefs: savedPrefs });
   } catch (e) {
+    if(e&&['model_key_required','model_endpoint_key_required','account_changed'].includes(e.message)){
+      var message=e.message==='model_endpoint_key_required'?'更换服务商或接口地址时必须重新输入 API Key':e.message==='account_changed'?'账号状态已变化，请重新登录':'该模型密钥尚未保存，请重新输入 API Key';
+      return res.status(e.message==='account_changed'?401:400).json({ok:false,code:e.message,error:message});
+    }
     console.error('[ai-models] 保存失败:', e && e.message);
     return res.status(500).json({ error: '保存自定义模型失败', code: 'ai_models_write_error' });
   }
@@ -23451,7 +23483,7 @@ app.get('/api/agent/image', authenticateUser, securityRateLimit(3600000, 40), as
 
 
 // POST /api/agent/chat/stream - 流式 SSE 输出
-app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), express.json({ limit: '80mb' }), async (req, res) => {
+app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), express.json({ limit: '80mb' }), aiRequestMiddleware, async (req, res) => {
   res._aiRetryOwner={userName:req.userName,accountId:String(req.accountId||'')};
   res._aiFollowupEnabled = !!(req.body && req.body.followup_suggestions === true);
   res._aiFollowupQuestion = String(req.body && req.body.message || '').slice(0,1000);
@@ -26435,7 +26467,7 @@ async function runSelfResearchFlow(opts) {
   } finally { if (researchCustomModel && researchCustomModel.provider === 'openrouter') flowAbortCtrl.abort(); clearFlowWallTimer(); if (checkpointHeartbeat) clearInterval(checkpointHeartbeat); if (cancelToken._onSubCancel === flowCancelHandler) delete cancelToken._onSubCancel; }
 }
 
-require('./ai-model-capabilities').installModelCapabilities(app, {ownerName:ADMIN_USERNAME,authenticateUser:authenticateUser,rateLimit:rateLimit,gate:enforceAiChatAccess,record:recordAiTurnUsage});
+require('./ai-model-capabilities').installModelCapabilities(app, {resolveReference:resolveAiModelReference,ownerName:ADMIN_USERNAME,authenticateUser:authenticateUser,rateLimit:rateLimit,gate:enforceAiChatAccess,record:recordAiTurnUsage});
 var researchCheckpoints = require('./research-checkpoints').installResearchCheckpoints(app, { db: supabase, authenticateUser: authenticateUser, rateLimit: rateLimit });
 require('./ai-report-export').installReportExport(app,{authenticateUser:authenticateUser,rateLimit:rateLimit,jsonMiddleware:express.json({limit:'6mb'})});
 require('./ai-tool-retry').installToolRetry(app,{authenticateUser:authenticateUser,rateLimit:rateLimit,execute:executeToolCall,gate:enforceAiChatAccess,record:recordAiTurnUsage,feedback:toolFeedback,normalize:normalizeToolResultItems,store:require('./ai-tool-retry-store').createToolRetryStore(supabase)});
@@ -26450,7 +26482,7 @@ require('./ai-workbench').registerWorkbenchRoutes(app,{authenticateUser:authenti
 //   4) 24h LRU 缓存（key=sha256(query+model+mode)，命中直接回放）
 //   5) 最终报告持久化到 posts（type=tavily_research 以兼容历史读取），research_done 携带 message_id
 // 事件：research_stage / research_step / research_content / research_sources / research_done / heartbeat / error
-app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, rateLimit(3600000, 20), express.json({limit:'80mb'}), async (req, res) => {
+app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, rateLimit(3600000, 20), express.json({limit:'80mb'}), aiRequestMiddleware, async (req, res) => {
   var aborted = false;
   var _researchAbort = new AbortController();
   var cancelToken = { cancelled: false };
@@ -26519,6 +26551,8 @@ app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, 
       checkpointJob = await researchCheckpoints.begin({ userName:userName, accountId:req.accountId }, null, resumeId);
       req.body = Object.assign({}, checkpointJob.state.request, { checkpoint_id:resumeId });
     }
+    if(req.aiRequestScope&&req.aiRequestScope.policy.mode==='off')req.body.web_search=false;
+    if(req.aiRequestScope&&req.aiRequestScope.policy.mode==='required')req.body.web_search=true;
     var allowResearchSearch = !(req.body && req.body.web_search === false);
     var remainingSearch = allowResearchSearch && (!checkpointJob || checkpointJob.state.stage !== 'synthesize' || (checkpointJob.state.workers || []).some(function(w) { return !w || w.status !== 'success'; }) || (checkpointJob.state.gapWorkers || []).some(function(w) { return !w || w.status !== 'success'; }));
     // 深入研究与小猫/Code 共用日额度；研究默认会联网搜索，免费用户需有搜索余量
@@ -26585,7 +26619,7 @@ app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, 
       documents=preparedDocuments.documents;documentFingerprint=preparedDocuments.fingerprint;
       if(!documents.some(function(d){return d.status==='read';}))throw Error('文件没有提取到可用文字，请检查格式和大小；图片也可在普通对话中分析。');
     }
-    var cacheKey = researchCacheKey(userName, query, model, mode + '|' + researchModel + '|' + (allowResearchSearch?'web':'files') + '|' + documentFingerprint, req.accountId);
+    var cacheKey = researchCacheKey(userName, query, model, mode + '|' + researchModel + '|' + (allowResearchSearch?'web':'files') + '|' + documentFingerprint + '|' + (req.aiRequestScope?JSON.stringify([req.aiRequestScope.policy.mode,req.aiRequestScope.policy.maxSearches,req.aiRequestScope.policy.maxSeconds]):''), req.accountId);
     if (forceRefresh) {
       try { researchCache.delete(cacheKey); } catch (_) {}
     }

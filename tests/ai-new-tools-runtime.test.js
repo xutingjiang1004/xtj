@@ -97,7 +97,7 @@ test('a failed synthesis preserves real worker materials without marking the res
 test('research resume binds the stored model and conversation, and synthesis-only work does not rebill old searches',async()=>{
   const {EventEmitter}=require('node:events');let handler,captured;const charges=[],finishes=[],gates=[];
   const state={version:1,stage:'synthesize',agents:[{role:'A'}],workers:[{status:'success',content:'saved work'}],request:{query:'ORIGINAL QUESTION',conversation_id:'ORIGINAL01',model:'mini',research_model:'flash',refresh:true,rewrite:false}};
-  const c={app:{post(...args){handler=args.at(-1);}},express:{json:()=>null},fetchSafeWebPage:async()=>null,authenticateUser(){},aiChatConcurrencyGate(){},rateLimit(){},AbortController,Date,
+  const c={app:{post(...args){handler=args.at(-1);}},express:{json:()=>null},fetchSafeWebPage:async()=>null,authenticateUser(){},aiChatConcurrencyGate(){},aiRequestMiddleware(){},rateLimit(){},AbortController,Date,
     researchCheckpoints:{begin:async()=>({id:'11111111-1111-4111-8111-111111111111',state,resumed:true,save:async()=>{},finish:async status=>finishes.push(status)})},
     tryAcquireDeepResearch:()=>()=>{},enforceAiChatAccess:async(_user,opts)=>{gates.push(opts);return{allowed:true};},measureSearchQuota:async()=>({allowed:false,reason:'search_limit'}),
     validateString:value=>value,genConvId:()=> 'NEWCONV01',researchCacheKey:()=> 'isolated',researchCacheGet:()=>null,researchCacheSet(){},researchCache:new Map(),

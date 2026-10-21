@@ -80,6 +80,7 @@ test('history survives close/reopen during its exit animation and its actions wo
   assert.equal(await p.locator('.ai-conv-rename').evaluate(n => n.tagName === 'BUTTON' && n.tabIndex === 0), true);
   p.once('dialog', dialog => dialog.accept('键盘重命名'));
   await p.locator('.ai-conv-rename').focus(); await p.keyboard.press('Enter');
+  await p.locator('.ai-conv-title').filter({hasText:'键盘重命名'}).waitFor();
   assert.equal(await p.locator('.ai-conv-title').textContent(), '键盘重命名');
   p.once('dialog', dialog => dialog.dismiss());
   await p.locator('.ai-conv-del').focus(); await p.keyboard.press('Enter');
@@ -92,7 +93,7 @@ test('model synchronization failures show pending status and the twenty-model li
   const f = await fixture(t, { modelWriteStatus: 503 }), p = f.page; await openModelPicker(p);
   await p.getByRole('option', { name: '＋ 添加自定义模型', exact: true }).click();
   await p.locator('#aiCmApiKey').fill('isolated-only-key'); await p.locator('#aiCmSaveBtn').click();
-  await p.waitForFunction(() => [...document.querySelectorAll('#toastContainer .toast')].some(n => n.textContent.includes('联网后同步到账号')));
+  await p.waitForFunction(() => [...document.querySelectorAll('#toastContainer .toast')].some(n => n.textContent.includes('密钥仅暂留本页')));
   assert.equal(await p.evaluate(() => !!localStorage.getItem('xtj_ai_models_pending__alice')), true);
   const capped = await fixture(t, { models: models(20) }), q = capped.page; await openModelPicker(q);
   await q.getByRole('option', { name: '＋ 添加自定义模型', exact: true }).click(); await q.locator('#aiCmApiKey').fill('isolated-only-key'); await q.locator('#aiCmSaveBtn').click();

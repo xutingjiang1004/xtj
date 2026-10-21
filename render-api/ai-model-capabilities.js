@@ -81,7 +81,7 @@ async function probeCapabilities(config, deps = {}) {
   return { results, usage, tested_at:new Date().toISOString(), model:config.model };
 }
 function installModelCapabilities(app, deps) {
-  app.post('/api/agent/models/check', deps.authenticateUser, deps.rateLimit(60000,2), deps.rateLimit(3600000,20), async (req,res) => {
+  app.post('/api/agent/models/check', deps.authenticateUser, deps.rateLimit(60000,2), deps.rateLimit(3600000,20), deps.resolveReference || ((req,res,next)=>next()), async (req,res) => {
     const body = req.body || {}, provider = String(body.provider || 'custom');
     let config;
     if (provider === 'openrouter') {

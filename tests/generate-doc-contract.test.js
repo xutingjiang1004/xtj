@@ -148,11 +148,12 @@ test('★ 关键：server.js 不再存在"PDF 仅支持英文/数字"的硬拒�
   );
 });
 
-test('generate_pdf 在含中文时改走 buildHtmlBuffer', function() {
+test('generate_pdf 中文复用有界中文 PDF 导出器', function() {
   var idx = SERVER_SRC.indexOf("case 'generate_pdf'");
   assert.ok(idx > 0, '应存在 generate_pdf 分支');
   var seg = SERVER_SRC.slice(idx, idx + 5000);
-  assert.ok(seg.indexOf('buildHtmlBuffer') >= 0, '应调用 buildHtmlBuffer');
+  assert.ok(seg.indexOf("require('./ai-report-export').buildReportPdf") >= 0, '应调用现有中文 PDF 导出器');
+  assert.ok(seg.indexOf('signal: context && context.signal') >= 0, '导出保留取消信号');
   assert.ok(seg.indexOf('isPureAscii') >= 0, '应据 isPureAscii 分流');
 });
 
@@ -171,12 +172,13 @@ test('generate_pdf 工具描述不再谎称"中文字体已内置"', function() 
   );
 });
 
-test('generate_pdf 工具描述明确告知两种输出格式', function() {
+test('generate_pdf 工具描述如实说明中文 PDF 和失败状态', function() {
   var idx = SERVER_SRC.indexOf("name: 'generate_pdf'");
   assert.ok(idx > 0);
   var seg = SERVER_SRC.slice(idx, idx + 1200);
-  assert.ok(seg.indexOf('HTML') >= 0, '应说明中文走 HTML');
-  assert.ok(/失败|道歉/.test(seg), '应指示模型不要声称失败');
+  assert.ok(seg.indexOf('中文与英文均输出真正的 PDF') >= 0);
+  assert.equal(seg.indexOf('HTML 文档'),-1);
+  assert.ok(/失败或取消须如实说明/.test(seg));
 });
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -205,11 +207,13 @@ test('动态清单在 AI_TOOLS 定义之后求值（保证拿到完整名单）'
     '清单常量应在站内工具注册之后（否则漏掉 7 个 search_* 工具）');
 });
 
-test('AI_TOOLS 工具数量符合预期（35 基础 + 7 站内 = 42）', function() {
+test('AI_TOOLS 保留 35 基础、7 站内工具，并添加 2 个已提供文档工具', function() {
   var m = SERVER_SRC.match(/const AI_TOOLS = \[([\s\S]*?)\n\];/);
   assert.ok(m, '应能匹配 AI_TOOLS 定义');
   var base = (m[1].match(/name: '[a-z_0-9]+'/g) || []).length;
-  assert.strictEqual(base, 35, 'AI_TOOLS 基础工具应为 35 个，实际 ' + base);
+  assert.strictEqual(base, 35, '原有基础工具应保持');
+  assert.equal(require('../render-api/ai-request-features').DOCUMENT_TOOLS.length,2);
+  assert.ok(SERVER_SRC.includes('AI_TOOLS.push(...aiRequestFeatures.DOCUMENT_TOOLS)'));
 
   var siteM = SERVER_SRC.match(/const AI_SITE_TOOL_REGISTRY = \{([\s\S]*?)\n\};/);
   assert.ok(siteM, '应能匹配站内工具注册表');
@@ -222,7 +226,7 @@ test('★ 关键：工作模式不再因配额裁剪工具可见性', function()
     '应存在工作模式专用工具集函数');
   var idx = SERVER_SRC.indexOf('function aiToolsForWorkMode');
   var seg = SERVER_SRC.slice(idx, idx + 500);
-  assert.ok(/return AI_TOOLS/.test(seg), '工作模式应恒返回全量工具');
+  assert.ok(/aiRequestFeatures.tools\(AI_TOOLS\)/.test(seg), '工作模式返回完整工具并加入本次文件目录');
 });
 
 test('移除无效的内置 web_search tool 声明（API 会忽略）', function() {

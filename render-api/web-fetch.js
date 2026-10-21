@@ -381,6 +381,7 @@ function normalizeWebText(buffer, contentType) {
  * @returns {{ ok: boolean, url: string, title: string, content: string, content_type: string, bytes: number, truncated: boolean, status: number }}
  */
 async function fetchSafeWebPage(rawUrl, options) {
+  require('./ai-request-features').assertNetwork();
   options = options || {};
   var lookupImpl = options.lookupImpl || defaultDnsLookup;
   var maxBytes = options.maxBytes || WEB_MAX_BYTES;
