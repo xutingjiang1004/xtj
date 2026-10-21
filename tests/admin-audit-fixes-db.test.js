@@ -12,7 +12,38 @@ test('administrator audit database boundaries, concurrent merges and durable ema
   await db.query("GRANT SELECT ON posts TO anon,authenticated;ALTER TABLE posts ENABLE ROW LEVEL SECURITY;CREATE POLICY public_posts ON posts FOR SELECT TO anon,authenticated USING(visibility='public' AND is_deleted IS NOT TRUE);GRANT SELECT ON likes,comments TO anon,authenticated;ALTER TABLE likes ENABLE ROW LEVEL SECURITY;ALTER TABLE comments ENABLE ROW LEVEL SECURITY;CREATE POLICY likes_select_all ON likes FOR SELECT USING(true);CREATE POLICY comments_select_all ON comments FOR ALL USING(true) WITH CHECK(true)");
   await db.query(read('20261012023234_audit_interaction_read_boundary.sql'));
   await db.query(read('20261012023316_audit_atomic_reports_and_email.sql'));
+  await db.query(read('20261021160504_admin_management_consistency.sql'));
   const atomic=read('20261002012142_atomic_audit_operations.sql');await db.query(atomic.slice(atomic.indexOf('CREATE FUNCTION public.record_auth_ip_location'),atomic.indexOf('COMMIT;',atomic.indexOf('CREATE FUNCTION public.record_auth_ip_location'))));
+  await t.test('report pagination reaches old pending records beyond 500 with independent counts and equal-timestamp tie breaks',async()=>{
+   await db.query("INSERT INTO posts(user_name,media_type,content,created_at) SELECT 'reporter','__report__',jsonb_build_object('status','reviewed','target_user','alice')::text,'2026-10-20T12:00:00.123456Z'::timestamptz FROM generate_series(1,601)");
+   const old=(await db.query("INSERT INTO posts(user_name,media_type,content,created_at) VALUES('reporter','__report__','{\"review_status\":\"pending\"}','2026-01-01') RETURNING id")).rows[0].id;
+   const page=(status='all',cursor=null)=>db.query('SELECT admin_report_page($1,$2,$3,$4) result',[status,cursor?.before_at||null,cursor?.before_id||null,37]).then(r=>r.rows[0].result);
+   const first=await page();assert.equal(first.total,602);assert.equal(first.pending_count,1);assert.equal(first.rows.length,37);assert.match(first.next_cursor.before_at,/123456/);
+   const pending=await page('pending');assert.equal(pending.rows[0].id,old);assert.equal(pending.filtered_total,1);assert.equal(pending.total,602);
+   let current=first;const ids=[];do{ids.push(...current.rows.map(row=>row.id));if(!current.has_more)break;current=await page('all',current.next_cursor);}while(true);
+   assert.equal(ids.length,602);assert.equal(new Set(ids).size,602);assert.equal(ids.at(-1),old);
+   assert.equal((await db.query("SELECT admin_report_page('invalid',NULL,NULL,1) result")).rows[0].result.code,'invalid_request');
+   await db.query("DELETE FROM posts WHERE media_type='__report__'");
+  });
+  await t.test('concurrent read and false-positive reviews preserve flags, other fields and review attribution',async()=>{
+   const other=await connect();try{
+    for(const firstStatus of ['read','false_positive']){
+     const id=(await db.query("INSERT INTO posts(user_name,media_type,content) VALUES('alice','__security_alert__','{\"reason\":\"keep this evidence\",\"related_users\":[\"alice\"]}') RETURNING id")).rows[0].id;
+     await db.query('BEGIN');await db.query('SELECT review_security_alert($1,$2,$3)',[id,'reviewer',firstStatus]);
+     const waiting=other.query('SELECT review_security_alert($1,$2,$3)',[id,'reader',firstStatus==='read'?'false_positive':'read']);
+     await db.query('COMMIT');assert.equal((await waiting).rows[0].review_security_alert.ok,true);
+     const info=JSON.parse((await db.query('SELECT content FROM posts WHERE id=$1',[id])).rows[0].content);
+     assert.equal(info.is_read,true);assert.equal(info.false_positive,true);assert.equal(info.ignored,true);assert.equal(info.reason,'keep this evidence');assert.deepEqual(info.related_users,['alice']);assert.equal(info.reviewed_by,firstStatus==='read'?'reader':'reviewer');
+     await db.query('SELECT review_security_alert($1,$2,$3)',[id,'late-reader','read']);assert.equal(JSON.parse((await db.query('SELECT content FROM posts WHERE id=$1',[id])).rows[0].content).reviewed_at,info.reviewed_at);
+    }
+   }finally{await other.end();}
+  });
+  await t.test('new administrator RPCs are service-only and reject invalid or wrong-marker targets',async()=>{
+   for(const role of ['anon','authenticated']){await db.query('SET ROLE '+role);try{await assert.rejects(db.query("SELECT admin_report_page('all',NULL,NULL,10)"),e=>e.code==='42501');await assert.rejects(db.query("SELECT review_security_alert($1,'xxz','read')",[randomUUID()]),e=>e.code==='42501');}finally{await db.query('RESET ROLE');}}
+   await db.query('SET ROLE service_role');try{assert.equal((await db.query("SELECT admin_report_page('all',NULL,NULL,10) result")).rows[0].result.ok,true);assert.equal((await db.query("SELECT review_security_alert($1,'xxz','read') result",[randomUUID()])).rows[0].result.code,'not_found');}finally{await db.query('RESET ROLE');}
+   const normal=(await db.query("INSERT INTO posts(user_name,media_type,content) VALUES('alice','text','hello') RETURNING id")).rows[0].id;assert.equal((await db.query("SELECT review_security_alert($1,'xxz','read') result",[normal])).rows[0].result.code,'not_found');await db.query('DELETE FROM posts WHERE id=$1',[normal]);
+   const broken=(await db.query("INSERT INTO posts(user_name,media_type,content) VALUES('alice','__security_alert__','broken evidence') RETURNING id")).rows[0].id;assert.equal((await db.query("SELECT review_security_alert($1,'xxz','read') result",[broken])).rows[0].result.code,'invalid_record');assert.equal((await db.query('SELECT content FROM posts WHERE id=$1',[broken])).rows[0].content,'broken evidence');
+  });
   await t.test('anon and authenticated can only read interactions on public nondeleted normal parent posts',async()=>{
    const parents=[];for(const [visibility,deleted,type] of [['public',false,'image'],['private',false,'image'],['public',true,'image'],['public',false,'__report__']])parents.push((await db.query("INSERT INTO posts(user_name,visibility,is_deleted,media_type) VALUES('alice',$1,$2,$3) RETURNING id",[visibility,deleted,type])).rows[0].id);
    for(const id of parents){await db.query('INSERT INTO likes VALUES($1,$2)',[randomUUID(),id]);await db.query('INSERT INTO comments VALUES($1,$2)',[randomUUID(),id]);}

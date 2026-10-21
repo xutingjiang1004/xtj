@@ -34,14 +34,14 @@ test('loadAllData timeout invalidates and aborts stale requests before they can 
   assert.match(loader, /_allDataLoadGeneration\+\+;[\s\S]*?controller\.abort\(\)/);
   assert.match(loader, /apiCall\('GET', '\/admin\/data', null, \{ signal: controller\.signal \}\)/);
   assert.match(loader, /if \(generation !== _allDataLoadGeneration\) return;/);
-  assert.match(js, /if \(_allDataAbortController\) \{\s*_allDataAbortController\.abort\(\);/);
+  assert.match(js, /if \(_allDataAbortController\)\s*_allDataAbortController\.abort\(\);/);
   const api = sourceBetween(js, 'async function apiCall(method, path, body, options)', 'function showToast');
   assert.match(api, /externalSignal\.addEventListener\('abort', forwardAbort/);
 });
 
 test('report load failures record an error state without clearing the last successful report list', () => {
-  const reports = sourceBetween(js, 'window.loadReportsData = async function()', 'window.loadUserVisitStats = async function');
-  assert.match(reports, /var data = await apiCall\('GET', '\/admin\/reports'\);/);
+  const reports = sourceBetween(js, 'window.loadReportsData = async function()', 'window.loadMoreAdminReports = async function');
+  assert.match(reports, /var data = await apiCall\('GET', '\/admin\/reports\?' \+ query\.toString\(\)\);/);
   assert.match(reports, /if \(!data \|\| !Array\.isArray\(data\.data\)\) throw new Error/);
   assert.doesNotMatch(reports, /reportsData = \[\]/);
   assert.doesNotMatch(reports, /reportsData\.length = 0/);
@@ -83,7 +83,7 @@ test('report lazy loader and polling reuse the same failure-safe reports path', 
   assert.doesNotMatch(lazy, /reportsData = reportRes\.data \|\| \[\]/);
   assert.match(lazy, /adminTabDataLoaded\.reports = true;/);
   const poll = sourceBetween(js, '_adminReportPollTimer = setInterval', '}, 30000)');
-  assert.match(poll, /await loadReportsData\(\);/);
+  assert.match(poll, /await loadReportsData\(\{background:true\}\);/);
   // 轮询失败不再完全静默：停留在举报 Tab 时刷新出失败提示与重试入口
   assert.match(poll, /\} catch \(e\) \{[\s\S]*?renderReportsTab\(errEl\)/);
   assert.doesNotMatch(poll, /reportsData = \[\]/);

@@ -6,10 +6,74 @@ const admin=fs.readFileSync('js/admin/admin.js','utf8'),server=fs.readFileSync('
 function section(src,start,end){const a=src.indexOf(start),b=src.indexOf(end,a+start.length);assert.ok(a>=0&&b>a,start);return src.slice(a,b);}
 function fluent(resolve,details={}){return new Proxy({}, {get(_,key){if(key==='then')return (ok,bad)=>Promise.resolve().then(()=>resolve(details)).then(ok,bad);return (...args)=>{if(['insert','update','delete','upsert'].includes(key)){details.operation=key;details.payload=args[0];}else if(key==='select'){details.operation ||= 'select';details.columns=args[0];}else if(key==='eq'){(details.filters ||= {})[args[0]]=args[1];}else if(key==='in'){(details.in ||= {})[args[0]]=args[1];}else if(key==='order'){(details.orders ||= []).push(args);}return fluent(resolve,details);};}});}
 function node(){return {style:{},innerHTML:'',textContent:'',setAttribute(){},removeAttribute(){},appendChild(){},querySelector(){return null;},querySelectorAll(){return [];},classList:{add(){},remove(){}}};}
-function context(extra={}){const nodes={};return vm.createContext({console:{warn(){},error(){},log(){}},Date,Map,Set,Promise,URL,crypto,Buffer,JSON,setTimeout,clearTimeout,AbortController,DOMException,...operations,...markers,...history,ADMIN_USERNAME:'xxz',window:{},document:{getElementById(id){return nodes[id] ||= node();},createElement:()=>node()},...extra});}
+function context(extra={}){const nodes={};return vm.createContext({console:{warn(){},error(){},log(){}},Date,Map,Set,Promise,URL,URLSearchParams,crypto,_adminRequests:new Set(),Buffer,JSON,setTimeout,clearTimeout,AbortController,DOMException,...operations,...markers,...history,ADMIN_USERNAME:'xxz',window:{},document:{getElementById(id){return nodes[id] ||= node();},createElement:()=>node()},...extra});}
 function response(){return {statusCode:200,status(n){this.statusCode=n;return this;},json(body){this.body=body;return this;}};}
 function route(start,end,extra={}){const handlers={};const c=context({verifyToken(){},authenticateUser(){},rateLimit:()=>()=>{},securityRateLimit:()=>()=>{},app:Object.fromEntries(['get','post','put','delete'].map(method=>[method,(path,...handlersList)=>{handlers[method+' '+path]=handlersList.at(-1);} ])),...extra});vm.runInContext(section(server,start,end),c);return {c,handler:handlers[Object.keys(handlers)[0]],handlers};}
 const uuid='aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',photoId='bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+test('admin directories and visitor aggregates retain prototype-shaped usernames without touching prototypes',()=>{
+ const c=context({pickEarlierIso:(a,b)=>a||b,pickLaterIso:(a,b)=>b||a,safeJsonParse:s=>JSON.parse(s||'{}'),getUtcDateKey:s=>String(s||'').slice(0,10),toTimeMs:s=>Date.parse(s)});
+ vm.runInContext(section(server,'function buildAuthUserMap','function buildRegisteredUsersByDate'),c);
+ const names=['__proto__','constructor','toString','hasOwnProperty','普通用户'],rows=names.map(user_name=>({user_name,created_at:'2026-10-21T00:00:00Z',content:'{}'}));
+ assert.deepEqual(Array.from(c.buildAdminUsersPayload(rows,rows),r=>r.user_name).sort(),names.slice().sort());
+ for(const build of [c.buildAuthUserMap,c.buildUserInfoMap,c.buildUserVisitMap]){const map=build(rows);assert.equal(Object.getPrototypeOf(map),null);assert.equal(Object.keys(map).length,names.length);}
+ assert.equal(c.buildUserVisitMap(rows).__proto__.total_visits,1);assert.equal(Object.prototype.auth_created_at,undefined);
+});
+test('activity and moderation caches handle special usernames and equal-length replacement data',()=>{
+ const c=context({_userFlagsCache:null,_flagDataRefs:null,_userActivityCache:null,ADMIN:'xxz',bansData:[],mutesData:[],blacklistData:[],allPosts:[{user_name:'__proto__'}],allLikes:[],allComments:[]});
+ vm.runInContext(section(admin,'function getUserStateFlags','function buildUserTagMarkup'),c);
+ assert.equal(c.getUserActivityStats('__proto__').posts,1);assert.equal(c.getUserStateFlags('constructor').isBanned,false);
+ c.allPosts=[{user_name:'constructor'}];assert.equal(c.getUserActivityStats('__proto__').posts,0);assert.equal(c.getUserActivityStats('constructor').posts,1);
+ c.bansData=[{user_name:'__proto__',is_active:true}];assert.equal(c.getUserStateFlags('__proto__').isBanned,true);assert.equal(c.getUserStateFlags('constructor').isBanned,false);
+});
+test('comment RPC business failures and nonexistent moderation rows cannot report success',async()=>{
+ for(const result of [{ok:false,code:'not_found'},{ok:false,code:'forbidden'},null]){
+  const x=route("app.delete('/admin/comment/:id'",'// ===================== 举报通知辅助函数',{supabase:{rpc:async()=>({data:result,error:null})},logAdminAudit:()=>assert.fail('failed action cannot log success')}),r=response();await x.handler({params:{id:1}},r);assert.equal(r.body.ok,false);assert.equal(r.statusCode,result?.code==='not_found'?404:result?.code==='forbidden'?403:503);
+ }
+ for(const [start,end] of [["app.put('/admin/ban/:id/lift'",'// ===================== 禁言管理'],["app.put('/admin/mute/:id/lift'",'// ===================== 黑名单管理'],["app.put('/admin/blacklist/:id/lift'",'// ===================== 管理员删除用户账号']]){
+  const x=route(start,end,{supabase:{from:()=>fluent(()=>({data:[],error:null}))},logAdminAudit:()=>assert.fail('missing record')}),r=response();await x.handler({params:{id:uuid}},r);assert.equal(r.statusCode,404);assert.equal(r.body.ok,false);
+ }
+});
+test('attack list reports the independent filtered count and rejects an unavailable count',async()=>{
+ for(const count of [517,null]){
+  const x=route("app.get('/admin/stats/attacks'",'// 每日明细统计',{supabase:{from:()=>fluent(()=>({data:[{id:uuid,content:'{}'}],error:null,count}))}}),r=response();await x.handler({query:{limit:'1',offset:'400',type:'login'}},r);
+  if(count===null){assert.equal(r.statusCode,503);assert.equal(r.body.ok,false);}else{assert.equal(r.body.total,517);assert.equal(r.body.has_more,true);assert.equal(r.body.data.length,1);}
+ }
+});
+test('report endpoint forwards keyset/filter to RPC and retains independent pending totals',async()=>{
+ const requests=[],x=route("app.get('/admin/reports'","app.put('/admin/report/:id'",{supabase:{rpc:async(name,args)=>{requests.push({name,args});return {data:{ok:true,rows:[{id:uuid,user_name:'alice',created_at:'2026-10-21',content:'{"target_user":"bob","status":"reviewed"}'}],total:705,pending_count:7,filtered_total:698,has_more:true,next_cursor:{before_id:uuid,before_at:'2026-10-21T00:00:00Z'}},error:null};}},parseReportRecordContent:s=>JSON.parse(s),firstNonEmptyValue:(...values)=>values.find(Boolean),formatAdminReportReason:(c,r)=>r||c||'-'}),r=response();
+ await x.handler({query:{status:'reviewed',limit:'100',before_at:'2026-10-21T00:00:00.123456Z',before_id:uuid}},r);assert.equal(r.body.pending_count,7);assert.equal(r.body.total,705);assert.equal(r.body.data.length,1);assert.equal(requests[0].args.p_before_at,'2026-10-21T00:00:00.123456Z');assert.equal(requests[0].args.p_status,'reviewed');
+ const bad=response();await x.handler({query:{before_id:uuid}},bad);assert.equal(bad.statusCode,400);assert.equal(requests.length,1);
+});
+test('durable admin audit blocks unrecorded actions, preserves committed results and covers sensitive AI reads',async()=>{
+ const express=require('express'),request=require('supertest'),{createAdminAuditTrail}=require('../render-api/admin-audit-trail');
+ for(const mode of ['ok','insert-failed','update-failed']){
+  const records=new Map();let actions=0;const db={from:()=>fluent(q=>{if(q.operation==='insert'){if(mode==='insert-failed')return {error:Error('offline')};const row=q.payload[0];records.set(row.id,row);return {data:{id:row.id},error:null};}if(mode==='update-failed')return {error:Error('offline')};Object.assign(records.get(q.filters.id),q.payload);return {data:{id:q.filters.id},error:null};})};
+  const app=express();app.use(express.json());app.use((req,_res,next)=>{req.adminName='xxz';next();});app.use(createAdminAuditTrail({supabase:db}).middleware);app.post('/admin/comment/123',(req,res)=>{actions++;res.json({ok:true,deleted:123});});
+  const r=await request(app).post('/admin/comment/123').send({password:'never log me',content:'private body'});
+  if(mode==='insert-failed'){assert.equal(r.status,503);assert.equal(actions,0);assert.equal(records.size,0);continue;}
+  assert.equal(actions,1);assert.equal(r.body.ok,true);const stored=JSON.parse([...records.values()][0].content);assert.match(stored.detail,/resource_id=123/);assert.doesNotMatch(JSON.stringify([...records.values()]),/never log me|private body/);
+  if(mode==='update-failed'){assert.equal(r.body.audit_pending,true);assert.equal(stored.outcome,'unconfirmed');assert.equal(r.body.audit_request_id,stored.request_id);}else assert.equal(stored.outcome,'succeeded');
+ }
+ let writes=0;const app=express();app.use((req,_res,next)=>{req.adminName='xxz';next();});app.use(createAdminAuditTrail({supabase:{from:()=>fluent(q=>{writes++;return {data:{id:q.payload?.[0]?.id || q.filters.id},error:null};})}}).middleware);app.get('/admin/ai-agent/conversation',(_req,res)=>res.json({ok:true,messages:[]}));await request(app).get('/admin/ai-agent/conversation?user_name=alice').expect(200);assert.equal(writes,2);
+});
+test('stalled audit storage has a bounded deadline and never starts the action',async()=>{
+ const express=require('express'),request=require('supertest'),{createAdminAuditTrail}=require('../render-api/admin-audit-trail');let ran=false;
+ const app=express();app.use((req,_res,next)=>{req.adminName='xxz';next();});app.use(createAdminAuditTrail({supabase:{from:()=>fluent(()=>new Promise(()=>{}))},timeoutMs:20}).middleware);app.post('/admin/example',(_req,res)=>{ran=true;res.json({ok:true});});const r=await request(app).post('/admin/example');assert.equal(r.status,503);assert.equal(ran,false);
+});
+test('audit outage cannot prevent session revocation',async()=>{
+ const express=require('express'),request=require('supertest'),{createAdminAuditTrail}=require('../render-api/admin-audit-trail');let revoked=false;
+ const app=express();app.use(createAdminAuditTrail({supabase:{from(){assert.fail('revocation must not depend on audit storage');}}}).middleware);app.post('/admin/logout',(_req,res)=>{revoked=true;res.json({ok:true});});await request(app).post('/admin/logout').expect(200);assert.equal(revoked,true);
+});
+test('audit matching follows Express case-insensitive routes and redacts invite codes and query credentials',()=>{
+ const {operationPath}=require('../render-api/admin-audit-trail');
+ assert.equal(operationPath({originalUrl:'/ADMIN/AI-AGENT/INVITE-CODES/SecretInvite?password=SecretPassword'}),'/admin/ai-agent/invite-codes/:code');
+ assert.equal(operationPath({originalUrl:'/ADMIN/AI-AGENT/CONVERSATION/?user_name=Alice'}),'/admin/ai-agent/conversation');
+});
+test('audit request lookup finds durable unconfirmed entries independently of the latest window',async()=>{
+ const queries=[],x=route("app.get('/admin/audit-logs'",'// ===================== 用户访问统计',{supabase:{from:()=>fluent(q=>{queries.push(q);return {data:[{id:uuid,user_name:'xxz',content:JSON.stringify({request_id:uuid,status:'started',outcome:'unconfirmed'})}],error:null};})}}),r=response();
+ await x.handler({query:{request_id:uuid}},r);assert.equal(queries[0].filters.id,uuid);assert.equal(r.body.data[0].outcome,'unconfirmed');assert.equal(r.body.data[0].request_id,uuid);
+ const bad=response();await x.handler({query:{request_id:'not-a-uuid'}},bad);assert.equal(bad.statusCode,400);assert.equal(queries.length,1);
+});
 const normalizePostId=id=>/^[a-f\d-]{36}$/i.test(String(id || ''))?String(id):null;
 const sanitizeError=()=> 'database operation failed';
 test('public runtime configuration exposes only anon/publishable keys and never privileged or unclassified JWTs',async()=>{

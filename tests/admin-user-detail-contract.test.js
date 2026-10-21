@@ -84,7 +84,7 @@ test('IP geolocation prefers TLS providers and de-duplicates repeated lookups', 
 
 test('online users use latest login telemetry and profile tab exposes the complete user directory', () => {
   assert.match(server, /app\.get\('\/admin\/stats\/online', verifyToken, rateLimit/);
-  assert.match(server, /var activeByUser = \{\}/);
+  assert.match(server, /var activeByUser = Object\.create\(null\)/);
   assert.match(server, /eq\('media_type', LOGIN_EVENT_MARKER\)[\s\S]{0,180}\.in\('user_name', activeNames\)/);
   assert.match(server, /eq\('media_type', USER_INFO_MARKER\)[\s\S]{0,180}\.in\('user_name', activeNames\)/);
   assert.match(server, /function normalizeDeviceSnapshot/);
