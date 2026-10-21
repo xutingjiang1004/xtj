@@ -2488,6 +2488,27 @@
 .admin-support-codes label { display:grid; gap:12px; font-size:14px; }
 .admin-support-codes input { width:100%; box-sizing:border-box; }
 .admin-support-disclaimer { font-size:12px; line-height:1.8; color:var(--text-muted,#7c8c82); }
+.admin-nav-toggle { display:none; }
+.admin-record-scope { margin:0 0 12px; color:var(--text-muted); font-size:12px; line-height:1.7; }
+#adminAuditNotice { margin:16px 24px; padding:12px 16px; border:1px solid var(--danger); border-radius:12px; color:var(--text-primary); background:var(--bg-secondary); overflow-wrap:anywhere; }
+#adminAuditNotice[hidden] { display:none; }
+#confirmModal { z-index:10020; }
+.table-wrap:focus-visible { outline:2px solid var(--primary); outline-offset:3px; }
+.table-wrap .btn-sm { white-space:nowrap; }
+.report-detail-modal[role="dialog"] { transform:none; max-width:none; width:auto; max-height:none; border-radius:0; }
+.report-detail-modal[role="dialog"] > div { max-height:85dvh; overflow:auto; }
+@media (max-width:640px) {
+    .dash-header { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:10px; padding:12px 16px; }
+    .dash-header h1 { margin:0; font-size:18px; }
+    .admin-nav-toggle { display:block; min-height:44px; padding:8px 12px; border:1px solid var(--border); border-radius:10px; color:var(--text-primary); background:var(--bg-secondary); font:inherit; font-size:13px; }
+    .dash-header .dh-right { display:none; grid-column:1/-1; max-height:min(55dvh,420px); overflow:auto; padding:4px 0; }
+    .dash-header.admin-nav-open .dh-right { display:flex; }
+    .dash-header .dh-right button { flex:1 0 42%; min-height:44px; }
+    .table-wrap table { min-width:600px; }
+    .table-wrap th { white-space:nowrap; }
+    .table-wrap td:last-child { min-width:120px; }
+    .table-wrap .btn-sm { display:inline-flex; align-items:center; justify-content:center; min-height:36px; }
+}
 @media(max-width:580px) { .admin-support-codes { grid-template-columns:1fr; } }
 
 #adminFlashLimits{padding:12px 0;border-bottom:1px solid var(--border);font-size:12px;}#adminFlashLimits label{display:block;margin:8px 0;}#adminFlashLimits input[type=number]{display:block;max-width:200px;padding:8px;margin-top:4px;}#adminFlashLimits button{min-height:44px;padding:0 8px;background:none;border:0;color:var(--primary);}#adminFlashLimits details{margin-top:12px;}

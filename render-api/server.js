@@ -18,6 +18,7 @@ const fs = require('fs');
 const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
 const { checkedResult, checkedData, checkedRpc, patchReport, reportNotification, mediaGatewayUrl, adminPostPayload, emailOutcome, sendAdminDbFailure, recoverEmailJob } = require('./admin-operations');
+const { createAdminAuditTrail } = require('./admin-audit-trail');
 const { createPhotoRecord, inspectPhotoOriginal, validatePhotoCreatePayload } = require('./photo-create');
 const { validatePostAttachments, loadPostAttachments, createPostWithAttachments } = require('./post-attachments');
 const { installPostMedia, createPostWithMedia, parsePostMediaUrl, isLocalUploadUrl, retireAccountPostMediaUploads, deleteQueuedAccountPostMediaUploads } = require('./post-media');
@@ -4136,7 +4137,7 @@ async function fetchAllPostsByMediaType(mediaType, selectFields) {
 }
 
 function buildAuthUserMap(authRows) {
-  const authMap = {};
+  const authMap = Object.create(null);
   (authRows || []).forEach(row => {
     const userName = String(row && row.user_name || '').trim();
     if (!userName) return;
@@ -4151,7 +4152,7 @@ function buildAuthUserMap(authRows) {
 }
 
 function buildUserInfoMap(userInfoRows) {
-  const userInfoMap = {};
+  const userInfoMap = Object.create(null);
   (userInfoRows || []).forEach(row => {
     const userName = String(row && row.user_name || '').trim();
     if (!userName) return;
@@ -4180,7 +4181,7 @@ function buildUserInfoMap(userInfoRows) {
 }
 
 function buildUserVisitMap(visitRows) {
-  const userVisitMap = {};
+  const userVisitMap = Object.create(null);
   (visitRows || []).forEach(row => {
     const userName = String(row && row.user_name || '').trim();
     if (!userName) return;
@@ -11750,6 +11751,12 @@ app.get('/api/config/public', rateLimit(60000, 30), (req, res) => {
 });
 
 // 邮件配置健康检查（需管理员鉴权）
+const adminAuditTrail = createAdminAuditTrail({ supabase, marker: AUDIT_LOG_MARKER });
+app.use('/admin', (req, res, next) => {
+  if (req.path === '/login' || req.path === '/login/') return next();
+  return verifyToken(req, res, () => adminAuditTrail.middleware(req, res, next));
+});
+
 app.get('/health/mail', verifyToken, (req, res) => {
   res.json({
     ok: true,
@@ -12654,7 +12661,8 @@ function requireAdminUser(req, res, next) {
   if (req.userName !== ADMIN_USERNAME) {
     return res.status(403).json({ error: '需要管理员账号', code: 'admin_required' });
   }
-  return next();
+  req.adminName = req.userName;
+  return adminAuditTrail.middleware(req, res, next);
 }
 app.post('/api/admin/announcement', authenticateUser, requireAdminUser, rateLimit(60000, 20), createAnnouncementHandler);
 app.delete('/api/admin/announcement/:id', authenticateUser, requireAdminUser, securityRateLimit(60000, 30), deleteAnnouncementHandler);
@@ -12817,6 +12825,12 @@ app.delete('/admin/comment/:id', verifyToken, securityRateLimit(60000, 30), asyn
     p_is_admin: true
   });
   if (error) return sendAdminDbFailure(res,error);
+  if (!data || data.ok !== true) {
+    const code = data && data.code || 'delete_not_applied';
+    return res.status(code === 'not_found' ? 404 : code === 'forbidden' ? 403 : 503)
+      .json({ ok: false, code, error: '评论删除未完成', retryable: code !== 'not_found' && code !== 'forbidden' });
+  }
+  await logAdminAudit('delete_comment', req.adminName || ADMIN_USERNAME, 'comment_id:' + id);
   return res.json({ ok: true, data });
   } catch (e) {
     console.error('Unhandled route error:', e.message);
@@ -16651,10 +16665,11 @@ app.put('/admin/ban/:id/lift', verifyToken, securityRateLimit(60000, 30), async 
   // ★ M25 审计修复：auditUser 取自 verifyToken 已验签的 req.adminName，不再裸解析 JWT payload
   var auditUser = req.adminName || 'admin';
   const { id } = req.params;
-  const { error } = await supabase.from('bans').update({
+  const { data: lifted, error } = await supabase.from('bans').update({
     is_active: false, lifted_at: new Date().toISOString(), lifted_by: ADMIN_USERNAME
-  }).eq('id', id);
+  }).eq('id', id).select('id');
   if (error) return sendAdminDbFailure(res,error);
+  if (!lifted || !lifted.length) return res.status(404).json({ ok: false, code: 'not_found', error: '封禁记录不存在' });
   await logAdminAudit('unban_user', auditUser, 'ban_id:' + id);
   return res.json({ ok: true });
   } catch (e) { console.error('[admin] unban:', e && e.message); return res.status(500).json({ error: '服务器内部错误' }); }
@@ -16714,12 +16729,11 @@ app.put('/admin/mute/:id/lift', verifyToken, securityRateLimit(60000, 30), async
   // ★ M25 审计修复：auditUser 取自 verifyToken 已验签的 req.adminName，不再裸解析 JWT payload
   var auditUser = req.adminName || 'admin';
   const { id } = req.params;
-  const { data: muteRecord } = await supabase.from('mutes').select('id').eq('id', id).maybeSingle();
-  if (!muteRecord) return res.status(404).json({ error: '禁言记录不存在' });
-  const { error } = await supabase.from('mutes').update({
+  const { data: lifted, error } = await supabase.from('mutes').update({
     is_active: false, lifted_at: new Date().toISOString(), lifted_by: ADMIN_USERNAME
-  }).eq('id', id);
+  }).eq('id', id).select('id');
   if (error) return sendAdminDbFailure(res,error);
+  if (!lifted || !lifted.length) return res.status(404).json({ ok: false, code: 'not_found', error: '禁言记录不存在' });
   await logAdminAudit('unmute_user', auditUser, 'mute_id:' + id);
   return res.json({ ok: true });
   } catch (e) { console.error('[admin] unmute:', e && e.message); return res.status(500).json({ error: '服务器内部错误' }); }
@@ -16790,12 +16804,12 @@ app.post('/admin/blacklist', verifyToken, rateLimit(60000, 30), async (req, res)
 app.put('/admin/blacklist/:id/lift', verifyToken, securityRateLimit(60000, 30), async (req, res) => {
   try {
   const { id } = req.params;
-  const { data: target } = await supabase.from('blacklist').select('user_name').eq('id', id).maybeSingle();
-  const { error } = await supabase.from('blacklist').update({
+  const { data: lifted, error } = await supabase.from('blacklist').update({
     is_active: false, lifted_at: new Date().toISOString(), lifted_by: ADMIN_USERNAME
-  }).eq('id', id);
+  }).eq('id', id).select('id,user_name');
   if (error) return sendAdminDbFailure(res,error);
-  if (target) await logAdminAudit('unblacklist_user', ADMIN_USERNAME, 'user:' + target.user_name + ' blacklist_id:' + id);
+  if (!lifted || !lifted.length) return res.status(404).json({ ok: false, code: 'not_found', error: '黑名单记录不存在' });
+  await logAdminAudit('unblacklist_user', req.adminName || ADMIN_USERNAME, 'user:' + lifted[0].user_name + ' blacklist_id:' + id);
   return res.json({ ok: true });
   } catch (e) { console.error('[admin] unblacklist:', e && e.message); return res.status(500).json({ error: '服务器内部错误' }); }
 });
@@ -17251,8 +17265,15 @@ function formatAdminReportReason(category, reason) {
 // ===================== 举报管理 ======================
 app.get('/admin/reports', verifyToken, async (req, res) => {
   try {
-  const { data, error } = await supabase.from('posts').select('*').eq('media_type', REPORT_MARKER).order('created_at', { ascending: false }).limit(500);
-  if (error) return sendAdminDbFailure(res,error);
+  const status = req.query.status || 'all';
+  const pageSize = req.query.limit === undefined ? 100 : Number(req.query.limit);
+  const beforeAt = req.query.before_at || null, beforeId = req.query.before_id || null;
+  if (!['all','pending','reviewed','actioned','dismissed'].includes(status) || !Number.isInteger(pageSize) || pageSize < 1 || pageSize > 500 ||
+      !!beforeAt !== !!beforeId || beforeAt && (typeof beforeAt !== 'string' || typeof beforeId !== 'string' || !/^\d{4}-\d{2}-\d{2}T/.test(beforeAt) || !Number.isFinite(Date.parse(beforeAt)) || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(beforeId))) {
+    return res.status(400).json({ok:false,code:'invalid_request',error:'分页或筛选参数无效'});
+  }
+  const page = await checkedRpc(supabase, 'admin_report_page', {p_status:status,p_limit:pageSize,p_before_at:beforeAt,p_before_id:beforeId});
+  const data = page.rows;
 
   const reports = (data || []).map(function(p) {
       const normalized = parseReportRecordContent(p.content);
@@ -17281,7 +17302,7 @@ app.get('/admin/reports', verifyToken, async (req, res) => {
 
   if (missingTargetIds.length) {
     const { data: targetPosts } = await supabase.from('posts').select('id, user_name').in('id', missingTargetIds);
-    const targetUserMap = {};
+    const targetUserMap = Object.create(null);
     (targetPosts || []).forEach(function(post) {
       if (post && post.id && post.user_name && !targetUserMap[post.id]) {
         targetUserMap[post.id] = post.user_name;
@@ -17300,10 +17321,10 @@ app.get('/admin/reports', verifyToken, async (req, res) => {
     report.report_reason = formatAdminReportReason(report.report_category, report.report_reason);
   });
 
-  return res.json({ data: reports });
+  return res.json({ data: reports, total:page.total, filtered_total:page.filtered_total, pending_count:page.pending_count, actioned_count:page.actioned_count, has_more:page.has_more, next_cursor:page.next_cursor });
   } catch (e) {
     console.error('Unhandled route error:', e.message);
-    return res.status(500).json({ error: '服务器内部错误' });
+    return res.status(e.status || 503).json({ok:false,code:e.code || 'reports_unavailable',error:'举报列表暂不可用，请重试',retryable:e.status!==400});
   }});
 
 app.put('/admin/report/:id', verifyToken, securityRateLimit(60000, 30), async (req, res) => {
@@ -17718,12 +17739,12 @@ app.get('/admin/stats', verifyToken, rateLimit(60000, 10), async (req, res) => {
 // 攻击详情 API（返回完整攻击记录，含 IP、时间、类型、详情）
 app.get('/admin/stats/attacks', verifyToken, rateLimit(60000, 20), async (req, res) => {
   try {
-    const limit = Math.min(parseInt(req.query.limit, 10) || 200, 1000);
-    const offset = parseInt(req.query.offset, 10) || 0;
+    const limit = Math.max(1, Math.min(parseInt(req.query.limit, 10) || 200, 1000));
+    const offset = Math.max(0, Math.min(parseInt(req.query.offset, 10) || 0, 1000000));
     const typeFilter = req.query.type || ''; // 可选，按攻击类型筛选
 
     var query = supabase.from('posts')
-      .select('id, user_name, content, media_url, created_at, actor_key')
+      .select('id, user_name, content, media_url, created_at, actor_key', { count: 'exact' })
       .eq('media_type', ATTACK_MARKER);
 
     if (typeFilter) {
@@ -17732,6 +17753,7 @@ app.get('/admin/stats/attacks', verifyToken, rateLimit(60000, 20), async (req, r
 
     const { data, error, count } = await query
       .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
       .range(offset, offset + limit - 1);
 
     if (error) return sendAdminDbFailure(res,error);
@@ -17750,7 +17772,8 @@ app.get('/admin/stats/attacks', verifyToken, rateLimit(60000, 20), async (req, r
       };
     });
 
-    return res.json({ data: attacks, total: typeof count === 'number' ? count : attacks.length });
+    if (typeof count !== 'number') return res.status(503).json({ ok: false, error: '攻击记录总数暂不可用', retryable: true });
+    return res.json({ data: attacks, total: count, offset, limit, has_more: offset + attacks.length < count });
   } catch (e) {
     console.error('[API] 攻击详情加载失败:', e.message);
     return res.status(500).json({ error: '攻击详情加载失败' });
@@ -18526,10 +18549,10 @@ app.get('/admin/user-profile', verifyToken, rateLimit(60000, 20), async (req, re
     var loginEvents = (results[1].data || []).map(function(row) {
       try { return Object.assign(JSON.parse(row.content || '{}'), { recorded_at: row.created_at }); } catch(_) { return null; }
     }).filter(Boolean);
-    var uniqueIps = {};
-    var uniqueDevices = {};
+    var uniqueIps = Object.create(null);
+    var uniqueDevices = Object.create(null);
     var locationHistory = [];
-    var fingerprintSet = {};
+    var fingerprintSet = Object.create(null);
     var proxyAlerts = [];
     loginEvents.forEach(function(evt) {
       if (evt.ip && evt.ip !== 'unknown') {
@@ -18616,15 +18639,15 @@ app.get('/admin/stats/online', verifyToken, rateLimit(60000, 30), async (req, re
       .order('created_at', { ascending: false })
       .limit(500);
     if (error) return sendAdminDbFailure(res,error);
-    var activeByUser = {};
+    var activeByUser = Object.create(null);
     (data || []).forEach(function(row) {
       var name = row.user_name;
       if (!name || activeByUser[name]) return;
       activeByUser[name] = row;
     });
     var activeNames = Object.keys(activeByUser);
-    var latestLoginByUser = {};
-    var latestInfoByUser = {};
+    var latestLoginByUser = Object.create(null);
+    var latestInfoByUser = Object.create(null);
     if (activeNames.length) {
       // ★ M37 审计修复：原实现对"全部历史"的 LOGIN/USER_INFO 行做全局 limit(1000)，
       //   登录次数多的活跃用户会挤掉靠后用户的最新记录，且越查越深无界。
@@ -18812,30 +18835,14 @@ app.get('/admin/security-alerts', verifyToken, rateLimit(60000, 10), async (req,
 // ===================== 标记安全提醒已读 =====================
 app.post('/admin/security-alerts/read', verifyToken, rateLimit(60000, 10), async (req, res) => {
   try {
-    var alertId = req.body.id;
+    var alertId = normalizePostId(req.body && req.body.id);
     if (!alertId) return res.status(400).json({ error: '缺少提醒ID' });
 
-    var { data: existing } = await supabase.from('posts')
-      .select('content')
-      .eq('id', alertId)
-      .eq('media_type', SECURITY_ALERT_MARKER)
-      .maybeSingle();
-
-    if (!existing) return res.status(404).json({ error: '提醒不存在' });
-
-    var info = {};
-    try { info = JSON.parse(existing.content || '{}'); } catch(e) {}
-    info.is_read = true;
-
-    var { error } = await supabase.from('posts')
-      .update({ content: JSON.stringify(info) })
-      .eq('id', alertId);
-
-    if (error) return sendAdminDbFailure(res,error);
+    await checkedRpc(supabase, 'review_security_alert', {p_id:alertId,p_operator:req.adminName || ADMIN_USERNAME,p_status:'read'});
     return res.json({ ok: true });
   } catch(e) {
     console.error('[API] 标记安全提醒已读失败:', e.message);
-    return res.status(500).json({ error: '操作失败' });
+    return res.status(e.status || 503).json({ok:false,code:e.code || 'alert_update_failed',error:'提醒更新未完成，请重试',retryable:!e.status || e.status>=500});
   }
 });
 
@@ -18843,35 +18850,17 @@ app.post('/admin/security-alerts/read', verifyToken, rateLimit(60000, 10), async
 app.post('/admin/security-alerts/status', verifyToken, rateLimit(60000, 10), async (req, res) => {
   try {
     var { id, status } = req.body;
-    if (!id || !status) return res.status(400).json({ error: '缺少参数' });
+    if (!normalizePostId(id) || !status) return res.status(400).json({ error: '提醒ID或状态无效',code:'invalid_request',ok:false });
     var VALID_STATUSES = ['read', 'ignored', 'false_positive'];
     if (VALID_STATUSES.indexOf(status) === -1) return res.status(400).json({ error: '无效状态' });
 
-    var { data: existing } = await supabase.from('posts')
-      .select('content')
-      .eq('id', id)
-      .eq('media_type', SECURITY_ALERT_MARKER)
-      .maybeSingle();
-    if (!existing) return res.status(404).json({ error: '提醒不存在' });
-
-    var info = {};
-    try { info = JSON.parse(existing.content || '{}'); } catch(e) {}
-    info.is_read = true;
-    if (status === 'ignored') info.ignored = true;
-    if (status === 'false_positive') { info.false_positive = true; info.ignored = true; }
-    info.reviewed_at = new Date().toISOString();
-    info.reviewed_by = ADMIN_USERNAME;
-
-    var { error } = await supabase.from('posts')
-      .update({ content: JSON.stringify(info) })
-      .eq('id', id);
-    if (error) return sendAdminDbFailure(res,error);
+    await checkedRpc(supabase, 'review_security_alert', {p_id:id,p_operator:req.adminName || ADMIN_USERNAME,p_status:status});
 
     await logAdminAudit('review_security_alert', ADMIN_USERNAME, 'alert:' + id + ' status:' + status);
     return res.json({ ok: true });
   } catch(e) {
     console.error('[API] 安全提醒状态更新失败:', e.message);
-    return res.status(500).json({ error: '操作失败' });
+    return res.status(e.status || 503).json({ok:false,code:e.code || 'alert_update_failed',error:'提醒更新未完成，请重试',retryable:!e.status || e.status>=500});
   }
 });
 
@@ -19006,11 +18995,15 @@ app.get('/admin/audit-logs', verifyToken, rateLimit(60000, 10), async (req, res)
   try {
     var limit = parseInt(req.query.limit, 10) || 200;
     if (limit > 500) limit = 500;
-    var { data, error } = await supabase.from('posts')
+    const requestId = req.query.request_id;
+    if (requestId !== undefined && (typeof requestId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestId))) return res.status(400).json({ok:false,code:'invalid_request',error:'请求编号无效'});
+    var auditQuery = supabase.from('posts')
       .select('id, user_name, content, media_url, created_at')
       .eq('media_type', AUDIT_LOG_MARKER)
       .order('created_at', { ascending: false })
-      .limit(limit);
+      .limit(Math.max(1,limit));
+    if (requestId) auditQuery = auditQuery.eq('id',requestId);
+    var {data,error} = await auditQuery;
     if (error) return sendAdminDbFailure(res,error);
     var logs = (data || []).map(function(row) {
       var info = {};
@@ -19021,6 +19014,11 @@ app.get('/admin/audit-logs', verifyToken, rateLimit(60000, 10), async (req, res)
         operator: info.operator || row.user_name,
         detail: info.detail || '',
         timestamp: info.timestamp || row.created_at,
+        request_id: info.request_id || null,
+        status: info.status || null,
+        outcome: info.outcome || null,
+        http_status: info.http_status || null,
+        completed_at: info.completed_at || null,
         created_at: row.created_at
       };
     });
@@ -27519,7 +27517,7 @@ async function handleAvatarUpload(req, res) {
   }
 }
 
-app.post('/api/admin/ai-agent/avatar', verifyToken, securityRateLimit(60000, 20), express.json({ limit: '10mb' }), handleAvatarUpload);
+app.post('/api/admin/ai-agent/avatar', verifyToken, adminAuditTrail.middleware, securityRateLimit(60000, 20), express.json({ limit: '10mb' }), handleAvatarUpload);
 app.post('/admin/ai-agent/avatar', verifyToken, securityRateLimit(60000, 20), express.json({ limit: '10mb' }), handleAvatarUpload);
 
 

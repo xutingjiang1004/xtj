@@ -242,7 +242,7 @@
     }
 
     var allPosts = [], allLikes = [], allComments = [], allUsers = [], annList = [], allLoginEvents = [], allBehaviorEvents = [], allSecurityAlerts = [], allAuditLogs = [], allErrorLogs = [];
-    var adminAvatarCache = {};
+    var adminAvatarCache = Object.create(null);
     var adminDataLoadedAt = 0;
     var adminDataLoading = false;
     var adminTabDataLoaded = {};
@@ -251,6 +251,7 @@
     var _allDataLoadGeneration = 0;
     var _allDataAbortController = null;
     var _adminSessionGeneration = 0;
+    var _adminRequests = new Set();
     var _adminLogoutPromise = null;
     var _adminDetailGeneration = 0;
     var _adminDetailAbortController = null;
@@ -523,6 +524,7 @@
         if (body) opts.body = JSON.stringify(body);
         var timeoutMs = Number(options.timeoutMs) || 30000;
         var ac = new AbortController();
+        _adminRequests.add(ac);
         var externalSignal = options.signal;
         var forwardAbort = function() { ac.abort(); };
         if (externalSignal) {
@@ -539,6 +541,7 @@
                 if (externalSignal) externalSignal.removeEventListener('abort', forwardAbort);
                 var renewed = await refreshUserAccessToken();
                 if (renewed) {
+                    _adminRequests.delete(ac);
                     return apiCall(method, path, body, Object.assign({}, options, {
                         authMode: 'user_access',
                         _retriedUserAccess: true
@@ -548,8 +551,10 @@
             // Keep the deadline and cancellation active while reading the body.
             if (generation !== _adminSessionGeneration) throw new DOMException('会话已改变', 'AbortError');
         } catch (fetchErr) {
+            _adminRequests.delete(ac);
             clearTimeout(at);
             if (externalSignal) externalSignal.removeEventListener('abort', forwardAbort);
+            if (generation !== _adminSessionGeneration || externalSignal && externalSignal.aborted) throw new DOMException('请求已取消', 'AbortError');
             if (fetchErr && fetchErr.name === 'AbortError') {
                 throw adminApiError('请求超时（' + (timeoutMs / 1000) + '秒），请稍后重试', 408, { code:'request_timeout', retryable:true });
             }
@@ -559,11 +564,8 @@
         if (res.status === 401 && !useUserAccessToken) {
             clearTimeout(at);
             if (externalSignal) externalSignal.removeEventListener('abort', forwardAbort);
-            clearSession();
-            try {
-                document.getElementById('dashboard').style.display = 'none';
-                document.getElementById('loginWrap').style.display = 'flex';
-            } catch (e) {}
+            _adminRequests.delete(ac);
+            clearAdminClientState();
             throw adminApiError('登录已过期，请重新登录',401,{code:'session_expired',retryable:false});
         }
         var data;
@@ -573,10 +575,21 @@
             if (ac.signal.aborted || generation !== _adminSessionGeneration) throw new DOMException('请求已取消或超时', 'AbortError');
             throw adminApiError('服务响应无法解析，请稍后重试',res.status,{code:'invalid_response',retryable:true});
         } finally {
+            _adminRequests.delete(ac);
             clearTimeout(at);
             if (externalSignal) externalSignal.removeEventListener('abort', forwardAbort);
         }
         if (generation !== _adminSessionGeneration) throw new DOMException('会话已改变', 'AbortError');
+        if (data.audit_pending) {
+            showToast(data.audit_warning || '审计结果待确认，请勿重复执行', 'error');
+            var notice = document.getElementById('adminAuditNotice');
+            if (notice) {
+                notice.textContent='本次操作结果已返回，审计结果待确认。请勿重复执行。请求编号：'+(data.audit_request_id || '未提供')+' ';
+                var review = document.createElement('button'); review.className='btn-sm'; review.textContent='核对本次审计';
+                review.onclick=function() { window.openAdminAuditRequest(data.audit_request_id); };
+                notice.appendChild(review); notice.hidden=false;
+            }
+        }
         if (!res.ok || (!options.allowBusinessFailure && data.ok === false)) throw adminApiError(data.error || '操作未完成 (HTTP ' + res.status + ')',res.status,data);
         saveSession();
         return data;
@@ -669,6 +682,53 @@
         try { localStorage.setItem(SESSION_KEY, JSON.stringify({ t: Date.now() })); } catch(e) {}
     }
 
+    var adminDialogs = [];
+    function dialogFocusable(modal) {
+        return Array.from(modal.querySelectorAll('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')).filter(function(node) { return node.getClientRects().length; });
+    }
+    function openAdminDialog(modal, close, label) {
+        var existing = adminDialogs.find(function(entry) { return entry.modal === modal; });
+        modal.setAttribute('role', 'dialog'); modal.setAttribute('aria-modal', 'true');
+        modal.setAttribute('aria-label', label || (modal.querySelector('h3') || {}).textContent || '管理操作');
+        modal.setAttribute('tabindex', '-1');
+        if (!existing) adminDialogs.push({modal: modal, close: close, previous: document.activeElement});
+        var focus = dialogFocusable(modal)[0] || modal;
+        if (!modal.contains(document.activeElement)) focus.focus();
+    }
+    function releaseAdminDialog(modal) {
+        var index = adminDialogs.findIndex(function(entry) { return entry.modal === modal; });
+        if (index < 0) return;
+        var entry = adminDialogs.splice(index, 1)[0];
+        var top = adminDialogs[adminDialogs.length - 1];
+        var focus = entry.previous;
+        if (top && (!focus || !top.modal.contains(focus))) focus = dialogFocusable(top.modal)[0] || top.modal;
+        if (focus && focus.isConnected && focus.getClientRects().length) focus.focus();
+    }
+    function closeAdminActionDialog(modal) {
+        if (!modal) return;
+        modal.remove(); releaseAdminDialog(modal);
+    }
+    window.closeAdminActionDialog = closeAdminActionDialog;
+    document.addEventListener('keydown', function(e) {
+        if (e.defaultPrevented) return;
+        var confirm = document.getElementById('confirmModal');
+        if (confirm && confirm.classList.contains('active')) return;
+        var entry = adminDialogs[adminDialogs.length - 1];
+        if (!entry) return;
+        if (e.key === 'Escape') { e.preventDefault(); entry.close(); }
+        if (e.key === 'Tab') {
+            var items = dialogFocusable(entry.modal), first = items[0] || entry.modal, last = items[items.length - 1] || entry.modal;
+            if (e.shiftKey && (document.activeElement === first || !entry.modal.contains(document.activeElement))) { e.preventDefault(); last.focus(); }
+            else if (!e.shiftKey && (document.activeElement === last || !entry.modal.contains(document.activeElement))) { e.preventDefault(); first.focus(); }
+        }
+    });
+    document.addEventListener('focusin', function(e) {
+        var confirm = document.getElementById('confirmModal');
+        if (confirm && confirm.classList.contains('active')) return;
+        var entry = adminDialogs[adminDialogs.length - 1];
+        if (entry && !entry.modal.contains(e.target)) (dialogFocusable(entry.modal)[0] || entry.modal).focus();
+    });
+
     function saveCurrentTab() {
         try { localStorage.setItem(TAB_KEY, currentTab); } catch(e) {}
     }
@@ -676,6 +736,72 @@
     function clearSession() {
         try { localStorage.removeItem(SESSION_KEY); } catch(e) {}
         clearToken();
+    }
+
+    function clearAdminClientState() {
+        _adminSessionGeneration++;
+        _allDataLoadGeneration++;
+        adminTabSwitchGeneration++;
+        _aiAdminSubTabGeneration++;
+        ADMIN = null;
+        _adminRequests.forEach(function(controller) { controller.abort(); });
+        _adminRequests.clear();
+        if (_allDataAbortController) _allDataAbortController.abort();
+        _allDataAbortController = null;
+        stopRegisterAlertPolling();
+        if (_adminSessionTimer) clearInterval(_adminSessionTimer);
+        if (_adminReportPollTimer) clearInterval(_adminReportPollTimer);
+        if (onlineRefreshTimer) clearInterval(onlineRefreshTimer);
+        _adminSessionTimer = _adminReportPollTimer = onlineRefreshTimer = null;
+        clearTimeout(_userSearchTimer); clearTimeout(_postSearchTimer);
+        sessionTimeoutMonitorStarted = false;
+        document.removeEventListener('visibilitychange', _handleAdminVisibilityChange);
+        ['click', 'keydown', 'scroll', 'mousemove', 'touchstart'].forEach(function(evt) {
+            document.removeEventListener(evt, resetActivityTimer);
+        });
+        window.closeConfirm();
+        document.getElementById('confirmTitle').textContent='确认操作';
+        document.getElementById('confirmMsg').textContent='确定要执行此操作吗？';
+        window.closeAdminDetailModal();
+        window.adminClosePhotoPreview();
+        document.querySelectorAll('.report-detail-modal').forEach(function(modal) { closeAdminActionDialog(modal); });
+        allowedTabs.forEach(function(tab) {
+            var panel = document.getElementById('tab' + getTabDomName(tab));
+            if (panel) { panel.innerHTML = ''; panel.__xtjLastSuccessfulHtml = ''; panel.__xtjLastSuccessfulNodes = null; }
+        });
+        allPosts = []; allLikes = []; allComments = []; allUsers = []; annList = [];
+        allLoginEvents = []; allBehaviorEvents = []; allSecurityAlerts = []; allAuditLogs = []; allErrorLogs = [];
+        reportsData = []; reportsLoading = false; reportsLoadError = '';
+        resetReportsPage();
+        bansData = []; mutesData = []; blacklistData = []; photosAdminData = [];
+        adminAvatarCache = Object.create(null);
+        _userActivityCache = _userFlagsCache = _flagDataRefs = null;
+        _aiAdminConvUser = _aiAdminConvId = null;
+        profileCurrentUser = ''; searchUser = ''; searchPost = '';
+        adminTabDataLoaded = {}; adminDataLoadPromises = {};
+        _allDataLoadPromise = null; adminDataLoading = false; adminDataLoadedAt = 0;
+        registerAlertState.data = null;
+        clearRegisterAlertBadge(); updateReportBadge();
+        // Keep only the opaque pending mail job identity: it prevents duplicate
+        // delivery after an uncertain response. Private drafts are discarded.
+        try {
+            sessionStorage.removeItem('xtj_email_draft_subject'); sessionStorage.removeItem('xtj_email_draft_content');
+            var pendingMail=JSON.parse(sessionStorage.getItem('xtj_email_pending_job') || 'null');
+            if (pendingMail && pendingMail.id) sessionStorage.setItem('xtj_email_pending_job',JSON.stringify({id:pendingMail.id}));
+        } catch (_) {}
+        clearSession();
+        document.getElementById('dashboard').style.display = 'none';
+        document.getElementById('loginWrap').style.display = 'flex';
+        document.getElementById('loginName').value = '';
+        document.getElementById('loginPw').value = '';
+        var header = document.querySelector('.dash-header');
+        if (header) header.classList.remove('admin-nav-open');
+        var toggle = document.getElementById('adminNavToggle');
+        if (toggle) toggle.setAttribute('aria-expanded', 'false');
+        document.getElementById('toastWrap').textContent = '';
+        var auditNotice = document.getElementById('adminAuditNotice');
+        if (auditNotice) { auditNotice.textContent=''; auditNotice.hidden=true; }
+        document.getElementById('loginName').focus();
     }
 
     function hasSession() {
@@ -774,7 +900,7 @@
         if (!document.hidden) {
             refreshRegisterAlerts().catch(function() {});
             if (_adminReportPollTimer) {
-                loadReportsData().then(function() {
+                loadReportsData({background:true}).then(function() {
                     if (currentTab === 'reports') {
                         var el = document.getElementById('tabReports');
                         if (el) renderReportsTab(el);
@@ -825,9 +951,8 @@
             try {
                 // ★ 修复：页面隐藏时跳过轮询，恢复可见时由 visibilitychange 立即补一次
                 if (document.hidden) return;
-                var prevLen = reportsData.length;
-                await loadReportsData();
-                if (currentTab === 'reports' && reportsData.length !== prevLen) {
+                await loadReportsData({background:true});
+                if (currentTab === 'reports') {
                     var el = document.getElementById('tabReports');
                     if (el) renderReportsTab(el);
                 }
@@ -872,7 +997,7 @@
         var loginTimeout = setTimeout(function() { loginAbortController.abort(); }, ADMIN_LOGIN_TIMEOUT_MS);
         try {
             if (_adminLogoutPromise) await _adminLogoutPromise;
-            _adminSessionGeneration++;
+            var loginGeneration = ++_adminSessionGeneration;
             var res = await fetch(API_BASE + '/admin/login', {
                 method: 'POST',
                 credentials: 'include',
@@ -881,6 +1006,7 @@
                 signal: loginAbortController.signal
             });
             var data = await res.json().catch(function() { return {}; });
+            if (loginGeneration !== _adminSessionGeneration) return;
             if (!res.ok || !data || data.ok !== true) {
                 err.textContent = data && data.error ? data.error : '登录失败 (' + res.status + ')';
                 btn.disabled = false;
@@ -929,43 +1055,7 @@
     window.doAdminLogout = async function() {
         if (_adminLogoutPromise) return _adminLogoutPromise;
         var companionToken = getToken();
-        _adminSessionGeneration++;
-        ADMIN = null;
-        window.closeAdminDetailModal();
-        stopRegisterAlertPolling();
-        _allDataLoadGeneration++;
-        if (_allDataAbortController) {
-            _allDataAbortController.abort();
-            _allDataAbortController = null;
-        }
-        // 清理定时器和事件监听
-        if (_adminSessionTimer) { clearInterval(_adminSessionTimer); _adminSessionTimer = null; }
-        // 重置监控标志：管理员重新登录后必须重新挂载 24h 无操作自动登出与 activity 监听
-        sessionTimeoutMonitorStarted = false;
-        if (_adminReportPollTimer) { clearInterval(_adminReportPollTimer); _adminReportPollTimer = null; }
-        if (onlineRefreshTimer) { clearInterval(onlineRefreshTimer); onlineRefreshTimer = null; }
-        // ★ M48：登出时移除 visibilitychange 监听（用命名函数精确移除，防止随登录累积）
-        document.removeEventListener('visibilitychange', _handleAdminVisibilityChange);
-        ['click', 'keydown', 'scroll', 'mousemove', 'touchstart'].forEach(function(evt) {
-            document.removeEventListener(evt, resetActivityTimer);
-        });
-        allPosts = []; allLikes = []; allComments = []; allUsers = [];
-        (typeof allowedTabs==='undefined'?Object.keys(adminTabDataLoaded):allowedTabs).forEach(function(tab){var panel=document.getElementById('tab'+(tab==='errorlog'?'ErrorLog':tab.charAt(0).toUpperCase()+tab.slice(1)));if(panel){panel.__xtjLastSuccessfulHtml='';panel.__xtjLastSuccessfulNodes=null;}});
-        // ★ P2-5：登出时一并清空举报的三态，避免下次登录残留上一次的错误提示
-        reportsData = []; reportsLoading = false; reportsLoadError = '';
-        allLoginEvents = []; allBehaviorEvents = []; allSecurityAlerts = [];
-        allAuditLogs = []; allErrorLogs = [];
-        annList = [];
-        adminTabDataLoaded = {}
-        adminDataLoadPromises = {};
-        _allDataLoadPromise = null;
-        adminDataLoading = false;
-        adminTabSwitchGeneration++;
-        clearSession();
-        document.getElementById('loginWrap').style.display = 'flex';
-        document.getElementById('dashboard').style.display = 'none';
-        document.getElementById('loginName').value = '';
-        document.getElementById('loginPw').value = '';
+        clearAdminClientState();
         var loginError = document.getElementById('loginErr');
         var controller = new AbortController();
         var timer = setTimeout(function() { controller.abort(); }, 15000);
@@ -1075,14 +1165,14 @@
             adminTabDataLoaded.anns = true;
             adminTabDataLoaded.bans = true;
 
-            var userMap = {};
+            var userMap = Object.create(null);
             allPosts.forEach(function(p) { userMap[p.user_name] = true; });
             allLikes.forEach(function(l) { userMap[l.user_name] = true; });
             allComments.forEach(function(c) { userMap[c.user_name] = true; });
 
             // ★ M50：重建 allUsers 时按 name 合并已有对象，保留此前合并的 info
             //（如 /admin/users 拉取、用户详情弹窗补充的授权/注册信息），避免刷新后被置空导致详情闪烁
-            var prevUserByName = {};
+            var prevUserByName = Object.create(null);
             allUsers.forEach(function(u) {
                 if (u && u.name && !prevUserByName[u.name]) prevUserByName[u.name] = u;
             });
@@ -1188,7 +1278,7 @@
             if (dataType === 'users') {
                 var userRes = await apiCall('GET', '/admin/users');
                 if (!userRes || !Array.isArray(userRes.data)) throw new Error('用户目录响应无效');
-                var previousUsers={};allUsers.forEach(function(user){previousUsers[user.name]=user;});
+                var previousUsers=Object.create(null);allUsers.forEach(function(user){previousUsers[user.name]=user;});
                 var refreshedUsers=userRes.data.map(function(row){
                     var info=JSON.parse(row.content || '{}');
                     return {name:row.user_name,info:mergeAdminUserInfo(previousUsers[row.user_name] && previousUsers[row.user_name].info,info)};
@@ -1368,7 +1458,7 @@
     // ★ 修复：头像请求去重 + 并发上限。
     // 此前 adminLoadAvatars 每次渲染都会对未缓存的用户重复发起请求（数百并发），
     // 且无 pending 占位。这里用 _adminAvatarFetching 记录 in-flight promise 复用。
-    var _adminAvatarFetching = {};
+    var _adminAvatarFetching = Object.create(null);
     var _adminAvatarInflight = 0;
     var _adminAvatarQueue = [];
     var ADMIN_AVATAR_MAX_CONCURRENCY = 8;
@@ -1386,6 +1476,7 @@
         if (adminAvatarCache[userName]) return adminAvatarCache[userName];
         // 复用 in-flight promise，避免同一用户重复请求
         if (_adminAvatarFetching[userName]) return _adminAvatarFetching[userName];
+        var generation = _adminSessionGeneration;
         var p = (async function() {
             if (_adminAvatarInflight >= ADMIN_AVATAR_MAX_CONCURRENCY) {
                 // 超出并发上限时排队等待，避免打爆服务端
@@ -1396,6 +1487,7 @@
                 var resp = await fetch(API_BASE + '/api/avatar/public/' + encodeURIComponent(userName));
                 if (!resp.ok) return null;
                 var result = await resp.json();
+                if (generation !== _adminSessionGeneration) return null;
                 if (result.ok && result.avatar_url) {
                     adminAvatarCache[userName] = adminMediaSource(result.avatar_url);
                     return adminAvatarCache[userName];
@@ -1415,12 +1507,14 @@
     }
 
     function adminLoadAvatars() {
+        var generation = _adminSessionGeneration;
         var avatars = document.querySelectorAll('[data-avatar-user]');
         avatars.forEach(function(el) {
             var userName = el.getAttribute('data-avatar-user');
             if (!userName) return;
             if (adminAvatarCache[userName] === undefined) {
                 fetchAdminAvatar(userName).then(function(url) {
+                    if (generation !== _adminSessionGeneration || !el.isConnected) return;
                     if (url && el && el.parentNode) {
                         el.innerHTML = '<img src="' + escapeHtml(url) + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.style.display=\'none\';this.parentElement.textContent=\'' + safeJsStr((userName || '?').slice(0, 1).toUpperCase()) + '\'">';
                         adminAvatarCache[userName] = url;
@@ -1431,6 +1525,7 @@
                         el.style.cssText = 'display:flex;align-items:center;justify-content:center;font-weight:600;font-size:14px;color:#fff;';
                     }
                 }).catch(function() {
+                    if (generation !== _adminSessionGeneration || !el.isConnected) return;
                     adminAvatarCache[userName] = null;
                     el.textContent = (userName || '?').slice(0, 1).toUpperCase();
                     el.style.cssText = 'display:flex;align-items:center;justify-content:center;font-weight:600;font-size:14px;color:#fff;';
@@ -1545,7 +1640,7 @@
         // 本文件内三个名单数组只在接口加载后整体重新赋值（无 push / 原地 is_active 翻转），
         // 因此以“数组引用”做失效指纹：引用变化即视为内容可能变化并重建缓存，判定为 O(1)。
         if (!_userFlagsCache || !_flagDataRefs || _flagDataRefs.bans !== bansData || _flagDataRefs.mutes !== mutesData || _flagDataRefs.blacklist !== blacklistData) {
-            _userFlagsCache = { bans: {}, mutes: {}, blacklist: {} };
+            _userFlagsCache = { bans: Object.create(null), mutes: Object.create(null), blacklist: Object.create(null) };
             _flagDataRefs = { bans: bansData, mutes: mutesData, blacklist: blacklistData };
             (bansData || []).forEach(function(b) { if (b && b.is_active && b.user_name) _userFlagsCache.bans[b.user_name] = true; });
             (mutesData || []).forEach(function(m) { if (m && m.is_active && m.user_name) _userFlagsCache.mutes[m.user_name] = true; });
@@ -1560,12 +1655,12 @@
     }
 
     var _userActivityCache = null;
-    var _lastDataLengths = '';
     function getUserActivityStats(userName) {
-        var currentLengths = allPosts.length + ',' + allLikes.length + ',' + allComments.length;
-        if (!_userActivityCache || _lastDataLengths !== currentLengths) {
-            _userActivityCache = { posts: {}, likes: {}, comments: {} };
-            _lastDataLengths = currentLengths;
+        if (!_userActivityCache || _userActivityCache.postSource !== allPosts || _userActivityCache.likeSource !== allLikes || _userActivityCache.commentSource !== allComments) {
+            _userActivityCache = { posts: Object.create(null), likes: Object.create(null), comments: Object.create(null) };
+            _userActivityCache.postSource = allPosts;
+            _userActivityCache.likeSource = allLikes;
+            _userActivityCache.commentSource = allComments;
             for (var i = 0; i < allPosts.length; i++) {
                 var u = allPosts[i].user_name;
                 _userActivityCache.posts[u] = (_userActivityCache.posts[u] || 0) + 1;
@@ -1890,12 +1985,12 @@
         var preview = comment ? (comment.content || '').slice(0, 50) : '';
         if (preview && comment.content && comment.content.length > 50) preview += '...';
         
-        showConfirm('删除评论', '您确定要删除此评论吗？\n\n' + (comment ? '发布者：' + (comment.user_name || '') + '\n' : '') + (preview ? '内容：' + preview + '\n\n' : '') + '评论将标记为删除，但记录会保留在数据库中。', '确认删除', async function() {
+        showConfirm('删除评论', '您确定要删除此评论吗？\n\n' + (comment ? '发布者：' + (comment.user_name || '') + '\n' : '') + (preview ? '内容：' + preview + '\n\n' : '') + '评论及其回复将从数据库中彻底删除，无法恢复。', '确认删除', async function() {
             try {
                 if (!API_BASE) throw new Error('未配置 API_BASE，无法删除');
                 await apiCall('DELETE', '/admin/comment/' + encodeURIComponent(idStr));
                 await loadAllData(true);
-                showToast('评论已标记为删除', 'success');
+                showToast('评论及其回复已彻底删除', 'success');
             } catch(e) { showToast('删除失败: ' + e.message, 'error'); }
         });
     };
@@ -1981,6 +2076,12 @@
     })();
 
     var reportsData = [];
+    var reportsPage = {status:'all',total:null,pending:null,actioned:null,filtered:null,cursor:null,hasMore:false,extended:false};
+    var reportsRequestGeneration = 0;
+    function resetReportsPage(status) {
+        reportsRequestGeneration++;
+        reportsPage = {status:status || 'all',total:null,pending:null,actioned:null,filtered:null,cursor:null,hasMore:false,extended:false};
+    }
     // ★ P2-5 审计修复：举报列表的 loading / error / data 三态。
     // 旧实现失败时把 reportsData 清空，渲染层于是显示"暂无举报"——
     // 请求失败被伪装成"确实没有举报"，管理员会漏掉真实待处理举报。
@@ -1991,7 +2092,7 @@
     function updateReportBadge() {
         var badge = document.getElementById('reportBadge');
         if (!badge) return;
-        var pending = reportsData.filter(function(r) { return r.status === 'pending'; }).length;
+        var pending = reportsPage.pending === null ? reportsData.filter(function(r) { return r.status === 'pending'; }).length : reportsPage.pending;
         if (pending > 0) {
             badge.textContent = pending > 99 ? '99+' : pending;
             badge.style.display = '';
@@ -2009,7 +2110,7 @@
             try {
                 await apiCall('POST', '/admin/report/' + id + '/delete-post');
                 await loadReportsData();
-                document.querySelector('.report-detail-modal')?.remove();
+                closeAdminActionDialog(document.querySelector('.report-detail-modal'));
                 renderTab('reports');
                 showToast('内容已删除，举报已处理', 'success');
             } catch(e) { showToast('操作失败: ' + e.message, 'error'); }
@@ -2027,7 +2128,7 @@
                 await apiCall('POST', '/admin/report/' + id + '/ban-user', { duration_hours: 72 });
                 await loadReportsData();
                 await loadBansData();
-                document.querySelector('.report-detail-modal')?.remove();
+                closeAdminActionDialog(document.querySelector('.report-detail-modal'));
                 renderTab('reports');
                 showToast('用户已封禁，举报已处理', 'success');
             } catch(e) { showToast('操作失败', 'error'); }
@@ -2039,7 +2140,7 @@
             try {
                 await apiCall('PUT', '/admin/report/' + id, { status: 'actioned' });
                 await loadReportsData();
-                document.querySelector('.report-detail-modal')?.remove();
+                closeAdminActionDialog(document.querySelector('.report-detail-modal'));
                 renderTab('reports');
                 showToast('举报已处理', 'success');
             } catch(e) { showToast('操作失败: ' + e.message, 'error'); }
@@ -2058,7 +2159,7 @@
         try {
             await apiCall('PUT', '/admin/report/' + id + '/respond', { response: response });
             await loadReportsData();
-            document.querySelector('.report-detail-modal')?.remove();
+            closeAdminActionDialog(document.querySelector('.report-detail-modal'));
             renderTab('reports');
             showToast('已回复并处理', 'success');
         } catch(e) { showToast('操作失败: ' + e.message, 'error'); }
@@ -2089,7 +2190,7 @@
         var modal = document.createElement('div');
         modal.className = 'report-detail-modal';
         modal.style.cssText = 'position:fixed;inset:0;z-index:10002;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;padding:20px;';
-        modal.onclick = function(e) { if (e.target === modal) modal.remove(); };
+        modal.onclick = function(e) { if (e.target === modal) closeAdminActionDialog(modal); };
 
         var box = document.createElement('div');
         box.style.cssText = 'background:rgba(255,255,255,0.95);border-radius:16px;padding:24px;max-width:460px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,0.3);';
@@ -2106,7 +2207,7 @@
         html += '<div><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">原因</label><input id="banReason" placeholder="违反社区规定" style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid rgba(0,0,0,0.2);background:rgba(255,255,255,0.8);font-size:13px;outline:none;"></div>';
         html += '</div>';
         html += '<div style="display:flex;gap:8px;justify-content:flex-end;">';
-        html += '<button class="btn-sm" onclick="this.closest(\'.report-detail-modal\').remove()">取消</button>';
+        html += '<button class="btn-sm" onclick="closeAdminActionDialog(this.closest(\'.report-detail-modal\'))">取消</button>';
         // ★ 审计修复：确认按钮补 id（弹窗与举报详情弹窗共用 .report-detail-modal 类名，
         //   旧 addBan 用全局 querySelector 取按钮/关闭弹窗，堆叠时会命中错误弹窗）。
         html += '<button class="btn-sm primary" id="banConfirmBtn" onclick="addBan()">确认拉黑封禁</button>';
@@ -2115,6 +2216,7 @@
         box.innerHTML = html;
         modal.appendChild(box);
         document.body.appendChild(modal);
+        openAdminDialog(modal, function() { closeAdminActionDialog(modal); });
     };
 
     // ★ 审计修复：addBan 此前无 in-flight 锁（G9 已给 mute/blacklist 加锁，此处遗漏），
@@ -2134,8 +2236,8 @@
         if (btn) btn.disabled = true;
         try {
             await apiCall('POST', '/admin/ban', { user_name: userName, duration_hours: duration, reason: reason || '违反社区规定' });
-            if (modal) modal.remove();
-            else document.querySelector('.report-detail-modal')?.remove();
+            if (modal) closeAdminActionDialog(modal);
+            else closeAdminActionDialog(document.querySelector('.report-detail-modal'));
             await loadBansData();
             renderTab('bans');
             showToast('已拉黑封禁 ' + userName, 'success');
@@ -2173,7 +2275,7 @@
         var modal = document.createElement('div');
         modal.className = 'report-detail-modal';
         modal.style.cssText = 'position:fixed;inset:0;z-index:10002;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;padding:20px;';
-        modal.onclick = function(e) { if (e.target === modal) modal.remove(); };
+        modal.onclick = function(e) { if (e.target === modal) closeAdminActionDialog(modal); };
 
         var box = document.createElement('div');
         box.style.cssText = 'background:rgba(255,255,255,0.95);border-radius:16px;padding:24px;max-width:460px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,0.3);';
@@ -2190,13 +2292,14 @@
         html += '<div><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">原因</label><input id="muteReason" placeholder="违反社区规定" style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid rgba(0,0,0,0.2);background:rgba(255,255,255,0.8);font-size:13px;outline:none;"></div>';
         html += '</div>';
         html += '<div style="display:flex;gap:8px;justify-content:flex-end;">';
-        html += '<button class="btn-sm" onclick="this.closest(\'.report-detail-modal\').remove()">取消</button>';
+        html += '<button class="btn-sm" onclick="closeAdminActionDialog(this.closest(\'.report-detail-modal\'))">取消</button>';
         html += '<button class="btn-sm primary" onclick="addMute()">确认禁言</button>';
         html += '</div>';
 
         box.innerHTML = html;
         modal.appendChild(box);
         document.body.appendChild(modal);
+        openAdminDialog(modal, function() { closeAdminActionDialog(modal); });
     };
 
     function formatDuration(hours) {
@@ -2217,7 +2320,7 @@
         _addMuteLock = true;
         try {
             await apiCall('POST', '/admin/mute', { user_name: userName, duration_hours: duration, reason: reason || '违反社区规定' });
-            document.querySelector('.report-detail-modal')?.remove();
+            closeAdminActionDialog(document.querySelector('.report-detail-modal'));
             await loadMutesData();
             renderTab('mutes');
             showToast('已禁言 ' + userName, 'success');
@@ -2250,7 +2353,7 @@
         var modal = document.createElement('div');
         modal.className = 'report-detail-modal';
         modal.style.cssText = 'position:fixed;inset:0;z-index:10002;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;padding:20px;';
-        modal.onclick = function(e) { if (e.target === modal) modal.remove(); };
+        modal.onclick = function(e) { if (e.target === modal) closeAdminActionDialog(modal); };
 
         var box = document.createElement('div');
         box.style.cssText = 'background:rgba(255,255,255,0.95);border-radius:16px;padding:24px;max-width:460px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,0.3);';
@@ -2267,13 +2370,14 @@
         html += '<div><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">原因</label><input id="blacklistReason" placeholder="违反社区规定" style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid rgba(0,0,0,0.2);background:rgba(255,255,255,0.8);font-size:13px;outline:none;"></div>';
         html += '</div>';
         html += '<div style="display:flex;gap:8px;justify-content:flex-end;">';
-        html += '<button class="btn-sm" onclick="this.closest(\'.report-detail-modal\').remove()">取消</button>';
+        html += '<button class="btn-sm" onclick="closeAdminActionDialog(this.closest(\'.report-detail-modal\'))">取消</button>';
         html += '<button class="btn-sm primary" onclick="addBlacklist()">加入黑名单</button>';
         html += '</div>';
 
         box.innerHTML = html;
         modal.appendChild(box);
         document.body.appendChild(modal);
+        openAdminDialog(modal, function() { closeAdminActionDialog(modal); });
     };
 
     // G9 修复：in-flight 锁，防止双击重复添加黑名单
@@ -2287,7 +2391,7 @@
         _addBlacklistLock = true;
         try {
             await apiCall('POST', '/admin/blacklist', { user_name: userName, duration_hours: duration, reason: reason || '违反社区规定' });
-            document.querySelector('.report-detail-modal')?.remove();
+            closeAdminActionDialog(document.querySelector('.report-detail-modal'));
             await loadBlacklistData();
             renderTab('bans');
             showToast('已加入黑名单 ' + userName, 'success');
@@ -2366,13 +2470,17 @@
         img.alt = username + ' - ' + time;
         info.textContent = '用户: ' + (username || '未知') + ' | 时间: ' + (time || '未知');
         modal.style.display = 'flex';
+        openAdminDialog(modal, window.adminClosePhotoPreview, '照片预览');
     };
 
     window.adminClosePhotoPreview = function() {
         var modal = document.getElementById('photoPreviewModal');
         if (modal) {
             modal.style.display = 'none';
-            document.getElementById('photoPreviewImg').src = '';
+            var img = document.getElementById('photoPreviewImg');
+            img.onerror = null; img.removeAttribute('src'); img.alt = '';
+            document.getElementById('photoPreviewInfo').textContent = '';
+            releaseAdminDialog(modal);
         }
     };
 
@@ -2626,7 +2734,7 @@
         else {
             h += '<div class="table-wrap"><table><thead><tr><th>用户名</th><th>状态</th><th>注册时间</th><th>最近登录</th><th>最近设备</th><th>地区</th><th>最近IP</th><th>帖子</th><th>点赞</th><th>评论</th><th>操作</th></tr></thead><tbody>';
             // ★ 修复：按 user_name 一次性建索引，避免循环内 filter(allLoginEvents) 的 O(用户数×事件数)
-            var loginEventsByUser = {};
+            var loginEventsByUser = Object.create(null);
             allLoginEvents.forEach(function(ev) {
                 if (!loginEventsByUser[ev.user_name]) loginEventsByUser[ev.user_name] = [];
                 loginEventsByUser[ev.user_name].push(ev);
@@ -2789,6 +2897,19 @@
         });
     }
 
+    window.toggleAdminNavigation = function() {
+        var header = document.querySelector('.dash-header');
+        var open = header.classList.toggle('admin-nav-open');
+        document.getElementById('adminNavToggle').setAttribute('aria-expanded', String(open));
+    };
+    var adminNavigation = document.getElementById('adminNav');
+    if (adminNavigation) adminNavigation.addEventListener('click', function(e) {
+        var tab = e.target.closest('[role="tab"]');
+        if (!tab || !window.matchMedia('(max-width: 640px)').matches) return;
+        document.querySelector('.dash-header').classList.remove('admin-nav-open');
+        document.getElementById('adminNavToggle').setAttribute('aria-expanded', 'false');
+        document.getElementById('adminNavToggle').focus();
+    });
     var adminTablist = document.querySelector('.dash-header .dh-right [role="tablist"]');
     if (adminTablist) {
         adminTablist.querySelectorAll('button[id^="tab"][id$="Btn"]').forEach(function(button) {
@@ -2915,6 +3036,13 @@
             case 'online': renderOnlineTab(el); break;
             case 'profile': renderProfileTab(el); break;
         }
+        var windowedTabs = ['users','posts','likes','comments','photos','bans','mutes','security','audit','errorlog','behavior'];
+        if (windowedTabs.indexOf(normalized) >= 0 && !el.querySelector('.admin-record-scope')) {
+            var scope = document.createElement('p'); scope.className='admin-record-scope';
+            scope.textContent='此页展示最近加载的记录；列表数量及关联统计仅针对已加载数据，不代表全部历史。';
+            el.prepend(scope);
+        }
+        el.querySelectorAll('.table-wrap').forEach(function(wrap) { wrap.tabIndex=0; wrap.setAttribute('role','region'); wrap.setAttribute('aria-label','数据表格，可左右滚动'); });
         // 延迟加载用户头像
         setTimeout(function() { adminLoadAvatars(); }, 100);
     };
@@ -3001,20 +3129,50 @@
     window.loadReportsData = async function() {
         // ★ P2-5 审计修复：只有请求成功才覆盖 reportsData，失败时保留上一次成功的列表并单独记录错误态。
         // 这样轮询/刷新失败不会把"加载失败"伪装成"暂无举报"，徽标也停留在最后一次成功的数据上。
+        var options = arguments[0] || {};
+        var more = options.more === true;
+        if (options.background && reportsLoading) return reportsData;
+        if (more && (reportsLoading || !reportsPage.hasMore)) return reportsData;
+        var generation = ++reportsRequestGeneration;
+        var query = new URLSearchParams({status:reportsPage.status,limit:'100'});
+        if (more && reportsPage.cursor) { query.set('before_at',reportsPage.cursor.before_at); query.set('before_id',reportsPage.cursor.before_id); }
         reportsLoading = true;
         try {
-            var data = await apiCall('GET', '/admin/reports');
+            var data = await apiCall('GET', '/admin/reports?' + query.toString());
+            if (generation !== reportsRequestGeneration) return reportsData;
             if (!data || !Array.isArray(data.data)) throw new Error('举报数据格式无效，请重试');
-            reportsData = data.data;
+            var preservePage = options.background && reportsPage.extended;
+            if (!preservePage) reportsData = more ? Array.from(new Map(reportsData.concat(data.data).map(function(row) { return [row.id,row]; })).values()) : data.data;
+            reportsPage.total = typeof data.total === 'number' ? data.total : null;
+            reportsPage.pending = typeof data.pending_count === 'number' ? data.pending_count : null;
+            reportsPage.actioned = typeof data.actioned_count === 'number' ? data.actioned_count : null;
+            reportsPage.filtered = typeof data.filtered_total === 'number' ? data.filtered_total : null;
+            if (!preservePage) {
+                reportsPage.cursor = data.next_cursor || null;
+                reportsPage.hasMore = data.has_more === true;
+                reportsPage.extended = more;
+            }
             reportsLoadError = '';
             updateReportBadge();
             return reportsData;
         } catch (e) {
+            if (generation !== reportsRequestGeneration) throw e;
             reportsLoadError = (e && e.message) || '举报数据加载失败，请重试';
             throw e; // 不吞异常：调用方（轮询/Tab 渲染）据此展示失败态与重试入口
         } finally {
-            reportsLoading = false;
+            if (generation === reportsRequestGeneration) reportsLoading = false;
         }
+    };
+    window.loadMoreAdminReports = async function() {
+        var button = document.getElementById('reportsMore');
+        if (button) { button.disabled=true; button.textContent='加载中…'; }
+        try { await loadReportsData({more:true}); } catch (_) {}
+        if (currentTab==='reports') renderTab('reports');
+    };
+    window.filterAdminReports = async function(status) {
+        resetReportsPage(status); reportsData=[]; reportsLoadError='';
+        try { await loadReportsData(); } catch (_) {}
+        if (currentTab==='reports') renderTab('reports');
     };
 
     window.loadUserVisitStats = async function(el) {
@@ -3154,11 +3312,11 @@
             renderAdminTabLoadError(el, 'reports', reportsLoadError);
             return;
         }
-        var pending = reportsData.filter(function(r) { return r.status === 'pending'; }).length;
+        var pending = reportsPage.pending === null ? reportsData.filter(function(r) { return r.status === 'pending'; }).length : reportsPage.pending;
         var h = '<div class="stats-row">';
-        h += '<div class="stat-box"><div class="val">' + reportsData.length + '</div><div class="lbl">总举报数</div></div>';
+        h += '<div class="stat-box"><div class="val">' + (reportsPage.total === null ? reportsData.length : reportsPage.total) + '</div><div class="lbl">' + (reportsPage.total === null ? '当前加载举报' : '总举报数') + '</div></div>';
         h += '<div class="stat-box"><div class="val" style="color:var(--danger)">' + pending + '</div><div class="lbl">待处理</div></div>';
-        h += '<div class="stat-box"><div class="val" style="color:var(--primary)">' + reportsData.filter(function(r) { return r.status === 'actioned'; }).length + '</div><div class="lbl">已处理</div></div>';
+        h += '<div class="stat-box"><div class="val" style="color:var(--primary)">' + (reportsPage.actioned === null ? reportsData.filter(function(r) { return r.status === 'actioned'; }).length : reportsPage.actioned) + '</div><div class="lbl">已处理' + (reportsPage.actioned === null ? '（已加载）' : '') + '</div></div>';
         h += '</div>';
         if (reportsLoadError) {
             h += '<div class="empty-state" role="alert" aria-live="assertive"><div class="icon" aria-hidden="true">!</div>' +
@@ -3166,6 +3324,9 @@
                 '<button class="btn-sm primary" type="button" onclick="refreshAdminTab(\'reports\')">重新加载</button></div>';
         }
         h += '<div class="card"><h3>举报管理</h3>';
+        h += '<label>状态筛选 <select id="reportsStatus" onchange="filterAdminReports(this.value)">';
+        [['all','全部'],['pending','待处理'],['reviewed','已审核'],['actioned','已处理'],['dismissed','已驳回']].forEach(function(option) { h+='<option value="'+option[0]+'"'+(reportsPage.status===option[0]?' selected':'')+'>'+option[1]+'</option>'; });
+        h += '</select></label><p>已加载 '+reportsData.length+(reportsPage.filtered===null?' 条；服务端总数暂未提供':' / '+reportsPage.filtered+' 条')+'</p>' + (reportsPage.extended ? '<p>翻页期间保留当前列表；点击刷新获取最新记录。</p>' : '');
         if (!reportsData.length) {
             h += '<div class="empty">暂无举报</div>';
         } else {
@@ -3193,6 +3354,7 @@
             });
             h += '</tbody></table></div>';
         }
+        if (reportsPage.hasMore) h += '<button type="button" class="btn-sm primary" id="reportsMore" onclick="loadMoreAdminReports()">加载更多举报</button>';
         h += '</div>';
         el.innerHTML = h;
     };
@@ -3203,7 +3365,7 @@
         var modal = document.createElement('div');
         modal.className = 'report-detail-modal';
         modal.style.cssText = 'position:fixed;inset:0;z-index:10002;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;padding:20px;';
-        modal.onclick = function(e) { if (e.target === modal) modal.remove(); };
+        modal.onclick = function(e) { if (e.target === modal) closeAdminActionDialog(modal); };
 
         var box = document.createElement('div');
         box.style.cssText = 'background:rgba(255,255,255,0.95);border-radius:16px;padding:24px;max-width:560px;width:100%;max-height:85vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3);';
@@ -3212,7 +3374,7 @@
         var typeLabel = r.target_type === 'photo' ? '照片墙' : '帖子';
         var statusLabel = r.status === 'pending' ? '待处理' : r.status === 'actioned' ? '已处理' : r.status === 'dismissed' ? '已驳回' : r.status;
 
-        var html = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;"><h3 style="margin:0;">举报详情</h3><button onclick="this.closest(\'.report-detail-modal\').remove()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--text-muted);padding:4px;line-height:1;">×</button></div>';
+        var html = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;"><h3 style="margin:0;">举报详情</h3><button onclick="closeAdminActionDialog(this.closest(\'.report-detail-modal\'))" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--text-muted);padding:4px;line-height:1;">×</button></div>';
         html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px;margin-bottom:16px;">';
         html += '<div><strong>举报人：</strong>' + escapeHtml(r.reporter_name || '-') + '</div>';
         html += '<div><strong>被举报人：</strong>' + escapeHtml(r.target_user || '-') + '</div>';
@@ -3235,7 +3397,7 @@
             html += '<button class="btn-sm" style="background:rgba(255,59,96,0.1);color:#ff3b60;border:1px solid rgba(255,59,96,0.3);" onclick="doBanReportUser(\'' + safeJsStr(String(r.id)) + '\')">封禁用户</button>';
             html += '<button class="btn-sm" onclick="doMarkReportActioned(\'' + safeJsStr(String(r.id)) + '\')">标记已处理</button>';
         }
-        html += '<button class="btn-sm" style="margin-left:auto;" onclick="this.closest(\'.report-detail-modal\').remove()">关闭</button>';
+        html += '<button class="btn-sm" style="margin-left:auto;" onclick="closeAdminActionDialog(this.closest(\'.report-detail-modal\'))">关闭</button>';
         html += '</div>';
         if (r.status === 'pending') {
             html += '<div style="border-top:1px solid rgba(0,0,0,0.1);padding-top:12px;margin-top:8px;">';
@@ -3247,6 +3409,7 @@
         box.innerHTML = html;
         modal.appendChild(box);
         document.body.appendChild(modal);
+        openAdminDialog(modal, function() { closeAdminActionDialog(modal); });
     };
 
     // 登录记录设备型号文案（不显示“需重新登录后记录”）
@@ -3372,14 +3535,14 @@
         var cfHash = latestFpEvent ? (latestFpEvent.info.canvas_fingerprint_hash || null) : null;
 
         // 查找关联账号（同一 IP 或同一 device_id）
-        var userIps = {};
-        var userDevices = {};
+        var userIps = Object.create(null);
+        var userDevices = Object.create(null);
         userEvents.forEach(function(ev) {
             if (ev.info.ip) userIps[ev.info.ip] = true;
             if (ev.info.device_id) userDevices[ev.info.device_id] = true;
         });
 
-        var relatedAccounts = {};
+        var relatedAccounts = Object.create(null);
         allLoginEvents.forEach(function(ev) {
             if (ev.user_name === userName) return;
             var info = {};
@@ -3402,7 +3565,7 @@
         };
 
         var html = '<div class="card" style="max-width:820px;margin:0 auto;">' +
-            '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;"><h3 style="margin:0;">设备详情：' + escapeHtml(userName) + '</h3><button onclick="this.closest(\'.report-detail-modal\').remove()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--text-muted);padding:4px;line-height:1;">×</button></div>';
+            '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;"><h3 style="margin:0;">设备详情：' + escapeHtml(userName) + '</h3><button onclick="closeAdminActionDialog(this.closest(\'.report-detail-modal\'))" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--text-muted);padding:4px;line-height:1;">×</button></div>';
 
         // 设备指纹信息
         html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin-bottom:14px;padding:12px;background:rgba(255,255,255,0.05);border-radius:10px;">';
@@ -3487,7 +3650,7 @@
         var modal = document.createElement('div');
         modal.className = 'report-detail-modal';
         modal.style.cssText = 'position:fixed;inset:0;z-index:10002;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;padding:20px;';
-        modal.onclick = function(e) { if (e.target === modal) modal.remove(); };
+        modal.onclick = function(e) { if (e.target === modal) closeAdminActionDialog(modal); };
 
         var box = document.createElement('div');
         box.style.cssText = 'background:rgba(255,255,255,0.95);border-radius:16px;padding:24px;max-width:860px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3);';
@@ -3495,15 +3658,26 @@
         box.innerHTML = html;
         modal.appendChild(box);
         document.body.appendChild(modal);
+        openAdminDialog(modal, function() { closeAdminActionDialog(modal); });
     };
 
     var auditTypeFilter = 'all';
+    window.openAdminAuditRequest = async function(id) {
+        if (!id) return;
+        try {
+            await window.switchTab('audit');
+            var result=await apiCall('GET','/admin/audit-logs?request_id='+encodeURIComponent(id));
+            if (!Array.isArray(result.data)) throw Error('审计记录格式无效');
+            allAuditLogs=result.data;
+            if (currentTab==='audit') renderTab('audit');
+        } catch (e) { showToast(e.message || '审计记录暂不可用，请稍后核对', 'error'); }
+    };
     window.renderAuditTab = function(el) {
         var h = '<div class="card"><h3>📋 操作审计日志</h3>';
         if (!allAuditLogs.length) {
             h += '<div class="empty">暂无审计记录</div>';
         } else {
-            h += '<div class="table-wrap"><table><thead><tr><th>时间</th><th>操作</th><th>操作人</th><th>详情</th></tr></thead><tbody>';
+            h += '<div class="table-wrap"><table><thead><tr><th>时间</th><th>操作</th><th>操作人</th><th>结果</th><th>详情</th></tr></thead><tbody>';
             var actionLabels = {
                 'delete_post': '删除帖子',
                 'delete_photo': '删除照片',
@@ -3519,7 +3693,7 @@
                 'view_user_gps_history': '查看授权 GPS 历史'
             };
             allAuditLogs.forEach(function(log) {
-                h += '<tr><td>' + escapeHtml(formatTime(log.created_at)) + '</td><td>' + escapeHtml(actionLabels[log.action] || log.action) + '</td><td>' + escapeHtml(log.operator) + '</td><td style="max-width:300px;white-space:normal;word-break:break-word;">' + escapeHtml(log.detail || '-') + '</td></tr>';
+                h += '<tr><td>' + escapeHtml(formatTime(log.created_at)) + '</td><td>' + escapeHtml(actionLabels[log.action] || log.action) + '</td><td>' + escapeHtml(log.operator) + '</td><td>' + escapeHtml(log.outcome === 'succeeded' ? '成功' : log.outcome === 'failed' ? '失败' : log.outcome === 'partial' ? '部分完成' : log.request_id ? '结果待确认，请勿重复执行' : '历史记录') + '</td><td style="max-width:300px;white-space:normal;word-break:break-word;">' + escapeHtml(log.detail || '-') + (log.request_id ? '<br>请求编号：' + escapeHtml(log.request_id) : '') + '</td></tr>';
             });
             h += '</tbody></table></div>';
         }
@@ -3662,7 +3836,7 @@
             h += '<div class="empty">暂无用户行为记录</div>';
         } else {
             var uniqueUsers = [];
-            var seenUsers = {};
+            var seenUsers = Object.create(null);
             allBehaviorItems.forEach(function(item) {
                 if (!seenUsers[item.user_name]) {
                     seenUsers[item.user_name] = true;
@@ -3739,7 +3913,7 @@
             errors = errors.filter(function(e) { return e.type === errorLogTypeFilter; });
         }
 
-        var typeCounts = {};
+        var typeCounts = Object.create(null);
         allErrorLogs.forEach(function(e) { typeCounts[e.type] = (typeCounts[e.type] || 0) + 1; });
         var types = Object.keys(typeCounts).sort(function(a, b) { return typeCounts[b] - typeCounts[a]; });
 
@@ -3777,6 +3951,7 @@
         _adminDetailAbortController = null;
         var overlay = document.getElementById('detailModal');
         if (overlay) { overlay.classList.remove('active'); overlay.innerHTML = ''; }
+        if (overlay) releaseAdminDialog(overlay);
     };
 
     function showModal(title, contentHtml) {
@@ -3798,12 +3973,13 @@
             '<div class="modal-dialog admin-detail-dialog" onclick="event.stopPropagation()">' +
                 '<div class="admin-detail-head">' +
                     '<h3>' + escapeHtml(String(title || '')) + '</h3>' +
-                    '<button class="admin-detail-close" onclick="window.closeAdminDetailModal()">&times;</button>' +
+                    '<button class="admin-detail-close" aria-label="关闭用户详情" onclick="window.closeAdminDetailModal()">&times;</button>' +
                 '</div>' +
                 '<div class="admin-detail-body">' + contentHtml + '</div>' +
             '</div>';
 
         overlay.classList.add('active');
+        openAdminDialog(overlay, window.closeAdminDetailModal, String(title || '用户详情'));
     }
 
 
@@ -4565,7 +4741,7 @@
                 return;
             }
             // 构建 allUsers 索引（用于判断邮箱是否对应网站用户）
-            var allUsersMap = {};
+            var allUsersMap = Object.create(null);
             (allUsers || []).forEach(function(u) { if (u && u.name) allUsersMap[u.name] = true; });
 
             var h = '<div class="table-wrap" style="max-height:400px;overflow-y:auto;"><table style="width:100%;border-collapse:collapse;font-size:12px;"><thead><tr style="position:sticky;top:0;z-index:1;background:var(--card-bg,var(--bg));"><th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border);">时间</th><th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border);">接收邮件账号</th><th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border);">接收人</th><th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border);">主题</th><th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border);">结果</th></tr></thead><tbody>';

@@ -19,7 +19,7 @@ async function checkedRpc(supabase, name, args) {
   if (!data || data.ok !== true) {
     const error = new Error(data && data.error || name + '_not_applied');
     error.code = data && data.code || 'operation_not_applied';
-    error.status = error.code === 'not_found' ? 404 : error.code === 'email_daily_limit' ? 429 : error.code === 'idempotency_conflict' ? 409 : 503;
+    error.status = error.code === 'invalid_request' ? 400 : error.code === 'invalid_record' ? 422 : error.code === 'forbidden' ? 403 : error.code === 'not_found' ? 404 : error.code === 'email_daily_limit' ? 429 : error.code === 'idempotency_conflict' ? 409 : 503;
     throw error;
   }
   return data;
