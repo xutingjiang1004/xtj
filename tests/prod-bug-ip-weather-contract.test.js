@@ -1,14 +1,6 @@
-// 2026-09-24 生产 bug 回归合约（两连修）
-// Bug A（发帖 IP 属地错误）：
-//   - trust proxy 固定网段列表可能漏掉平台新增内网 hop → req.ip 落私网 →
-//     XFF 兜底极端时误选客户端伪造的最左公网值 → 改函数判定（非公网即受信）
-//   - 属地数据源全为海外库，对中国移动/广电等 IP 省市精度差甚至张冠李戴 →
-//     国内源第一层（百度 opendata + pconline GBK）+ 海外库第二层
-//   - 属地缓存 7 天过长，错误属地一周无法自愈 → 24 小时
-//   - 新增取 IP 来源标记 + 发帖诊断日志，可在 Render 日志直接定位错在哪一环
-// Bug B（小猫AI get_weather「天气服务暂时不可用」）：
-//   - Render 共享出口 IP 触发 open-meteo 429 限流，每次提问实时外发无节流 →
-//     10 分钟结果缓存 + wttr.in 备源兜底 + 状态码透出日志
+// IP source/localization and weather regression contracts.
+// 2026-10-22: IP evidence is corroborated, not selected by response speed;
+// conflicting/partial locations expire before a corroborated city result.
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert');
@@ -18,6 +10,8 @@ const path = require('node:path');
 const ROOT = path.join(__dirname, '..');
 const serverSrc = fs.readFileSync(path.join(ROOT, 'render-api', 'server.js'), 'utf8');
 const weather = require(path.join(ROOT, 'render-api', 'weather.js'));
+const geoSource = fs.readFileSync(path.join(ROOT, 'render-api', 'ip-geolocation.js'), 'utf8');
+const { parseBaiduGeoPayload, parsePconlineGeoText, locationCacheTtl } = require('../render-api/ip-geolocation');
 
 // ───────────────────────── Bug A：IP 属地 ─────────────────────────
 
@@ -39,55 +33,18 @@ test('合约：发帖端点输出 [IP-DIAG] 诊断日志（含 xff 原文与解�
   assert.ok(ctx.includes('region='), '日志必须含属地解析结果');
 });
 
-test('合约：属地解析第一层为国内源（百度 opendata + pconline），第二层海外库', () => {
-  assert.ok(serverSrc.includes('https://opendata.baidu.com/api.php?query='), '国内第一层必须有百度 opendata');
-  assert.ok(serverSrc.includes('https://whois.pconline.com.cn/ipJson.jsp?ip='), '国内第一层必须有 pconline');
-  assert.ok(serverSrc.includes('const cnFetchers = ['), '必须存在国内源竞速层');
-  assert.ok(serverSrc.includes('function raceWithDeadline('), '必须存在带截止时间的竞速辅助');
-  assert.ok(serverSrc.includes("new TextDecoder('gbk')"), 'pconline GBK 文本必须用 TextDecoder 解码');
-  // 国内层命中且省市齐全时不落第二层；省市全空（海外 IP）时补第二层
-  assert.ok(serverSrc.includes("if (!racedResult || (!racedResult.region && !racedResult.city)) {"),
-    '海外 IP（国内库只给国家级结果）必须落第二层海外库');
+test('geolocation keeps TLS domestic evidence and bounded overseas corroboration', () => {
+  assert.match(geoSource, /https:\/\/opendata\.baidu\.com/);
+  assert.match(geoSource, /https:\/\/whois\.pconline\.com\.cn/);
+  assert.match(geoSource, /'gbk'/);
+  assert.doesNotMatch(geoSource, /Promise\.any\(/);
 });
 
-test('合约：属地缓存 TTL 为 24 小时（错误属地最多固化一天）', () => {
-  assert.ok(serverSrc.includes('var IP_REGION_CACHE_TTL_MS = 24 * 60 * 60 * 1000;'));
+test('conflicting and single-source geography expires before corroborated city evidence', () => {
+  assert.ok(locationCacheTtl({has_conflict:true}) < locationCacheTtl({city_confidence:'single_source'}));
+  assert.ok(locationCacheTtl({city_confidence:'single_source'}) < locationCacheTtl({city_confidence:'corroborated'}));
+  assert.ok(locationCacheTtl({city_confidence:'corroborated'}) <= 60*60*1000);
 });
-
-// 从 server.js 提取纯函数做行为验证（不 require 整个服务）
-function extractFn(name) {
-  const re = new RegExp('\\n(?:async )?function ' + name + '\\([^)]*\\) \\{');
-  const m = serverSrc.match(re);
-  assert.ok(m, '在 server.js 中找到 function ' + name);
-  const start = m.index + 1;
-  let i = serverSrc.indexOf('{', start), depth = 0, end = -1;
-  for (; i < serverSrc.length; i++) {
-    if (serverSrc[i] === '{') depth++;
-    else if (serverSrc[i] === '}') { depth--; if (depth === 0) { end = i + 1; break; } }
-  }
-  return serverSrc.slice(start, end);
-}
-
-function extractVar(name) {
-  const marker = 'var ' + name + ' = {';
-  const start = serverSrc.indexOf(marker);
-  assert.ok(start >= 0, '在 server.js 中找到 var ' + name);
-  let i = start + marker.length - 1, depth = 0, end = -1;
-  for (; i < serverSrc.length; i++) {
-    if (serverSrc[i] === '{') depth++;
-    else if (serverSrc[i] === '}') { depth--; if (depth === 0) { end = i + 1; break; } }
-  }
-  return serverSrc.slice(start, end);
-}
-
-const geoCode = [
-  extractVar('IP_GEO_ZH_MAP'),
-  extractFn('normalizeIpGeoName'),
-  extractFn('parseBaiduGeoPayload'),
-  extractFn('parsePconlineGeoText')
-].join('\n');
-const geoFactory = new Function(geoCode + '; return { parseBaiduGeoPayload: parseBaiduGeoPayload, parsePconlineGeoText: parsePconlineGeoText };');
-const { parseBaiduGeoPayload, parsePconlineGeoText } = geoFactory();
 
 test('行为：parseBaiduGeoPayload（省+市 / 直辖市去重 / 运营商剥离 / 非法与海外降级）', () => {
   const cn = parseBaiduGeoPayload({ status: '0', data: [{ location: '福建省福州市 电信' }] });

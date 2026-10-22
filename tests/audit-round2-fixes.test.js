@@ -110,7 +110,7 @@ test('M-10: 实时在线页与画像页保留完整字段分支', () => {
 });
 
 test('M-10: 用户列表页区域保持安全文本渲染', () => {
-  assert.match(admin, /var _geoRaw = ''/, '未引入 _geoRaw 中转变量');
+  assert.match(admin, /var _geoRaw = adminFormatLocation\(/, '地区须先格式化为文本，再统一转义');
   assert.match(admin, /regionCell = escapeHtml\(_showSensitiveInSession \? _geoRaw : maskGeo\(_geoRaw\)\)/);
 });
 

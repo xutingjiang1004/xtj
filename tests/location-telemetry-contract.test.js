@@ -49,7 +49,9 @@ test('browser context only includes bounded language, timezone and network facts
   for (const retired of ['getDeviceMeta', 'getBrowserFingerprint', 'getCanvasFingerprint', 'getWebglFingerprint', 'getBatteryInfo', 'getMediaDevices', '/api/log-login-event', '/api/security-settings']) assert.equal(device.includes(retired), false, retired);
   assert.match(device, /authOwner:actor,authEpoch:epoch/);
   assert.match(device, /xtj_location_sharing_owner/);
-  assert.match(server, /if \(ip\.indexOf\('::ffff:'\) === 0\) ip = ip\.slice\(7\)/);
+  const { normalizeIpAddress } = require('../render-api/ip-geolocation');
+  assert.equal(normalizeIpAddress('::ffff:8.8.8.8'), '8.8.8.8');
+  assert.equal(normalizeIpAddress('0:0:0:0:0:ffff:808:808'), '8.8.8.8');
   assert.match(admin, /用户授权 GPS 精确定位/);
   assert.match(admin, /openstreetmap\.org/);
   // ★ 2026-09-22 合规整改：通讯录/剪贴板采集接口已整体移除
