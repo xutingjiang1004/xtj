@@ -4619,17 +4619,7 @@ function getRealIp(req) {
 //   客户端伪造值只会出现在链最左侧，从右往左扫描永远不会选中伪造值。
 // IP 字符串规范化：去端口（仅 IPv4:host 形式）、去 ::ffff: 映射前缀、取逗号分隔首段
 function normalizeClientIpValue(value) {
-  var ip = String(value || '').trim();
-  if (!ip) return '';
-  if (ip.indexOf(',') >= 0) ip = ip.split(',')[0].trim();
-  var colonCount = (ip.match(/:/g) || []).length;
-  if (colonCount === 1 && ip.indexOf(']') < 0 && ip.indexOf('::') < 0) {
-    var hostPortMatch = ip.match(/^(\d{1,3}(?:\.\d{1,3}){3}):\d+$/);
-    if (hostPortMatch) ip = hostPortMatch[1];
-  }
-  if (ip.indexOf('::ffff:') === 0) ip = ip.slice(7);
-  if (require('net').isIP(ip) === 6) { try { ip = new URL('http://[' + ip + ']/').hostname.slice(1,-1); } catch (_) {} }
-  return ip;
+  return require('./ip-geolocation').normalizeIpAddress(value);
 }
 
 function firstPublicIpFromForwardedChain(req) {
@@ -4652,7 +4642,7 @@ function getClientIp(req) {
   ];
   for (var i = 0; i < candidates.length; i++) {
     var ip = normalizeClientIpValue(candidates[i]);
-    if (ip && !isPrivateOrReservedIp(ip)) {
+    if (ip && !isPrivateOrReservedIp(ip) && !require('./trusted-proxies').isCloudflareProxy(ip)) {
       // ★ 2026-09-24：标记取值来源，供属地诊断日志定位"取错的是哪一环"
       if (req) req._clientIpSource = (i === 0 ? 'express_req_ip' : 'socket_remote');
       return ip;
@@ -4661,7 +4651,8 @@ function getClientIp(req) {
   // 兜底：req.ip/socket 全是私网地址（trust proxy 信任范围仍不够），
   // 从 X-Forwarded-For 链右往左找第一个公网地址。
   var socketIp = normalizeClientIpValue(req && req.socket && req.socket.remoteAddress);
-  var chainIp = socketIp && require('net').isIP(socketIp) && isPrivateOrReservedIp(socketIp) ? firstPublicIpFromForwardedChain(req) : '';
+  var trustedSocket = socketIp && (isPrivateOrReservedIp(socketIp) || require('./trusted-proxies').isCloudflareProxy(socketIp));
+  var chainIp = trustedSocket ? firstPublicIpFromForwardedChain(req) : '';
   if (chainIp) {
     if (req) req._clientIpSource = 'xff_chain_public';
     return chainIp;
@@ -4669,6 +4660,7 @@ function getClientIp(req) {
   // 最终兜底：返回原始 req.ip（哪怕是私网，至少日志/审计可溯源）。
   var fallback = normalizeClientIpValue(candidates[0]);
   if (req) req._clientIpSource = 'fallback_private_or_unknown';
+  if (require('./trusted-proxies').isCloudflareProxy(fallback)) return 'unknown';
   return fallback || 'unknown';
 }
 
@@ -5258,9 +5250,10 @@ async function logAdminLoginEvent(req) {
           last_visit: now,
           last_device: detectDeviceTypeFromUA(ua) + ' · ' + detectOSFromUA(ua) + ' · ' + detectBrowserFromUA(ua),
           last_device_id: deviceId,
-          last_ip: ip
+          last_ip: ip,
+          last_ip_location: ipLocation,
+          last_ip_location_ip: ipLocation ? ip : null
         };
-        if (ipLocation) adminInfoPatch.last_ip_location = ipLocation;
         await mergeUserInfo(ADMIN_USERNAME, adminInfoPatch);
       } catch(e) {
         console.warn('[AdminLoginEvent] 同步 user_info 失败:', e.message || e);
@@ -5271,62 +5264,6 @@ async function logAdminLoginEvent(req) {
   }
 }
 
-const IP_LOCATION_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
-const IP_LOCATION_NEGATIVE_TTL_MS = 2 * 60 * 1000;
-const IP_LOCATION_CACHE_MAX = 500;
-const ipLocationCache = new Map();
-const ipLocationInflight = new Map();
-
-async function resolveIpLocation(ip) {
-  var normalizedIp = String(ip || '').trim();
-  var cached = ipLocationCache.get(normalizedIp);
-  if (cached && cached.expires_at > Date.now()) return cached.value;
-  if (cached) ipLocationCache.delete(normalizedIp);
-  if (ipLocationInflight.has(normalizedIp)) return ipLocationInflight.get(normalizedIp);
-  var pending = resolveIpLocationUncached(normalizedIp).then(function(result) {
-    if (ipLocationCache.size >= IP_LOCATION_CACHE_MAX) {
-      var oldestKey = ipLocationCache.keys().next().value;
-      if (oldestKey !== undefined) ipLocationCache.delete(oldestKey);
-    }
-    ipLocationCache.set(normalizedIp, {
-      value: result,
-      expires_at: Date.now() + (result ? IP_LOCATION_CACHE_TTL_MS : IP_LOCATION_NEGATIVE_TTL_MS)
-    });
-    return result;
-  }).finally(function() {
-    ipLocationInflight.delete(normalizedIp);
-  });
-  ipLocationInflight.set(normalizedIp, pending);
-  return pending;
-}
-
-// IP 地区解析（HTTPS 数据源并行竞速，取最快成功者）
-// ★ 2026-09-22：ipwho.is 加 lang=zh-CN（实测中国 IP 返回「中国/浙江省/杭州」，
-//   此前为「Zhejiang Sheng Hangzhou」英文串）；ip-api.com 免费档不支持 HTTPS
-//   （实测 403）从解析链移除；顺序串行（最坏 2.5+2.5+2=7s）改为并行竞速 + 3s 截止。
-// ★ 记录每个 Provider 的诊断信息
-var ipProviderDiagnostics = {};
-var IP_PROVIDER_DIAGNOSTICS_MAX = 500;
-// ★ 修复：诊断对象此前只写不清理，随机 IP 打登录即可无界增长导致 OOM。
-//   加上限（超过时重置为仅保留最近 500 条）+ 定时清空。
-function setIpProviderDiagnostics(ip, diagnostics) {
-  try {
-    if (ipProviderDiagnostics[ip] === undefined && Object.keys(ipProviderDiagnostics).length >= IP_PROVIDER_DIAGNOSTICS_MAX) {
-      var keys = Object.keys(ipProviderDiagnostics);
-      var dropCount = keys.length - Math.floor(IP_PROVIDER_DIAGNOSTICS_MAX / 2);
-      for (var i = 0; i < dropCount; i++) delete ipProviderDiagnostics[keys[i]];
-    }
-    ipProviderDiagnostics[ip] = diagnostics;
-  } catch (e) {}
-}
-setInterval(function() {
-  ipProviderDiagnostics = {};
-}, 10 * 60 * 1000).unref();
-var IP_CACHE_TTL_OK = 3600000;
-var IP_CACHE_TTL_FAIL = 120000;
-// 私网/保留地址判定（IPv4 + IPv6）。之前只拦截 127/10/192.168/172.16-31/::1，
-// 遗漏了 IPv6 ULA(fc00::/7)、链路本地(fe80::/10)、CGNAT(100.64/10)、169.254/16、
-// 组播与保留段；这些地址一旦被外发即产生无效请求与隐私面。
 function isPrivateOrReservedIp(ip) {
   var v = String(ip || '').trim().toLowerCase();
   if (!v || v === 'unknown' || !require('net').isIP(v)) return true;
@@ -5342,278 +5279,25 @@ function isPrivateOrReservedIp(ip) {
   ]);
   try { return isPrivateOrReservedIp.matches(v); } catch (_) { return true; }
 }
-// 2026-09-22：IP 属地中文化映射表 + 归一函数。
-// ipwho.is 带 lang=zh-CN 直接返回中文；但并行竞速下不支持语言参数的
-// ipapi.co 可能先返回英文（"Zhejiang Sheng Hangzhou"），这里兜底归一。
-var IP_GEO_ZH_MAP = {
-  // 省级行政区（含港澳台）
-  'beijing': '北京', 'shanghai': '上海', 'tianjin': '天津', 'chongqing': '重庆',
-  'hebei': '河北', 'shanxi': '山西', 'liaoning': '辽宁', 'jilin': '吉林',
-  'heilongjiang': '黑龙江', 'jiangsu': '江苏', 'zhejiang': '浙江', 'anhui': '安徽',
-  'fujian': '福建', 'jiangxi': '江西', 'shandong': '山东', 'henan': '河南',
-  'hubei': '湖北', 'hunan': '湖南', 'guangdong': '广东', 'hainan': '海南',
-  'sichuan': '四川', 'guizhou': '贵州', 'yunnan': '云南', 'shaanxi': '陕西',
-  'gansu': '甘肃', 'qinghai': '青海', 'taiwan': '台湾', 'inner mongolia': '内蒙古',
-  'guangxi': '广西', 'guangxi zhuang': '广西', 'tibet': '西藏', 'ningxia': '宁夏',
-  'ningxia hui': '宁夏', 'xinjiang': '新疆', 'xinjiang uygur': '新疆',
-  'hong kong': '香港', 'macau': '澳门', 'macao': '澳门',
-  // 常见城市
-  'hangzhou': '杭州', 'ningbo': '宁波', 'wenzhou': '温州', 'shenzhen': '深圳',
-  'guangzhou': '广州', 'dongguan': '东莞', 'foshan': '佛山', 'nanjing': '南京',
-  'suzhou': '苏州', 'wuxi': '无锡', 'chengdu': '成都', 'wuhan': '武汉',
-  'xian': '西安', 'changsha': '长沙', 'zhengzhou': '郑州', 'qingdao': '青岛',
-  'jinan': '济南', 'dalian': '大连', 'shenyang': '沈阳', 'harbin': '哈尔滨',
-  'changchun': '长春', 'shijiazhuang': '石家庄', 'taiyuan': '太原', 'hefei': '合肥',
-  'nanchang': '南昌', 'fuzhou': '福州', 'xiamen': '厦门', 'kunming': '昆明',
-  'nanning': '南宁', 'guiyang': '贵阳', 'lanzhou': '兰州', 'urumqi': '乌鲁木齐',
-  'lasa': '拉萨', 'haikou': '海口',
-  // 国家（海外 IP 属地展示用）
-  'china': '中国', 'united states': '美国', 'japan': '日本', 'south korea': '韩国',
-  'korea': '韩国', 'singapore': '新加坡', 'united kingdom': '英国', 'germany': '德国',
-  'france': '法国', 'canada': '加拿大', 'australia': '澳大利亚', 'russia': '俄罗斯',
-  'india': '印度', 'brazil': '巴西', 'thailand': '泰国', 'vietnam': '越南',
-  'malaysia': '马来西亚', 'indonesia': '印度尼西亚', 'philippines': '菲律宾',
-  'italy': '意大利', 'spain': '西班牙', 'netherlands': '荷兰', 'switzerland': '瑞士',
-  'united arab emirates': '阿联酋', 'new zealand': '新西兰'
-};
-function normalizeIpGeoName(name) {
-  var v = String(name || '').trim();
-  if (!v) return '';
-  if (/[\u4e00-\u9fff]/.test(v)) {
-    // 中文结果：去行政后缀，与主流平台展示一致（"浙江省"→"浙江"、"杭州市"→"杭州"）
-    return v.replace(/(省|市|自治区|壮族自治区|回族自治区|维吾尔自治区|特别行政区)$/, '');
-  }
-  var raw = v.toLowerCase();
-  var key = raw
-    .replace(/\s*(sheng|province|shi|city|municipality|zizhiqu|autonomous region|prefecture)$/, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return IP_GEO_ZH_MAP[key] || IP_GEO_ZH_MAP[raw] || v;
-}
-// ★ 2026-09-24 新增（属地错误/不准修复）：国内数据源的纯解析函数（模块级，
-//   便于单测直接构造 payload 验证，不需要真实网络）。
-//   背景：海外库（ipwho.is/ipapi.co）对中国移动/广电等运营商 IP 的省市精度差，
-//   甚至张冠李戴；国内库对国内 IP 显著更准。resolveIpLocationUncached 现在
-//   分两层：第一层竞速国内库（百度 opendata + pconline 太平洋），命中即用；
-//   只有国家级结果（常见于海外 IP）或全败时，再落第二层海外库竞速。
-//   注：qifu（百度千帆 district API）2026-09 实测已全量下线（ResourceNotFound），
-//   故国内第一层采用 opendata.baidu.com + pconline 双源。
-function parseBaiduGeoPayload(data) {
-  if (!data || typeof data !== 'object' || String(data.status) !== '0' || !Array.isArray(data.data) || !data.data[0]) return null;
-  var loc = String(data.data[0].location || '').trim();
-  if (!loc) return null;
-  // 「福建省福州市 电信」→ 去尾部运营商；「北京市北京市 移动」→ 去重
-  var main = loc.replace(/\s*(电信|联通|移动|铁通|教育网|长城宽带|鹏博士|其他)\s*$/, '').trim();
-  var m = main.match(/^([^省自治区市]{1,8}?(?:省|自治区)|北京市|上海市|天津市|重庆市)(.*)$/);
-  var rg = m ? normalizeIpGeoName(m[1]) : '';
-  var ct = m ? normalizeIpGeoName(m[2] || '') : '';
-  if (rg && ct && rg === ct) ct = '';
-  if (!rg && !ct) return null;
-  return { region: rg, city: ct, addr: loc.slice(0, 60) };
+
+// Login enrichment, manual checks and post snapshots share one canonical cache.
+const ipGeocoder = require('./ip-geolocation').createIpGeocoder({
+  fetch: (...args) => fetch(...args), isPrivateOrReservedIp
+});
+async function resolveIpLocation(ip, options) {
+  return ipGeocoder.resolve(ip, options);
 }
 
-function parsePconlineGeoText(text) {
-  var m = String(text || '').match(/\{[\s\S]*\}/);
-  if (!m) return null;
-  var d;
-  try { d = JSON.parse(m[0]); } catch (_) { return null; }
-  if (!d || typeof d !== 'object') return null;
-  var rg = normalizeIpGeoName(d.pro || '');
-  var ct = normalizeIpGeoName(d.city || '');
-  if (rg && ct && rg === ct) ct = ''; // 直辖市去重：「北京市/北京市」→「北京」
-  if (!rg && !ct) return null;
-  return { region: rg, city: ct, addr: String(d.addr || '').slice(0, 60) };
-}
-
-async function resolveIpLocationUncached(ip) {
-  if (isPrivateOrReservedIp(ip)) return null;
-  var diagnostics = [];
-  // ★ 2026-09-24：第一层 —— 国内数据源竞速（百度 opendata + pconline 太平洋）。
-  //   海外库对中国移动/广电等运营商 IP 省市精度差甚至张冠李戴；国内库对国内
-  //   IP 显著更准。2s/源、整体 2.5s 截止。解析逻辑抽在模块级纯函数
-  //   parseBaiduGeoPayload / parsePconlineGeoText，可离线单测。
-  const cnFetchers = [
-    async function() {
-      var controller = new AbortController();
-      var timeout = setTimeout(function() { controller.abort(); }, 2000);
-      var diag = { provider: 'baidu-opendata', resolved_at: new Date().toISOString() };
-      try {
-        var resp = await fetch('https://opendata.baidu.com/api.php?query=' + encodeURIComponent(ip) + '&co=&resource_id=6006&oe=utf8', { signal: controller.signal });
-        diag.http_status = resp.status;
-        if (!resp.ok) { diag.error_code = 'HTTP_' + resp.status; throw new Error('baidu opendata HTTP ' + resp.status); }
-        var data = await resp.json();
-        var parsed = parseBaiduGeoPayload(data);
-        if (!parsed) { diag.error_code = 'bad_or_empty_payload'; throw new Error('baidu opendata empty geo'); }
-        diag.response_schema_valid = true;
-        return { provider: 'baidu-opendata', country: '中国', region: parsed.region, city: parsed.city, isp: parsed.addr };
-      } catch (e) {
-        diag.error_code = diag.error_code || (e.name === 'AbortError' ? 'timeout' : String(e.message || '').slice(0, 200));
-        throw e;
-      } finally { clearTimeout(timeout); diagnostics.push(diag); }
-    },
-    async function() {
-      var controller = new AbortController();
-      var timeout = setTimeout(function() { controller.abort(); }, 2000);
-      var diag = { provider: 'pconline', resolved_at: new Date().toISOString() };
-      try {
-        var resp = await fetch('https://whois.pconline.com.cn/ipJson.jsp?ip=' + encodeURIComponent(ip) + '&json=true', { signal: controller.signal });
-        diag.http_status = resp.status;
-        if (!resp.ok) { diag.error_code = 'HTTP_' + resp.status; throw new Error('pconline HTTP ' + resp.status); }
-        // pconline 返回 GBK 编码文本（Node 22 内置 full-icu，TextDecoder('gbk')
-        // 可用；运行时万一不可用会抛 RangeError → 记录后落第二层海外库）
-        var buf = await resp.arrayBuffer();
-        var text;
-        try { text = new TextDecoder('gbk').decode(buf); }
-        catch (eDec) { diag.error_code = 'gbk_decoder_unavailable'; throw new Error('pconline gbk decode failed'); }
-        var parsed = parsePconlineGeoText(text);
-        if (!parsed) { diag.error_code = 'bad_or_empty_payload'; throw new Error('pconline empty geo'); }
-        diag.response_schema_valid = true;
-        return { provider: 'pconline', country: '中国', region: parsed.region, city: parsed.city, isp: parsed.addr };
-      } catch (e) {
-        diag.error_code = diag.error_code || (e.name === 'AbortError' ? 'timeout' : String(e.message || '').slice(0, 200));
-        throw e;
-      } finally { clearTimeout(timeout); diagnostics.push(diag); }
-    }
-  ];
-  const fetchers = [
-    async function() {
-      var controller = new AbortController();
-      var timeout = setTimeout(function() { controller.abort(); }, 2500);
-      var diag = { provider: 'ipwho.is', resolved_at: new Date().toISOString() };
-      try {
-        var resp = await fetch('https://ipwho.is/' + encodeURIComponent(ip) + '?lang=zh-CN', { signal: controller.signal });
-        diag.http_status = resp.status;
-        if (!resp.ok) { diag.error_code = 'HTTP_' + resp.status; throw new Error('ipwho.is HTTP ' + resp.status); }
-        var data = await resp.json();
-        diag.response_schema_valid = typeof data === 'object' && data !== null;
-        if (data.ip && normalizeClientIpValue(data.ip) !== normalizeClientIpValue(ip)) throw new Error('ipwho.is address mismatch');
-        if (!data.success) { diag.error_code = 'not_success'; throw new Error('ipwho.is not success'); }
-        return {
-          _diag: diag, provider: 'ipwho.is', country: data.country || '', region: data.region || '', city: data.city || '',
-          country_code: data.country_code || '',
-          latitude: data.latitude || null, longitude: data.longitude || null,
-          postal: data.postal || '',
-          asn: data.connection && data.connection.asn || '', isp: data.connection && data.connection.isp || '',
-          org: data.connection && data.connection.org || '', is_mobile: String(data.type || '').toLowerCase() === 'mobile',
-          is_proxy: !!(data.security && (data.security.proxy || data.security.vpn || data.security.tor)),
-          is_hosting: !!(data.security && data.security.hosting),
-          is_vpn: !!(data.security && data.security.vpn),
-          is_tor: !!(data.security && data.security.tor),
-          timezone: data.timezone && data.timezone.id || ''
-        };
-      } catch(e) {
-        diag.error_code = diag.error_code || (e.name === 'AbortError' ? 'timeout' : String(e.message || '').slice(0, 200));
-        diag.timeout = e.name === 'AbortError';
-        throw e;
-      } finally { clearTimeout(timeout); diagnostics.push(diag); }
-    },
-    async function() {
-      var controller = new AbortController();
-      var timeout = setTimeout(function() { controller.abort(); }, 2500);
-      try {
-        var resp = await fetch('https://ipapi.co/' + encodeURIComponent(ip) + '/json/', { signal: controller.signal });
-        if (!resp.ok) throw new Error('ipapi.co HTTP ' + resp.status);
-        var data = await resp.json();
-        if (data.ip && normalizeClientIpValue(data.ip) !== normalizeClientIpValue(ip)) throw new Error('ipapi.co address mismatch');
-        if (data.error) throw new Error('ipapi.co error: ' + (data.reason || data.error));
-        return { provider: 'ipapi.co', country: data.country_name || '', region: data.region || '', city: data.city || '', country_code: data.country_code || '', latitude: data.latitude || null, longitude: data.longitude || null, postal: data.postal || '', asn: data.asn || '', isp: data.org || '', org: data.org || '', timezone: data.timezone || '' };
-      } finally { clearTimeout(timeout); }
-    }
-  ];
-
-  // 并行竞速：所有数据源同时发起，取第一个成功者。
-  // 超时/全败返回 null，由调用方走 failed/pending + 异步重试路径，不阻塞发帖。
-  function raceWithDeadline(list, deadlineMs) {
-    var overallDeadline = new Promise(function(_, reject) {
-      var deadlineTimer = setTimeout(function() { reject(new Error('overall_deadline')); }, deadlineMs);
-      if (deadlineTimer && typeof deadlineTimer.unref === 'function') deadlineTimer.unref();
-    });
-    return Promise.race([Promise.any(list.map(function(f) { return f(); })), overallDeadline]);
-  }
-
-  // ★ 2026-09-24：两层竞速 —— 先国内库（国内 IP 更准），全败、或只拿到
-  //   国家级结果（region/city 全空，常见于海外 IP 命中国内库）时，
-  //   再落第二层海外库竞速（原 ipwho.is/ipapi.co 逻辑不变）。
-  var racedResult = null;
-  try { racedResult = await raceWithDeadline(cnFetchers, 2500); } catch (e) { racedResult = null; }
-  if (!racedResult || (!racedResult.region && !racedResult.city)) {
-    var overseasResult = null;
-    try { overseasResult = await raceWithDeadline(fetchers, 3000); } catch (e) { overseasResult = null; }
-    if (overseasResult) racedResult = overseasResult;
-  }
-  if (racedResult) {
-    // 2026-09-22：竞速下不支持语言参数的 ipapi.co 可能先返回（英文，如
-    // "Zhejiang Sheng"/"Hangzhou"），用映射表把常见中国省/市与国家名归一为
-    // 中文；映射未命中的保留原文（好过显示空白）。
-    racedResult.country = normalizeIpGeoName(racedResult.country);
-    racedResult.region = normalizeIpGeoName(racedResult.region);
-    racedResult.city = normalizeIpGeoName(racedResult.city);
-    var parts = [racedResult.country, racedResult.region, racedResult.city].filter(Boolean);
-    setIpProviderDiagnostics(ip, diagnostics);
-    return {
-      country: racedResult.country,
-      region: racedResult.region,
-      city: racedResult.city,
-      text: parts.length > 0 ? parts.join(' · ') : '未知',
-      provider: racedResult.provider || '',
-      resolved_at: new Date().toISOString(),
-      precision: 'approximate_city',
-      asn: racedResult.asn || '',
-      isp: racedResult.isp || '',
-      org: racedResult.org || '',
-      is_mobile: racedResult.is_mobile || false,
-      is_proxy: racedResult.is_proxy || false,
-      is_hosting: racedResult.is_hosting || false,
-      is_vpn: racedResult.is_vpn || false,
-      is_tor: racedResult.is_tor || false,
-      timezone: racedResult.timezone || '',
-      country_code: racedResult.country_code || '',
-      latitude: racedResult.latitude || null,
-      longitude: racedResult.longitude || null,
-      postal: racedResult.postal || ''
-    };
-  }
-  // ★ 审计修复：失败路径此前直写 `ipProviderDiagnostics[ip]`，绕过
-  //   setIpProviderDiagnostics 的 500 条上限（成功路径 5488 行走的是封顶函数），
-  //   10 分钟重置窗口内可被大量唯一失败 IP 撑大。统一走封顶入口。
-  setIpProviderDiagnostics(ip, diagnostics);
-  console.warn('[IP] 所有解析源均失败或超时，返回 null:', ip);
-  return null;
-}
-
-// 帖子 IP 属地专用解析（返回简化格式：省份+城市，用于帖子展示）
-var ipRegionCache = new Map();
-// ★ 2026-09-24：7 天 → 24 小时。数据源精度会随时间修正（国内库新接入），
-//   错误的属地结果最多固化一天，不再一周无法自愈。
-var IP_REGION_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
-var IP_REGION_CACHE_MAX = 2000;
-
+// Snapshot only the requesting post's IP; never reuse a user's later session.
 async function resolveIpRegion(ip) {
-  if (isPrivateOrReservedIp(ip)) return { province: '', city: '', text: '', status: 'failed' };
-  // 检查缓存
-  var cached = ipRegionCache.get(ip);
-  if (cached && cached.expiresAt > Date.now()) return cached.value;
-  if (cached) ipRegionCache.delete(ip);
-
-  try {
-    var location = await resolveIpLocation(ip);
-    if (location && (location.region || location.city || location.country)) {
-      var province = location.region || location.country || '';
-      var city = location.city || '';
-      var text = [province, city].filter(Boolean).join(' ');
-      var result = { province: province, city: city, text: text || '未知', status: 'resolved' };
-      // 写入缓存
-      if (ipRegionCache.size >= IP_REGION_CACHE_MAX) {
-        var oldestKey = ipRegionCache.keys().next().value;
-        if (oldestKey !== undefined) ipRegionCache.delete(oldestKey);
-      }
-      ipRegionCache.set(ip, { value: result, expiresAt: Date.now() + IP_REGION_CACHE_TTL_MS });
-      return result;
-    }
-  } catch (e) {
-    console.warn('[IP Region] 解析失败:', ip, e.message || e);
-  }
-  return { province: '', city: '', text: '', status: 'failed' };
+  const location = await resolveIpLocation(ip);
+  if (!location) return { province: '', city: '', text: '', status: 'failed' };
+  const province = location.region || location.country || '';
+  // Post rows have no per-city confidence field. Keep a city snapshot only
+  // when sources corroborate it; a lone guess remains visible as such in the
+  // private login geography, rather than becoming an unqualified post fact.
+  const city = location.city_confidence === 'corroborated' ? location.city || '' : '';
+  return { province, city, text: [province, city].filter(Boolean).join(' '), status: 'resolved' };
 }
 
 // IP retry jobs are persisted on the post row. The temporary client IP is encrypted at rest
@@ -18480,7 +18164,7 @@ app.post('/admin/user/resolve-ip', verifyToken, rateLimit(60000, 10), async (req
       });
     }
 
-    var ipLocation = await resolveIpLocation(ip);
+    var ipLocation = await resolveIpLocation(ip, { forceRefresh: true });
     if (!ipLocation) return res.status(404).json({ error: 'IP 地区解析失败（所有数据源均不可用）', code: 'resolve_failed' });
 
     var persisted = await checkedRpc(supabase, 'record_auth_ip_location', {

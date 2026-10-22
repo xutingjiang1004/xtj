@@ -23,7 +23,7 @@ async function fixturePage(browser,state={}){
    if(p==='/admin/data')body={posts:[adminPostPayload({id:uuid,user_name:'alice',media_type:'image',media_url:raw('first'),media_items:[{media_type:'image',media_url:raw('first')},{media_type:'image',media_url:raw('second')}],content:'审核多图帖子',created_at:now,views:1},storageOrigin)],likes:[{id:1,user_name:'bob',post_id:uuid,created_at:now}],comments:[{id:1,user_name:'bob',post_id:uuid,content:'评论',created_at:now}],bans:[],announcements:[]};
    if(p==='/admin/data' && state.commentDeleted)body.comments=[];
    if(p==='/admin/users')body={data:[{user_name:'alice',content:JSON.stringify({reg_time:now,auth_created_at:now,email:'alice@example.invalid'}),created_at:now},{user_name:'silent',content:JSON.stringify({reg_time:now,auth_created_at:now}),created_at:now}]};
-   if(p==='/admin/user-data')body={info:{email:'private-detail@example.invalid',last_ip:'192.0.2.10'},posts:[],likes:[],comments:[],login_events:[],behavior_events:[],security_alerts:[]};
+   if(p==='/admin/user-data')body=state.userData||{info:{email:'private-detail@example.invalid',last_ip:'192.0.2.10'},posts:[],likes:[],comments:[],login_events:[],behavior_events:[],security_alerts:[]};
    if(p==='/admin/reports' && state.pagedReports){
     const rows=state.pagedReports,filter=url.searchParams.get('status')||'all',filtered=rows.filter(r=>filter==='all'||r.status===filter),cursor=url.searchParams.get('before_id'),offset=cursor?filtered.findIndex(r=>r.id===cursor)+1:0,limit=Number(url.searchParams.get('limit'))||100,data=filtered.slice(offset,offset+limit),has_more=offset+data.length<filtered.length;
     body={data,total:rows.length,pending_count:rows.filter(r=>r.status==='pending').length,actioned_count:rows.filter(r=>r.status==='actioned').length,filtered_total:filtered.length,has_more,next_cursor:has_more?{before_id:data.at(-1).id,before_at:data.at(-1).created_at}:null};
@@ -64,6 +64,28 @@ async function fixturePage(browser,state={}){
 }
 async function login(page){await page.goto(origin+'/admin.html');await page.fill('#loginName','xxz');await page.fill('#loginPw','fixture-password');await page.click('#adminLoginForm button');await page.waitForSelector('#dashboard',{state:'visible'});}
 async function switchTab(page,tab){await page.evaluate(tab=>window.switchTab(tab),tab);await page.waitForFunction(tab=>{const id=tab==='errorlog'?'ErrorLog':tab[0].toUpperCase()+tab.slice(1),el=document.getElementById('tab'+id);return el && el.textContent.length>0 && !el.hasAttribute('aria-busy');},tab);await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));}
+test('administrator IP city evidence explains conflicts and never borrows a GPS or different login city',{timeout:30000},async()=>{
+ const browser=await chromium.launch(options);try{
+  const ip='8.8.8.8',location={source_ip:ip,country:'中国',region:'浙江',city:'',text:'中国 · 浙江',precision:'region',city_confidence:'conflict',providers:['baidu-opendata','pconline'],resolved_at:now};
+  const state={userData:{info:{last_ip:ip,last_ip_location:location,last_ip_location_ip:ip,last_location:{address:'GPS 地址不得作为 IP 城市'}},login_events:[]}};
+  const f=await fixturePage(browser,state),page=f.page;await login(page);
+  await page.evaluate(()=>window.showUserDetailModal('alice'));await page.waitForFunction(()=>document.getElementById('detailModal').textContent.includes('城市待核实'));
+  assert.match(await page.locator('#detailModal').innerText(),/baidu-opendata.*pconline/);
+  assert.doesNotMatch(await page.locator('#detailModal').innerText(),/GPS 地址不得作为 IP 城市/);
+  for(const width of [1440,375]){await page.setViewportSize({width,height:width===375?812:1000});await screenshot(page,'ip-city-conflict-'+width);}
+  state.userData.info.last_ip_location={...location,city:'杭州',text:'中国 · 浙江 · 杭州',precision:'approximate_city',city_confidence:'corroborated'};
+  await page.evaluate(()=>window.showUserDetailModal('alice'));await page.waitForFunction(()=>document.getElementById('detailModal').textContent.includes('城市多源一致'));
+  assert.doesNotMatch(await page.locator('#detailModal').innerText(),/城市待核实/);
+  for(const width of [1440,375]){await page.setViewportSize({width,height:width===375?812:1000});await screenshot(page,'ip-city-corroborated-'+width);}
+  state.userData.info.last_ip='1.1.1.1';
+  state.userData.login_events=[{user_name:'alice',content:JSON.stringify({ip,login_at:now,ip_location:{text:'旧登录城市',source_ip:ip}}),created_at:now}];
+  await page.evaluate(()=>window.showUserDetailModal('alice'));await page.waitForFunction(()=>document.getElementById('detailModal').textContent.includes('1.1.1.1'));
+  const summary=(await page.locator('#detailModal').innerText()).split('最近登录记录')[0];
+  assert.match(summary,/暂未解析/);assert.doesNotMatch(summary,/旧登录城市|杭州|GPS 地址不得作为 IP 城市/);
+  for(const width of [1440,375]){await page.setViewportSize({width,height:width===375?812:1000});await screenshot(page,'ip-city-unmatched-'+width);}
+  assert.deepEqual(f.errors,[]);
+ }finally{await browser.close();}
+});
 test('fixed admin dialogs trap and restore focus, Escape closes them, and expiry or logout clears every private surface',{timeout:45000},async()=>{
  const browser=await chromium.launch(options);try{
   const state={},f=await fixturePage(browser,state),page=f.page;await login(page);await switchTab(page,'users');

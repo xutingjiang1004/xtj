@@ -2773,22 +2773,7 @@
                         var deviceText = escapeHtml((lc.device_type || '?') + ' · ' + (lc.os || '?') + ' · ' + (lc.browser || '?'));
                         // ★ M-10：默认遮罩（点表头「显示」可展开完整值）
                         ipCell = escapeHtml(_showSensitiveInSession ? (lc.ip || '-') : maskIp(lc.ip));
-                        var _geoRaw = '';
-                        if (lc.ip_location && lc.ip_location.text) {
-                            _geoRaw = lc.ip_location.text;
-                        } else {
-                            // 回退：使用用户信息中存储的IP位置或精确定位
-                            try {
-                                var ui2 = u.info || {};
-                                if (ui2.last_ip_location && ui2.last_ip_location.text) {
-                                    _geoRaw = ui2.last_ip_location.text;
-                                } else if (ui2.last_location && ui2.last_location.address) {
-                                    _geoRaw = ui2.last_location.address;
-                                } else if (ui2.last_location && ui2.last_location.text) {
-                                    _geoRaw = ui2.last_location.text;
-                                }
-                            } catch(e) {}
-                        }
+                        var _geoRaw = adminFormatLocation(adminGetIpLocation(u.info, lc, lc.ip));
                         // ★ M-10：区域默认遮罩到市级，避免精确位置在后台被无差别暴露
                         regionCell = escapeHtml(_showSensitiveInSession ? _geoRaw : maskGeo(_geoRaw)) || '-';
                         latestLoginTime = lc.login_at || latestEvent.created_at || '';
@@ -3444,8 +3429,36 @@
         return '-';
     }
 
-    // 格式化地区显示：China · Guangdong · Guangzhou → 广东广州
+    // IP geography must describe the same address; GPS is a separate fact.
+    function adminGetIpLocation(info, event, ip) {
+        info = info || {}; event = event || {};
+        var currentIp = String(ip || info.last_ip || event.ip || '').trim();
+        if (!currentIp) return null;
+        var saved = info.last_ip_location;
+        var savedIp = info.last_ip_location_ip || (saved && saved.source_ip);
+        if (saved && savedIp === currentIp && (!saved.source_ip || saved.source_ip === currentIp)) return saved;
+        var historical = event.ip_location;
+        if (historical && event.ip === currentIp && (!historical.source_ip || historical.source_ip === currentIp)) return historical;
+        return null;
+    }
+
+    function adminIpLocationNote(location) {
+        if (!location || typeof location !== 'object') return '';
+        if (location.city_confidence === 'conflict') return '城市待核实：来源不一致';
+        if (location.city_confidence === 'single_source') return '城市为单一来源推测';
+        if (location.city_confidence === 'corroborated') return location.has_conflict ? '城市多数来源一致，仍有分歧' : '城市多源一致，仍为 IP 推测';
+        if (location.city_confidence === 'unavailable' && !['北京','上海','天津','重庆','香港','澳门'].includes(location.region)) return '未获得可靠城市';
+        return '';
+    }
+
     function adminFormatLocation(location) {
+        var text = adminFormatLocationText(location);
+        var note = adminIpLocationNote(location);
+        return text + (note ? '（' + note + '）' : '');
+    }
+
+    // 格式化地区显示：China · Guangdong · Guangzhou → 广东广州
+    function adminFormatLocationText(location) {
         if (!location) return '';
         var text = location.text || location;
         if (typeof text !== 'string') return '';
@@ -4101,7 +4114,7 @@
         var latestEvent = userEvents.length > 0 ? userEvents[0].info : {};
         var fallbackVisit = userInfo.last_visit || latestEvent.login_at || latestEvent.created_at || '';
         var fallbackIp = userInfo.last_ip || latestEvent.ip || '';
-        var fallbackLocation = userInfo.last_ip_location || latestEvent.ip_location || null;
+        var fallbackLocation = adminGetIpLocation(userInfo, latestEvent, fallbackIp);
         var fallbackDevice = userInfo.last_device || ((latestEvent.device_type || '') + ' · ' + (latestEvent.os || '') + ' · ' + (latestEvent.browser || '')) || '';
 
         // Basic info grid
@@ -4115,6 +4128,9 @@
             html += ' <button onclick="adminReResolveIp(\'' + safeJsStr(userName) + '\');return false;" style="font-size:10px;padding:2px 6px;background:var(--primary);color:#fff;border:none;border-radius:3px;cursor:pointer;margin-left:4px;">重新解析IP</button>';
         }
         html += '</div>';
+        if (fallbackLocation && Array.isArray(fallbackLocation.providers)) {
+            html += '<div><span style="font-size:11px;color:var(--text-muted);">IP 地区来源 / 查询时间</span><br>' + escapeHtml(fallbackLocation.providers.join('、')) + ' · ' + escapeHtml(formatTime(fallbackLocation.resolved_at)) + '</div>';
+        }
         html += '<div><span style="font-size:11px;color:var(--text-muted);">最近设备</span><br>' + escapeHtml(fallbackDevice.slice(0, 40)) + '</div>';
         html += '<div><span style="font-size:11px;color:var(--text-muted);">设备ID</span><br><span style="font-size:11px;font-family:monospace;">' + escapeHtml((userInfo.last_device_id || (userEvents[0] && userEvents[0].info.device_id) || '-').slice(0, 16)) + '...</span></div>';
         html += '<div><span style="font-size:11px;color:var(--text-muted);">浏览器指纹</span><br><span style="font-size:11px;font-family:monospace;">' + (latestFp.browser_fingerprint_hash ? escapeHtml(latestFp.browser_fingerprint_hash.slice(0, 16)) + '...' : '-') + '</span></div>';
@@ -6348,7 +6364,7 @@
             users.forEach(function(user) {
                 var info = {};
                 try { info = JSON.parse(user.content || '{}'); } catch (_) {}
-                var location = (info.last_ip_location && info.last_ip_location.text) || (info.last_location && (info.last_location.address || info.last_location.text)) || '未记录';
+                var location = adminFormatLocation(adminGetIpLocation(info, null, info.last_ip)) || '未记录';
                 var userName = String(user.user_name || '');
                 h += '<tr data-profile-user="' + escapeHtml(userName.toLowerCase()) + '"><td><b>' + escapeHtml(userName) + '</b></td><td>' + escapeHtml(formatTime(info.last_visit || info.last_login || user.created_at)) + '</td><td>' + escapeHtml(location) + '</td><td><button class="btn-sm" style="white-space:nowrap" onclick="loadUserProfile(\'' + safeJsStr(userName) + '\')">查看画像</button></td></tr>';
             });

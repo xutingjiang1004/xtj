@@ -55,7 +55,7 @@ const code = [
   extractFn('firstPublicIpFromForwardedChain'),
 ].join('\n');
 const factory = new Function('require','URL',code + '; return { normalizeClientIpValue: normalizeClientIpValue, isPrivateOrReservedIp: isPrivateOrReservedIp, firstPublicIpFromForwardedChain: firstPublicIpFromForwardedChain };');
-const { isPrivateOrReservedIp, firstPublicIpFromForwardedChain } = factory(name => name==='./trusted-proxies'?require('../render-api/trusted-proxies'):require(name),URL);
+const { isPrivateOrReservedIp, firstPublicIpFromForwardedChain } = factory(name => name==='./trusted-proxies'?require('../render-api/trusted-proxies'):name==='./ip-geolocation'?require('../render-api/ip-geolocation'):require(name),URL);
 
 test('行为：私网/保留地址判定', () => {
   assert.equal(isPrivateOrReservedIp('10.193.27.131'), true, 'Render 内网 10/8');
@@ -99,11 +99,9 @@ test('行为：X-Forwarded-For 从右往左取第一个公网地址', () => {
   assert.equal(firstPublicIpFromForwardedChain(null), '');
 });
 
-test('行为：私网 IP 的属地解析在源头被拦截（不外发数据源）', () => {
-  assert.ok(
-    src.includes('async function resolveIpLocationUncached(ip) {\n  if (isPrivateOrReservedIp(ip)) return null;'),
-    'resolveIpLocationUncached 必须前置拦截私网 IP'
-  );
+test('IP geocoder requires a public-address classifier', () => {
+  const {createIpGeocoder}=require('../render-api/ip-geolocation');
+  assert.throws(()=>createIpGeocoder(),/classification is required/);
 });
 
 test('合约：管理端重解析端点对私网 IP 返回明确结论', () => {
