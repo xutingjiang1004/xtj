@@ -8,6 +8,9 @@ const { SECURITY_HEADERS } = require('../render-api/security-headers');
 const { createPreviewWorker } = require('../cloudflare/pages-worker');
 const { createAdminVerifier } = require('../cloudflare/admin-verifier');
 const { createLoginBackend } = require('../cloudflare/login-backend');
+const { createIpLocationTools } = require('../js/ip-location');
+const ipCityData = require('../js/ip-city-data');
+const { createAdminLoginStore } = require('../render-api/admin-login-ip');
 const { REVOKED_TOKEN_MARKER } = require('../render-api/post-markers');
 const ROOT = path.resolve(__dirname, '..');
 const OUT = path.join(ROOT, 'output', 'cloudflare-pages');
@@ -44,7 +47,7 @@ function buildPages() {
   const configSource = fs.readFileSync(path.join(ROOT, 'js/config.js'), 'utf8');
   const publicUrl = configSource.match(/SUPABASE_URL\s*:\s*"(https:\/\/[^"\s]+)"/);
   if (!publicUrl) throw Error('Missing public Supabase URL in frontend configuration');
-  fs.writeFileSync(path.join(OUT, '_worker.js'), `import * as nodeCrypto from 'node:crypto';\nimport { Buffer } from 'node:buffer';\nexport default (${createPreviewWorker.toString()})(${JSON.stringify(SECURITY_HEADERS)}, ${JSON.stringify(publicUrl[1])}, (${createAdminVerifier.toString()})(${JSON.stringify(publicUrl[1])}, ${JSON.stringify(REVOKED_TOKEN_MARKER)}), (${createLoginBackend.toString()})(${JSON.stringify(publicUrl[1])}, ${JSON.stringify(REVOKED_TOKEN_MARKER)}, nodeCrypto, Buffer));\n`);
+  fs.writeFileSync(path.join(OUT, '_worker.js'), `import * as nodeCrypto from 'node:crypto';\nimport { Buffer } from 'node:buffer';\nconst ipTools = (${createIpLocationTools.toString()})(${JSON.stringify(ipCityData)});\nconst adminIpStore = (${createAdminLoginStore.toString()})(nodeCrypto, ipTools);\nexport default (${createPreviewWorker.toString()})(${JSON.stringify(SECURITY_HEADERS)}, ${JSON.stringify(publicUrl[1])}, (${createAdminVerifier.toString()})(${JSON.stringify(publicUrl[1])}, ${JSON.stringify(REVOKED_TOKEN_MARKER)}), (${createLoginBackend.toString()})(${JSON.stringify(publicUrl[1])}, ${JSON.stringify(REVOKED_TOKEN_MARKER)}, nodeCrypto, Buffer, {}, ipTools, adminIpStore));\n`);
   // Pages canonicalizes admin.html to /admin; exclude both static entry forms
   // explicitly because Pages' wildcard routing can also match the bare prefix.
   fs.writeFileSync(path.join(OUT, '_routes.json'), JSON.stringify({ version: 1, include: ['/api', '/api/*', '/admin/*', '/health', '/health/*', '/share', '/share/*'], exclude: ['/admin', '/admin.html'] }, null, 2) + '\n');

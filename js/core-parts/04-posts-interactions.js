@@ -2054,6 +2054,10 @@
                     created_at: normalized.created_at || '',
                     views: Number(normalized.views || 0)
                 };
+                ['ip_region_status','ip_region_text','ip_province','ip_city','ip_lookup_started_at','ip_resolved_at',
+                    'location_name','location_province','location_city','location_district','location_level','_contentMeta'].forEach(function(key) {
+                    if (Object.prototype.hasOwnProperty.call(normalized,key)) postInfoCache[normalized.id][key] = normalized[key];
+                });
             }
             let feedVisiblePostsCache = null; // 缓存过滤后的帖子
             let feedMapsCache = null; // 缓存 buildPostMaps 结果
@@ -2545,6 +2549,7 @@
             function postNeedsIpRefresh(post) {
                 if (!post || !post.id) return false;
                 var status = String(post.ip_region_status || "").trim();
+                if (status === 'resolved' || status === 'failed') return false;
                 var hasLookupStarted = !!String(post.ip_lookup_started_at || "").trim();
                 var hasRegionText = !!String(post.ip_region_text || "").trim();
                 return status === 'pending' || (hasLookupStarted && !hasRegionText);
@@ -2619,7 +2624,7 @@
                         var normalized = freshPost ? normalizePost(freshPost) : null;
                         var ipText = normalized ? String(normalized.ip_region_text || "").trim() : "";
                         var ipStatus = normalized ? String(normalized.ip_region_status || "").trim() : "";
-                        var hasFinalIpDisplay = !!ipText || ipStatus === 'resolved' || ipStatus === 'failed';
+                        var hasFinalIpDisplay = ipStatus === 'resolved' || ipStatus === 'failed' || (!ipStatus && !!ipText);
                         if (normalized && hasFinalIpDisplay) {
                             refreshPublishedPostCard(normalized);
                             cleanup();
@@ -3094,30 +3099,7 @@
                 if (locationName) {
                     parts.push('<div class="post-location-display"><span class="post-location-icon">📍</span> ' + escapeHtml(locationName) + '</div>');
                 }
-                var ipText = String(normalized.ip_region_text || "").trim();
-                var ipStatus = String(normalized.ip_region_status || "").trim();
-                var ipProvince = String(normalized.ip_province || "").trim();
-                var ipCity = String(normalized.ip_city || "").trim();
-                if (!ipText && normalized._contentMeta) {
-                    var ipMeta = normalized._contentMeta || {};
-                    if (!ipText) ipText = String(ipMeta.ip_region_text || "").trim();
-                    if (!ipStatus) ipStatus = String(ipMeta.ip_region_status || "").trim();
-                    if (!ipProvince) ipProvince = String(ipMeta.ip_province || "").trim();
-                    if (!ipCity) ipCity = String(ipMeta.ip_city || "").trim();
-                }
-                var hasLookupStarted = !!normalized.ip_lookup_started_at || ipStatus === 'resolved' || ipStatus === 'pending' || ipStatus === 'failed';
-                if (!ipText && (ipProvince || ipCity)) {
-                    ipText = [ipProvince, ipCity].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
-                }
-                if (hasLookupStarted || ipText) {
-                    if (!ipText && ipStatus === 'pending') ipText = '解析中';
-                    if (!ipText && (ipStatus === 'failed' || ipStatus === 'resolved')) ipText = '未知';
-                    if (!ipText) ipText = '未知';
-                }
-                // Existing posts, cached metadata and new resolver results share this display rule.
-                if (ipProvince) ipText = ipProvince;
-                var provinceMatch = ipText.match(/^(北京市?|天津市?|上海市?|重庆市?|河北省?|山西省?|辽宁省?|吉林省?|黑龙江省?|江苏省?|浙江省?|安徽省?|福建省?|江西省?|山东省?|河南省?|湖北省?|湖南省?|广东省?|海南省?|四川省?|贵州省?|云南省?|陕西省?|甘肃省?|青海省?|台湾省?|内蒙古(?:自治区)?|广西(?:壮族自治区)?|西藏(?:自治区)?|宁夏(?:回族自治区)?|新疆(?:维吾尔自治区)?|香港(?:特别行政区)?|澳门(?:特别行政区)?)/);
-                if (provinceMatch) ipText = provinceMatch[1].replace(/省$|市$|壮族自治区$|回族自治区$|维吾尔自治区$|自治区$|特别行政区$/, '');
+                var ipText = window.XtjIpLocation.postIpView(normalized).text;
                 if (ipText) {
                     parts.push('<div class="post-ip-region">IP属地：' + escapeHtml(ipText) + '</div>');
                 }

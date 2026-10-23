@@ -7,12 +7,13 @@ async function pageFor(t,html,viewport={width:1024,height:768}) {
  const page=await browser.newPage({viewport});await page.route('https://ui.test/**',r=>r.fulfill({contentType:'text/html',body:html}));await page.goto('https://ui.test/');return page;
 }
 function slice(file,from,to){const s=read(file),a=s.indexOf(from);assert.ok(a>=0);return s.slice(a,s.indexOf(to,a));}
-test('profile endpoint reads only the authenticated account creation fact and reports failures',async()=>{
- const {installAccountProfile}=require('../render-api/account-events');let fail=false,actor='',selected='',order;
- const supabase={from(){return {select(v){selected=v;return this;},eq(k,v){if(k==='user_name')actor=v;return this;},order(k,v){order=v;return this;},limit(){return Promise.resolve(fail?{error:{}}:{data:[{created_at:'2024-01-02T03:04:05Z'}]});}};}};
+test('profile endpoint reads only authenticated account facts and reports failures from either read',async()=>{
+ const {installAccountProfile}=require('../render-api/account-events');let fail='',calls=[];
+ const supabase={from(){const call={filters:{}};calls.push(call);return {select(v){call.selected=v;return this;},eq(k,v){call.filters[k]=v;return this;},order(k,v){call.order=v;return this;},limit(){return Promise.resolve(fail===call.filters.media_type?{error:{}}:{data:call.filters.media_type==='__auth__'?[{created_at:'2024-01-02T03:04:05Z'}]:[{content:JSON.stringify({last_ip:'8.8.8.8'})}]});}};}};
  const app=express();installAccountProfile(app,{supabase,authenticateUser(req,res,next){req.userName='A';next();},rateLimit:()=>((req,res,next)=>next())});
- const response=await request(app).get('/api/user/profile?user_name=B');assert.equal(response.body.registered_at,'2024-01-02T03:04:05Z');assert.equal(actor,'A');assert.equal(selected,'created_at');assert.equal(order.ascending,true);assert.equal(response.headers['cache-control'],'no-store');
- fail=true;assert.equal((await request(app).get('/api/user/profile')).status,503);
+ const response=await request(app).get('/api/user/profile?user_name=B');assert.equal(response.body.registered_at,'2024-01-02T03:04:05Z');assert.equal(response.body.info.last_ip,'8.8.8.8');assert.equal(response.body.user_name,'A');assert.equal(response.headers['cache-control'],'no-store');
+ assert.equal(calls.length,2);assert.ok(calls.every(call=>call.filters.user_name==='A'));assert.deepEqual(calls.map(call=>[call.selected,call.filters.media_type,call.order.ascending]),[['created_at','__auth__',true],['content','__user_info__',false]]);
+ for(const marker of ['__auth__','__user_info__']){fail=marker;assert.equal((await request(app).get('/api/user/profile')).status,503);}
 });
 test('personal detail renders server registration time and fences an A to B to A response',async t=>{
  const p=await pageFor(t,'<div id="profileDetailRegTime"></div><div id="profileDetailName"></div><div id="profileDetailId"></div>');

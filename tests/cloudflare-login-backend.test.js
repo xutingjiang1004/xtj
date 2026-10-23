@@ -5,6 +5,8 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const { createLoginBackend } = require('../cloudflare/login-backend');
+const {createIpLocationTools} = require('../js/ip-location');
+const {createAdminLoginStore} = require('../render-api/admin-login-ip');
 const { createPreviewWorker } = require('../cloudflare/pages-worker');
 const { createAdminVerifier } = require('../cloudflare/admin-verifier');
 const { REVOKED_TOKEN_MARKER } = require('../render-api/post-markers');
@@ -32,6 +34,7 @@ function fixture(options = {}) {
     if (options.fail?.(url, init, body)) return new Response('private provider error', { status: 503 });
     if (url.pathname.endsWith('/rpc/get_user_restrictions')) return response(options.restrictions || { is_banned: false, is_muted: false, is_blacklisted: false });
     if (url.pathname.endsWith('/rpc/record_user_auth_event')) return response({ event_id: 'event-1', login_at: new Date().toISOString(), registered_at: '2020-01-01T00:00:00Z' });
+    if (url.pathname.endsWith('/rpc/record_auth_ip_location')) return response({ok:true,event_updated:true,current_updated:true});
     if (url.pathname.endsWith('/rpc/merge_user_info')) return response({ ok: true });
     if (url.pathname.endsWith('/rpc/rotate_user_refresh_token')) {
       const old = records.find(r => r.media_type === '__refresh_token__' && r.media_url === body.p_old_jti);
@@ -43,14 +46,15 @@ function fixture(options = {}) {
     assert.equal(url.pathname, '/rest/v1/posts');
     const matches = row => [...url.searchParams].every(([key, value]) => {
       if (['select', 'order', 'limit'].includes(key)) return true;
-      if (value.startsWith('eq.')) return String(row[key]) === value.slice(3);
+      if (value.startsWith('eq.')) return row[key] != null && String(row[key]) === value.slice(3);
+      if (value === 'is.null') return row[key] == null;
       if (value.startsWith('gt.')) return String(row[key]) > value.slice(3);
       assert.fail('unexpected filter ' + key);
     });
     if (init.method === 'POST') {
       if (body.media_type === '__rate_limit__' && records.some(r => r.media_type === body.media_type && r.media_url === body.media_url)) return new Response('{}', { status: 409 });
-      const row = { id: crypto.randomUUID(), ...body }; records.push(row);
-      return response([row]);
+      const inserted = (Array.isArray(body) ? body : [body]).map(value=>({id:crypto.randomUUID(),...value}));
+      records.push(...inserted);return response(inserted);
     }
     let found = records.filter(matches);
     if ((url.searchParams.get('order') || '').startsWith('created_at.')) found.sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)) * (url.searchParams.get('order').endsWith('desc') ? -1 : 1));
@@ -65,10 +69,41 @@ function fixture(options = {}) {
   const worker = createPreviewWorker({}, DB, null, backend);
   async function request(path, body, headers = {}, env = ENV) {
     const method = body === undefined ? 'GET' : 'POST';
-    return worker.fetch(new Request(ORIGIN + path, { method, headers: { ...(body === undefined ? {} : { 'Content-Type': 'application/json', Origin: ORIGIN }), ...headers }, body: body === undefined ? undefined : JSON.stringify(body) }), env);
+    const req=new Request(ORIGIN + path, { method, headers: { ...(body === undefined ? {} : { 'Content-Type': 'application/json', Origin: ORIGIN }), ...headers }, body: body === undefined ? undefined : JSON.stringify(body) });
+    if(options.cf)Object.defineProperty(req,'cf',{value:options.cf});
+    return worker.fetch(req, env);
   }
   return { records, calls, backend, worker, request, fetcher };
 }
+
+test('edge login stores platform city evidence for its canonical IP and never uses body or forged city headers',async()=>{
+ const f=fixture({cf:{country:'CN',region:'Zhejiang',regionCode:'ZJ',city:'Huzhou',colo:'HKG'}});
+ const res=await f.request('/api/user/login',{user_name:'alice',password:PASSWORD,ip:'1.1.1.1',city:'ForgedCity'}, {'cf-connecting-ip':'::ffff:808:808','cf-ipcity':'ForgedCity'});
+ assert.equal(res.status,200);
+ const facts=f.calls.find(call=>call.url.pathname.endsWith('/rpc/record_user_auth_event')).body.p_event;
+ const saved=f.calls.find(call=>call.url.pathname.endsWith('/rpc/record_auth_ip_location')).body;
+ assert.equal(facts.ip,'8.8.8.8');assert.equal(facts.ip_version,4);assert.equal(saved.p_ip,'8.8.8.8');assert.equal(saved.p_location.city,'湖州');assert.equal(saved.p_location.city_confidence,'single_source');assert.deepEqual(saved.p_location.providers,['cloudflare']);
+});
+test('edge Pseudo IPv4 login records original IPv6, while anonymous cross-zone relays stay unknown',async()=>{
+ for(const relay of [false,true]){
+  const f=fixture({cf:{country:'CN',region:'Anhui',regionCode:'AH',city:'Suzhou'}});
+  const res=await f.request('/api/user/login',{user_name:'alice',password:PASSWORD},{'cf-connecting-ip':relay?'2a06:98c0:3600::103':'241.1.1.1','cf-connecting-ipv6':'2001:4860:4860::8888'});
+  assert.equal(res.status,200);
+  const facts=f.calls.find(call=>call.url.pathname.endsWith('/rpc/record_user_auth_event')).body.p_event;
+  const geo=f.calls.find(call=>call.url.pathname.endsWith('/rpc/record_auth_ip_location'));
+  assert.equal(facts.ip,relay?'':'2001:4860:4860::8888');if(relay)assert.equal(geo,undefined);else assert.equal(geo.body.p_location.city,'宿州');
+ }
+});
+test('edge administrator profile uses shared CAS, overwrites SQL NULL, and clears stale city on unavailable metadata',async()=>{
+ const cf={country:'CN',region:'Zhejiang',regionCode:'ZJ',city:'Huzhou'},f=fixture({cf});
+ f.records.push({id:'admin-info',user_name:'xxz',media_type:'__user_info__',content:null});
+ const first=await f.request('/admin/login',{username:'xxz',password:ENV.ADMIN_PASSWORD},{'cf-connecting-ip':'8.8.8.8'});assert.equal(first.status,200);
+ const read=()=>JSON.parse(f.records.find(row=>row.id==='admin-info').content);
+ assert.equal(read().last_ip,'8.8.8.8');assert.equal(read().last_ip_location.city,'湖州');assert.equal(read().last_ip_location_ip,'8.8.8.8');assert.ok(read().last_auth_event_id);
+ cf.country=null;
+ const second=await f.request('/admin/login',{username:'xxz',password:ENV.ADMIN_PASSWORD},{'cf-connecting-ip':'1.1.1.1'});assert.equal(second.status,200);
+ assert.equal(read().last_ip,'1.1.1.1');assert.equal(read().last_ip_location,null);assert.equal(read().last_ip_location_ip,null);
+});
 function cookieHeader(response) {
   return response.headers.getSetCookie().map(value => value.split(';')[0]).join('; ');
 }
@@ -238,7 +273,9 @@ test('workerd executes native scrypt, login, cookie headers and atomic refresh a
   const f = fixture();
   const script = `import * as nativeCrypto from 'node:crypto';
     import { Buffer } from 'node:buffer';
-    const backend = (${createLoginBackend.toString()})(${JSON.stringify(DB)}, ${JSON.stringify(REVOKED_TOKEN_MARKER)}, nativeCrypto, Buffer);
+    const ipTools = (${createIpLocationTools.toString()})(${JSON.stringify(require('../js/ip-city-data'))});
+    const adminIpStore = (${createAdminLoginStore.toString()})(nativeCrypto, ipTools);
+    const backend = (${createLoginBackend.toString()})(${JSON.stringify(DB)}, ${JSON.stringify(REVOKED_TOKEN_MARKER)}, nativeCrypto, Buffer, {}, ipTools, adminIpStore);
     const verifyAdmin = (${createAdminVerifier.toString()})(${JSON.stringify(DB)}, ${JSON.stringify(REVOKED_TOKEN_MARKER)});
     export default (${createPreviewWorker.toString()})({}, ${JSON.stringify(DB)}, verifyAdmin, backend);`;
   const mf = new Miniflare({ modules: true, script, compatibilityDate: '2026-07-30', compatibilityFlags: ['nodejs_compat'], bindings: ENV,

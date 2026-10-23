@@ -210,7 +210,7 @@ test('oversized response streams fail and retained diagnostic keys are bounded',
 });
 
 test('trusted proxy extraction skips Cloudflare hops but ignores forged provider headers on a direct connection', () => {
-  const scope = new Function('require','isPrivateOrReservedIp',between(server,'function normalizeClientIpValue(', '// AI site tools')+';return {getClientIp};')(name => name.startsWith('./') ? require('../render-api/'+name.slice(2)) : require(name),isPrivate);
+  const scope = new Function('require','isPrivateOrReservedIp',between(server,'function normalizeClientIpValue(', '// AI site tools')+';return {getClientIp};')(name => name === '../js/ip-location' ? require('../js/ip-location') : name.startsWith('./') ? require('../render-api/'+name.slice(2)) : require(name),isPrivate);
   const proxied = {ip:'173.245.48.1',socket:{remoteAddress:'173.245.48.1'},headers:{'x-forwarded-for':'6.6.6.6, 8.8.8.8, 173.245.48.1','cf-connecting-ip':'1.1.1.1'}};
   assert.equal(scope.getClientIp(proxied), ip); assert.equal(proxied._clientIpSource, 'xff_chain_public');
   assert.equal(scope.getClientIp({ip:'173.245.48.1',socket:{remoteAddress:'173.245.48.1'},headers:{}}), 'unknown');
@@ -223,7 +223,7 @@ test('trusted proxy extraction skips Cloudflare hops but ignores forged provider
 test('real Express proxy parsing cannot skip malformed or reserved hops to accept a forged IP', async () => {
   const express = require('express'), request = require('supertest');
   const proxies = require('../render-api/trusted-proxies');
-  const {getClientIp} = new Function('require','isPrivateOrReservedIp',between(server,'function normalizeClientIpValue(', '// AI site tools')+';return {getClientIp};')(name => name.startsWith('./') ? require('../render-api/'+name.slice(2)) : require(name),isPrivate);
+  const {getClientIp} = new Function('require','isPrivateOrReservedIp',between(server,'function normalizeClientIpValue(', '// AI site tools')+';return {getClientIp};')(name => name === '../js/ip-location' ? require('../js/ip-location') : name.startsWith('./') ? require('../render-api/'+name.slice(2)) : require(name),isPrivate);
   const app = express();
   app.set('trust proxy',address=>proxies.isCloudflareProxy(address) || proxies.isTrustedInternalProxy(address));
   app.get('/',(req,res)=>res.json({ip:getClientIp(req)}));
@@ -294,12 +294,14 @@ test('idempotent image and video retries from a different IP cannot requeue hist
 });
 
 test('administrator IP geography never falls back to GPS or a different event address and explains uncertainty', () => {
-  const scope = vm.createContext({URL});
+  const scope = vm.createContext({URL,window:{XtjIpLocation:require('../js/ip-location')}});
   vm.runInContext(between(admin,'function adminGetIpLocation(', '// 登录设备详情展示'),scope);
   const location = {source_ip:ip,text:'中国 · 浙江',region:'浙江',city_confidence:'conflict'};
   assert.equal(scope.adminGetIpLocation({last_ip:ip,last_location:{address:'GPS 杭州市'}},{ip:'1.1.1.1',ip_location:{text:'旧地区'}},ip), null);
   assert.equal(scope.adminGetIpLocation({last_ip:ip,last_ip_location_ip:'1.1.1.1',last_ip_location:{text:'旧地区'}},null,ip), null);
   assert.equal(scope.adminGetIpLocation({last_ip:ip,last_ip_location:location},null,ip),location);
+  assert.equal(scope.adminGetIpLocation({last_ip:ip,last_ip_location:{...location,source:'gps'},last_ip_location_ip:ip},null,ip),null);
+  assert.equal(scope.adminGetIpLocation({}, {ip,ip_location:{...location,precision:'precise'}},ip),null);
   assert.match(scope.adminFormatLocation(location),/城市待核实/);
   assert.doesNotMatch(scope.adminFormatLocation(location),/杭州/);
   assert.equal(scope.adminGetIpLocation({last_ip:'::ffff:808:808',last_ip_location:location},null),location);
@@ -310,12 +312,12 @@ test('administrator IP geography never falls back to GPS or a different event ad
   assert.equal(scope.adminFormatLocation({text:'China · Anhui · Suzhou'}),'安徽宿州');
   assert.equal(scope.adminFormatLocation({text:'China · Jiangxi · Fuzhou'}),'江西抚州');
   assert.equal(scope.adminFormatLocation({text:'China · Jilin · Jilin'}),'吉林省吉林市');
-  assert.equal(scope.adminFormatLocation({text:'China · constructor · Suzhou'}),'constructorSuzhou');
+  assert.equal(scope.adminFormatLocation({text:'China · constructor · Suzhou'}),'constructor');
 });
 
 test('public post IP labels preserve the existing province-only choice even when a city is available', () => {
   const posts=fs.readFileSync('js/core-parts/04-posts-interactions.js','utf8');
-  const scope=vm.createContext({normalizePostRecord:value=>value,escapeHtml:String});
+  const scope=vm.createContext({normalizePostRecord:value=>value,escapeHtml:String,window:{XtjIpLocation:require('../js/ip-location')}});
   vm.runInContext(between(posts,'function buildPostLocationHtml(normalized) {','// 供 core-parts/06'),scope);
   const html=scope.buildPostLocationHtml({ip_province:'浙江',ip_city:'杭州',ip_region_text:'浙江 杭州',ip_region_status:'resolved'});
   assert.match(html,/IP属地：浙江/);assert.doesNotMatch(html,/杭州/);

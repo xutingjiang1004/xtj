@@ -26,7 +26,9 @@ const ranges=[
   "2c0f:f248::/32"
 ];
 const matches=require('proxy-addr').compile(ranges);
-function isCloudflareProxy(address){try{return matches(String(address||''));}catch(_){return false;}}
+const anonymousRelay=require('proxy-addr').compile(['2a06:98c0:3600::103/128']);
+function isAnonymousCloudflareRelay(address){try{return anonymousRelay(String(address||''));}catch(_){return false;}}
+function isCloudflareProxy(address){try{return !isAnonymousCloudflareRelay(address) && matches(String(address||''));}catch(_){return false;}}
 // Non-geolocatable does not imply trusted. Documentation, benchmarking and
 // multicast addresses must stop the chain instead of exposing a forged left hop.
 const internalMatches=require('proxy-addr').compile([
@@ -34,4 +36,4 @@ const internalMatches=require('proxy-addr').compile([
   '127.0.0.0/8','169.254.0.0/16','::1/128','fc00::/7','fe80::/10'
 ]);
 function isTrustedInternalProxy(address){try{return internalMatches(String(address||''));}catch(_){return false;}}
-module.exports={isCloudflareProxy,isTrustedInternalProxy,ranges};
+module.exports={isCloudflareProxy,isTrustedInternalProxy,isAnonymousCloudflareRelay,ranges};

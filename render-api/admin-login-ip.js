@@ -1,6 +1,6 @@
 'use strict';
 
-const {createHash, randomUUID} = require('node:crypto');
+function createAdminLoginStore({createHash, randomUUID}, ipTools) {
 const LOGIN = '__login_event__', INFO = '__user_info__';
 const parse = text => { try { const value = JSON.parse(text); return value && typeof value === 'object' && !Array.isArray(value) ? value : {}; } catch (_) { return {}; } };
 const time = value => Number.isFinite(Date.parse(value)) ? Date.parse(value) : 0;
@@ -39,7 +39,7 @@ async function updateInfo(db, userName, makePatch) {
 
 async function refreshAdminLoginLocation({db, userName, eventId, ip, location, initial = false}) {
   if (!location || typeof location !== 'object' || !location.source_ip) throw Error('invalid_ip_location');
-  const {normalizeIpAddress} = require('./ip-geolocation');
+  const {normalizeIpAddress} = ipTools;
   if (!normalizeIpAddress(ip) || normalizeIpAddress(ip) !== normalizeIpAddress(location.source_ip)) throw Error('event_mismatch');
   let body, eventUpdated = false;
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -87,4 +87,6 @@ async function recordAdminLogin({db, userName, event, resolve, loginAt = new Dat
   return {event_id:eventId, login_at:loginAt};
 }
 
-module.exports = {recordAdminLogin, refreshAdminLoginLocation, isAdminLoginEvent};
+return {recordAdminLogin, refreshAdminLoginLocation, isAdminLoginEvent};
+}
+module.exports = {createAdminLoginStore, ...createAdminLoginStore(require('node:crypto'),require('../js/ip-location'))};

@@ -142,166 +142,42 @@
             window.currentUserInfoSnapshot = window.currentUserInfoSnapshot || null;
 
             function normalizeUserInfoSnapshot(info) {
-                if (!info || typeof info !== 'object') return null;
-                var lastIpLocation = info.last_ip_location || null;
-                if (lastIpLocation && typeof lastIpLocation === 'object' && !Array.isArray(lastIpLocation)) {
-                    lastIpLocation = {
-                        province: String(lastIpLocation.province || lastIpLocation.region || '').trim(),
-                        city: String(lastIpLocation.city || '').trim(),
-                        text: String(lastIpLocation.text || lastIpLocation.label || '').trim()
-                    };
-                    if (!lastIpLocation.text) {
-                        lastIpLocation.text = [lastIpLocation.province, lastIpLocation.city].filter(Boolean).join(' ').trim();
-                    }
-                } else if (typeof lastIpLocation === 'string') {
-                    lastIpLocation = lastIpLocation.trim();
-                } else {
-                    lastIpLocation = null;
-                }
-                return {
-                    reg_time: info.reg_time || null,
-                    last_login: info.last_login || null,
-                    last_ip: info.last_ip || null,
-                    last_ip_location: lastIpLocation,
-                    email: info.email || ''
-                };
+                return info && typeof info === 'object' ? window.XtjIpLocation.userInfoSnapshot(info) : null;
             }
 
+            var userInfoSnapshotInflight = null;
             async function loadCurrentUserInfoSnapshot(userName) {
-                var name = String(userName || currentUser || "").trim();
-                if (!name || !sb) return null;
-                try {
-                    var userInfoRes = await sb.from("posts")
-                        .select("content")
-                        .eq("user_name", name)
-                        .eq("media_type", "__user_info__")
-                        .order("created_at", { ascending: false })
-                        .limit(1);
-                    if (userInfoRes.data && userInfoRes.data.length > 0) {
-                        try {
-                            var info = JSON.parse(userInfoRes.data[0].content || '{}');
-                            var snapshot = normalizeUserInfoSnapshot(info);
-                            if (snapshot) {
-                                window.currentUserInfoSnapshot = snapshot;
-                                return snapshot;
-                            }
-                        } catch (e) {}
+                var owner = String(userName || currentUser || '').trim();
+                if (!owner || owner !== currentUser) return null;
+                var epoch = _authStateEpoch;
+                if (userInfoSnapshotInflight && userInfoSnapshotInflight.owner === owner && userInfoSnapshotInflight.epoch === epoch) return userInfoSnapshotInflight.promise;
+                var entry = {owner:owner,epoch:epoch};
+                entry.promise = (async function() {
+                    try {
+                        var response = await window.xtjProtectedFetch('/api/user/profile', {authOwner:owner,authEpoch:epoch});
+                        var body = response && await response.json();
+                        if (owner !== currentUser || epoch !== _authStateEpoch) return null;
+                        if (!response || !response.ok || !body || body.ok !== true || body.user_name !== owner) throw new Error('profile_unavailable');
+                        var snapshot = normalizeUserInfoSnapshot(Object.assign({},body.info || {},{reg_time:body.registered_at || null}));
+                        window.currentUserInfoSnapshot = snapshot;
+                        return snapshot;
+                    } catch (_) {
+                        if (owner === currentUser && epoch === _authStateEpoch) window.currentUserInfoSnapshot = null;
+                        return null;
+                    } finally {
+                        if (userInfoSnapshotInflight === entry) userInfoSnapshotInflight = null;
                     }
-                } catch (e) {}
-                return null;
+                })();
+                userInfoSnapshotInflight = entry;
+                return entry.promise;
             }
+            window.loadCurrentUserInfoSnapshot = loadCurrentUserInfoSnapshot;
 
-            async function saveUserInfo(name, isNewUser, email) {
-                // ★ 隐私/防伪守卫：仅允许写入"当前登录用户"或"登录流程中的规范用户"的
-                //   __user_info__ 行，禁止经控制台伪造他人注册信息（RLS 侧亦应强制归属）。
-                var actingUser = String(window.currentUser || '').trim() || String(window._xtjCanonicalUser || '').trim();
-                if (!name || !actingUser || String(name).trim() !== actingUser) {
-                    console.warn('[saveUserInfo] blocked write for non-self or unauthenticated user:', name);
-                    return;
-                }
-                try {
-                    var regTime = null;
-
-                    // 优先从已有的 __user_info__ 记录读取 reg_time（已正确设置的注册时间最可靠）
-                    try {
-                        var existing = await sb.from("posts")
-                            .select("content, id")
-                            .eq("user_name", name)
-                            .eq("media_type", "__user_info__")
-                            .order("created_at", { ascending: false })
-                            .limit(1);
-                        if (existing.data && existing.data.length > 0) {
-                            try { var parsed = JSON.parse(existing.data[0].content); if (parsed.reg_time) regTime = parsed.reg_time; } catch(e) {}
-                        }
-                    } catch(e) {}
-
-                    // 如果 __user_info__ 没有 reg_time，从 __auth__ 记录获取（仅作为后备）
-                    if (!regTime) {
-                        try {
-                            var authRes = await sb.from("posts")
-                                .select("created_at")
-                                .eq("user_name", name)
-                                .eq("media_type", AUTH_MARKER)
-                                .order("created_at", { ascending: true })
-                                .limit(1);
-                            if (authRes.data && authRes.data.length > 0 && authRes.data[0].created_at) {
-                                regTime = authRes.data[0].created_at;
-                            }
-                        } catch(e) {}
-                    }
-
-                    // 仍然没有且是新用户，使用当前时间
-                    if (!regTime && isNewUser) {
-                        regTime = new Date().toISOString();
-                    }
-
-                    var userInfo = { reg_time: regTime, last_login: new Date().toISOString() };
-                    if (email) userInfo.email = email;
-                    var contentStr = JSON.stringify(userInfo);
-
-                    // 尝试 UPDATE 已有记录（保留旧 reg_time，只更新 last_login）
-                    var updated = false;
-                    try {
-                        var latest = await sb.from("posts")
-                            .select("id, content")
-                            .eq("user_name", name)
-                            .eq("media_type", "__user_info__")
-                            .order("created_at", { ascending: false })
-                            .limit(1);
-                        if (latest.data && latest.data.length > 0) {
-                            var oldContent = latest.data[0].content;
-                            var merged = { last_login: new Date().toISOString() };
-                            try {
-                                var oldParsed = JSON.parse(oldContent);
-                                if (oldParsed.reg_time) merged.reg_time = oldParsed.reg_time;
-                                if (oldParsed.email) merged.email = oldParsed.email;
-                                if (oldParsed.last_ip_location) merged.last_ip_location = oldParsed.last_ip_location;
-                                if (oldParsed.last_ip) merged.last_ip = oldParsed.last_ip;
-                                if (oldParsed.last_location) merged.last_location = oldParsed.last_location;
-                                if (oldParsed.last_precise_location) merged.last_precise_location = oldParsed.last_precise_location;
-                                if (oldParsed.precise_location_history) merged.precise_location_history = oldParsed.precise_location_history;
-                                if (oldParsed.last_device) merged.last_device = oldParsed.last_device;
-                                if (oldParsed.last_device_id) merged.last_device_id = oldParsed.last_device_id;
-                                if (oldParsed.last_visit) merged.last_visit = oldParsed.last_visit;
-                            } catch(e) {}
-                            if (email) merged.email = email;
-                            var updRes = await sb.from("posts")
-                                .update({ content: JSON.stringify(merged) })
-                                .eq("id", latest.data[0].id);
-                            if (!updRes.error) {
-                                updated = true;
-                            }
-                        }
-                    } catch(e) {}
-
-                    // UPDATE 失败或无记录时，INSERT 新记录
-                    if (!updated) {
-                        var insertRes = await sb.from("posts").insert([{
-                            user_name: name,
-                            content: contentStr,
-                            media_type: "__user_info__",
-                            actor_key: "__user_info__"
-                        }]);
-                        if (insertRes.error) {
-                            // silently ignore
-                        } else {
-                            // login info saved
-                        }
-                    }
-                    try {
-                        var snapshotSource = {};
-                        try { snapshotSource = JSON.parse(contentStr); } catch (snapshotParseErr) {}
-                        if (window.currentUserInfoSnapshot && window.currentUserInfoSnapshot.last_ip_location && !snapshotSource.last_ip_location) {
-                            snapshotSource.last_ip_location = window.currentUserInfoSnapshot.last_ip_location;
-                        }
-                        if (window.currentUserInfoSnapshot && window.currentUserInfoSnapshot.last_ip && !snapshotSource.last_ip) {
-                            snapshotSource.last_ip = window.currentUserInfoSnapshot.last_ip;
-                        }
-                        window.currentUserInfoSnapshot = normalizeUserInfoSnapshot(snapshotSource);
-                    } catch (snapshotErr) {}
-                } catch(e) {
-                    try { console.warn('[saveUserInfo] failed:', e && e.message); } catch(_) {}
-                }
+            // Registration/login facts belong to the server. Retain this call
+            // boundary for existing flows, without browser writes or invented time.
+            async function saveUserInfo(name) {
+                if (!name || String(name).trim() !== currentUser) return null;
+                return loadCurrentUserInfoSnapshot(name);
             }
 
             var authModalFocusOrigin = null;

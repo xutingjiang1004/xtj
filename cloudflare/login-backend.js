@@ -1,9 +1,11 @@
 'use strict';
+const defaultIpTools = require('../js/ip-location');
+const {createAdminLoginStore} = require('../render-api/admin-login-ip');
 
 // Embedded by build-pages. No Express import, startup tasks, migration, cleanup,
 // storage access or Render proxy. All database writes below follow an explicit
 // authentication request and target only its credential/session/security rows.
-function createLoginBackend(expectedUrl, revokedMarker, cryptoApi, BufferApi, options = {}) {
+function createLoginBackend(expectedUrl, revokedMarker, cryptoApi, BufferApi, options = {}, ipTools = defaultIpTools, adminIpStore = createAdminLoginStore(cryptoApi, ipTools)) {
   const fetcher = options.fetch || globalThis.fetch;
   const now = options.now || Date.now;
   const B = BufferApi;
@@ -139,6 +141,22 @@ function createLoginBackend(expectedUrl, revokedMarker, cryptoApi, BufferApi, op
       return value;
     }
     const rpc = (name, body) => db('rpc/' + name, {}, 'POST', body);
+    // The same guarded administrator store runs on Node and Workers. This
+    // adapter implements only its PostgREST operations, with returned rows.
+    const postsClient = {from() {
+      const query = {}; let method = 'GET', body, single = false;
+      const chain = {
+        select(fields) {query.select = fields;return chain;},
+        insert(value) {method='POST';body=value;return chain;},
+        update(value) {method='PATCH';body=value;return chain;},
+        eq(field,value) {query[field]='eq.'+value;return chain;},
+        is(field,value) {query[field]='is.'+value;return chain;},
+        order(field,settings) {query.order=field+(settings.ascending?'.asc':'.desc');return chain;},
+        limit(value) {query.limit=String(value);return chain;},
+        maybeSingle() {single=true;return chain;},
+        then(resolve,reject) {return rows(query,method,body).then(data=>resolve({data:single?data[0]||null:data,error:null}),error=>resolve({data:null,error:{code:error.upstreamStatus===409?'23505':'database_unavailable'}})).catch(reject);}
+      };return chain;
+    }};
     const bearer = () => (request.headers.get('authorization') || '').startsWith('Bearer ') ? request.headers.get('authorization').slice(7) : '';
     function sign(payload) {
       const b64 = B.from(JSON.stringify(payload)).toString('base64url');
@@ -264,7 +282,7 @@ function createLoginBackend(expectedUrl, revokedMarker, cryptoApi, BufferApi, op
         catch (_) { return controller.signal.aborted ? unavailable() : result(400, { error: '请求内容无效或过大' }); }
         if (!body || typeof body !== 'object' || Array.isArray(body)) return result(400, { error: '请求内容无效' });
       }
-      const ip = request.headers.get('cf-connecting-ip') || '';
+      const ip = ipTools.cloudflareClientIp(request);
       // Only Cloudflare's platform header is trusted. Never x-forwarded-for or
       // a body-supplied address; missing IP shares a conservative bucket.
       const maximum = path.endsWith('/login') ? 10 : path.endsWith('/refresh') ? 30 : 60;
@@ -326,10 +344,8 @@ function createLoginBackend(expectedUrl, revokedMarker, cryptoApi, BufferApi, op
           } catch (_) {}
           const adminDevice = 'admin_' + hash(ip + '|' + ua).slice(0, 32), loginAt = new Date(now()).toISOString();
           try {
-            await rows({ select: 'id' }, 'POST', { user_name: 'xxz', media_type: '__login_event__', media_url: adminDevice,
-              actor_key: 'admin_login_' + cryptoApi.randomUUID(), content: JSON.stringify({ ...facts, device_id: adminDevice, source: 'admin_login', is_admin: true, login_at: loginAt }) });
-            await rpc('merge_user_info', { p_user_name: 'xxz', p_patch: { last_login: loginAt, last_visit: loginAt,
-              last_device: facts.device_type + ' · ' + facts.os + ' · ' + facts.browser, last_device_id: adminDevice, last_ip: ip } });
+            await adminIpStore.recordAdminLogin({db:postsClient,userName:'xxz',loginAt,event:{...facts,device_id:adminDevice},
+              resolve:async()=>ipTools.cloudflareLocation(request,ip,now())});
           } catch (_) {} // Same non-blocking audit semantics as the original admin endpoint.
           return result(200, { ok: true, username: 'xxz', token, user_token: companion?.body.token || null,
             ...(companion ? {} : { user_session_error: '用户会话暂时无法建立，请稍后重试' }) }, [cookie('xtj_admin_token', token, '/', hours * 3600000, 'Strict'), ...(companion?.cookies || [])]);
@@ -340,6 +356,11 @@ function createLoginBackend(expectedUrl, revokedMarker, cryptoApi, BufferApi, op
         await storeSession(user, session);
         const event = await rpc('record_user_auth_event', { p_user_name: user, p_source: 'login_success', p_event: facts });
         if (!event?.event_id || !event.login_at) return unavailable('auth_event_store_failed');
+        const location = ipTools.cloudflareLocation(request,ip,now());
+        if (location) {
+          try {const saved = await rpc('record_auth_ip_location',{p_event_id:event.event_id,p_ip:ip,p_location:location});if (!saved?.ok) throw Error('ip_location_not_saved');}
+          catch (_) {} // The confirmed login survives optional geography failure.
+        }
         return sessionResponse(user, session, event);
       }
       if (path === '/api/user/refresh') {
@@ -383,7 +404,10 @@ function createLoginBackend(expectedUrl, revokedMarker, cryptoApi, BufferApi, op
       if (!matches(payload, account, ACCESS_MS)) return invalid();
       if (path === '/api/user/profile') {
         const earliest = await rows({ select: 'created_at', user_name: 'eq.' + payload.user_name, media_type: 'eq.__auth__', order: 'created_at.asc', limit: '1' });
-        return result(200, { ok: true, user_name: payload.user_name, registered_at: earliest[0]?.created_at || null });
+        const records = await rows({select:'content',user_name:'eq.'+payload.user_name,media_type:'eq.__user_info__',order:'created_at.desc',limit:'1'});
+        let info={};try{info=JSON.parse(records[0]?.content||'{}');}catch(_){}
+        const registeredAt=earliest[0]?.created_at||null;
+        return result(200, { ok: true, user_name: payload.user_name, registered_at:registeredAt,info:ipTools.userInfoSnapshot(info,registeredAt) });
       }
       return result(200, { ok: true, is_admin: payload.user_name === 'xxz', restrictions: await restrictions(payload.user_name, true) });
     } catch (error) {

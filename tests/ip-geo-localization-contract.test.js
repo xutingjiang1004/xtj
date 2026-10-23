@@ -10,7 +10,7 @@ const path = require('node:path');
 const ROOT = path.join(__dirname, '..');
 const SERVER = path.join(ROOT, 'render-api', 'server.js');
 const src = fs.readFileSync(SERVER, 'utf8');
-const geoSource = fs.readFileSync(path.join(ROOT, 'render-api', 'ip-geolocation.js'), 'utf8');
+const geoSource = fs.readFileSync(path.join(ROOT, 'render-api', 'ip-geolocation.js'), 'utf8') + '\n' + fs.readFileSync(path.join(ROOT, 'js', 'ip-location.js'), 'utf8');
 const { normalizeIpGeoName } = require('../render-api/ip-geolocation');
 
 // ── 合约（源码级）────────────────────────────────────────────

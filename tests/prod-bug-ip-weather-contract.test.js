@@ -10,7 +10,7 @@ const path = require('node:path');
 const ROOT = path.join(__dirname, '..');
 const serverSrc = fs.readFileSync(path.join(ROOT, 'render-api', 'server.js'), 'utf8');
 const weather = require(path.join(ROOT, 'render-api', 'weather.js'));
-const geoSource = fs.readFileSync(path.join(ROOT, 'render-api', 'ip-geolocation.js'), 'utf8');
+const geoSource = fs.readFileSync(path.join(ROOT, 'render-api', 'ip-geolocation.js'), 'utf8') + '\n' + fs.readFileSync(path.join(ROOT, 'js', 'ip-location.js'), 'utf8');
 const { parseBaiduGeoPayload, parsePconlineGeoText, locationCacheTtl } = require('../render-api/ip-geolocation');
 
 // ───────────────────────── Bug A：IP 属地 ─────────────────────────

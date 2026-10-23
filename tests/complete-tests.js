@@ -616,25 +616,28 @@ test('post create degraded_fields reflects actual removed columns', function(){
 
 console.log('\n=== IP Region & Data Leak Acceptance Tests ===');
 
-// 一、历史帖子 IP 属地泄漏修复
-test('1. buildPostLocationHtml 历史帖子无 ip_lookup_started_at 不显示 IP 属地', function(){
+// 一、服务端 IP 状态优先，历史内容元数据不能冒充核对结果。
+function postLocationTestScope(){
   var s = read('js/core.js');
   var fn = s.slice(s.indexOf('function buildPostLocationHtml'), s.indexOf('function looksLikeSystemTelemetry'));
-  assert.ok(fn.indexOf('hasLookupStarted') >= 0, 'core.js must check ip_lookup_started_at before showing IP');
-  assert.ok(fn.indexOf('ip_lookup_started_at') >= 0, 'core.js must reference ip_lookup_started_at');
+  assert.match(fn, /window\.XtjIpLocation\.postIpView\(normalized\)/, 'post renderer must use the shared IP rules');
+  var scope={window:{XtjIpLocation:require('../js/ip-location')},escapeHtml:String};
+  vm.runInNewContext(fn,scope);
+  return scope;
+}
+test('1. 历史内容自报 IP 标为未核对，服务端空值不复活旧地区', function(){
+  var scope=postLocationTestScope();
+  assert.strictEqual(scope.buildPostLocationHtml({}), '');
+  assert.match(scope.buildPostLocationHtml({_contentMeta:{ip_province:'浙江',ip_city:'湖州'}}), /历史未核对/);
+  assert.strictEqual(scope.buildPostLocationHtml({ip_region_status:null,ip_region_text:null,ip_province:null,_contentMeta:{ip_province:'浙江',ip_city:'湖州'}}), '');
 });
 
-test('2. 历史帖子遗留 pending 但没有 lookup_started_at 不显示解析中', function(){
-  var s = read('js/core.js');
-  var fn = s.slice(s.indexOf('function buildPostLocationHtml'), s.indexOf('function looksLikeSystemTelemetry'));
-  // 验证 hasLookupStarted 变量保护了 pending/failed 显示
-  assert.ok(fn.indexOf('hasLookupStarted') >= 0, 'must guard pending/failed display behind hasLookupStarted');
-  // 验证"解析中"赋值在 hasLookupStarted 块内
-  var hasLookupIdx = fn.indexOf('hasLookupStarted');
-  var pendingIdx = fn.indexOf("'pending'");
-  var failedIdx = fn.indexOf("'failed'");
-  assert.ok(pendingIdx > hasLookupIdx, 'pending assignment must be after hasLookupStarted declaration');
-  assert.ok(failedIdx > hasLookupIdx, 'failed assignment must be after hasLookupStarted declaration');
+test('2. 服务端 pending/failed 覆盖旧省市，且不依赖遗留时间列', function(){
+  var scope=postLocationTestScope();
+  var pending=scope.buildPostLocationHtml({ip_region_status:'pending',ip_province:'广东',_contentMeta:{ip_city:'深圳'}});
+  assert.match(pending,/解析中/);assert.doesNotMatch(pending,/广东|深圳/);
+  var failed=scope.buildPostLocationHtml({ip_region_status:'failed',ip_region_text:'浙江 湖州'});
+  assert.match(failed,/未知/);assert.doesNotMatch(failed,/浙江|湖州/);
 });
 
 test('3. 新帖子创建时写入 ip_lookup_started_at', function(){

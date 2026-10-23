@@ -23,6 +23,7 @@ async function fixturePage(browser,state={}){
    if(p==='/admin/data')body={posts:[adminPostPayload({id:uuid,user_name:'alice',media_type:'image',media_url:raw('first'),media_items:[{media_type:'image',media_url:raw('first')},{media_type:'image',media_url:raw('second')}],content:'审核多图帖子',created_at:now,views:1},storageOrigin)],likes:[{id:1,user_name:'bob',post_id:uuid,created_at:now}],comments:[{id:1,user_name:'bob',post_id:uuid,content:'评论',created_at:now}],bans:[],announcements:[]};
    if(p==='/admin/data' && state.commentDeleted)body.comments=[];
    if(p==='/admin/users')body={data:[{user_name:'alice',content:JSON.stringify({reg_time:now,auth_created_at:now,email:'alice@example.invalid'}),created_at:now},{user_name:'silent',content:JSON.stringify({reg_time:now,auth_created_at:now}),created_at:now}]};
+   if(p==='/admin/users' && state.users)body={data:state.users};
    if(p==='/admin/user-data')body=state.userData||{info:{email:'private-detail@example.invalid',last_ip:'192.0.2.10'},posts:[],likes:[],comments:[],login_events:[],behavior_events:[],security_alerts:[]};
    if(p==='/admin/reports' && state.pagedReports){
     const rows=state.pagedReports,filter=url.searchParams.get('status')||'all',filtered=rows.filter(r=>filter==='all'||r.status===filter),cursor=url.searchParams.get('before_id'),offset=cursor?filtered.findIndex(r=>r.id===cursor)+1:0,limit=Number(url.searchParams.get('limit'))||100,data=filtered.slice(offset,offset+limit),has_more=offset+data.length<filtered.length;
@@ -39,6 +40,8 @@ async function fixturePage(browser,state={}){
    if(p.startsWith('/api/avatar/public'))body={ok:true,avatar_url:mediaGatewayUrl(raw('avatar'),storageOrigin)};
    if(p==='/admin/author-support')body={ok:true,wechat_url:null,alipay_url:null,disclaimer:'自愿打赏'};
    if(p==='/admin/stats/online')body={online_count:0,users:[],device_stats:{}};
+   if(p==='/admin/stats/online' && state.online)body=state.online;
+   if(p==='/admin/user-profile' && state.profile)body=state.profile;
    if(p==='/admin/ai-agent/config')body={ok:true,config:{name:'小猫',avatar:'🐱',avatar_url:mediaGatewayUrl(raw('ai-avatar'),storageOrigin),model:{reasoner_model:'deepseek-v4-flash-vision-exp'}}};
    if(p==='/admin/ai-agent/effective-prompt')body={ok:true,core_prompt:'实际配置的提示词'};
    if(p==='/admin/ai-agent/usage-summary')body={ok:true,summary:{},currency:'CNY'};
@@ -64,6 +67,33 @@ async function fixturePage(browser,state={}){
 }
 async function login(page){await page.goto(origin+'/admin.html');await page.fill('#loginName','xxz');await page.fill('#loginPw','fixture-password');await page.click('#adminLoginForm button');await page.waitForSelector('#dashboard',{state:'visible'});}
 async function switchTab(page,tab){await page.evaluate(tab=>window.switchTab(tab),tab);await page.waitForFunction(tab=>{const id=tab==='errorlog'?'ErrorLog':tab[0].toUpperCase()+tab.slice(1),el=document.getElementById('tab'+id);return el && el.textContent.length>0 && !el.hasAttribute('aria-busy');},tab);await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));}
+test('actual administrator UI binds directory, details, online users and profile cities to the current server IP',{timeout:45000},async()=>{
+ const browser=await chromium.launch(options);try{
+  const ip='8.8.8.8',nextIp='1.1.1.1',before='2026-10-23T01:00:00Z',after='2026-10-23T02:00:00Z';
+  const geo=(address=ip)=>({source_ip:address,country:'中国',region:'浙江',city:'湖州',text:'中国 · 浙江 · 湖州',city_confidence:'single_source',providers:['cloudflare'],resolved_at:before});
+  const state={users:[{user_name:'alice',content:JSON.stringify({reg_time:before,last_login:before,last_ip:ip,last_ip_location:geo(),last_ip_location_ip:ip}),created_at:before}],
+   userData:{info:{last_login:before,last_ip:ip,last_ip_location:geo(),last_ip_location_ip:ip},login_events:[]},
+   online:{online_count:2,device_stats:{desktop:2},users:[{user_name:'alice',ip,ip_location:geo(),last_active:now},{user_name:'bob',ip:nextIp,ip_location:geo(),location:'活动城市不得回填',last_active:now}]},
+   profile:{user_name:'alice',latest_ip:ip,latest_location:{...geo(),latitude:0,longitude:0},unique_ips:[],recent_logins:[],visit_trend:[],device_stats:{}}};
+  const f=await fixturePage(browser,state),page=f.page;await login(page);await switchTab(page,'users');
+  await page.waitForFunction(()=>document.getElementById('tabUsers').textContent.includes('湖州'));
+  assert.match(await page.locator('#tabUsers').innerText(),/8\.8\.8\.8/);assert.match(await page.locator('#tabUsers').innerText(),/单一来源/);
+  for(const width of [1440,375]){await page.setViewportSize({width,height:width===375?812:1000});await screenshot(page,'ip-full-directory-'+width);}
+  state.userData.login_events=[{id:'new-event',user_name:'alice',created_at:after,content:JSON.stringify({ip:nextIp,login_at:after,authority:'server_authentication',method:'password',source:'login_success',ip_location:{...geo(nextIp),region:'安徽',city:'宿州',text:'中国 · 安徽 · 宿州',city_confidence:'corroborated',providers:['baidu-opendata','pconline']}})}];
+  await page.evaluate(()=>window.showUserDetailModal('alice'));await page.waitForFunction(()=>document.getElementById('detailModal').textContent.includes('宿州'));
+  const current=(await page.locator('#detailModal').innerText()).split('最近登录记录')[0];assert.match(current,/1\.1\.1\.1/);assert.doesNotMatch(current,/湖州|8\.8\.8\.8/);
+  for(const width of [1440,375]){await page.setViewportSize({width,height:width===375?812:1000});await screenshot(page,'ip-full-newest-login-'+width);}
+  state.userData={info:{},login_events:[]};await page.evaluate(()=>window.showUserDetailModal('alice'));await page.waitForFunction(()=>!document.getElementById('detailModal').textContent.includes('宿州'));
+  assert.doesNotMatch((await page.locator('#detailModal').innerText()).split('最近登录记录')[0],/8\.8\.8\.8|1\.1\.1\.1|湖州|宿州/);await page.keyboard.press('Escape');
+  await switchTab(page,'online');await page.waitForFunction(()=>document.getElementById('tabOnline').textContent.includes('bob'));
+  const online=await page.locator('#tabOnline tbody tr').allInnerTexts();assert.match(online[0],/湖州.*单一来源/);assert.match(online[1],/未解析/);assert.doesNotMatch(online[1],/湖州|活动城市/);
+  for(const width of [1440,375]){await page.setViewportSize({width,height:width===375?812:1000});await screenshot(page,'ip-full-online-'+width);}
+  await page.evaluate(()=>window.loadUserProfile('alice'));await page.waitForFunction(()=>document.getElementById('tabProfile').textContent.includes('IP 估计坐标'));
+  const profile=await page.locator('#tabProfile').innerText();assert.match(profile,/IP 推测地区/);assert.match(profile,/单一来源/);assert.match(profile,/0, 0/);assert.doesNotMatch(profile,/GPS 坐标/);
+  for(const width of [1440,375]){await page.setViewportSize({width,height:width===375?812:1000});await screenshot(page,'ip-full-profile-'+width);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);}
+  assert.deepEqual(f.errors,[]);
+ }finally{await browser.close();}
+});
 test('administrator city ambiguity, same-named province/city and canonical IPv6 show accurate evidence',{timeout:30000},async()=>{
  const browser=await chromium.launch(options);try{
   const {selectIpLocation}=require('../render-api/ip-geolocation'),ip='8.8.8.8';
