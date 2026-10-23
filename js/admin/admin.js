@@ -3432,13 +3432,32 @@
     // IP geography must describe the same address; GPS is a separate fact.
     function adminGetIpLocation(info, event, ip) {
         info = info || {}; event = event || {};
-        var currentIp = String(ip || info.last_ip || event.ip || '').trim();
+        function canonical(value) {
+            var address = String(value || '').trim();
+            var bracketed = address.match(/^\[([^\]]+)\](?::\d+)?$/);
+            if (bracketed) address = bracketed[1];
+            if (/^\d+\.\d+\.\d+\.\d+:\d+$/.test(address)) address = address.slice(0, address.lastIndexOf(':'));
+            if (/^(?:\d{1,3}\.){3}\d{1,3}$/.test(address)) {
+                return address.split('.').every(function(part) {return Number(part) <= 255 && String(Number(part)) === part;}) ? address : '';
+            }
+            if (!address.includes(':')) return '';
+            try {
+                address = new URL('http://[' + address.split('%')[0] + ']/').hostname.slice(1, -1).toLowerCase();
+                var mapped = address.match(/^::ffff:([a-f\d]+):([a-f\d]+)$/);
+                if (mapped) {
+                    var high = parseInt(mapped[1], 16), low = parseInt(mapped[2], 16);
+                    return [high >> 8, high & 255, low >> 8, low & 255].join('.');
+                }
+                return address;
+            } catch (_) {return '';}
+        }
+        var currentIp = canonical(ip || info.last_ip || event.ip);
         if (!currentIp) return null;
         var saved = info.last_ip_location;
-        var savedIp = info.last_ip_location_ip || (saved && saved.source_ip);
-        if (saved && savedIp === currentIp && (!saved.source_ip || saved.source_ip === currentIp)) return saved;
+        var savedIp = canonical(info.last_ip_location_ip || (saved && saved.source_ip));
+        if (saved && savedIp === currentIp && (!saved.source_ip || canonical(saved.source_ip) === currentIp)) return saved;
         var historical = event.ip_location;
-        if (historical && event.ip === currentIp && (!historical.source_ip || historical.source_ip === currentIp)) return historical;
+        if (historical && canonical(event.ip) === currentIp && (!historical.source_ip || canonical(historical.source_ip) === currentIp)) return historical;
         return null;
     }
 
@@ -3480,7 +3499,7 @@
             'Fuzhou': '福州', 'Chengdu': '成都', 'Wuhan': '武汉', 'Changsha': '长沙',
             'Zhengzhou': '郑州', 'Jinan': '济南', 'Qingdao': '青岛', 'Hefei': '合肥',
             'Dongguan': '东莞', 'Foshan': '佛山', 'Zhuhai': '珠海', 'Shanghai': '上海',
-            'Beijing': '北京', 'Chongqing': '重庆', 'Tianjin': '天津'
+            'Beijing': '北京', 'Chongqing': '重庆', 'Tianjin': '天津', 'Jilin': '吉林'
         };
         var countryMap = {
             'Japan': '日本', 'South Korea': '韩国', 'Singapore': '新加坡',
@@ -3490,6 +3509,9 @@
             'Russia': '俄罗斯', 'Brazil': '巴西', 'India': '印度', 'Vietnam': '越南',
             'Philippines': '菲律宾', 'Indonesia': '印度尼西亚'
         };
+        function translated(map, key) {
+            return Object.prototype.hasOwnProperty.call(map, key) ? map[key] : key;
+        }
         var isChina = false;
         var pp = parts.map(function(p) {
             var trimmed = p.trim();
@@ -3501,19 +3523,30 @@
             return trimmed;
         }).filter(Boolean);
         if (isChina && pp.length) {
-            var provinceName = provinceMap[pp[0]] || pp[0];
-            var cityName = pp.length > 1 ? (cityMap[pp[1]] || pp[1]) : '';
+            var provinceName = translated(provinceMap, pp[0]);
+            var cityName = pp.length > 1 ? translated(cityMap, pp[1]) : '';
+            var ambiguousCities = {
+                suzhou: {'江苏':'苏州','安徽':'宿州'}, fuzhou: {'福建':'福州','江西':'抚州'},
+                taizhou: {'江苏':'泰州','浙江':'台州'}, yichun: {'江西':'宜春','黑龙江':'伊春'},
+                yulin: {'广西':'玉林','陕西':'榆林'}
+            };
+            var cityKey = String(pp[1] || '').toLowerCase().replace(/\s*(?:shi|city|prefecture)$/, '').trim();
+            if (Object.prototype.hasOwnProperty.call(ambiguousCities, cityKey)) {
+                var choices = ambiguousCities[cityKey];
+                cityName = Object.prototype.hasOwnProperty.call(choices, provinceName) ? choices[provinceName] : pp[1];
+            }
+            if (provinceName === '吉林' && cityName === '吉林') return '吉林省吉林市';
             if (provinceName === cityName || (pp.length === 1 && (pp[0] === 'Shanghai' || pp[0] === 'Beijing' || pp[0] === 'Chongqing' || pp[0] === 'Tianjin'))) {
                 return provinceName;
             }
             return provinceName + (cityName || '');
         }
         if (parts.length === 1) {
-            return countryMap[parts[0].trim()] || parts[0].trim();
+            return translated(countryMap, parts[0].trim());
         }
         return parts.map(function(p) {
             var trimmed = p.trim();
-            return countryMap[trimmed] || cityMap[trimmed] || provinceMap[trimmed] || trimmed;
+            return translated(provinceMap, translated(cityMap, translated(countryMap, trimmed)));
         }).join('');
     }
 

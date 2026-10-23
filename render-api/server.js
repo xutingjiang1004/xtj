@@ -191,16 +191,12 @@ app.use((req, res, next) => {
 // ★ 2026-09-21 修复（IP 全部落成 10.x 内网地址 → 属地全部解析失败）：
 //   原值 `1` 只信任一跳，但 Render 边缘 → 应用之间实际存在多层内网代理，
 //   导致 req.ip 仍解析成 Render 内网地址（用户数据实证：last_ip = 10.193.27.131）。
-// ★ 2026-09-24 再修（发帖 IP 属地错误）：固定网段列表可能漏掉平台新增的内网
-//   hop 网段——一旦漏掉，req.ip 会落成该 hop 的私网地址，getClientIp 只能退到
-//   XFF 从右往左兜底；极端情况下（真实 IP 右侧全为未被信任的私网 hop）会误选
-//   客户端伪造的最左公网值。改为函数判定：所有私网/保留地址一律视为平台代理
-//   hop（isPrivateOrReservedIp 为函数声明，运行时已提升可用）。安全性：
-//   LB 追加的真实客户端公网 IP 必在链最右侧，从右往左扫描会先停在它那里；
-//   客户端伪造值永远在最左侧，不可能被选中（见下方 getClientIp 注释与测试）。
+// Trust Render's internal proxy networks and official Cloudflare public hops.
+// Other reserved ranges are not proxy authority; stop there rather than using
+// a farther-left client-supplied address. Malformed chains fail in getClientIp.
 app.set('trust proxy', function trustProxyHop(addr) {
   if (require('./trusted-proxies').isCloudflareProxy(addr)) return true;
-  return isPrivateOrReservedIp(addr);
+  return require('./trusted-proxies').isTrustedInternalProxy(addr);
 });
 
 // 全局禁用 X-Powered-By（必须在任何路由之前）
@@ -4612,11 +4608,8 @@ function getRealIp(req) {
 // 获取客户端 IP（仅信任 req.ip：trust proxy=1 时 Express 负责解析 X-Forwarded-For，
 // 客户端无法伪造；不再读取 cf-connecting-ip / x-real-ip 等可任意设置的请求头，防止 IP 伪造污染安全检测）
 // ★ 2026-09-21 修复（IP 全部落成 10.x 内网地址）：
-//   trust proxy 现已信任全部私有网段（见文件头部 app.set('trust proxy', ...)）。
-//   此处再加一层防御兜底：若 req.ip / socket 地址解析出来仍是私有/保留地址
-//   （代理层数超出信任配置、或部署环境变化），则从 X-Forwarded-For 链
-//   **从右往左**找第一个公网地址。安全性：链右侧由受信代理逐跳追加，
-//   客户端伪造值只会出现在链最左侧，从右往左扫描永远不会选中伪造值。
+//   Trust internal proxy networks and official Cloudflare hops. An invalid or
+//   other reserved hop stops traversal; non-geolocatable is not proxy trust.
 // IP 字符串规范化：去端口（仅 IPv4:host 形式）、去 ::ffff: 映射前缀、取逗号分隔首段
 function normalizeClientIpValue(value) {
   return require('./ip-geolocation').normalizeIpAddress(value);
@@ -4628,12 +4621,34 @@ function firstPublicIpFromForwardedChain(req) {
   var parts = String(raw).split(',');
   for (var i = parts.length - 1; i >= 0; i--) {
     var hop = normalizeClientIpValue(parts[i]);
-    if (hop && !isPrivateOrReservedIp(hop) && !require('./trusted-proxies').isCloudflareProxy(hop)) return hop;
+    // An unreadable nearest hop is a trust boundary. Skipping it would let a
+    // farther-left, client-supplied address become the recorded client IP.
+    if (!hop) return '';
+    var proxies = require('./trusted-proxies');
+    if (proxies.isTrustedInternalProxy(hop) || proxies.isCloudflareProxy(hop)) continue;
+    return isPrivateOrReservedIp(hop) ? '' : hop;
   }
   return '';
 }
 
 function getClientIp(req) {
+  var socketIp = normalizeClientIpValue(req && req.socket && req.socket.remoteAddress);
+  var trustedSocket = socketIp && (require('./trusted-proxies').isTrustedInternalProxy(socketIp) || require('./trusted-proxies').isCloudflareProxy(socketIp));
+  var forwarded = req && req.headers && req.headers['x-forwarded-for'];
+  // Express's forwarded parser omits empty tokens. Validate before accepting
+  // req.ip so that omission cannot jump across an unreadable proxy hop.
+  if (trustedSocket && forwarded) {
+    var forwardedParts = String(forwarded).split(',');
+    for (var index = forwardedParts.length - 1; index >= 0; index--) {
+      var forwardedHop = normalizeClientIpValue(forwardedParts[index]);
+      if (!forwardedHop) {
+        if (req) req._clientIpSource = 'invalid_forwarded_chain';
+        return 'unknown';
+      }
+      // Values beyond the first non-proxy hop are supplied by that client.
+      if (!require('./trusted-proxies').isTrustedInternalProxy(forwardedHop) && !require('./trusted-proxies').isCloudflareProxy(forwardedHop)) break;
+    }
+  }
   // 先取 Express 解析后的 req.ip / socket 地址；但**跳过私有/保留地址**——
   // 私有地址对属地解析毫无价值（任何数据源都解析不了），只会污染 last_ip。
   var candidates = [
@@ -4650,8 +4665,6 @@ function getClientIp(req) {
   }
   // 兜底：req.ip/socket 全是私网地址（trust proxy 信任范围仍不够），
   // 从 X-Forwarded-For 链右往左找第一个公网地址。
-  var socketIp = normalizeClientIpValue(req && req.socket && req.socket.remoteAddress);
-  var trustedSocket = socketIp && (isPrivateOrReservedIp(socketIp) || require('./trusted-proxies').isCloudflareProxy(socketIp));
   var chainIp = trustedSocket ? firstPublicIpFromForwardedChain(req) : '';
   if (chainIp) {
     if (req) req._clientIpSource = 'xff_chain_public';
@@ -5210,55 +5223,18 @@ function getPossibleDeviceModel(info) {
 // 记录管理员登录事件（静默，不影响登录流程）
 async function logAdminLoginEvent(req) {
   try {
+    const loginAt = new Date().toISOString();
     const ip = getClientIp(req);
     const ua = String(req.headers['user-agent'] || '');
     const deviceId = 'admin_' + crypto.createHash('sha256').update(ip + '|' + ua).digest('hex').slice(0, 32);
-    const loginAt = new Date().toISOString();
-    const random = Math.random().toString(36).slice(2, 10);
-
-    var ipLocation = null;
-    try { ipLocation = await resolveIpLocation(ip); } catch(e) {}
-
-    const { error } = await supabase.from('posts').insert([{
-      user_name: ADMIN_USERNAME,
-      media_type: LOGIN_EVENT_MARKER,
-      media_url: deviceId,
-      content: JSON.stringify({
-        device_id: deviceId,
-        device_type: detectDeviceTypeFromUA(ua),
-        os: detectOSFromUA(ua),
-        browser: detectBrowserFromUA(ua),
-        user_agent: ua,
-        ip: ip,
-        ip_location: ipLocation,
-        login_at: loginAt,
-        is_admin: true,
-        source: 'admin_login'
-      }),
-      actor_key: 'admin_login_' + Date.now() + '_' + random
-    }]);
-    if (error) {
-      console.warn('[AdminLoginEvent] 写入失败:', error.message || error);
-    }
-
-    // 同步更新管理员 user_info
-    if (!error) {
-      try {
-        const now = new Date().toISOString();
-        var adminInfoPatch = {
-          last_login: now,
-          last_visit: now,
-          last_device: detectDeviceTypeFromUA(ua) + ' · ' + detectOSFromUA(ua) + ' · ' + detectBrowserFromUA(ua),
-          last_device_id: deviceId,
-          last_ip: ip,
-          last_ip_location: ipLocation,
-          last_ip_location_ip: ipLocation ? ip : null
-        };
-        await mergeUserInfo(ADMIN_USERNAME, adminInfoPatch);
-      } catch(e) {
-        console.warn('[AdminLoginEvent] 同步 user_info 失败:', e.message || e);
+    await require('./admin-login-ip').recordAdminLogin({
+      db: supabase, userName: ADMIN_USERNAME, loginAt: loginAt, resolve: resolveIpLocation,
+      event: {
+        device_id: deviceId, device_type: detectDeviceTypeFromUA(ua),
+        os: detectOSFromUA(ua), browser: detectBrowserFromUA(ua), user_agent: ua,
+        ip: ip, ip_source: req._clientIpSource || 'unknown'
       }
-    }
+    });
   } catch(e) {
     console.warn('[AdminLoginEvent] 记录异常:', e.message || e);
   }
@@ -5346,14 +5322,15 @@ async function retryIpRegionAsync(postId, ip, attempt) {
   try {
     var result = await resolveIpRegion(ip);
     if (result.status === 'resolved') {
-      await supabase.from('posts').update({
+      var saved = await supabase.from('posts').update({
         ip_province: result.province,
         ip_city: result.city,
         ip_region_text: result.text,
         ip_region_status: 'resolved',
         ip_resolved_at: new Date().toISOString(),
         ip_region_error: null
-      }).eq('id', postId);
+      }).eq('id', postId).eq('ip_region_status', 'pending');
+      if (saved.error) throw saved.error;
       return;
     }
     if (attempt === 3) {
@@ -5383,13 +5360,16 @@ async function queuePersistentIpRegionRetry(postId, ip, lookupStartedAt) {
   var now = new Date().toISOString();
   var queued = await supabase.from('posts').update({
     ip_region_status: 'pending',
+    ip_province: null,
+    ip_city: null,
+    ip_resolved_at: null,
     ip_region_text: null,
     ip_lookup_started_at: lookupStartedAt || now,
     ip_retry_count: 0,
     ip_next_retry_at: now,
     ip_last_attempt_at: null,
     ip_lookup_ip_enc: encryptedIp
-  }).eq('id', postId).select('id').maybeSingle();
+  }).eq('id', postId).eq('ip_region_status', 'pending').select('id').maybeSingle();
   if (queued.error || !queued.data) throw queued.error || new Error('ip_retry_job_not_saved');
   setTimeout(function() {
     processDueIpRegionRetries().catch(function(err) {
@@ -5436,7 +5416,7 @@ async function processDueIpRegionRetries() {
 
       var ip = decryptIpRetryAddress(claimed.data.ip_lookup_ip_enc);
       if (!ip || isPrivateOrReservedIp(ip)) {
-        await setIpRegionFailed(due.id, ip ? 'private_ip_unresolvable' : 'retry_ip_unavailable');
+        await setIpRegionFailed(due.id, ip ? 'private_ip_unresolvable' : 'retry_ip_unavailable', claimAt);
         continue;
       }
 
@@ -5464,6 +5444,9 @@ async function processDueIpRegionRetries() {
         };
       } else if (retryCount >= 3) {
         update = {
+          ip_province: null,
+          ip_city: null,
+          ip_resolved_at: null,
           ip_region_status: 'failed',
           ip_region_text: '未知',
           ip_region_error: String((result && result.error) || failureReason).slice(0, 500),
@@ -5500,18 +5483,22 @@ setInterval(function() {
   });
 }, 15000).unref();
 
-async function setIpRegionFailed(postId, errorMsg) {
-  try {
-    await supabase.from('posts').update({
-      ip_region_status: 'failed',
-      ip_region_text: '未知',
-      ip_region_error: String(errorMsg || 'unknown').slice(0, 500)
-    }).eq('id', postId);
-    await supabase.from('posts').update({
-      ip_next_retry_at: null,
-      ip_lookup_ip_enc: null
-    }).eq('id', postId);
-  } catch (_) {}
+async function setIpRegionFailed(postId, errorMsg, claimAt) {
+  var patch = {
+    ip_region_status: 'failed', ip_region_text: '未知',
+    ip_province: null, ip_city: null, ip_resolved_at: null,
+    ip_region_error: String(errorMsg || 'unknown').slice(0, 500)
+  };
+  function write(value) {
+    var query = supabase.from('posts').update(value).eq('id', postId).eq('ip_region_status', 'pending');
+    if (claimAt) query = query.eq('ip_last_attempt_at', claimAt);
+    return query;
+  }
+  var saved = await write(Object.assign({}, patch, {ip_next_retry_at:null, ip_lookup_ip_enc:null}));
+  // Legacy installations lack the durable-retry columns. Fall back only for
+  // that schema error; never erase another worker's lease in a second write.
+  if (saved.error && ['42703','PGRST204'].includes(String(saved.error.code))) saved = await write(patch);
+  if (saved.error) throw saved.error;
 }
 
 // ===================== 安全检测逻辑 =====================
@@ -13709,8 +13696,9 @@ app.post('/api/post/create', authenticateUser, rateLimit(60000, 20), async (req,
       degraded = true;
     }
 
-    // IP 解析失败时异步重试
-    if (ipRetryRequired) {
+    // A media retry can return an existing post. Its historical lookup belongs
+    // to the original request IP, never the address making this retry.
+    if (ipRetryRequired && !inserted.duplicate) {
       queuePersistentIpRegionRetry(inserted.data.id, clientIp, ipLookupStartedAt).then(function(queued) {
         if (!queued) retryIpRegionAsync(inserted.data.id, clientIp, 1).catch(function(err) {
           console.warn('[IP Retry] fallback could not start:', err && err.message || err);
@@ -18154,12 +18142,22 @@ app.post('/admin/user/resolve-ip', verifyToken, rateLimit(60000, 10), async (req
     }
     if (!ip) return res.status(404).json({ error: '未找到该用户的 IP 记录', code: 'no_ip' });
 
+    var adminLoginIp = require('./admin-login-ip');
+    var isAdminEvent = userName === ADMIN_USERNAME && adminLoginIp.isAdminLoginEvent(eventData);
+    var isAuthEvent = eventData.authority === 'server_authentication' && eventData.method === 'password'
+      && ['login_success', 'register_success'].includes(eventData.source);
+    if (!isAdminEvent && !isAuthEvent) return res.status(422).json({
+      error: '该历史记录不是服务端认证登录记录，请在用户下次登录后重查', code: 'unsupported_login_event'
+    });
+    var canonicalIp = normalizeClientIpValue(ip);
+    if (!canonicalIp) return res.status(422).json({error: '该记录缺少有效 IP，请在用户下次登录后重查', code:'invalid_ip'});
+
     // ★ 2026-09-21：私有/保留地址直接给出明确结论，不再去打数据源。
     //   私有 IP（如 Render 内网 10.x）对任何地理数据源都必然失败，
     //   之前返回"所有数据源均不可用"具有误导性——数据源是好的，是 IP 本身不可解析。
-    if (isPrivateOrReservedIp(ip)) {
+    if (isPrivateOrReservedIp(canonicalIp)) {
       return res.status(422).json({
-        error: '该记录的 IP（' + ip + '）是内网/保留地址，无法解析属地。这是历史服务端 IP 提取缺陷写入的数据，该用户下次访问后将记录正确的公网 IP',
+        error: '该记录的 IP（' + ip + '）是内网/保留地址，无法查询公网属地；请在后续真实登录记录生成后重查',
         code: 'private_ip'
       });
     }
@@ -18167,9 +18165,11 @@ app.post('/admin/user/resolve-ip', verifyToken, rateLimit(60000, 10), async (req
     var ipLocation = await resolveIpLocation(ip, { forceRefresh: true });
     if (!ipLocation) return res.status(404).json({ error: 'IP 地区解析失败（所有数据源均不可用）', code: 'resolve_failed' });
 
-    var persisted = await checkedRpc(supabase, 'record_auth_ip_location', {
-      p_event_id: loginEvent.data.id, p_ip: ip, p_location: ipLocation
-    });
+    var persisted = isAdminEvent
+      ? await adminLoginIp.refreshAdminLoginLocation({db:supabase, userName:userName, eventId:loginEvent.data.id, ip:ip, location:ipLocation})
+      : await checkedRpc(supabase, 'record_auth_ip_location', {
+        p_event_id: loginEvent.data.id, p_ip: ip, p_location: ipLocation
+      });
 
     await logAdminAudit('resolve_user_ip', req.adminName || 'admin', 'target_user=' + userName + '; ip=' + ip + '; text=' + (ipLocation.text || ''));
 

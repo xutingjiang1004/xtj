@@ -22,17 +22,24 @@ test('IPv4 clients cannot match broad IPv6 proxy subnets through mapped-address 
   assert.equal(mappedPrivate('8.8.8.8'), false);
 });
 
-test('合约：trust proxy 为函数判定（所有私网/保留地址视为受信代理 hop）', () => {
-  // ★ 2026-09-24：固定网段列表可能漏掉平台新增内网 hop；改为函数判定后
-  //   任何私网 hop 都被信任，req.ip 恒为第一个公网地址（真实客户端）。
+test('合约：trust proxy 为函数判定，区分内网代理和其他不可定位地址', () => {
   assert.ok(
     src.includes("app.set('trust proxy', function trustProxyHop(addr) {"),
     "server.js 必须设置 trust proxy 为函数模式"
   );
   assert.ok(
-    src.includes('return isPrivateOrReservedIp(addr);'),
-    'trust proxy 函数必须复用 isPrivateOrReservedIp 判定'
+    src.includes("return require('./trusted-proxies').isTrustedInternalProxy(addr);"),
+    'trust proxy 必须只信任内网代理网段，而不是所有保留地址'
   );
+});
+
+test('reserved-address and invalid hops stop the chain before a forged earlier client', () => {
+  for (const hop of ['192.0.2.1','198.18.0.1','224.1.2.3','2001:db8::1','bad-hop','']) {
+    assert.equal(firstPublicIpFromForwardedChain({headers:{'x-forwarded-for':'8.8.8.8, '+hop+', 10.1.2.3'}}),'',hop);
+  }
+  const {isTrustedInternalProxy} = require('../render-api/trusted-proxies');
+  for (const ip of ['10.1.2.3','::ffff:10.1.2.3','::1','fd12::1','100.64.1.2']) assert.equal(isTrustedInternalProxy(ip),true,ip);
+  for (const ip of ['192.0.2.1','198.18.0.1','224.1.2.3','2001:db8::1','bad-hop','8.8.8.8']) assert.equal(isTrustedInternalProxy(ip),false,ip);
 });
 
 // 从 server.js 提取三个纯函数做行为验证（不 require 整个服务）

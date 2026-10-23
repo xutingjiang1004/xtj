@@ -124,6 +124,6 @@ async function createPostWithMedia(supabase, actor, path, uploadId, payload) {
   if (!result || result.error) return { error: result && result.error || { code: 'media_store_unavailable' } };
   const data = result.data;
   if (!data || !data.ok || !data.post) return { error: { code: data && data.code || 'media_ownership', message: '媒体登记已失效，请重新选择附件' } };
-  return { data: data.post, error: null };
+  return { data: data.post, error: null, duplicate: data.duplicate === true };
 }
 module.exports = { installPostMedia, createPostWithMedia, parsePostMediaUrl, isLocalUploadUrl, validPath, sweepPostMediaUploads, retireAccountPostMediaUploads, deleteQueuedAccountPostMediaUploads };

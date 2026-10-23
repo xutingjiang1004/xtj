@@ -7,7 +7,7 @@ const uuid='aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',now=new Date().toISOString();
 const raw=name=>storageOrigin+'/storage/v1/object/public/uploads/posts/'+name+'.png';
 const tabs=['ann','stats','users','security','audit','behavior','errorlog','posts','likes','comments','reports','bans','mutes','support','photos','email','online','profile','ai'];
 const options={headless:true,args:['--no-sandbox'],executablePath:process.env.CHROMIUM_PATH || (fs.existsSync('/usr/bin/chromium')?'/usr/bin/chromium':undefined)};
-async function screenshot(page,name,fullPage=true){const directory=process.env.XTJ_ADMIN_FIX_SCREENSHOTS;if(!directory)return;fs.mkdirSync(directory,{recursive:true});await page.screenshot({path:path.join(directory,name+'.png'),fullPage});}
+async function screenshot(page,name,fullPage=true){const directory=process.env.XTJ_ADMIN_FIX_SCREENSHOTS;if(!directory)return;fs.mkdirSync(directory,{recursive:true});await page.screenshot({path:path.join(directory,name+'.png'),fullPage,animations:'disabled'});}
 async function fixturePage(browser,state={}){
  const page=await browser.newPage({viewport:{width:1280,height:900}}),errors=[],calls=[];page.on('pageerror',error=>errors.push(error.message));
  await page.route('**/*',async route=>{
@@ -64,6 +64,26 @@ async function fixturePage(browser,state={}){
 }
 async function login(page){await page.goto(origin+'/admin.html');await page.fill('#loginName','xxz');await page.fill('#loginPw','fixture-password');await page.click('#adminLoginForm button');await page.waitForSelector('#dashboard',{state:'visible'});}
 async function switchTab(page,tab){await page.evaluate(tab=>window.switchTab(tab),tab);await page.waitForFunction(tab=>{const id=tab==='errorlog'?'ErrorLog':tab[0].toUpperCase()+tab.slice(1),el=document.getElementById('tab'+id);return el && el.textContent.length>0 && !el.hasAttribute('aria-busy');},tab);await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));}
+test('administrator city ambiguity, same-named province/city and canonical IPv6 show accurate evidence',{timeout:30000},async()=>{
+ const browser=await chromium.launch(options);try{
+  const {selectIpLocation}=require('../render-api/ip-geolocation'),ip='8.8.8.8';
+  const cn=(provider,region,city)=>({provider,country:'中国',region,city});
+  const cases=[
+   ['suzhou-anhui',[cn('a','安徽','宿州'),cn('b','安徽','Suzhou'),cn('c','安徽','Suzhou')],'宿州','苏州'],
+   ['fuzhou-jiangxi',[cn('a','江西','抚州'),cn('b','江西','Fuzhou'),cn('c','江西','Fuzhou')],'抚州','福州'],
+   ['jilin-city',[cn('a','吉林','吉林市'),cn('b','Jilin','Jilin')],'吉林市',''],
+   ['province-conflict',[cn('a','浙江','杭州'),cn('b','广东','深圳'),cn('c','','Hangzhou'),cn('d','','Hangzhou')],'城市待核实','杭州']
+  ];
+  const state={userData:{info:{last_ip:'0:0:0:0:0:ffff:808:808',last_ip_location_ip:ip},login_events:[]}},f=await fixturePage(browser,state),page=f.page;await login(page);
+  for(const [name,rows,expected,absent] of cases){
+   state.userData.info.last_ip_location=selectIpLocation(rows,ip);
+   await page.evaluate(()=>window.showUserDetailModal('alice'));await page.waitForFunction(text=>document.getElementById('detailModal').textContent.includes(text),expected);
+   const text=await page.locator('#detailModal').innerText();assert.ok(text.includes(expected));if(absent)assert.equal(text.includes(absent),false);
+   for(const width of [1440,375]){await page.setViewportSize({width,height:width===375?812:1000});await screenshot(page,'ip-deep-'+name+'-'+width);}
+  }
+  assert.deepEqual(f.errors,[]);
+ }finally{await browser.close();}
+});
 test('administrator IP city evidence explains conflicts and never borrows a GPS or different login city',{timeout:30000},async()=>{
  const browser=await chromium.launch(options);try{
   const ip='8.8.8.8',location={source_ip:ip,country:'中国',region:'浙江',city:'',text:'中国 · 浙江',precision:'region',city_confidence:'conflict',providers:['baidu-opendata','pconline'],resolved_at:now};
