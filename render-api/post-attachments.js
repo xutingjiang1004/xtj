@@ -32,6 +32,6 @@ async function createPostWithAttachments(db, actor, payload, attachments) {
   if (result.error) return { data: null, error: result.error };
   const saved = result.data;
   if (!saved || !saved.ok || !saved.post) return { data: null, error: { code: saved && saved.code || 'media_attach_failed', message: '图片挂载失败，请重试' } };
-  return { data: Object.assign({}, saved.post, { media_items: saved.attachments }), error: null };
+  return { data: Object.assign({}, saved.post, { media_items: saved.attachments }), error: null, duplicate: saved.duplicate === true };
 }
 module.exports = { validatePostAttachments, loadPostAttachments, createPostWithAttachments };

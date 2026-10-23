@@ -22,12 +22,12 @@ test('private user info has one row and a service-role-only atomic merge', () =>
   assert.match(migration, /GRANT EXECUTE ON FUNCTION public\.merge_user_info\(TEXT, JSONB\) TO service_role/);
 });
 
-test('active profile writers use atomic merge or service-only confirmed authentication RPCs', () => {
+test('active profile writers use atomic merge, guarded administrator writes or confirmed authentication RPCs', () => {
   assert.match(server, /async function mergeUserInfo/);
   for (const token of [
     "mergeUserInfo(userNameVal, { last_visit: now })",
     'mergeUserInfo(req.userName, {',
-    'mergeUserInfo(ADMIN_USERNAME, adminInfoPatch)'
+    "require('./admin-login-ip').recordAdminLogin({"
   ]) assert.ok(server.includes(token), `missing atomic writer: ${token}`);
   // The removed client telemetry writer must remain retired. Its replacement
   // authenticates on the server and merges profile facts in a DB transaction.

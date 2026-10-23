@@ -64,10 +64,35 @@ function normalizeIpGeoName(value) {
 }
 
 const CHINA_REGIONS = new Set(['北京','天津','河北','山西','内蒙古','辽宁','吉林','黑龙江','上海','江苏','浙江','安徽','福建','江西','山东','河南','湖北','湖南','广东','广西','海南','重庆','四川','贵州','云南','西藏','陕西','甘肃','青海','宁夏','新疆','台湾','香港','澳门']);
+const MUNICIPAL_REGIONS = new Set(['北京','上海','天津','重庆','香港','澳门']);
+// These romanizations identify different cities in different provinces. Never
+// choose one using the flat display-name dictionary or a missing province.
+const AMBIGUOUS_CITIES = {
+  suzhou: {江苏:'苏州', 安徽:'宿州'}, fuzhou: {福建:'福州', 江西:'抚州'},
+  taizhou: {江苏:'泰州', 浙江:'台州'}, yichun: {江西:'宜春', 黑龙江:'伊春'},
+  yulin: {广西:'玉林', 陕西:'榆林'}
+};
+const CHINA_CITY_REGIONS = {
+  杭州:'浙江',宁波:'浙江',温州:'浙江',台州:'浙江',深圳:'广东',广州:'广东',东莞:'广东',佛山:'广东',
+  南京:'江苏',苏州:'江苏',无锡:'江苏',泰州:'江苏',宿州:'安徽',合肥:'安徽',成都:'四川',武汉:'湖北',
+  西安:'陕西',榆林:'陕西',长沙:'湖南',郑州:'河南',青岛:'山东',济南:'山东',大连:'辽宁',沈阳:'辽宁',
+  哈尔滨:'黑龙江',伊春:'黑龙江',长春:'吉林',吉林:'吉林',石家庄:'河北',太原:'山西',南昌:'江西',
+  抚州:'江西',宜春:'江西',福州:'福建',厦门:'福建',昆明:'云南',南宁:'广西',玉林:'广西',贵阳:'贵州',
+  兰州:'甘肃',乌鲁木齐:'新疆',拉萨:'西藏',海口:'海南'
+};
 
-function cleanCity(value, region) {
-  const city = normalizeIpGeoName(value);
-  return city === region || /^(?:全省|全市|未知|局域网|省直辖县级行政区划|市辖区|市辖县|其他|unknown)$/i.test(city) ? '' : city;
+function cleanCity(value, region, country = '中国') {
+  const raw = typeof value === 'string' ? value.trim().toLowerCase().replace(/\s*(?:shi|city|prefecture)$/, '').trim() : '';
+  let city = normalizeIpGeoName(value);
+  if (country === '中国') {
+    if (Object.hasOwn(AMBIGUOUS_CITIES, raw)) {
+      const choices = AMBIGUOUS_CITIES[raw];
+      city = Object.hasOwn(choices, region) ? choices[region] : '';
+    }
+    if (region && Object.hasOwn(CHINA_CITY_REGIONS, city) && CHINA_CITY_REGIONS[city] !== region) return '';
+    if (city === region && (MUNICIPAL_REGIONS.has(region) || city !== '吉林')) return '';
+  }
+  return /^(?:全省|全市|未知|局域网|(?:省|自治区)直辖县级行政区划|市辖区|市辖县|其他|unknown|null|none|n\/a)$/i.test(city) ? '' : city;
 }
 
 function matchesAddress(value, expectedIp) {
@@ -125,11 +150,13 @@ function selectIpLocation(candidates, ip, now = Date.now()) {
   const rows = candidates.filter(Boolean).filter(row => {
     if (!row.provider || seen.has(row.provider)) return false;
     seen.add(row.provider); return true;
-  }).map(row => ({ ...row, country: normalizeIpGeoName(row.country), region: normalizeIpGeoName(row.region), city: cleanCity(row.city, normalizeIpGeoName(row.region)) }));
+  }).map(row => ({ ...row, country: normalizeIpGeoName(row.country), region: normalizeIpGeoName(row.region), city: cleanCity(row.city, normalizeIpGeoName(row.region), normalizeIpGeoName(row.country)) }));
   const country = majority(rows, 'country');
   if (!country.value) return null;
   const region = majority(country.rows, 'region');
-  const regionRows = region.value ? region.rows : country.rows.filter(row => !row.region);
+  // A missing province is an abstention, not evidence that can overrule a
+  // province tie and manufacture a corroborated city below that conflict.
+  const regionRows = region.value ? region.rows : region.conflict ? [] : country.rows.filter(row => !row.region);
   const city = majority(regionRows, 'city');
   const cityValue = city.value;
   const evidence = cityValue ? city.rows : region.value ? region.rows : country.rows;
@@ -137,7 +164,7 @@ function selectIpLocation(candidates, ip, now = Date.now()) {
   const base = evidence[0] || {};
   return {
     source_ip: ip, country: country.value, region: region.value, city: cityValue,
-    text: [country.value, region.value, cityValue].filter((value, index, all) => value && all.indexOf(value) === index).join(' · '),
+    text: [country.value, region.value, cityValue && cityValue === region.value ? cityValue + '市' : cityValue].filter(Boolean).join(' · '),
     provider: providers.join('+'), providers, resolved_at: new Date(now).toISOString(),
     precision: cityValue ? 'approximate_city' : region.value ? 'region' : 'country',
     city_confidence: cityValue ? (city.rows.length > 1 ? 'corroborated' : 'single_source') : (city.conflict || region.conflict ? 'conflict' : 'unavailable'),

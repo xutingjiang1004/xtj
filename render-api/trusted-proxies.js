@@ -27,4 +27,11 @@ const ranges=[
 ];
 const matches=require('proxy-addr').compile(ranges);
 function isCloudflareProxy(address){try{return matches(String(address||''));}catch(_){return false;}}
-module.exports={isCloudflareProxy,ranges};
+// Non-geolocatable does not imply trusted. Documentation, benchmarking and
+// multicast addresses must stop the chain instead of exposing a forged left hop.
+const internalMatches=require('proxy-addr').compile([
+  '10.0.0.0/8','172.16.0.0/12','192.168.0.0/16','100.64.0.0/10',
+  '127.0.0.0/8','169.254.0.0/16','::1/128','fc00::/7','fe80::/10'
+]);
+function isTrustedInternalProxy(address){try{return internalMatches(String(address||''));}catch(_){return false;}}
+module.exports={isCloudflareProxy,isTrustedInternalProxy,ranges};

@@ -46,7 +46,7 @@ test('prepare authenticates and binds the exact path and upload id; guessed old 
 test('lost create response reconciliation preserves referenced media; cleanup tombstone prevents later attach', async () => {
   const f = fixture(); await request(f.app).post('/api/post/media/prepare').set('authorization', 'A').send(body).expect(200); f.files.add(path);
   const saved = await createPostWithMedia(f.supabase, 'A', path, upload, post); assert.equal(saved.data.id, 'post-id-0');
-  const retry = await createPostWithMedia(f.supabase, 'A', path, upload, post); assert.equal(retry.data.id, saved.data.id); assert.equal(f.posts.length, 1);
+  const retry = await createPostWithMedia(f.supabase, 'A', path, upload, post); assert.equal(retry.data.id, saved.data.id); assert.equal(f.posts.length, 1); assert.equal(saved.duplicate,false); assert.equal(retry.duplicate,true);
   const result = await request(f.app).post('/api/post/media/cleanup').set('authorization', 'A').send(body).expect(200);
   assert.equal(result.body.referenced, true); assert.equal(f.removals.length, 0);
   f.posts.length = 0; await request(f.app).post('/api/post/media/cleanup').set('authorization', 'A').send(body).expect(200);

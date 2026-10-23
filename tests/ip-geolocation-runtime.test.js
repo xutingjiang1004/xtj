@@ -102,6 +102,43 @@ test('a province tie cannot construct a city belonging to an arbitrarily chosen 
   assert.equal(result.precision, 'country'); assert.equal(result.city_confidence, 'conflict');
 });
 
+test('ambiguous city romanizations are resolved by province, rather than majority mistranslation', () => {
+  for (const [region, english, chinese] of [
+    ['安徽','Suzhou','宿州'],['江苏','Suzhou','苏州'],['江西','Fuzhou','抚州'],['福建','Fuzhou','福州'],
+    ['浙江','Taizhou','台州'],['江苏','Taizhou','泰州'],['江西','Yichun','宜春'],['黑龙江','Yichun','伊春'],
+    ['广西','Yulin','玉林'],['陕西','Yulin','榆林']
+  ]) {
+    const value = geo.selectIpLocation([cn('a',region,chinese),cn('b',region,english),cn('c',region,english)],ip);
+    assert.equal(value.city,chinese); assert.equal(value.city_confidence,'corroborated'); assert.equal(value.has_conflict,false);
+  }
+  const missingProvince = geo.selectIpLocation([cn('a','','Suzhou'),cn('b','','Suzhou')],ip);
+  assert.equal(missingProvince.city,'');
+  for (const region of ['constructor','__proto__','toString']) {
+    assert.equal(geo.selectIpLocation([cn('a',region,'Suzhou'),cn('b',region,'Suzhou')],ip).city,'');
+  }
+});
+
+test('known incompatible province/city pairs and generic placeholders cannot become corroborated cities', () => {
+  for (const [region,city] of [['安徽','苏州'],['江西','福州'],['广西','榆林'],['新疆','自治区直辖县级行政区划']]) {
+    const value = geo.selectIpLocation([cn('a',region,city),cn('b',region,city)],ip);
+    assert.equal(value.city,''); assert.equal(value.precision,'region');
+  }
+});
+
+test('Jilin province and Jilin city remain distinct facts, while municipalities do not duplicate', () => {
+  const value = geo.selectIpLocation([cn('a','吉林省','吉林市'),cn('b','Jilin Sheng','Jilin Shi')],ip);
+  assert.equal(value.region,'吉林'); assert.equal(value.city,'吉林'); assert.equal(value.city_confidence,'corroborated');
+  assert.equal(value.text,'中国 · 吉林 · 吉林市');
+  assert.equal(geo.parseBaiduGeoPayload({status:'0',data:[{location:'吉林省吉林市 电信'}]},ip).city,'吉林');
+  const municipal = geo.selectIpLocation([cn('a','北京','北京市'),cn('b','Beijing','Beijing')],ip);
+  assert.equal(municipal.city,''); assert.equal(municipal.text,'中国 · 北京');
+});
+
+test('province-less city votes cannot bypass an unresolved province conflict', () => {
+  const value = geo.selectIpLocation([cn('a','浙江','杭州'),cn('b','广东','深圳'),cn('c','','Hangzhou'),cn('d','','Hangzhou')],ip);
+  assert.equal(value.region,''); assert.equal(value.city,''); assert.equal(value.city_confidence,'conflict'); assert.equal(value.precision,'country');
+});
+
 test('province-only evidence is not marked as city precision, and overseas fallback is normalized', async () => {
   const province = fixture({'baidu-opendata':baidu(''),pconline:pconline('')});
   const result = await province.resolver.resolve(ip);
@@ -178,6 +215,24 @@ test('trusted proxy extraction skips Cloudflare hops but ignores forged provider
   assert.equal(scope.getClientIp(proxied), ip); assert.equal(proxied._clientIpSource, 'xff_chain_public');
   assert.equal(scope.getClientIp({ip:'173.245.48.1',socket:{remoteAddress:'173.245.48.1'},headers:{}}), 'unknown');
   assert.equal(scope.getClientIp({ip:'1.1.1.1',socket:{remoteAddress:'1.1.1.1'},headers:{'x-forwarded-for':'6.6.6.6','cf-connecting-ip':ip}}), '1.1.1.1');
+  for (const chain of ['8.8.8.8, bad-hop','8.8.8.8, , 10.0.0.2','8.8.8.8, unknown, 173.245.48.1']) {
+    assert.equal(scope.getClientIp({ip:'bad-hop',socket:{remoteAddress:'10.0.0.1'},headers:{'x-forwarded-for':chain}}),'unknown');
+  }
+});
+
+test('real Express proxy parsing cannot skip malformed or reserved hops to accept a forged IP', async () => {
+  const express = require('express'), request = require('supertest');
+  const proxies = require('../render-api/trusted-proxies');
+  const {getClientIp} = new Function('require','isPrivateOrReservedIp',between(server,'function normalizeClientIpValue(', '// AI site tools')+';return {getClientIp};')(name => name.startsWith('./') ? require('../render-api/'+name.slice(2)) : require(name),isPrivate);
+  const app = express();
+  app.set('trust proxy',address=>proxies.isCloudflareProxy(address) || proxies.isTrustedInternalProxy(address));
+  app.get('/',(req,res)=>res.json({ip:getClientIp(req)}));
+  assert.equal((await request(app).get('/').set('x-forwarded-for','6.6.6.6, 8.8.8.8, 10.1.2.3')).body.ip,ip);
+  assert.equal((await request(app).get('/').set('x-forwarded-for','bad-hop, , 8.8.8.8, 10.1.2.3')).body.ip,ip);
+  for (const hop of ['bad-hop','','192.0.2.1','2001:db8::1','198.18.0.1']) {
+    const value = (await request(app).get('/').set('x-forwarded-for','8.8.8.8, '+hop+', 10.1.2.3')).body.ip;
+    assert.notEqual(value,ip,hop); assert.ok(value === 'unknown' || isPrivate(value),hop);
+  }
 });
 
 test('post snapshots use the requesting IP, the same resolver and no separate day-long cache', async () => {
@@ -217,8 +272,29 @@ test('actual post creation ignores submitted IP/city and keeps optional GPS sepa
   assert.equal(payload.location_city,'GPS 城市');assert.deepEqual(lookedUp,[ip,ip]);assert.equal(queued[0][1],ip);
 });
 
+test('idempotent image and video retries from a different IP cannot requeue historical post geography', async () => {
+  for (const album of [false,true]) {
+    let handler, duplicate = true; const queued = [];
+    const original = {id:'original-post',ip_region_status:'pending',ip_lookup_started_at:'2026-10-01T00:00:00Z'};
+    const db = {rpc:async()=>({data:{ok:true,post:original,attachments:[],duplicate}})};
+    const scope = vm.createContext({
+      app:{post(_path,...handlers){handler=handlers.at(-1);}},authenticateUser(){},rateLimit:()=>()=>{},userBanError:()=>null,
+      SUPABASE_URL:'https://db.invalid',validatePostAttachments:()=>album?[{media_url:'https://db.invalid/media.jpg'}]:[],parsePostMediaUrl:()=>'posts/original.mp4',isLocalUploadUrl:()=>true,
+      getClientIp:req=>req.ip,isPrivateOrReservedIp:isPrivate,resolveIpRegion:async()=>({province:'',city:'',status:'failed'}),
+      createPostWithAttachments:require('../render-api/post-attachments').createPostWithAttachments,
+      createPostWithMedia:require('../render-api/post-media').createPostWithMedia,supabase:db,
+      queuePersistentIpRegionRetry:async(...args)=>{queued.push(args);return true;},console:{log(){},warn(){},error(){}},sanitizeError:String
+    });
+    vm.runInContext(between(server,"app.post('/api/post/create'",'// POST /api/location/reverse'),scope);
+    const req={ip:'1.1.1.1',userName:'alice',headers:{},body:{content:'retry from another network',visibility:'public',media_url:'https://db.invalid/media.mp4',media_type:album?'image':'video',media_storage_path:'posts/original.mp4',media_upload_id:'upload-original'}};
+    const res={statusCode:200,status(n){this.statusCode=n;return this;},json(body){this.body=body;return this;}};
+    await handler(req,res); await tick(); assert.equal(res.statusCode,201); assert.equal(res.body.data.id,original.id); assert.equal(queued.length,0);
+    duplicate=false; await handler(req,res); await tick(); assert.equal(queued.length,1); assert.equal(queued[0][1],req.ip);
+  }
+});
+
 test('administrator IP geography never falls back to GPS or a different event address and explains uncertainty', () => {
-  const scope = vm.createContext({});
+  const scope = vm.createContext({URL});
   vm.runInContext(between(admin,'function adminGetIpLocation(', '// 登录设备详情展示'),scope);
   const location = {source_ip:ip,text:'中国 · 浙江',region:'浙江',city_confidence:'conflict'};
   assert.equal(scope.adminGetIpLocation({last_ip:ip,last_location:{address:'GPS 杭州市'}},{ip:'1.1.1.1',ip_location:{text:'旧地区'}},ip), null);
@@ -226,6 +302,15 @@ test('administrator IP geography never falls back to GPS or a different event ad
   assert.equal(scope.adminGetIpLocation({last_ip:ip,last_ip_location:location},null,ip),location);
   assert.match(scope.adminFormatLocation(location),/城市待核实/);
   assert.doesNotMatch(scope.adminFormatLocation(location),/杭州/);
+  assert.equal(scope.adminGetIpLocation({last_ip:'::ffff:808:808',last_ip_location:location},null),location);
+  assert.equal(scope.adminGetIpLocation({}, {ip:'0:0:0:0:0:ffff:808:808',ip_location:location},ip),location);
+  const ipv6 = {...location,source_ip:'2001:4860:4860::8888'};
+  assert.equal(scope.adminGetIpLocation({last_ip:'2001:4860:4860:0:0:0:0:8888',last_ip_location:ipv6},null),ipv6);
+  assert.equal(scope.adminGetIpLocation({last_ip:'unknown',last_ip_location_ip:'unknown',last_ip_location:location},null),null);
+  assert.equal(scope.adminFormatLocation({text:'China · Anhui · Suzhou'}),'安徽宿州');
+  assert.equal(scope.adminFormatLocation({text:'China · Jiangxi · Fuzhou'}),'江西抚州');
+  assert.equal(scope.adminFormatLocation({text:'China · Jilin · Jilin'}),'吉林省吉林市');
+  assert.equal(scope.adminFormatLocation({text:'China · constructor · Suzhou'}),'constructorSuzhou');
 });
 
 test('public post IP labels preserve the existing province-only choice even when a city is available', () => {
