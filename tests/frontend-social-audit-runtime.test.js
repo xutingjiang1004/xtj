@@ -80,11 +80,12 @@ test('A→B→A does not clean abandoned A paths until the old in-flight upload 
 });
 
  test('existing and newly resolved post IP displays omit cities',()=>{
- const ctx={window:{},escapeHtml:x=>x};
+ const ctx={window:{XtjIpLocation:require('../js/ip-location')},escapeHtml:x=>x};
  const start=postSource.indexOf('            function buildPostLocationHtml('),end=postSource.indexOf('            window.buildPostLocationHtml =',start);
  vm.runInNewContext(postSource.slice(start,end),ctx);
- for(const post of [{ip_region_text:'浙江 舟山'},{ip_region_text:'浙江杭州'},{ip_province:'浙江省',ip_city:'湖州',ip_region_text:'浙江 湖州'},{_contentMeta:{ip_region_text:'广东 深圳'}},{ip_region_text:'广西壮族自治区 南宁'}]){
+ for(const post of [{ip_region_text:'浙江 舟山'},{ip_region_text:'浙江杭州'},{ip_province:'浙江省',ip_city:'湖州',ip_region_text:'浙江 湖州'},{ip_region_text:'广西壮族自治区 南宁'}]){
  const html=ctx.buildPostLocationHtml(post);assert.match(html,/IP属地：(浙江|广东|广西)<\/div>/);assert.doesNotMatch(html,/舟山|杭州|湖州|深圳|南宁/);
  }
  assert.match(ctx.buildPostLocationHtml({ip_region_text:'日本'}),/IP属地：日本/);
+ assert.match(ctx.buildPostLocationHtml({_contentMeta:{ip_region_text:'广东 深圳'}}),/IP属地：历史未核对/);
  });

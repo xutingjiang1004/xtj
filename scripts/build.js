@@ -104,6 +104,8 @@ function validateHtmlMinifiedRefs(htmlFile) {
 }
 
 const JS_FILES = [
+  'js/ip-location.js',
+  'js/ip-city-data.js',
   'js/photo-share.js',
   'js/post-media.js',
   'js/image-load-guard.js',

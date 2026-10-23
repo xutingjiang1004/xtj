@@ -132,7 +132,11 @@ test('wall failure with cached photos exposes retry, restores the confirmed sort
   await p.route('**/api/photos/public?**',r=>r.fulfill({status:503,json:{ok:false,error:'隔离服务不可用',retryable}}));
   await p.locator('#pwAlbumSort').selectOption('views');await p.waitForFunction(()=>document.getElementById('pwSyncStatus').classList.contains('is-error'));
   assert.equal(await p.locator('#pwSyncStatus').isVisible(),true);assert.match(await p.locator('#pwSyncLabel').innerText(),/缓存/);assert.equal(await p.locator('#pwAlbumSort').inputValue(),'date_desc');assert.equal(await p.locator('#photoGrid .photo-wall-item').count(),1);assert.equal(await p.locator('#pwSyncRetry').isVisible(),true);
-  retryable=false;await p.locator('#pwSyncRetry').click();await p.waitForFunction(()=>document.getElementById('pwSyncRetry').hidden);assert.equal(await p.locator('#pwSyncStatus').isVisible(),true);
+  retryable=false;await p.locator('#pwSyncRetry').click();
+  // The syncing state also hides Retry. Wait for this request's final error,
+  // rather than observing the transient start of the retry as its completion.
+  await p.waitForFunction(()=>window.photoWallLoadError?.retryable===false && document.getElementById('pwSyncStatus').classList.contains('is-error') && document.getElementById('pwSyncRetry').hidden);
+  assert.equal(await p.locator('#pwSyncStatus').isVisible(),true);
 }));
 
 test('closing and reopening a photo during comment submission retains the in-flight operation and its acknowledgement',()=>use(async f=>{

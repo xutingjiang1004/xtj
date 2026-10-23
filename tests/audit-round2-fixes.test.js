@@ -102,11 +102,13 @@ test('M-10: 认证后台按用户要求默认完整显示 IP / 地理 / 邮编',
 test('M-10: 实时在线页与画像页保留完整字段分支', () => {
   // 实时在线：IP 与位置
   assert.match(admin, /_showSensitiveInSession \? \(u\.ip \|\| '未记录'\) : maskIp\(u\.ip\)/);
-  assert.match(admin, /_showSensitiveInSession \? \(u\.location \|\| '未解析'\) : maskGeo\(u\.location\)/);
+  assert.match(admin, /var ipLocation = window\.XtjIpLocation\.locationForIp\(u\.ip_location, u\.ip, u\.ip\)/);
+  assert.match(admin, /_showSensitiveInSession \? \(ipLocationText \|\| '未解析'\) : maskGeo\(ipLocationText\)/);
   // 画像页：IP
   assert.match(admin, /_showSensitiveInSession \? \(p\.latest_ip \|\| ''\) : maskIp\(p\.latest_ip\)/);
-  // 画像页：GPS 坐标必须遮罩
-  assert.match(admin, /已遮罩/, 'GPS 坐标未遮罩');
+  // 画像页：IP 估计坐标保留完整值与遮罩分支，不冒充 GPS。
+  assert.match(admin, /IP 估计坐标/);
+  assert.match(admin, /已遮罩/, 'IP 估计坐标缺少遮罩分支');
 });
 
 test('M-10: 用户列表页区域保持安全文本渲染', () => {

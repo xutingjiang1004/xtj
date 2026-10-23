@@ -15,7 +15,11 @@ function installAccountProfile(app,{supabase,authenticateUser,rateLimit}) {
   try {
    const result=await supabase.from('posts').select('created_at').eq('user_name',req.userName).eq('media_type','__auth__').order('created_at',{ascending:true}).limit(1);
    if(!result||result.error)throw new Error('profile_unavailable');
-   res.json({ok:true,user_name:req.userName,registered_at:result.data&&result.data[0]&&result.data[0].created_at||null});
+   const facts=await supabase.from('posts').select('content').eq('user_name',req.userName).eq('media_type','__user_info__').order('created_at',{ascending:false}).limit(1);
+   if(!facts||facts.error)throw new Error('profile_unavailable');
+   let info={};try{info=JSON.parse(facts.data&&facts.data[0]&&facts.data[0].content||'{}');}catch(_){}
+   const registeredAt=result.data&&result.data[0]&&result.data[0].created_at||null;
+   res.json({ok:true,user_name:req.userName,registered_at:registeredAt,info:require('../js/ip-location').userInfoSnapshot(info,registeredAt)});
   }catch(_){res.status(503).json({ok:false,error:'资料暂时无法读取，请重试'});}
  });
 }

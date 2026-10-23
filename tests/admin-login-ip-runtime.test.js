@@ -169,7 +169,7 @@ function manualRoute(db,extra = {}) {
   let handler;
   const context = vm.createContext({
     app:{post(_path,...handlers){handler = handlers.at(-1);}},verifyToken(){},rateLimit:()=>()=>{},
-    supabase:db,ADMIN_USERNAME:userName,LOGIN_EVENT_MARKER:LOGIN,require:name=>require('../render-api/'+name.slice(2)),
+    supabase:db,ADMIN_USERNAME:userName,LOGIN_EVENT_MARKER:LOGIN,USER_INFO_MARKER:INFO,require:name=>name==='../js/ip-location'?require('../js/ip-location'):require('../render-api/'+name.slice(2)),
     normalizeClientIpValue:require('../render-api/ip-geolocation').normalizeIpAddress,
     isPrivateOrReservedIp:()=>false,resolveIpLocation:async ip=>location(ip,atB),logAdminAudit:async()=>{},
     console:{error(){}},sanitizeError:String,...extra
@@ -190,4 +190,13 @@ test('manual HTTP route rejects untrusted legacy events and invalid IPs before c
     await manualRoute(db,{resolveIpLocation(){assert.fail('unsupported event must not contact providers');}})({body:{user_name:userName}},res);
     assert.equal(res.statusCode,422); assert.equal(res.body.code,code);
   }
+});
+
+test('manual refresh chooses the current bound event when same-millisecond login ordering is ambiguous',async()=>{
+ const db=store();
+ await recordAdminLogin({db,userName,event:event(ipA),loginAt:atA,resolve:async()=>null});
+ await recordAdminLogin({db,userName,event:event(ipB),loginAt:atA,resolve:async()=>null});
+ const lookedUp=[],res=response();
+ await manualRoute(db,{resolveIpLocation:async ip=>{lookedUp.push(ip);return location(ip,atB);}})({body:{user_name:userName}},res);
+ assert.equal(res.statusCode,200);assert.equal(res.body.current_updated,true);assert.deepEqual(lookedUp,[ipB]);
 });

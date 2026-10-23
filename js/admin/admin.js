@@ -1445,13 +1445,16 @@
     }
 
     function mergeAdminUserInfo(base, next) {
-        var left = base || {};
-        var right = next || {};
+        var left = base || {}, right = next || {};
         var merged = Object.assign({}, left, right);
         merged.reg_time = pickEarlierAdminIso(left.reg_time, right.reg_time);
         merged.auth_created_at = pickEarlierAdminIso(left.auth_created_at, right.auth_created_at);
-        merged.last_login = pickLaterAdminIso(left.last_login, right.last_login);
-        merged.last_visit = pickLaterAdminIso(left.last_visit, right.last_visit);
+        merged.last_visit = right.last_visit || null;
+        var older = right.last_login && left.last_login && Date.parse(right.last_login) < Date.parse(left.last_login);
+        var facts = older ? left : right;
+        ['last_login','last_ip','last_ip_location','last_ip_location_ip','last_auth_event_id','last_device','last_device_id'].forEach(function(key) {
+            merged[key] = facts[key] == null ? null : facts[key];
+        });
         return merged;
     }
 
@@ -2754,35 +2757,35 @@
                 var regTime = getAdminUserEffectiveRegTime(u.info);
 
                 // 最近登录设备 & IP（从 allLoginEvents 索引取该用户事件并排序）
-                var userEvents = loginEventsByUser[u.name] ? loginEventsByUser[u.name].slice() : [];
-                userEvents.sort(function(a, b) {
-                    var infoA = {}; try { infoA = JSON.parse(a.content || '{}'); } catch(e) {}
-                    var infoB = {}; try { infoB = JSON.parse(b.content || '{}'); } catch(e) {}
-                    var ta = (infoA.login_at || a.created_at || '');
-                    var tb = (infoB.login_at || b.created_at || '');
-                    return (new Date(tb).getTime() || 0) - (new Date(ta).getTime() || 0);
-                });
-                var latestEvent = userEvents[0];
+                var userEvents = loginEventsByUser[u.name] || [];
+                var currentEvent = adminLatestLoginEvent(userEvents);
+                var snapshot = window.XtjIpLocation.ipSnapshot(u.info, currentEvent);
+                var latestEvent = currentEvent.ip ? currentEvent : null;
                 var deviceCell = '-';
                 var regionCell = '-';
                 var ipCell = '-';
                 var latestLoginTime = '';
                 if (latestEvent) {
                     try {
-                        var lc = JSON.parse(latestEvent.content || '{}');
-                        var deviceText = escapeHtml((lc.device_type || '?') + ' · ' + (lc.os || '?') + ' · ' + (lc.browser || '?'));
+                        var lc = latestEvent;
+                        var deviceText = escapeHtml(snapshot.source === 'user_info' ? (u.info.last_device || '-') : (lc.device_type || '?') + ' · ' + (lc.os || '?') + ' · ' + (lc.browser || '?'));
                         // ★ M-10：默认遮罩（点表头「显示」可展开完整值）
-                        ipCell = escapeHtml(_showSensitiveInSession ? (lc.ip || '-') : maskIp(lc.ip));
-                        var _geoRaw = adminFormatLocation(adminGetIpLocation(u.info, lc, lc.ip));
+                        ipCell = escapeHtml(_showSensitiveInSession ? (snapshot.ip || '-') : maskIp(snapshot.ip));
+                        var _geoRaw = adminFormatLocation(snapshot.location);
                         // ★ M-10：区域默认遮罩到市级，避免精确位置在后台被无差别暴露
                         regionCell = escapeHtml(_showSensitiveInSession ? _geoRaw : maskGeo(_geoRaw)) || '-';
-                        latestLoginTime = lc.login_at || latestEvent.created_at || '';
+                        latestLoginTime = snapshot.at || '';
                         var escapedName = safeJsStr(u.name);
                         deviceCell = '<a href="#" onclick="showUserLoginDetail(\'' + escapedName + '\');return false;" style="color:var(--primary);text-decoration:underline;">' + deviceText + '</a>';
                     } catch(ex) {}
                 }
 
-                // 最近登录时间优先用最新 login 事件
+                if (!latestEvent && snapshot.ip) {
+                    ipCell = escapeHtml(_showSensitiveInSession ? snapshot.ip : maskIp(snapshot.ip));
+                    regionCell = escapeHtml(adminFormatLocation(snapshot.location)) || '-';
+                    deviceCell = escapeHtml(u.info.last_device || '-');
+                }
+                // Current IP/time/location come from one server snapshot.
                 var displayLastLogin = latestLoginTime || (u.info && (u.info.last_login || u.info.last_visit));
                 var lastLogin = displayLastLogin ? formatTime(displayLastLogin) : '-';
 
@@ -3429,44 +3432,33 @@
         return '-';
     }
 
+    function adminLatestLoginEvent(rows) {
+        return (rows || []).map(function(row) {
+            var info = {};try {info = JSON.parse(row.content || '{}');} catch (_) {}
+            return Object.assign({},info,{id:row.id,created_at:row.created_at});
+        }).filter(window.XtjIpLocation.isAuthenticationEvent).sort(function(a,b) {
+            return (Date.parse(b.created_at) || 0) - (Date.parse(a.created_at) || 0);
+        })[0] || {};
+    }
+
     // IP geography must describe the same address; GPS is a separate fact.
     function adminGetIpLocation(info, event, ip) {
         info = info || {}; event = event || {};
-        function canonical(value) {
-            var address = String(value || '').trim();
-            var bracketed = address.match(/^\[([^\]]+)\](?::\d+)?$/);
-            if (bracketed) address = bracketed[1];
-            if (/^\d+\.\d+\.\d+\.\d+:\d+$/.test(address)) address = address.slice(0, address.lastIndexOf(':'));
-            if (/^(?:\d{1,3}\.){3}\d{1,3}$/.test(address)) {
-                return address.split('.').every(function(part) {return Number(part) <= 255 && String(Number(part)) === part;}) ? address : '';
-            }
-            if (!address.includes(':')) return '';
-            try {
-                address = new URL('http://[' + address.split('%')[0] + ']/').hostname.slice(1, -1).toLowerCase();
-                var mapped = address.match(/^::ffff:([a-f\d]+):([a-f\d]+)$/);
-                if (mapped) {
-                    var high = parseInt(mapped[1], 16), low = parseInt(mapped[2], 16);
-                    return [high >> 8, high & 255, low >> 8, low & 255].join('.');
-                }
-                return address;
-            } catch (_) {return '';}
-        }
-        var currentIp = canonical(ip || info.last_ip || event.ip);
+        var tools = window.XtjIpLocation;
+        var currentIp = tools.normalizeIpAddress(ip || info.last_ip || event.ip);
         if (!currentIp) return null;
-        var saved = info.last_ip_location;
-        var savedIp = canonical(info.last_ip_location_ip || (saved && saved.source_ip));
-        if (saved && savedIp === currentIp && (!saved.source_ip || canonical(saved.source_ip) === currentIp)) return saved;
-        var historical = event.ip_location;
-        if (historical && canonical(event.ip) === currentIp && (!historical.source_ip || canonical(historical.source_ip) === currentIp)) return historical;
-        return null;
+        return tools.locationForIp(info.last_ip_location,currentIp,info.last_ip_location_ip)
+            || tools.locationForIp(event.ip_location,currentIp,event.ip);
     }
 
     function adminIpLocationNote(location) {
         if (!location || typeof location !== 'object') return '';
+        if (location.city && !window.XtjIpLocation.normalizeIpCity(location.city,window.XtjIpLocation.normalizeIpGeoName(location.region),location.country || '中国')) return '城市待核实：省市组合不一致';
         if (location.city_confidence === 'conflict') return '城市待核实：来源不一致';
         if (location.city_confidence === 'single_source') return '城市为单一来源推测';
         if (location.city_confidence === 'corroborated') return location.has_conflict ? '城市多数来源一致，仍有分歧' : '城市多源一致，仍为 IP 推测';
         if (location.city_confidence === 'unavailable' && !['北京','上海','天津','重庆','香港','澳门'].includes(location.region)) return '未获得可靠城市';
+        if (!location.city_confidence && location.city) return '历史城市未经多源核对';
         return '';
     }
 
@@ -3516,25 +3508,15 @@
         var pp = parts.map(function(p) {
             var trimmed = p.trim();
             var lower = trimmed.toLowerCase();
-            if (lower === 'china' || lower === "people's republic of china" || lower === 'cn') {
+            if (lower === '中国' || lower === 'china' || lower === "people's republic of china" || lower === 'cn') {
                 isChina = true;
                 return '';
             }
             return trimmed;
         }).filter(Boolean);
         if (isChina && pp.length) {
-            var provinceName = translated(provinceMap, pp[0]);
-            var cityName = pp.length > 1 ? translated(cityMap, pp[1]) : '';
-            var ambiguousCities = {
-                suzhou: {'江苏':'苏州','安徽':'宿州'}, fuzhou: {'福建':'福州','江西':'抚州'},
-                taizhou: {'江苏':'泰州','浙江':'台州'}, yichun: {'江西':'宜春','黑龙江':'伊春'},
-                yulin: {'广西':'玉林','陕西':'榆林'}
-            };
-            var cityKey = String(pp[1] || '').toLowerCase().replace(/\s*(?:shi|city|prefecture)$/, '').trim();
-            if (Object.prototype.hasOwnProperty.call(ambiguousCities, cityKey)) {
-                var choices = ambiguousCities[cityKey];
-                cityName = Object.prototype.hasOwnProperty.call(choices, provinceName) ? choices[provinceName] : pp[1];
-            }
+            var provinceName = window.XtjIpLocation.normalizeIpGeoName(pp[0]);
+            var cityName = pp.length > 1 ? window.XtjIpLocation.normalizeIpCity(pp[1],provinceName) : '';
             if (provinceName === '吉林' && cityName === '吉林') return '吉林省吉林市';
             if (provinceName === cityName || (pp.length === 1 && (pp[0] === 'Shanghai' || pp[0] === 'Beijing' || pp[0] === 'Chongqing' || pp[0] === 'Tianjin'))) {
                 return provinceName;
@@ -4144,16 +4126,17 @@
         }
 
         // 从最新登录事件回填信息（userInfo 可能为空）
-        var latestEvent = userEvents.length > 0 ? userEvents[0].info : {};
+        var latestEvent = adminLatestLoginEvent(allLoginEvents.filter(function(row){return row.user_name === userName;}));
+        var ipSnapshot = window.XtjIpLocation.ipSnapshot(userInfo,latestEvent);
         var fallbackVisit = userInfo.last_visit || latestEvent.login_at || latestEvent.created_at || '';
-        var fallbackIp = userInfo.last_ip || latestEvent.ip || '';
-        var fallbackLocation = adminGetIpLocation(userInfo, latestEvent, fallbackIp);
-        var fallbackDevice = userInfo.last_device || ((latestEvent.device_type || '') + ' · ' + (latestEvent.os || '') + ' · ' + (latestEvent.browser || '')) || '';
+        var fallbackIp = ipSnapshot.ip;
+        var fallbackLocation = ipSnapshot.location;
+        var fallbackDevice = ipSnapshot.source === 'user_info' ? userInfo.last_device || '' : ((latestEvent.device_type || '') + ' · ' + (latestEvent.os || '') + ' · ' + (latestEvent.browser || ''));
 
         // Basic info grid
         html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;margin-bottom:16px;">';
         html += '<div><span style="font-size:11px;color:var(--text-muted);">注册时间</span><br>' + escapeHtml(getAdminUserEffectiveRegTime(userInfo) ? formatTime(getAdminUserEffectiveRegTime(userInfo)) : '-') + '</div>';
-        html += '<div><span style="font-size:11px;color:var(--text-muted);">最近登录</span><br>' + escapeHtml(userInfo.last_login ? formatTime(userInfo.last_login) : '-') + '</div>';
+        html += '<div><span style="font-size:11px;color:var(--text-muted);">最近登录</span><br>' + escapeHtml(ipSnapshot.at ? formatTime(ipSnapshot.at) : '-') + '</div>';
         html += '<div><span style="font-size:11px;color:var(--text-muted);">最近访问</span><br>' + escapeHtml(fallbackVisit ? formatTime(fallbackVisit) : '-') + '</div>';
         html += '<div><span style="font-size:11px;color:var(--text-muted);">最近IP</span><br>' + escapeHtml(fallbackIp || '-') + '</div>';
         html += '<div><span style="font-size:11px;color:var(--text-muted);">IP 粗略地区</span><br>' + escapeHtml(adminFormatLocation(fallbackLocation) || '暂未解析') + ' <span style="font-size:10px;color:var(--text-muted);">（IP 推测）</span>';
@@ -6172,12 +6155,14 @@
             if (data.users && data.users.length > 0) {
                 h += '<div class="card" style="padding:0;overflow:hidden;border:1px solid var(--border);border-radius:12px"><div class="table-wrap" style="margin:0"><table style="margin:0;width:100%;border-collapse:collapse"><thead style="background:var(--bg-secondary)"><tr><th style="padding:12px 16px;text-align:left;border-bottom:1px solid var(--border);color:var(--text-secondary);font-weight:500">用户</th><th style="padding:12px 16px;text-align:left;border-bottom:1px solid var(--border);color:var(--text-secondary);font-weight:500">设备</th><th style="padding:12px 16px;text-align:left;border-bottom:1px solid var(--border);color:var(--text-secondary);font-weight:500">IP' + (_showSensitiveInSession ? '' : '<button class="btn-sm" type="button" style="margin-left:6px;font-size:11px;padding:1px 7px;border-radius:5px;" onclick="window.revealSensitive()">显示</button>') + '</th><th style="padding:12px 16px;text-align:left;border-bottom:1px solid var(--border);color:var(--text-secondary);font-weight:500">位置</th><th style="padding:12px 16px;text-align:left;border-bottom:1px solid var(--border);color:var(--text-secondary);font-weight:500">最后活动</th><th style="padding:12px 16px;text-align:left;border-bottom:1px solid var(--border);color:var(--text-secondary);font-weight:500">操作</th></tr></thead><tbody>';
                 data.users.forEach(function(u) {
+                    var ipLocation = window.XtjIpLocation.locationForIp(u.ip_location, u.ip, u.ip);
+                    var ipLocationText = adminFormatLocation(ipLocation);
                     h += '<tr style="border-bottom:1px solid var(--border)">';
                     h += '<td style="padding:12px 16px"><b>' + escapeHtml(u.user_name) + '</b></td>';
                     h += '<td style="padding:12px 16px;color:var(--text-secondary)">' + escapeHtml(u.device_label || [u.device_type, u.os, u.browser, u.model].filter(Boolean).join(' · ') || '浏览器未提供设备信息') + '</td>';
                     // ★ M-10：默认遮罩，需精确值时点「显示完整 IP」
                     h += '<td style="padding:12px 16px;font-family:var(--font-mono, monospace);font-size:13px;color:var(--text-secondary)">' + escapeHtml(_showSensitiveInSession ? (u.ip || '未记录') : maskIp(u.ip)) + '</td>';
-                    h += '<td style="padding:12px 16px;color:var(--text-secondary)">' + escapeHtml(_showSensitiveInSession ? (u.location || '未解析') : maskGeo(u.location)) + '</td>';
+                    h += '<td style="padding:12px 16px;color:var(--text-secondary)">' + escapeHtml(_showSensitiveInSession ? (ipLocationText || '未解析') : maskGeo(ipLocationText)) + '</td>';
                     h += '<td style="padding:12px 16px;color:var(--text-secondary)">' + formatTime(u.last_active) + '</td>';
                     h += '<td style="padding:12px 16px"><button class="btn-sm" style="border-radius:6px; white-space:nowrap" onclick="loadUserProfile(\'' + safeJsStr(u.user_name) + '\')">画像</button></td></tr>';
                 });
@@ -6221,6 +6206,7 @@
             });
     };
     function renderUserProfile(el, p) {
+        p = Object.assign({},p,{latest_location:window.XtjIpLocation.locationForIp(p.latest_location,p.latest_ip,p.latest_ip)});
         var cardStyle = 'margin:0;padding:20px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:12px;display:flex;flex-direction:column;gap:12px;font-size:14px;color:var(--text-secondary)';
         var rowStyle = 'display:flex;justify-content:space-between;align-items:center;border-bottom:1px dashed var(--border);padding-bottom:8px';
         var valStyle = 'color:var(--text);font-weight:500;font-family:system-ui';
@@ -6262,10 +6248,11 @@
         //   排查需要精确值时点标题栏「显示完整信息」（仅本次会话有效，刷新即复原）。
         h += '<div style="' + rowStyle + '"><span>IP' + (_showSensitiveInSession ? '' : ' <button class="btn-sm" type="button" style="font-size:11px;padding:1px 7px;border-radius:5px;" onclick="window.revealSensitive()">显示</button>') + '</span><span class="ip-text">' + escapeHtml(_showSensitiveInSession ? (p.latest_ip || '') : maskIp(p.latest_ip)) + '</span></div>';
         if (p.latest_location) {
-            h += '<div style="' + rowStyle + ';flex-direction:column;align-items:flex-start;gap:6px"><span>位置</span><span style="' + valStyle + ';align-self:flex-end;text-align:right">' + escapeHtml(_showSensitiveInSession ? (p.latest_location.text || '') : maskGeo(p.latest_location.text)) + '</span></div>';
-            if (p.latest_location.latitude && p.latest_location.longitude) {
-                // GPS 坐标精确到 4 位小数 ≈ 11 米，等同于精确住址，属于最敏感一档
-                h += '<div style="' + rowStyle + '"><span>坐标</span><span style="' + valStyle + '">' + (_showSensitiveInSession ? (String(p.latest_location.latitude) + ', ' + String(p.latest_location.longitude)) : '***.***, ***.***（已遮罩）') + '</span></div>';
+            var ipLocationLabel = adminFormatLocation(p.latest_location);
+            h += '<div style="' + rowStyle + ';flex-direction:column;align-items:flex-start;gap:6px"><span>IP 推测地区</span><span style="' + valStyle + ';align-self:flex-end;text-align:right">' + escapeHtml(_showSensitiveInSession ? ipLocationLabel : maskGeo(ipLocationLabel)) + '</span></div>';
+            if (Number.isFinite(p.latest_location.latitude) && Number.isFinite(p.latest_location.longitude)) {
+                // These are the provider's IP estimates, never device GPS.
+                h += '<div style="' + rowStyle + '"><span>IP 估计坐标</span><span style="' + valStyle + '">' + (_showSensitiveInSession ? (String(p.latest_location.latitude) + ', ' + String(p.latest_location.longitude)) : '***.***, ***.***（已遮罩）') + '</span></div>';
             }
             if (p.latest_location.country_code) h += '<div style="' + rowStyle + '"><span>国家代码</span><span style="' + valStyle + '">' + escapeHtml(p.latest_location.country_code) + '</span></div>';
             if (p.latest_location.postal) h += '<div style="' + rowStyle + '"><span>邮编</span><span style="' + valStyle + '">' + (_showSensitiveInSession ? escapeHtml(p.latest_location.postal) : escapeHtml(String(p.latest_location.postal).slice(0, 2) + '***')) + '</span></div>';
@@ -6313,7 +6300,7 @@
             h += '<div class="card" style="' + tableWrapStyle + '"><div class="table-wrap" style="margin:0"><table style="margin:0;width:100%;border-collapse:collapse"><thead><tr><th style="'+thStyle+'">IP</th><th style="'+thStyle+'">位置</th><th style="'+thStyle+'">次数</th><th style="'+thStyle+'">首次</th><th style="'+thStyle+'">最后</th></tr></thead><tbody>';
             p.unique_ips.forEach(function(ip) {
                 h += '<tr style="border-bottom:1px solid var(--border)"><td style="' + tdStyle + '"><span class="ip-text">' + escapeHtml(ip.ip) + '</span></td>';
-                h += '<td style="' + tdStyle + '">' + escapeHtml(ip.location && ip.location.text || '') + '</td>';
+                h += '<td style="' + tdStyle + '">' + escapeHtml(adminFormatLocation(window.XtjIpLocation.locationForIp(ip.location,ip.ip,ip.ip))) + '</td>';
                 h += '<td style="' + tdStyle + ';font-family:system-ui;font-weight:500;color:var(--text)">' + ip.count + '</td>';
                 h += '<td style="' + tdStyle + ';font-size:13px">' + formatTime(ip.first_seen) + '</td>';
                 h += '<td style="' + tdStyle + ';font-size:13px">' + formatTime(ip.last_seen) + '</td></tr>';

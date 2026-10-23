@@ -4153,25 +4153,20 @@ function buildUserInfoMap(userInfoRows) {
     const userName = String(row && row.user_name || '').trim();
     if (!userName) return;
     const info = safeJsonParse(row.content);
-    if (!userInfoMap[userName]) {
-      userInfoMap[userName] = {
-        reg_time: info.reg_time || null,
-        last_login: info.last_login || null,
-        last_visit: info.last_visit || null,
-        last_ip_location: info.last_ip_location || null,
-        last_location: info.last_location || null
-      };
-      return;
-    }
-    userInfoMap[userName].reg_time = pickEarlierIso(userInfoMap[userName].reg_time, info.reg_time);
-    userInfoMap[userName].last_login = pickLaterIso(userInfoMap[userName].last_login, info.last_login);
-    userInfoMap[userName].last_visit = pickLaterIso(userInfoMap[userName].last_visit, info.last_visit);
-    if (info.last_ip_location && !userInfoMap[userName].last_ip_location) {
-      userInfoMap[userName].last_ip_location = info.last_ip_location;
-    }
-    if (info.last_location && !userInfoMap[userName].last_location) {
-      userInfoMap[userName].last_location = info.last_location;
-    }
+    const previous = userInfoMap[userName];
+    const latest = !previous || (toTimeMs(info.last_login) || 0) >= (toTimeMs(previous.last_login) || 0);
+    const snapshot = latest ? info : previous;
+    userInfoMap[userName] = {
+      reg_time: pickEarlierIso(previous && previous.reg_time, info.reg_time),
+      last_visit: pickLaterIso(previous && previous.last_visit, info.last_visit),
+      last_login: snapshot.last_login || null,
+      last_ip: snapshot.last_ip || null,
+      last_ip_location: snapshot.last_ip_location || null,
+      last_ip_location_ip: snapshot.last_ip_location_ip || null,
+      last_auth_event_id: snapshot.last_auth_event_id || null,
+      last_device: snapshot.last_device || null,
+      last_device_id: snapshot.last_device_id || null
+    };
   });
   return userInfoMap;
 }
@@ -4219,8 +4214,12 @@ function buildAdminUsersPayload(authRows, userInfoRows) {
         auth_created_at: authInfo.auth_created_at || null,
         last_login: info.last_login || null,
         last_visit: info.last_visit || null,
+        last_ip: info.last_ip || null,
         last_ip_location: info.last_ip_location || null,
-        last_location: info.last_location || null
+        last_ip_location_ip: info.last_ip_location_ip || null,
+        last_auth_event_id: info.last_auth_event_id || null,
+        last_device: info.last_device || null,
+        last_device_id: info.last_device_id || null
       })
     };
   }).sort((a, b) => {
@@ -4610,7 +4609,7 @@ function getRealIp(req) {
 // ★ 2026-09-21 修复（IP 全部落成 10.x 内网地址）：
 //   Trust internal proxy networks and official Cloudflare hops. An invalid or
 //   other reserved hop stops traversal; non-geolocatable is not proxy trust.
-// IP 字符串规范化：去端口（仅 IPv4:host 形式）、去 ::ffff: 映射前缀、取逗号分隔首段
+// Normalize a single IP address, supported ports and IPv4-mapped IPv6; reject lists.
 function normalizeClientIpValue(value) {
   return require('./ip-geolocation').normalizeIpAddress(value);
 }
@@ -4634,7 +4633,11 @@ function firstPublicIpFromForwardedChain(req) {
 function getClientIp(req) {
   var socketIp = normalizeClientIpValue(req && req.socket && req.socket.remoteAddress);
   var trustedSocket = socketIp && (require('./trusted-proxies').isTrustedInternalProxy(socketIp) || require('./trusted-proxies').isCloudflareProxy(socketIp));
+  var cloudflareHop = require('./trusted-proxies').isCloudflareProxy(socketIp);
   var forwarded = req && req.headers && req.headers['x-forwarded-for'];
+  function platformIp() {
+    return require('../js/ip-location').cloudflareClientIp({headers:{get:function(name){return req && req.headers && req.headers[name] || '';}}});
+  }
   // Express's forwarded parser omits empty tokens. Validate before accepting
   // req.ip so that omission cannot jump across an unreadable proxy hop.
   if (trustedSocket && forwarded) {
@@ -4645,9 +4648,21 @@ function getClientIp(req) {
         if (req) req._clientIpSource = 'invalid_forwarded_chain';
         return 'unknown';
       }
+      if (require('./trusted-proxies').isCloudflareProxy(forwardedHop)) cloudflareHop = true;
       // Values beyond the first non-proxy hop are supplied by that client.
-      if (!require('./trusted-proxies').isTrustedInternalProxy(forwardedHop) && !require('./trusted-proxies').isCloudflareProxy(forwardedHop)) break;
+      if (!require('./trusted-proxies').isTrustedInternalProxy(forwardedHop) && !require('./trusted-proxies').isCloudflareProxy(forwardedHop)) {
+        var connectingIp = normalizeClientIpValue(req.headers['cf-connecting-ip']);
+        if (cloudflareHop && connectingIp === forwardedHop && /^24\d\.|^25[0-5]\./.test(connectingIp)) {
+          var originalIpv6 = platformIp();
+          if (originalIpv6) {req._clientIpSource='cloudflare_connecting_ipv6';return originalIpv6;}
+        }
+        break;
+      }
     }
+  }
+  if (cloudflareHop && !forwarded) {
+    var originalIp = platformIp();
+    if (originalIp) {req._clientIpSource='cloudflare_platform_ip';return originalIp;}
   }
   // 先取 Express 解析后的 req.ip / socket 地址；但**跳过私有/保留地址**——
   // 私有地址对属地解析毫无价值（任何数据源都解析不了），只会污染 last_ip。
@@ -4673,7 +4688,7 @@ function getClientIp(req) {
   // 最终兜底：返回原始 req.ip（哪怕是私网，至少日志/审计可溯源）。
   var fallback = normalizeClientIpValue(candidates[0]);
   if (req) req._clientIpSource = 'fallback_private_or_unknown';
-  if (require('./trusted-proxies').isCloudflareProxy(fallback)) return 'unknown';
+  if (require('./trusted-proxies').isCloudflareProxy(fallback) || require('./trusted-proxies').isAnonymousCloudflareRelay(fallback)) return 'unknown';
   return fallback || 'unknown';
 }
 
@@ -5241,19 +5256,7 @@ async function logAdminLoginEvent(req) {
 }
 
 function isPrivateOrReservedIp(ip) {
-  var v = String(ip || '').trim().toLowerCase();
-  if (!v || v === 'unknown' || !require('net').isIP(v)) return true;
-  // proxy-addr parses bytes and IPv4-mapped IPv6, so expanded/compressed
-  // spellings cannot change loopback/private/documentation classification.
-  if (!isPrivateOrReservedIp.matches) isPrivateOrReservedIp.matches = require('proxy-addr').compile([
-    '0.0.0.0/8','10.0.0.0/8','100.64.0.0/10','127.0.0.0/8','169.254.0.0/16',
-    '172.16.0.0/12','192.0.0.0/24','192.0.2.0/24','192.168.0.0/16',
-    '198.18.0.0/15','198.51.100.0/24','203.0.113.0/24','224.0.0.0/3',
-    '::/96','100::/64','64:ff9b:1::/48','2001:2::/48','2001:db8::/32',
-    '2001:10::/28','2001:20::/28','3fff::/20','5f00::/16','fc00::/7',
-    'fe80::/10','fec0::/10','ff00::/8'
-  ]);
-  try { return isPrivateOrReservedIp.matches(v); } catch (_) { return true; }
+  return !require('../js/ip-location').isPublicIpAddress(ip);
 }
 
 // Login enrichment, manual checks and post snapshots share one canonical cache.
@@ -18125,14 +18128,26 @@ app.post('/admin/user/resolve-ip', verifyToken, rateLimit(60000, 10), async (req
     if (!userName || userName.length > 100) return res.status(400).json({ error: '用户名无效' });
 
     // 获取用户最近一次登录事件中的 IP
-    var loginEvent = await supabase.from('posts')
-      .select('id, content')
+    var lookup = await Promise.all([supabase.from('posts')
+      .select('id, content, created_at')
       .eq('user_name', userName)
       .eq('media_type', LOGIN_EVENT_MARKER)
       .order('created_at', { ascending: false })
-      .limit(1).maybeSingle();
+      .limit(100),
+      supabase.from('posts').select('content').eq('user_name',userName).eq('media_type',USER_INFO_MARKER).order('created_at',{ascending:false}).limit(1).maybeSingle()
+    ]);
+    var loginEvent = lookup[0];
+    if (lookup[1].error) return res.status(500).json({error:sanitizeError(lookup[1].error)});
+    var currentInfo = {};try {currentInfo=JSON.parse(lookup[1].data && lookup[1].data.content || '{}');} catch (_) {}
     if (loginEvent.error) return res.status(500).json({ error: sanitizeError(loginEvent.error) });
 
+    var retainedEvents = loginEvent.data || [];
+    var validEvents = retainedEvents.filter(function(row) {
+      try {var body = JSON.parse(row.content || '{}');return require('../js/ip-location').isAuthenticationEvent(body) && (body.source !== 'admin_login' || userName === ADMIN_USERNAME);} catch (_) {return false;}
+    });
+    var authoritative = validEvents.find(function(row){return row.id === currentInfo.last_auth_event_id;}) || validEvents[0];
+    if (!authoritative && retainedEvents.length) return res.status(422).json({error:'最近100条记录中未找到可核对的服务端认证登录，请在用户下次真实登录后重查',code:'unsupported_login_event'});
+    loginEvent.data = authoritative || null;
     var ip = null;
     if (loginEvent.data && loginEvent.data.content) {
       try {
@@ -18218,7 +18233,7 @@ app.get('/admin/user-profile', verifyToken, rateLimit(60000, 20), async (req, re
     var results = await Promise.all([
       supabase.from('posts').select('content, created_at').eq('user_name', userName).eq('media_type', USER_INFO_MARKER)
         .order('created_at', { ascending: false }).limit(1).maybeSingle(),
-      supabase.from('posts').select('content, created_at').eq('user_name', userName)
+      supabase.from('posts').select('id, content, created_at').eq('user_name', userName)
         .eq('media_type', LOGIN_EVENT_MARKER).order('created_at', { ascending: false }).limit(100),
       supabase.from('posts').select('content, created_at').eq('user_name', userName)
         .eq('media_type', USER_BEHAVIOR_MARKER).order('created_at', { ascending: false }).limit(200),
@@ -18231,8 +18246,12 @@ app.get('/admin/user-profile', verifyToken, rateLimit(60000, 20), async (req, re
     var info = {};
     if (results[0].data) { try { info = JSON.parse(results[0].data.content || '{}'); } catch(_) {} }
     var loginEvents = (results[1].data || []).map(function(row) {
-      try { return Object.assign(JSON.parse(row.content || '{}'), { recorded_at: row.created_at }); } catch(_) { return null; }
+      try { return Object.assign(JSON.parse(row.content || '{}'), { id:row.id, recorded_at: row.created_at }); } catch(_) { return null; }
     }).filter(Boolean);
+    loginEvents = loginEvents.filter(require('../js/ip-location').isAuthenticationEvent).map(function(event) {
+      var tools = require('../js/ip-location');
+      return Object.assign({},event,{ip:tools.normalizeIpAddress(event.ip),ip_location:tools.locationForIp(event.ip_location,event.ip,event.ip)});
+    });
     var uniqueIps = Object.create(null);
     var uniqueDevices = Object.create(null);
     var locationHistory = [];
@@ -18280,6 +18299,7 @@ app.get('/admin/user-profile', verifyToken, rateLimit(60000, 20), async (req, re
     var visitCount = Number(summary.visit_count)||0;
     behaviorSummary.total_events=Number(summary.behavior_count)||0;
     var latestLogin = loginEvents[0] || {};
+    var currentIpSnapshot = require('../js/ip-location').ipSnapshot(info, latestLogin);
     var latestDevice = normalizeDeviceSnapshot(latestLogin);
     var profile = {
       user_name: userName,
@@ -18288,8 +18308,8 @@ app.get('/admin/user-profile', verifyToken, rateLimit(60000, 20), async (req, re
         browser: latestDevice.browser, model: latestDevice.model,
         device_meta: latestDevice.device_meta || null
       },
-      latest_ip: latestLogin.ip || 'unknown',
-      latest_location: latestLogin.ip_location || null,
+      latest_ip: currentIpSnapshot.ip || 'unknown',
+      latest_location: currentIpSnapshot.location,
       latest_asn: latestLogin.asn_info || null,
       unique_ips: Object.values(uniqueIps).sort(function(a,b) { return b.count - a.count; }),
       unique_devices: Object.values(uniqueDevices).sort(function(a,b) { return b.count - a.count; }),
@@ -18339,15 +18359,16 @@ app.get('/admin/stats/online', verifyToken, rateLimit(60000, 30), async (req, re
       //   极端场景（24h 内 >5000 条登录事件）下尾部用户自动回退到快照字段。
       var oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
       var related = await Promise.all([
-        supabase.from('posts').select('user_name, content, created_at').eq('media_type', LOGIN_EVENT_MARKER)
+        supabase.from('posts').select('id, user_name, content, created_at').eq('media_type', LOGIN_EVENT_MARKER)
           .gte('created_at', oneDayAgo)
           .in('user_name', activeNames).order('created_at', { ascending: false }).limit(5000),
-        supabase.from('posts').select('user_name, content, created_at').eq('media_type', USER_INFO_MARKER)
+        supabase.from('posts').select('id, user_name, content, created_at').eq('media_type', USER_INFO_MARKER)
           .in('user_name', activeNames).order('created_at', { ascending: false }).limit(5000)
       ]);
       if (related[0].error || related[1].error) return sendAdminDbFailure(res,related[0].error || related[1].error);
       (related[0].data || []).forEach(function(row) {
-        if (!latestLoginByUser[row.user_name]) latestLoginByUser[row.user_name] = safeJsonParse(row.content);
+        var event = Object.assign({}, safeJsonParse(row.content), {id:row.id,created_at:row.created_at});
+        if (!latestLoginByUser[row.user_name] && require('../js/ip-location').isAuthenticationEvent(event)) latestLoginByUser[row.user_name] = event;
       });
       (related[1].data || []).forEach(function(row) {
         if (!latestInfoByUser[row.user_name]) latestInfoByUser[row.user_name] = safeJsonParse(row.content);
@@ -18359,20 +18380,9 @@ app.get('/admin/stats/online', verifyToken, rateLimit(60000, 30), async (req, re
       var userInfo = latestInfoByUser[name] || {};
       var sourceInfo = Object.keys(loginInfo).length ? loginInfo : activeInfo;
       var device = normalizeDeviceSnapshot(sourceInfo);
-      var ip = String(loginInfo.ip || activeInfo.ip || userInfo.last_ip || '');
-      // 位置来源判定：按优先级记录 location 实际来自哪个字段（精确位置 vs IP 推断）
-      var locationSourceKind = 'unavailable';
-      var location = null;
-      var locationCandidates = [
-        ['ip', loginInfo.ip_location],
-        ['ip', activeInfo.ip_location],
-        ['ip', userInfo.last_ip_location],
-        ['precise', userInfo.last_precise_location],
-        ['ip', userInfo.last_location]
-      ];
-      for (var li = 0; li < locationCandidates.length; li++) {
-        if (locationCandidates[li][1]) { location = locationCandidates[li][1]; locationSourceKind = locationCandidates[li][0]; break; }
-      }
+      var snapshot = require('../js/ip-location').ipSnapshot(userInfo, loginInfo);
+      var ip = snapshot.ip;
+      var location = snapshot.location;
       return {
         user_name: name,
         last_active: activeByUser[name].created_at,
@@ -18383,7 +18393,8 @@ app.get('/admin/stats/online', verifyToken, rateLimit(60000, 30), async (req, re
         device_label: [device.type, device.os, device.browser, device.model].filter(Boolean).join(' · '),
         ip: ip === 'unknown' ? '' : ip,
         location: onlineLocationText(location),
-        location_source: location ? locationSourceKind : 'unavailable'
+        ip_location: location,
+        location_source: location ? 'ip' : 'unavailable'
       };
     });
     var deviceStats = { mobile: 0, desktop: 0, tablet: 0, unknown: 0 };
