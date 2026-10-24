@@ -20659,6 +20659,8 @@ function migrateConfig(config) {
       safeMergeInto(merged, 'security', config.security);
     } else if (k === 'admin_debug' && typeof config.admin_debug === 'object') {
       safeMergeInto(merged, 'admin_debug', config.admin_debug);
+    } else if (k === 'guest_access' && typeof config.guest_access === 'object') {
+      safeMergeInto(merged, 'guest_access', config.guest_access);
     } else {
       merged[k] = config[k];
     }
