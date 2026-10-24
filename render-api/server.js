@@ -10831,6 +10831,13 @@ function searchQuotaErrorPayload(reason) {
 //   被拒的调用算进计数。预占仅为进程内记账，真正的扣费仍在 DB 侧
 //   consume_ai_token_usage，因此账目准确性不受影响。
 async function claimSearchSlot(context) {
+  // 游客没有账号搜索额度：跳过数据库配额 RPC（否则返回 no_user 拒绝），
+  // 由 guestAiAdmission 的每小时/每日上限与请求级 searchConsumed 计数兜底；
+  // 官方搜索仍有 deepseek-web 的每轮请求与费用预算约束。
+  if (context && context.guest === true) {
+    context.searchConsumed = (Number(context.searchConsumed) || 0) + 1;
+    return { allowed: true, reason: null, quota: null };
+  }
   return claimDurableSearchCredit(context);
 }
 
@@ -10849,6 +10856,8 @@ function requestSearchCtx(req, userName) {
       ? host._searchApiCalls : { userName: userName || '', searchConsumed: 0 };
   }
   if (!host._searchCtx.userName) host._searchCtx.userName = userName || '';
+  // 游客标记：让搜索配额门禁跳过账号级 RPC（见 claimSearchSlot）。
+  if (req.guestAi) host._searchCtx.guest = true;
   return host._searchCtx;
 }
 

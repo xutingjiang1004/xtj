@@ -102,6 +102,9 @@ test('官方搜索默认开启且游客小时上限放宽', function() {
   const providersSource = fs.readFileSync('render-api/search-providers.js', 'utf8');
   assert.match(providersSource, /name:\s*'DeepSeek'/);
   assert.match(providersSource, /enabled: !options\.freeOnly && !!deepseekWeb\.credentials\(options\)/);
+  // 游客搜索跳过账号级配额 RPC，由游客小时/每日上限与请求级计数兜底
+  assert.match(serverSource, /if \(context && context\.guest === true\)\s*\{\s*context\.searchConsumed = \(Number\(context\.searchConsumed\) \|\| 0\) \+ 1;/);
+  assert.match(serverSource, /if \(req\.guestAi\) host\._searchCtx\.guest = true;/);
 });
 
 function guestExpressApp(config) {
