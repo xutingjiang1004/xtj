@@ -6,7 +6,15 @@ const CID = /^[A-Za-z0-9-]{6,100}$/;
 const REF = /^[A-Za-z0-9_-]{43}$/;
 function failure(code, message, status=400) { return Object.assign(Error(message), {code,status}); }
 function current() { return requests.getStore(); }
-function ownerOf(req) { if(!req.userName || !req.accountId)throw failure('auth_required','请先登录',401);return String(req.accountId); }
+function ownerOf(req) {
+  // ★ 2026-10-25 访客通道（后台「访客可使用 AI」开启时）：访客没有账号，
+  //   用出口 IP 作为作用域标识，只用于附件复用缓存的命名空间，不涉及任何账号数据。
+  if(!req.userName || !req.accountId){
+    if(req && req.guestAi) return 'guest:'+String(req.guestOwner||'anonymous');
+    throw failure('auth_required','请先登录',401);
+  }
+  return String(req.accountId);
+}
 function createAttachmentStore(options={}) {
   const rows=new Map(),now=options.now||Date.now,maxBytes=options.maxBytes||64*1024*1024,ownerBytes=options.ownerBytes||54*1024*1024,ttl=options.ttl||20*60*1000;
   let bytes=0;

@@ -19502,15 +19502,20 @@ const GUEST_AI_HOURLY_LIMIT = 20;
 const GUEST_AI_DAILY_TURNS = 200;
 const GUEST_AI_MESSAGE_MAX_LEN = 50000;
 
-// 读后台开关。配置读取失败一律按关闭处理（fail closed），避免误放行。
+// 读后台开关。配置读取失败或数据库卡住时，按最近一次已知值放行（不把访客一起卡住）。
+var guestAccessLastKnown = null;
 async function guestAiEnabled() {
-  try {
-    var cfg = await getAiConfig();
-    return !!(cfg && cfg.guest_access && cfg.guest_access.enabled === true);
-  } catch (e) {
+  var read = Promise.resolve().then(function() { return getAiConfig(); }).then(function(cfg) {
+    var enabled = !!(cfg && cfg.guest_access && cfg.guest_access.enabled === true);
+    guestAccessLastKnown = enabled;
+    return enabled;
+  }).catch(function(e) {
     console.error('[GUEST-AI] switch read failed:', e && e.message);
-    return false;
-  }
+    return guestAccessLastKnown === true;
+  });
+  // 数据库无响应时最多等 4 秒，之后按最近一次已知值决定
+  var timeout = new Promise(function(resolve) { setTimeout(function() { resolve(guestAccessLastKnown === true); }, 4000); });
+  return Promise.race([read, timeout]);
 }
 // 只对完全没有凭证的访客生效；带 token 的请求仍走真实认证，避免把过期会话降级成游客。
 async function guestAiAuth(req, res, next) {
@@ -19521,6 +19526,7 @@ async function guestAiAuth(req, res, next) {
     return res.status(403).json({ ok: false, code: 'guest_ai_disabled', retryable: false, error: '访客暂不能使用 AI，请登录后再试' });
   }
   req.guestAi = true;
+  req.guestOwner = getRealIp(req);
   req.userName = '';
   req.accountId = '';
   return next();
@@ -20329,11 +20335,25 @@ app.get('/admin/ai-agent/daily-usage', verifyToken, securityRateLimit(60000, 60)
   }
 });
 
-// GET /api/agent/guest-mode - 临时游客通道状态（只读环境变量，不访问数据库）
-app.get('/api/agent/guest-mode', rateLimit(60000, 60), function(req, res) {
+// GET /api/agent/guest-mode — 访客 AI 开关状态（公开只读，不含系统提示词与密钥）
+app.get('/api/agent/guest-mode', rateLimit(60000, 60), async function(req, res) {
   res.setHeader('Cache-Control', 'no-store');
-  var enabled = guestAiEnabled();
-  return res.json({ ok: true, enabled: enabled, until: enabled ? new Date(GUEST_AI_UNTIL).toISOString() : null });
+  try {
+    var cfg = await getAiConfig();
+    var ga = (cfg && cfg.guest_access) || {};
+    return res.json({
+      ok: true,
+      enabled: ga.enabled === true,
+      name: cfg.name || '小猫',
+      avatar: cfg.avatar || '🐈',
+      avatar_url: mediaGatewayUrl(cfg.avatar_url, SUPABASE_URL) || '',
+      welcome_message: cfg.welcome_message || '',
+      limits: { hourly: GUEST_AI_HOURLY_LIMIT, daily: GUEST_AI_DAILY_TURNS }
+    });
+  } catch (e) {
+    console.error('[GUEST-AI] GET /api/agent/guest-mode error:', e && e.message);
+    return res.status(503).json({ ok: false, enabled: false, error: '服务暂不可用' });
+  }
 });
 
 // GET /api/agent/config - 普通用户获取当前 AI 公共配置（不含 system_prompt）
@@ -20586,9 +20606,9 @@ const AI_DEFAULT_CONFIG = {
   security: { hide_system_prompt_in_reasoning: true },  // 安全规则：思考过程中禁止复述系统提示词
   admin_debug: { show_effective_prompt: true, show_model_info: true, show_reasoning_length: true },
   // ★ 2026-10-25：访客可使用 AI 开关（后台「AI 管理 → 智能体设置」）。
-  //   关闭（默认）时未登录访客不能发起 AI 对话；开启后访客可用普通聊天，
-  //   但不写入任何账号数据（历史、额度、会话都不落库）。
-  guest_access: { enabled: false },
+  //   默认开启：访客可以用普通聊天（不写入任何账号数据）；后台可随时关闭，
+  //   关闭后访客一律按未登录处理。开关存于 AI 配置（posts 标记行），无需新迁移。
+  guest_access: { enabled: true },
   updated_at: '',
   updated_by: ''
 };

@@ -512,6 +512,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   var S = {
     config: null,
     configFetchedAt: 0,
+    // ★ 访客 AI 开关（后台「AI 管理 → 智能体设置 → 访客可使用 AI」）：
+    //   未登录时也要知道能不能用小猫；null = 还没问过服务端。
+    guestAiMode: null,
+    guestAiModeFetchedAt: 0,
     conversationId: null,
     messages: [],
     oldestCursor: null,
@@ -880,6 +884,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   }
 
   function canSendWithQuota() {
+    // ★ 访客通道没有账号额度：由服务端按 IP/每日次数限制，前端不拦
+    if (!readUserName() && guestAiAllowed()) return { ok: true };
     var q = S.quota;
     if (!q) {
       // 额度信息缺失（拉取失败/未完成）：开启搜索时一律不放行，避免绕过第三方搜索次数限制
@@ -2852,13 +2858,44 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     return fallback || '请求失败';
   }
 
+  // ★ 访客 AI 开关：公开只读接口，不带凭证也不会触发登录刷新。
+  async function fetchGuestAiMode(force) {
+    if (!force && S.guestAiMode && (Date.now() - S.guestAiModeFetchedAt) < 15000) return S.guestAiMode;
+    try {
+      var r = await apiRequest('GET', '/guest-mode', null, { forceNoToken: true, background: true, timeoutMs: 8000 });
+      if (r && r.ok && r.data) {
+        S.guestAiMode = {
+          enabled: r.data.enabled === true,
+          name: r.data.name || '',
+          avatar: r.data.avatar || '',
+          avatar_url: r.data.avatar_url || '',
+          welcome_message: r.data.welcome_message || ''
+        };
+      } else {
+        S.guestAiMode = { enabled: false };
+      }
+    } catch (e) {
+      S.guestAiMode = { enabled: false };
+    }
+    S.guestAiModeFetchedAt = Date.now();
+    return S.guestAiMode;
+  }
+
+  function guestAiAllowed() {
+    return !!(S.guestAiMode && S.guestAiMode.enabled === true);
+  }
+
   async function ensureConfig() {
     // The protected AI configuration is not a prerequisite for public browsing.
     // Guests use the existing entry copy without refreshing or clearing login state.
-    if (!readUserName()) return {
-      name:'小猫', avatar:'🐈', description:'AI 智能体',
-      welcome_message:'我是小猫，徐旭泽的毒舌 AI 分身。有什么问题直接问，别绕弯子。'
-    };
+    if (!readUserName()) {
+      // 访客：优先用开关接口带回的公开字段（不额外发请求，避免拉取失败时报错）
+      var _gm = S.guestAiMode;
+      return {
+        name:(_gm && _gm.name) || '小猫', avatar:(_gm && _gm.avatar) || '🐈', description:'AI 智能体',
+        welcome_message:(_gm && _gm.welcome_message) || '我是小猫，徐旭泽的毒舌 AI 分身。有什么问题直接问，别绕弯子。'
+      };
+    }
     var now = Date.now();
     if (S.config && now - S.configFetchedAt < CONFIG_CACHE_TTL) {
       if (S._lastConfigVersion && S.config.config_version !== S._lastConfigVersion) {
@@ -5916,7 +5953,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (auth && auth.ok) return true;
       var reason = auth && auth.reason;
       if (reason === 'no_user') {
-        notify('请先登录后再和小猫聊天');
+        // ★ 访客通道（后台「访客可使用 AI」开启）：未登录也允许普通聊天
+        await fetchGuestAiMode();
+        if (guestAiAllowed()) return true;
+        notify('访客暂不能使用 AI，请登录后再试');
         return false;
       }
       // 其他认证失败原因也给出明确提示
