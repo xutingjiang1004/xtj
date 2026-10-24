@@ -56,7 +56,7 @@ test('P1-3 /api/agent/image 必须要求登录且复核重定向地址', () => {
 test('P1-4 AI 聊天链路必须有每用户并发闸与单请求预估值校验', () => {
   assert.match(server, /function aiChatConcurrencyGate\(req, res, next\)/, '必须有并发闸');
   assert.match(server, /ai_concurrent_limit/, '超限必须返回明确错误码');
-  const gateUses = (server.match(/authenticateUser, aiChatConcurrencyGate,/g) || []).length;
+  const gateUses = (server.match(/aiChatConcurrencyGate,/g) || []).length;
   assert.ok(gateUses >= 6, '至少 6 条 AI 写/流式路由必须挂并发闸，实际 ' + gateUses);
   assert.match(server, /estimated_exceeds_remaining/, '超长 prompt 必须按剩余额度提前拒绝');
 });

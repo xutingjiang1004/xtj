@@ -5190,6 +5190,17 @@
                 '</div>',
                 '</div>',
 
+                // ---- 模块8: 访客与登录 ----
+                '<div class="ai-settings-section">',
+                '<h4 style="font-size:14px;font-weight:700;margin:16px 0 10px 0;padding-bottom:6px;border-bottom:1px solid var(--border,rgba(140,196,158,0.25));">访客与登录</h4>',
+                '<div class="form-group" style="display:flex;align-items:center;gap:8px;">',
+                '<label style="display:flex;align-items:center;gap:4px;font-weight:400;cursor:pointer;"><input type="checkbox" id="guestAiEnabled"' + (cfg.allow_guest_ai === true ? ' checked' : '') + ' style="width:16px;height:16px;accent-color:var(--primary,#2E9465);" /> 访客用户可使用AI</label>',
+                '</div>',
+                '<div style="font-size:11px;color:#888;margin:4px 0 0 0;line-height:1.5;padding:6px 8px;background:rgba(46,148,101,0.06);border-radius:4px;">',
+                '开启后，未登录访客可直接使用小猫 AI 普通聊天，聊天记录不保存，刷新即清；历史、深入研究、自定义模型等依赖账号的功能仍需登录。关闭后访客必须登录才能使用。',
+                '</div>',
+                '</div>',
+
                 // ---- 模块8: 安全 ----
                 '<div class="ai-settings-section">',
                 '<h4 style="font-size:14px;font-weight:700;margin:16px 0 10px 0;padding-bottom:6px;border-bottom:1px solid var(--border,rgba(140,196,158,0.25));">安全规则</h4>',
@@ -5346,6 +5357,7 @@
                             security: {
                                 hide_system_prompt_in_reasoning: cfgChecked('secHidePrompt')
                             },
+                            allow_guest_ai: cfgChecked('guestAiEnabled'),
                             admin_debug: {
                                 show_effective_prompt: cfgChecked('debugPrompt'),
                                 show_model_info: cfgChecked('debugModelInfo'),

@@ -19492,29 +19492,27 @@ const AI_CHAT_HOURLY_IP_LIMIT = 200;
 const AI_CHAT_HISTORY_FETCH_BUFFER = 24;
 const AI_CHAT_LATEST_CONVERSATION_SCAN_LIMIT = 60;
 
-// ===================== 临时游客 AI（2026-10-25 至 2026-10-27）=====================
-// Supabase 免费额度耗尽期间，允许未登录访客只使用普通聊天，不写任何数据库记录。
-// 到期后 guestAiEnabled() 恒为 false，路由自动回到 authenticateUser 行为。
-// 可用 GUEST_AI_UNTIL=off 或自定义 ISO 时间提前关闭/延长。
-const GUEST_AI_DEFAULT_UNTIL = '2026-10-27T23:59:59+08:00';
+// ===================== 访客 AI 开关 =====================
+// 由管理员在「AI 管理 → 智能体设置」控制（配置字段 allow_guest_ai，默认开启）。
+// 开启后，未登录访客只能使用普通聊天，且不写任何数据库记录；
+// 关闭后访客请求立即回到 authenticateUser（必须登录）。
+// 历史、深入研究、自定义模型、站内工具等依赖账号的 AI 功能仍要求登录。
 const GUEST_AI_HOURLY_LIMIT = 20;
 const GUEST_AI_DAILY_TURNS = 200;
 const GUEST_AI_MESSAGE_MAX_LEN = 50000;
-function resolveGuestAiUntil(raw) {
-  var value = String(raw == null ? '' : raw).trim();
-  if (value.toLowerCase() === 'off') return 0;
-  var parsed = value ? Date.parse(value) : Date.parse(GUEST_AI_DEFAULT_UNTIL);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-const GUEST_AI_UNTIL = resolveGuestAiUntil(process.env.GUEST_AI_UNTIL);
-function guestAiEnabled(now) {
-  return GUEST_AI_UNTIL > (now || Date.now());
+async function guestAiEnabled() {
+  try {
+    var config = await getAiConfig();
+    return !!(config && config.allow_guest_ai === true);
+  } catch (e) {
+    return false;
+  }
 }
 // 只对完全没有凭证的访客生效；带 token 的请求仍走真实认证，避免把过期会话降级成游客。
-function guestAiAuth(req, res, next) {
+async function guestAiAuth(req, res, next) {
   if (req.userName) return next();
-  if (!guestAiEnabled()) return authenticateUser(req, res, next);
   if (_getTokenFromRequest(req)) return authenticateUser(req, res, next);
+  if (!(await guestAiEnabled())) return authenticateUser(req, res, next);
   req.guestAi = true;
   req.userName = '';
   req.accountId = '';
@@ -20324,11 +20322,11 @@ app.get('/admin/ai-agent/daily-usage', verifyToken, securityRateLimit(60000, 60)
   }
 });
 
-// GET /api/agent/guest-mode - 临时游客通道状态（只读环境变量，不访问数据库）
-app.get('/api/agent/guest-mode', rateLimit(60000, 60), function(req, res) {
+// GET /api/agent/guest-mode - 访客 AI 开关状态（公开只读，供前端决定是否放行发送）
+app.get('/api/agent/guest-mode', rateLimit(60000, 60), async function(req, res) {
   res.setHeader('Cache-Control', 'no-store');
-  var enabled = guestAiEnabled();
-  return res.json({ ok: true, enabled: enabled, until: enabled ? new Date(GUEST_AI_UNTIL).toISOString() : null });
+  var enabled = await guestAiEnabled();
+  return res.json({ ok: true, enabled: enabled });
 });
 
 // GET /api/agent/config - 普通用户获取当前 AI 公共配置（不含 system_prompt）
@@ -20579,6 +20577,9 @@ const AI_DEFAULT_CONFIG = {
   //      catch 吞掉 → 用户端 AI 配置（人设/欢迎语/模型设置）静默回退到默认值。
   //   现把 admin_debug 恢复为独立 key（与 6ae00e15 之前一致）。
   security: { hide_system_prompt_in_reasoning: true },  // 安全规则：思考过程中禁止复述系统提示词
+  // 访客 AI 开关：管理员在后台「AI 管理 → 智能体设置」控制。
+  // 默认开启，保证 Supabase 读取失败时仍可用的内置行为；管理员保存 false 后关闭。
+  allow_guest_ai: true,
   admin_debug: { show_effective_prompt: true, show_model_info: true, show_reasoning_length: true },
   updated_at: '',
   updated_by: ''
@@ -27150,10 +27151,16 @@ app.post('/admin/ai-agent/config', verifyToken, securityRateLimit(60000, 20), as
     var avatarUrl = existingConfig.avatar_url || '';
     var avatarType = existingConfig.avatar_type || 'emoji';
     var avatarVersion = existingConfig.avatar_version || 0;
+    // 旧管理页或第三方调用可能没有这个字段：只接受明确的布尔值，缺失时保留现状，
+    // 避免保存其他设置时把访客开关意外关掉。
+    var allowGuestAi = typeof body.allow_guest_ai === 'boolean'
+      ? body.allow_guest_ai
+      : existingConfig.allow_guest_ai === true;
 
     var payload = Object.assign({}, configPayload, {
       name: name, avatar: avatar, description: description, persona: persona,
       tone: tone, system_prompt: systemPrompt, welcome_message: welcomeMessage,
+      allow_guest_ai: allowGuestAi,
       avatar_url: avatarUrl, avatar_type: avatarType, avatar_version: avatarVersion,
       updated_at: nowIso, updated_by: req.adminName || 'admin'
     });
