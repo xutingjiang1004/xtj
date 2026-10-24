@@ -64,7 +64,7 @@ function makeMiddleware(deps={}){
   return async function(req,res,next){
     let scope,timer;
     try{
-      const body=req.body||{},owner=ownerOf(req),policy=parseBudget(body),cid=String(body.conversation_id||'');
+      const body=req.body||{},owner=req.guestAi?('guest:'+String(req.ip||'')):ownerOf(req),policy=parseBudget(body),cid=String(body.conversation_id||'');
       scope={owner,cid,policy,documents:[],controller:new AbortController(),cache};
       const refs=new Map(),urls=new Map();let attachmentBytes=0,attachmentCount=0;
       function inspect(attachment){

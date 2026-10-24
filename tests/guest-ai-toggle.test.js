@@ -125,6 +125,40 @@ test('真实 HTTP 路由：开关开启时携带 Authorization 仍不接受游�
   assert.equal(response.status, 401);
 });
 
+function guestAppWithRealAiMiddleware(config) {
+  const runtime = serverGuestRuntime(config);
+  const aiRequestFeatures = require('../render-api/ai-request-features');
+  const registrationApp = { post: function() {}, delete: function() {} };
+  const aiMiddleware = aiRequestFeatures.install(registrationApp, {
+    authenticateUser: async function() {},
+    rateLimit: function() { return function(req, res, next) { next(); }; },
+    writeSse: function() {},
+    jsonMiddleware: express.json({ limit: '1mb' })
+  });
+  const app = express();
+  app.use(express.json());
+  app.post('/api/agent/chat/stream', runtime.context.guestAiAuth, aiMiddleware, function(req, res) {
+    return res.json({ ok: true, guest: req.guestAi === true, owner: req.aiRequestScope && req.aiRequestScope.owner });
+  });
+  return app;
+}
+
+test('真实 aiRequestMiddleware 不再把游客聊天请求拒绝为 auth_required', async function() {
+  const response = await request(guestAppWithRealAiMiddleware({ allow_guest_ai: true }))
+    .post('/api/agent/chat/stream')
+    .send({ message: 'hi' });
+  assert.equal(response.status, 200);
+  assert.equal(response.body.guest, true);
+  assert.match(String(response.body.owner), /^guest:/);
+});
+
+test('真实 aiRequestMiddleware 在开关关闭时仍由认证中间件拦截', async function() {
+  const response = await request(guestAppWithRealAiMiddleware({ allow_guest_ai: false }))
+    .post('/api/agent/chat/stream')
+    .send({ message: 'hi' });
+  assert.equal(response.status, 401);
+});
+
 test('聊天流路由挂载访客鉴权、游客限流和每日上限', function() {
   assert.match(serverSource, /app\.post\('\/api\/agent\/chat\/stream', guestAiAuth, aiChatConcurrencyGate, rateLimit\(3600000, AI_CHAT_HOURLY_IP_LIMIT\), guestAiAdmission,/);
   assert.match(serverSource, /app\.get\('\/api\/agent\/guest-mode', rateLimit\(60000, 60\), async function/);
