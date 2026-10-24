@@ -57,7 +57,7 @@ test('the actual critique route enforces post visibility and bills image provide
   const supabase = { from() { return { select() { return this; }, eq() { return this; }, in() { return this; }, async maybeSingle() { return { data: { ...post, visibility } }; }, async order() { return { data: [{ post_id: post.id, media_type: 'image', position: 0, media_url: post.media_url }] }; } }; }, storage: { from() { return { async createSignedUrl(path, ttl) { signed.push({ path, ttl }); return { data: { signedUrl: 'https://supabase.test/storage/v1/object/sign/uploads/' + path + '?token=fixture' } }; } }; } } };
   const pass = (req, res, next) => next();
   const scope = vm.createContext({ app, supabase, require: localRequire, ADMIN_USERNAME: 'xxz', SUPABASE_URL: 'https://supabase.test', AbortController, console,
-    DEEPSEEK_MODEL_VISION: 'deepseek-flash', DEEPSEEK_MODEL_FLASH: 'deepseek-flash', writeSse: localRequire('./sse-write').writeSse,
+    DEEPSEEK_MODEL_VISION: 'deepseek-flash', DEEPSEEK_MODEL_FLASH: 'deepseek-flash', endSse:require('../render-api/sse-write').endSse,writeSse: localRequire('./sse-write').writeSse,
     authenticateUser: (req, res, next) => { req.userName = req.headers['x-fixture-user']; if (!req.userName) return res.status(401).json({ error: 'unauthorized' }); next(); },
     aiChatConcurrencyGate: pass, rateLimit: () => pass, enforceAiChatAccess: async () => ({ allowed: true }), getAiQuotaErrorMessage: () => '',
     aiSiteText: (v, n) => String(v || '').trim().slice(0, n), genConvId: () => 'fixture-conversation',

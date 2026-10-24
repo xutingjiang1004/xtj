@@ -103,7 +103,7 @@ test('research resume binds the stored model and conversation, and synthesis-onl
     validateString:value=>value,genConvId:()=> 'NEWCONV01',researchCacheKey:()=> 'isolated',researchCacheGet:()=>null,researchCacheSet(){},researchCache:new Map(),
     getAiConfig:async()=>({}),runSelfResearchFlow:async opts=>{captured=opts;return{answer:'RESUMED REPORT',complete:true,usage:{total_tokens:12},search_count:0,sources:[{url:'https://old-source.test/'}]};},
     persistResearchRecord:async()=> 'saved-report',recordAiTurnUsage:async(_user,usage,opts)=>{charges.push({usage,opts});return{};},
-    setInterval:()=>1,clearInterval(){},writeSse:(res,event)=>res.events.push(event),console:{error(){},warn(){}}
+    setInterval:()=>1,clearInterval(){},endSse:require('../render-api/sse-write').endSse,writeSse:(res,event)=>res.events.push(event),console:{error(){},warn(){}}
   };
   const a=source.indexOf("app.post('/api/agent/research/stream'"),b=source.indexOf('// GET /api/agent/research/history',a);vm.runInNewContext(source.slice(a,b),c);
   const req=new EventEmitter();Object.assign(req,{userName:'alice',accountId:'account',body:{checkpoint_id:'11111111-1111-4111-8111-111111111111',query:'EDITED QUESTION',conversation_id:'WRONGCONV',research_model:'pro',model:'pro'}});

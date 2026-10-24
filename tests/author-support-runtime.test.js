@@ -7,17 +7,17 @@ const sharp = require('sharp');
 const {createAuthorSupport, DISCLAIMER} = require('../render-api/author-support');
 
 function fixture() {
-  let row=null, failWrite=false;
+  let row=null, failWrite=false, attempted=false;
   const uploaded=new Map(), removed=[];
   const supabase={storage:{from(bucket){assert.equal(bucket,'uploads');return {
     getPublicUrl(path){return {data:{publicUrl:'https://example.test/storage/'+path}};},
     async upload(path,bytes,options){assert.equal(options.upsert,false);uploaded.set(path,Buffer.from(bytes));return {data:{path}};},
     async remove(paths){removed.push(...paths);paths.forEach(path=>uploaded.delete(path));return {data:[]};}
-  };}},from(table){assert.equal(table,'posts');let patch=null,insert=false;
+  };}},async rpc(name,args){if(name==='register_managed_image')return{data:true};if(name==='enqueue_storage_cleanup'){removed.push(...args.p_paths);args.p_paths.forEach(path=>uploaded.delete(path));return{data:{ok:true}};}assert.equal(name,'update_author_support');attempted=true;if(failWrite===true)return{error:{message:'temporary database failure'}};const codes=JSON.parse(row?.content||'{}'),old=codes[args.p_provider];codes[args.p_provider]=args.p_path;row={id:'support-config',content:JSON.stringify(codes)};if(old){removed.push(old);uploaded.delete(old);}return failWrite?{error:{message:'response lost'}}:{data:codes};},from(table){assert.equal(table,'posts');let patch=null,insert=false;
     const q={select(){return q;},eq(){return q;},order(){return q;},limit(){return q;},
       update(value){patch=value;return q;},insert(value){patch=value;insert=true;return q;},
       then(resolve,reject){
-        if(patch && failWrite)return Promise.resolve({error:{message:'temporary database failure'}}).then(resolve,reject);
+        if(failWrite==='verify'&&attempted)return Promise.resolve({error:{message:'verification unavailable'}}).then(resolve,reject);if(patch && failWrite)return Promise.resolve({error:{message:'temporary database failure'}}).then(resolve,reject);
         if(patch)row=insert?{id:'support-config',...patch}:{...row,...patch};
         return Promise.resolve({data:patch?null:row?[row]:[]}).then(resolve,reject);
       }};return q;}};
@@ -63,4 +63,14 @@ test('executable content and invalid providers cannot become published QR images
   await request(f.app).post('/admin/author-support').set('Authorization','Bearer admin').send({provider:'other',image:(await png()).toString('base64')}).expect(400);
   await request(f.app).post('/admin/author-support').set('Authorization','Bearer admin').send({provider:'wechat',image:Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><script>alert(1)</script></svg>').toString('base64')}).expect(400);
   assert.equal(f.uploaded.size,0);
+});
+
+test('F3 committed response loss and failed verification retain every published QR object',async()=>{
+ for(const failure of ['lost','verify']){
+  const f=fixture(),image=(await png()).toString('base64');
+  await request(f.app).post('/admin/author-support').set('Authorization','Bearer admin').send({provider:'wechat',image}).expect(200);
+  f.setFailWrite(failure);
+  await request(f.app).post('/admin/author-support').set('Authorization','Bearer admin').send({provider:'wechat',image}).expect(503);
+  const codes=JSON.parse(f.getRow().content);assert.ok(f.uploaded.has(codes.wechat));assert.ok(!f.removed.includes(codes.wechat));
+ }
 });

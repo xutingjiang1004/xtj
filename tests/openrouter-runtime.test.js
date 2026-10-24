@@ -47,7 +47,7 @@ function routeFixture(options={}) {
     buildMsgMeta:(role,convId,usage,reasoning,seq,_search,_elapsed,extra)=>JSON.stringify({role,convId,usage,reasoning,seq,...extra}),
     supabase:{from:()=>({insert:async value=>{rows.push(...value);return{error:null};}})},
     recordAiTurnUsage:async(_name,value)=>usage.push(value),
-    writeSse:(_res,event)=>{events.push(event);if(options.cancelOnContent&&event.type==='content')req.emit('aborted');return true;},
+    endSse:require('../render-api/sse-write').endSse,writeSse:(_res,event)=>{events.push(event);if(options.cancelOnContent&&event.type==='content')req.emit('aborted');return true;},
     requestPinnedStream:async(url,addresses,init)=>{
       assert.equal(url.href,openRouter.BASE_URL+'/chat/completions');assert.equal(addresses[0].address,'93.184.216.34');
       assert.equal(init.headers.Authorization,'Bearer '+TEST_KEY); const payload=JSON.parse(init.body);freeRequest(payload);calls.push({payload,signal:init.signal});

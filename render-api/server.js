@@ -85,7 +85,7 @@ const deepSeekPricing = require('./deepseek-pricing');
 const { queryWeather, queryWeatherData, formatWeatherText, CITY_COORDS } = require('./weather');
 const { fetchSafeWebPage, assertSafeWebUrl, requestPinnedStream, fetchSafeRaw, fetchSafeBuffer, fetchSafeRedirectBuffer } = require('./web-fetch');
 const { ocrImageBuffer } = require('./image-ocr');
-const { writeSse } = require('./sse-write');
+const { endSse, writeSse } = require('./sse-write');
 const { getProcessEvents } = require('./ai-process-events');
 const { createChatFeatures } = require('./chat-features');
 const { createDmPrivateStorage, dmStorageBucket, PRIVATE_BUCKET } = require('./dm-private-storage');
@@ -258,11 +258,11 @@ if (ALLOWED_ORIGINS.length === 0) {
 //   避免启动日志出现两条完全相同的 WARN。
 
 // 初始化 Supabase 客户端（仅使用 service_role key，禁止 anon key 兜底）
-const supabase = createClient(
+const supabase = require('./ai-private-data').bindPrivateAiData(createClient(
   SUPABASE_URL,
   SUPABASE_SERVICE_KEY,
   { global: { fetch: supabaseAvailability.transport } }
-);
+));
 // Token 额度 + Pro 会员（Stripe 接入点预留）
 const aiQuota = createAiQuota(supabase);
 const claimDurableSearchCredit = require('./search-credit').createSearchCredit({
@@ -11627,7 +11627,7 @@ async function authenticateUser(req, res, next) {
       }
       // 写路径统一封禁/禁言/状态不可用拦截（含 AI / 改删帖等此前遗漏路由）
       if (applyAuthenticatedWriteRestrictions(req, res)) return;
-      return next();
+      return require('./ai-private-data').runAsAccount(req, next);
     }
   }
 
@@ -13217,6 +13217,8 @@ async function processStorageCleanupJobs() {
   if (_storageCleanupRunning) return;
   _storageCleanupRunning = true;
   try {
+    var orphanSweep = await supabase.rpc('enqueue_managed_image_orphans');
+    if (!orphanSweep || orphanSweep.error) console.warn('[storage-cleanup] managed image sweep unavailable');
     var pending = await supabase.from('storage_cleanup_jobs')
       .select('id, bucket, paths, attempts, status, updated_at, claim_token, lease_until')
       .in('status', ['pending', 'processing'])
@@ -13292,6 +13294,12 @@ async function processStorageCleanupJobs() {
               var candidatePaths = cleanupGroup.paths;
               cleanupGroup.paths = await require('./storage-cleanup').claimPhotoCleanupPaths(supabase, candidatePaths);
               candidatePaths.forEach(function(path) { if (!cleanupGroup.paths.includes(path)) protectedPaths.add(path); });
+              if (!cleanupGroup.paths.length) continue;
+            }
+            if (cleanupGroup.bucket === 'uploads') {
+              var imageCandidates = cleanupGroup.paths;
+              cleanupGroup.paths = await require('./storage-cleanup').claimManagedImageCleanupPaths(supabase, imageCandidates);
+              imageCandidates.forEach(function(path) { if (!cleanupGroup.paths.includes(path)) protectedPaths.add(path); });
               if (!cleanupGroup.paths.length) continue;
             }
             var partRemoval = await withStorageCleanupTimeout(supabase.storage.from(cleanupGroup.bucket).remove(cleanupGroup.paths), STORAGE_CLEANUP_REMOVE_TIMEOUT_MS);
@@ -20936,7 +20944,7 @@ async function handleDeepThinkChat(req, res) {
   //        且其内部 releaseDeep 有 released 幂等标志，重复调用安全。
   function safeEnd() {
     try { if (typeof releaseDeepResearch === 'function') releaseDeepResearch(); } catch (e) {}
-    if (!res.writableEnded) { try { res.end(); } catch (e) {} }
+    if (!res.writableEnded) return endSse(res);
   }
   function sseSend(obj) { if (!res.writableEnded) { try { writeSse(res, obj); } catch (e) {} } }
 
@@ -21913,7 +21921,7 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
   }
   function safeEnd() {
     clearHeartbeat();
-    if (!res.writableEnded) res.end();
+    if (!res.writableEnded) return endSse(res);
   }
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -22527,7 +22535,7 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, aiChatConcurren
   }
   function safeEnd() {
     clearHeartbeat();
-    if (!res.writableEnded) res.end();
+    if (!res.writableEnded) return endSse(res);
   }
   function sseSend(obj) { try { if (!res.writableEnded && !aborted) writeSse(res, obj); } catch (_) {} }
   res.setHeader('Content-Type', 'text/event-stream');
@@ -23241,7 +23249,7 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
   var _inFlightRegistered = false; // 本请求是否已在 inFlightStreams 注册（safeEnd 清理条件）
   var _turnAccepted = false;
   var interruptedSave = null;
-  function preserveDisconnectedTurn() {
+  var preserveDisconnectedTurn = require('./ai-private-data').bindAccount(function() {
     if (interruptedSave || !_turnAccepted || res._aiTurnFinishing || !convId || !message) return;
     interruptedSave = saveInterruptedChatTurn({ db: supabase, userName: userName, convId: convId,
       message: _visionRawText || message,
@@ -23254,7 +23262,8 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
       startedAt: T0, requestId: clientReqId || ('server_' + T0),
       finishReason: aborted ? 'cancelled' : 'upstream_error' });
     interruptedSave.then(function(saved) { if (!saved) console.warn('[AGENT-STREAM] interrupted history save failed'); });
-  }
+  });
+
   function terminateWithError(errObj) {
     if (_terminalSent) return;
     _terminalSent = true;
@@ -23286,7 +23295,7 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
     if (_inFlightRegistered && clientReqId && userName) {
       try { inFlightStreams.delete(userName + ':' + clientReqId); } catch (e) {}
     }
-    if (!res.writableEnded) res.end();
+    if (!res.writableEnded) return endSse(res);
   }
   
   function markStreamDisconnected() {
@@ -26214,7 +26223,7 @@ app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, 
     //   守卫永远为 false，clearTimeout 从不执行，属复制粘贴残留。
     //   本路由只有心跳定时器，已由上方 clearStreamHeartbeat() 处理。
     if (researchRelease) { try { researchRelease(); } catch (e) {} researchRelease = null; }
-    if (!res.writableEnded) { try { res.end(); } catch (e) {} }
+    if (!res.writableEnded) return endSse(res);
   }
 
   function markStreamDisconnected() {
@@ -26672,7 +26681,7 @@ app.post('/api/agent/post-chat/stream', authenticateUser, aiChatConcurrencyGate,
       if (!closed) {
         writeSse(res, { error: getAiQuotaErrorMessage(critiqueAccess.reason), code: critiqueAccess.reason || 'rate_limited' }, 'error');
       }
-      res.end();
+      await endSse(res);
       return;
     }
     var postId = aiSiteText(req.body && req.body.post_id, 80);
@@ -26731,7 +26740,7 @@ app.post('/api/agent/post-chat/stream', authenticateUser, aiChatConcurrencyGate,
       }
     }
   }
-  res.end();
+  await endSse(res);
 });
 
 app.post('/api/agent/site-search', authenticateUser, rateLimit(60000, 20), async (req, res) => {

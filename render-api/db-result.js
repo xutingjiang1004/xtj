@@ -27,11 +27,11 @@ function isRetryableError(error) {
     if (NON_RETRYABLE_CODES.indexOf(code) >= 0) return false;
     if (/^08/.test(code)) return true;
     if (code === '40001') return true;
-    // PostgREST 连接类错误（PGRST100 无响应 / PGRST102 网络错误 / PGRST205 连接终止，
-    // 以及裸 PGRST + 连接类 message——旧版 supabase-js 的常见形态）属瞬态故障，必须可重试；
-    // 语义类（PGRST116 多行、PGRST203 无记录等）不可重试
+    // Group 0 is connection/pool availability. Request, schema and auth
+    // errors remain semantic failures even if their message mentions a timeout.
     if (/^PGRST/i.test(code)) {
-      if (/^PGRST(100|102|205)$/i.test(code)) return true;
+      if (/^PGRST00[0-3]$/i.test(code)) return true;
+      if (/^PGRST[0-9X]/i.test(code)) return false;
       if (/connection terminated|network|timeout|socket|fetch failed|ECONNRESET|ETIMEDOUT/i.test(message)) return true;
       return false;
     }

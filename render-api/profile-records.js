@@ -2,6 +2,11 @@
 const { NORMAL_POST_MEDIA_TYPES, isNormalPost } = require('./post-query');
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/;
+const BIGINT = /^(?:0|[1-9][0-9]{0,18})$/;
+function validRecordId(kind, id) {
+  if (typeof id !== 'string') return false;
+  return ['likes', 'comments'].includes(kind) ? BIGINT.test(id) && BigInt(id) <= 9223372036854775807n : UUID.test(id);
+}
 const KINDS = ['posts', 'views', 'likes', 'comments'];
 const FIELDS = 'id,user_name,content,media_type,media_url,created_at,visibility,is_deleted';
 async function result(query) {
@@ -22,7 +27,7 @@ function createProfileRecords({ express, supabase, authenticateUser, rateLimit }
     const opts = count ? { count: 'exact', head: true } : { count: 'exact' };
     let q;
     if (kind === 'likes' || kind === 'comments') q = supabase.from(kind)
-      .select(count ? 'id' : (kind === 'comments' ? 'id,post_id,content,created_at' : 'id,post_id,created_at'), opts).eq('user_name', actor);
+      .select(count ? 'id' : (kind === 'comments' ? 'id::text,post_id,content,created_at' : 'id::text,post_id,created_at'), opts).eq('user_name', actor);
     else q = supabase.from('posts').select(count ? 'id' : (kind === 'views' ? 'id,media_url,created_at' : FIELDS), opts).eq('user_name', actor);
     if (kind === 'views') q = q.eq('media_type', '__post_view__');
     if (kind === 'posts') {
@@ -39,7 +44,7 @@ function createProfileRecords({ express, supabase, authenticateUser, rateLimit }
   });
   router.get('/', async (req, res) => {
     const kind = String(req.query.kind || ''), at = req.query.before_at, id = req.query.before_id;
-    if (!KINDS.includes(kind) || !!at !== !!id || (at && (typeof at !== 'string' || !TIMESTAMP.test(at) || !Number.isFinite(Date.parse(at)) || !UUID.test(id)))) {
+    if (!KINDS.includes(kind) || !!at !== !!id || (at && (typeof at !== 'string' || !TIMESTAMP.test(at) || !Number.isFinite(Date.parse(at)) || !validRecordId(kind, id)))) {
       return res.status(400).json({ ok: false, error: '记录参数无效' });
     }
     const limit = Math.min(40, Math.max(1, parseInt(req.query.limit, 10) || 20));
@@ -64,7 +69,7 @@ function createProfileRecords({ express, supabase, authenticateUser, rateLimit }
       });
       const last = rows[rows.length - 1];
       res.json({ ok: true, items, total: page.count || 0, has_more: all.length > limit,
-        next_cursor: all.length > limit && last ? { at: last.created_at, id: last.id } : null });
+        next_cursor: all.length > limit && last ? { at: last.created_at, id: String(last.id) } : null });
     } catch (_) { res.status(503).json({ ok: false, error: '记录暂时无法加载，请重试' }); }
   });
   return router;

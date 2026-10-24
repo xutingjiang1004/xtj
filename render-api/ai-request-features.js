@@ -21,7 +21,11 @@ function createAttachmentStore(options={}) {
     let own=0;for(const row of rows.values())if(row.owner===owner)own+=row.bytes;
     if(decoded.buffer.length>ownerBytes||decoded.buffer.length>maxBytes)throw failure('attachment_cache_full','附件超过复用缓存容量，请拆分文件',413);
     const sorted=Array.from(rows.values()).sort((a,b)=>a.used-b.used);
-    for(const row of sorted){if(own+decoded.buffer.length<=ownerBytes&&bytes+decoded.buffer.length<=maxBytes&&rows.size<128)break;if(own+decoded.buffer.length>ownerBytes&&row.owner!==owner)continue;remove(row.ref);if(row.owner===owner)own-=row.bytes;}
+    // Apply the owner and global budgets independently; the global pass must
+    // revisit older foreign rows skipped while satisfying the owner budget.
+    for(const row of sorted){if(own+decoded.buffer.length<=ownerBytes)break;if(row.owner===owner){remove(row.ref);own-=row.bytes;}}
+    for(const row of sorted){if(bytes+decoded.buffer.length<=maxBytes&&rows.size<128)break;remove(row.ref);}
+    if(own+decoded.buffer.length>ownerBytes||bytes+decoded.buffer.length>maxBytes||rows.size>=128)throw failure('attachment_cache_full','附件复用缓存已满，请重试',413);
     const row={ref:randomBytes(32).toString('base64url'),owner,cid,digest,name:decoded.name,mime:decoded.mime,buffer:decoded.buffer,bytes:decoded.buffer.length,used:now(),expires:now()+ttl,parsed:null};
     rows.set(row.ref,row);bytes+=row.bytes;return publicRow(row);
   }
@@ -99,7 +103,7 @@ function makeMiddleware(deps={}){
         else res.status(408).json({ok:false,...error});
         // The existing transports all release their upstream work on this event.
         // The terminal event above distinguishes a budget deadline from a user stop.
-        req.emit('aborted');if(!res.writableEnded)res.end();
+        req.emit('aborted');if(!res.writableEnded)require('./sse-write').endSse(res);
       },policy.maxSeconds*1000);
       requests.run(scope,next);
     }catch(error){if(timer)clearTimeout(timer);res.status(error.status||400).json({ok:false,code:error.code||'attachment_invalid',error:error.message});}
