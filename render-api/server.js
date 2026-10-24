@@ -19492,6 +19492,52 @@ const AI_CHAT_HOURLY_IP_LIMIT = 200;
 const AI_CHAT_HISTORY_FETCH_BUFFER = 24;
 const AI_CHAT_LATEST_CONVERSATION_SCAN_LIMIT = 60;
 
+// ===================== 临时游客 AI（2026-10-25 至 2026-10-27）=====================
+// Supabase 免费额度耗尽期间，允许未登录访客只使用普通聊天，不写任何数据库记录。
+// 到期后 guestAiEnabled() 恒为 false，路由自动回到 authenticateUser 行为。
+// 可用 GUEST_AI_UNTIL=off 或自定义 ISO 时间提前关闭/延长。
+const GUEST_AI_DEFAULT_UNTIL = '2026-10-27T23:59:59+08:00';
+const GUEST_AI_HOURLY_LIMIT = 20;
+const GUEST_AI_DAILY_TURNS = 200;
+const GUEST_AI_MESSAGE_MAX_LEN = 50000;
+function resolveGuestAiUntil(raw) {
+  var value = String(raw == null ? '' : raw).trim();
+  if (value.toLowerCase() === 'off') return 0;
+  var parsed = value ? Date.parse(value) : Date.parse(GUEST_AI_DEFAULT_UNTIL);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+const GUEST_AI_UNTIL = resolveGuestAiUntil(process.env.GUEST_AI_UNTIL);
+function guestAiEnabled(now) {
+  return GUEST_AI_UNTIL > (now || Date.now());
+}
+// 只对完全没有凭证的访客生效；带 token 的请求仍走真实认证，避免把过期会话降级成游客。
+function guestAiAuth(req, res, next) {
+  if (req.userName) return next();
+  if (!guestAiEnabled()) return authenticateUser(req, res, next);
+  if (_getTokenFromRequest(req)) return authenticateUser(req, res, next);
+  req.guestAi = true;
+  req.userName = '';
+  req.accountId = '';
+  return next();
+}
+const guestAiHourlyLimiter = rateLimit(3600000, GUEST_AI_HOURLY_LIMIT);
+var guestAiDayCounter = { key: '', count: 0 };
+function guestAiAdmission(req, res, next) {
+  if (!req.guestAi) return next();
+  return guestAiHourlyLimiter(req, res, function() {
+    var key = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
+    if (guestAiDayCounter.key !== key) {
+      guestAiDayCounter.key = key;
+      guestAiDayCounter.count = 0;
+    }
+    if (guestAiDayCounter.count >= GUEST_AI_DAILY_TURNS) {
+      return res.status(429).json({ ok: false, code: 'guest_daily_limit', retryable: false, error: '今天游客体验次数已用完，请明天再试。' });
+    }
+    guestAiDayCounter.count += 1;
+    next();
+  });
+}
+
 // ★ 思考Max：切历史上下文，先按条数上限（256/2048）取最近，再从旧到新累计，
 //   总字符超过预算就自动丢弃更早的内容（“自动压缩”），保底保留最近一条。
 //   返回完整历史对象（保留 role/content/vision_urls 等字段，多模态连续追问不受影响）。
@@ -20278,6 +20324,13 @@ app.get('/admin/ai-agent/daily-usage', verifyToken, securityRateLimit(60000, 60)
   }
 });
 
+// GET /api/agent/guest-mode - 临时游客通道状态（只读环境变量，不访问数据库）
+app.get('/api/agent/guest-mode', rateLimit(60000, 60), function(req, res) {
+  res.setHeader('Cache-Control', 'no-store');
+  var enabled = guestAiEnabled();
+  return res.json({ ok: true, enabled: enabled, until: enabled ? new Date(GUEST_AI_UNTIL).toISOString() : null });
+});
+
 // GET /api/agent/config - 普通用户获取当前 AI 公共配置（不含 system_prompt）
 app.get('/api/agent/config', authenticateUser, async (req, res) => {
   try {
@@ -20811,6 +20864,9 @@ async function loadAiContext(userName, convId, clientHistory, historyOptions) {
       ctx.history = [];
     }
   }
+
+  // 临时游客通道没有账号历史可读，直接返回空上下文，避免任何数据库往返。
+  if (historyOptions && historyOptions.skipDb) return ctx;
 
   try {
     // 验证 convId 防止 LIKE 注入
@@ -23184,13 +23240,15 @@ app.get('/api/agent/image', authenticateUser, securityRateLimit(3600000, 40), as
 
 
 // POST /api/agent/chat/stream - 流式 SSE 输出
-app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), express.json({ limit: '80mb' }), aiRequestMiddleware, async (req, res) => {
+app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), guestAiAdmission, express.json({ limit: '80mb' }), aiRequestMiddleware, async (req, res) => {
   res._aiRetryOwner={userName:req.userName,accountId:String(req.accountId||'')};
   res._aiFollowupEnabled = !!(req.body && req.body.followup_suggestions === true);
   res._aiFollowupQuestion = String(req.body && req.body.message || '').slice(0,1000);
   var T0 = Date.now();
   var T_stage = {};
   var userName = req.userName;
+  // 游客没有账号名，防串流键退化为当前出口 IP（不写入用户字段）。
+  var streamOwnerKey = userName || ('guest:' + getRealIp(req));
   // F-1: 请求级搜索 API 调用计数器（供 recordAiTurnUsage 按真实次数记账）
   req._searchApiCalls = { n: 0 };
   var aborted = false;
@@ -23250,7 +23308,7 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
   var _turnAccepted = false;
   var interruptedSave = null;
   var preserveDisconnectedTurn = require('./ai-private-data').bindAccount(function() {
-    if (interruptedSave || !_turnAccepted || res._aiTurnFinishing || !convId || !message) return;
+    if (!userName || req.guestAi || interruptedSave || !_turnAccepted || res._aiTurnFinishing || !convId || !message) return;
     interruptedSave = saveInterruptedChatTurn({ db: supabase, userName: userName, convId: convId,
       message: _visionRawText || message,
       content: sanitizeAssistantVisibleText(contentBuffer || responsesContent || '', { skipActionCleanup: !!roleplayEnabled }),
@@ -23292,8 +23350,8 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
     // ★ 2026-09-24 修复：仅当本请求成功注册过（_inFlightRegistered）时才删除。
     //   此前重复请求在 22417 一带命中 409 分支后，其 safeEnd 会无条件 delete，
     //   删掉的是"在途请求"的注册，防串流去重被一次重复提交击穿。
-    if (_inFlightRegistered && clientReqId && userName) {
-      try { inFlightStreams.delete(userName + ':' + clientReqId); } catch (e) {}
+    if (_inFlightRegistered && clientReqId && streamOwnerKey) {
+      try { inFlightStreams.delete(streamOwnerKey + ':' + clientReqId); } catch (e) {}
     }
     if (!res.writableEnded) return endSse(res);
   }
@@ -23320,7 +23378,7 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
   
   try {
     // 先验证输入，避免空消息/非法参数仍扣配额
-    var message = validateString(req.body && req.body.message, AI_CHAT_MESSAGE_MAX_LEN, '消息内容');
+    var message = validateString(req.body && req.body.message, req.guestAi ? GUEST_AI_MESSAGE_MAX_LEN : AI_CHAT_MESSAGE_MAX_LEN, '消息内容');
     if (!message || message.error) {
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
@@ -23372,7 +23430,10 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
     }
 
     // token + 请求次数兜底（搜索额度不在此拦截整轮聊天）
-    var rl = await enforceAiChatAccess(userName, { needSearch: false, promptChars: String((req.body && req.body.message) || '').length });
+    // 游客不查数据库额度，只受 guestAiAdmission 的 IP/每日上限约束。
+    var rl = req.guestAi
+      ? { allowed: true, quota: null }
+      : await enforceAiChatAccess(userName, { needSearch: false, promptChars: String((req.body && req.body.message) || '').length });
     if (!rl.allowed) {
       return terminateWithError({
         type: 'error',
@@ -23383,8 +23444,8 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
     }
 
     // ★ P0：client_request_id 防串流 —— 活跃请求时返回 409，防止并发刷流
-    if (clientReqId && userName) {
-      var sKey = userName + ':' + clientReqId;
+    if (clientReqId && streamOwnerKey) {
+      var sKey = streamOwnerKey + ':' + clientReqId;
       if (inFlightStreams.has(sKey)) {
         // 注意：此处未注册，safeEnd 不得删除在途请求的注册（见 _inFlightRegistered）
         return terminateWithError({ type: 'error', error: '请求正在处理中，请勿重复提交', code: 'duplicate_request' });
@@ -23411,7 +23472,8 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
       messagesIncludeCurrent: !(req.body && req.body.messages_include_current === false),
       currentAttachments: req.body && req.body.attachments,
       contextManagement:req.body&&req.body.context_management===true,
-      allowVision: _visionEligibleEarly
+      allowVision: _visionEligibleEarly,
+      skipDb: !!req.guestAi
     });
     var _parallelPrep = await Promise.all([attachPromise, configPromise, ctxPromise]);
     var _attachStream = unwrapAttachmentExtract(_parallelPrep[0]);
@@ -23968,46 +24030,50 @@ app.post('/api/agent/chat/stream', authenticateUser, aiChatConcurrencyGate, rate
       if (_visionImageUrls.length) {
         _userSaveExtra.vision_urls = _visionImageUrls.slice(0, 10);
       }
-      try {
-        var _responsesSaveResult = await supabase.from('posts').insert([
-          {
-            user_name: userName,
-            content: message,
-            media_type: AI_AGENT_MESSAGE_MARKER,
-            media_url: buildMsgMeta('user', convId, null, null, 1, null, 0, _userSaveExtra),
-            actor_key: 'ai_msg_conv_' + convId + '_user_' + userName + '_' + nowTs
-          },
-          {
-            user_name: userName,
-            content: responsesContent,
-            media_type: AI_AGENT_MESSAGE_MARKER,
-            media_url: buildMsgMeta('assistant', convId, usageToStore, responsesReasoning, 2, searchMetaToStore, res._aiThinkingElapsedMs || 0, { chat_mode: 'normal', web_search: webSearchEnabled, process_events: getProcessEvents(res), site_cards: responsesSiteCards,client_request_id:res._aiClientRequestId,followups:responsesParts.followups,context_memory:res._aiContextMemory,context_budget:res._aiContextBudget }),
-            actor_key: 'ai_msg_conv_' + convId + '_agent_' + userName + '_' + (nowTs + 1)
+      if (!req.guestAi) {
+        try {
+          var _responsesSaveResult = await supabase.from('posts').insert([
+            {
+              user_name: userName,
+              content: message,
+              media_type: AI_AGENT_MESSAGE_MARKER,
+              media_url: buildMsgMeta('user', convId, null, null, 1, null, 0, _userSaveExtra),
+              actor_key: 'ai_msg_conv_' + convId + '_user_' + userName + '_' + nowTs
+            },
+            {
+              user_name: userName,
+              content: responsesContent,
+              media_type: AI_AGENT_MESSAGE_MARKER,
+              media_url: buildMsgMeta('assistant', convId, usageToStore, responsesReasoning, 2, searchMetaToStore, res._aiThinkingElapsedMs || 0, { chat_mode: 'normal', web_search: webSearchEnabled, process_events: getProcessEvents(res), site_cards: responsesSiteCards,client_request_id:res._aiClientRequestId,followups:responsesParts.followups,context_memory:res._aiContextMemory,context_budget:res._aiContextBudget }),
+              actor_key: 'ai_msg_conv_' + convId + '_agent_' + userName + '_' + (nowTs + 1)
+            }
+          ]);
+          if (_responsesSaveResult && _responsesSaveResult.error) {
+            console.error('[AGENT-STREAM] save failed:', _responsesSaveResult.error && _responsesSaveResult.error.message, 'userName:', userName, 'convId:', String(convId).slice(0, 8));
+          } else {
+            _responsesSaved = true;
           }
-        ]);
-        if (_responsesSaveResult && _responsesSaveResult.error) {
-          console.error('[AGENT-STREAM] save failed:', _responsesSaveResult.error && _responsesSaveResult.error.message, 'userName:', userName, 'convId:', String(convId).slice(0, 8));
-        } else {
-          _responsesSaved = true;
+        } catch (e) {
+          console.error('[AGENT-STREAM] save messages failed:', e.message);
         }
-      } catch (e) {
-        console.error('[AGENT-STREAM] save messages failed:', e.message);
       }
 
       var responsesQuota = null;
-      try {
-        responsesQuota = await recordAiTurnUsage(userName, responsesUsage, {
-          conversation_id: convId,
-          model: usedModel,
-          source: 'chat_stream_responses',
-          message: message,
-          content: responsesContent,
-          reasoning: responsesReasoning,
-          search_count: req._searchApiCalls ? req._searchApiCalls.n : 0,
-          did_search: (req._searchApiCalls ? req._searchApiCalls.n : 0) > 0
-        });
-      } catch (eRq) {
-        console.error('[AI-QUOTA] responses path record failed:', eRq && eRq.message);
+      if (!req.guestAi) {
+        try {
+          responsesQuota = await recordAiTurnUsage(userName, responsesUsage, {
+            conversation_id: convId,
+            model: usedModel,
+            source: 'chat_stream_responses',
+            message: message,
+            content: responsesContent,
+            reasoning: responsesReasoning,
+            search_count: req._searchApiCalls ? req._searchApiCalls.n : 0,
+            did_search: (req._searchApiCalls ? req._searchApiCalls.n : 0) > 0
+          });
+        } catch (eRq) {
+          console.error('[AI-QUOTA] responses path record failed:', eRq && eRq.message);
+        }
       }
       writeSse(res, {
         type: 'done',
