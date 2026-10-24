@@ -881,6 +881,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
   function canSendWithQuota() {
     var q = S.quota;
+    // 访客没有账号额度；是否放行由 ensureUserAuthOrNotify 按后台开关决定。
+    if (!readUserName()) return { ok: true };
     if (!q) {
       // 额度信息缺失（拉取失败/未完成）：开启搜索时一律不放行，避免绕过第三方搜索次数限制
       if (S.webSearchEnabled) {
@@ -2887,6 +2889,28 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     };
     updateAiStatus();
     return S.config;
+  }
+
+  // 后台「访客用户可使用AI」开关（公开只读接口，不触发登录刷新）。
+  // 每次发送前查询一次，管理员关闭后下一条消息立即回到登录提示。
+  var _guestAiModeRequest = null;
+  async function ensureGuestAiMode() {
+    if (readUserName()) return false;
+    if (_guestAiModeRequest) return _guestAiModeRequest;
+    _guestAiModeRequest = (async function() {
+      try {
+        var r = await apiRequest('GET', '/guest-mode', null, { background: true });
+        var active = !!(r && r.ok && r.data && r.data.enabled === true) && !readUserName();
+        S.guestAi = active;
+        return active;
+      } catch (e) {
+        S.guestAi = false;
+        return false;
+      } finally {
+        _guestAiModeRequest = null;
+      }
+    })();
+    return _guestAiModeRequest;
   }
 
   function buildUsageLine(usage) {
@@ -5908,7 +5932,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     notify('已取消思考');
   }
 
-  async function ensureUserAuthOrNotify() {
+  async function ensureUserAuthOrNotify(options) {
+    // 未登录访客：只有普通聊天可以在后台开关开启时继续，其他 AI 功能仍需登录。
+    if (!readUserName()) {
+      if (options && options.allowGuest && await ensureGuestAiMode()) return true;
+      notify('请先登录后再和小猫聊天');
+      return false;
+    }
     var preflight = window.ensureProtectedOperationAuth || window.ensureRealUserAuth;
     if (typeof preflight !== 'function') return true;
     try {
@@ -9531,7 +9561,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       return;
     }
 
-    var authOk = await ensureUserAuthOrNotify();
+    var authOk = await ensureUserAuthOrNotify({ allowGuest: true });
     if ((sendToken !== S.sendSeq || !customModelIdentityCurrent(sendIdentity)) || (S._currentReqId !== reqId || !customModelIdentityCurrent(sendIdentity)) || !S.active) return;
     if (!authOk) {
       // 认证失败 => 清理UI，恢复状态
@@ -12303,6 +12333,10 @@ function showChatMessages() {
     //   ② 加 _historyBusy 并发锁，进行中忽略重复点击；
     //   ③ 失败时明确提示并保持原状，不再静默显示空列表。
     histBtn.addEventListener('click', function() {
+      if (!readUserName()) {
+        notify('游客聊天不会保存记录，登录后可查看历史对话');
+        return;
+      }
       if (S.showingHistory) {
         hideConversationListPage();
         syncAiHeaderButtons(histBtn, newBtn);
@@ -12354,6 +12388,10 @@ function showChatMessages() {
     delBtn.addEventListener('click', async function(ev) {
       ev.preventDefault();
       ev.stopPropagation();
+      if (!readUserName()) {
+        notify('游客聊天不会保存记录，无需删除');
+        return;
+      }
       if (!S.conversationId || S.sending || S._newChatBusy || S.deletingConversations.has(S.conversationId)) return;
       var deleteCid = S.conversationId, deleteLife = S.lifecycleId, deleteOwner = window.currentUser || '', deleteEpoch = readAiAuthEpoch();
       var recreateSeq = 0;
@@ -12426,6 +12464,30 @@ function showChatMessages() {
       ev.preventDefault();
       ev.stopPropagation();
       if (S.sending) { notify('正在回复中，请稍候再新建对话'); return; }
+      // 访客没有服务端会话，直接在本地清空上下文与附件，不请求 /chat/new。
+      if (!readUserName()) {
+        abortCurrentRequest('chat');
+        S.historyRequestId += 1;
+        S._pendingLocalMsgs = [];
+        _aiChatFiles = []; _aiChatFileSelectionSeq++;
+        S._aiChatFilesLoading = false;
+        if (filePreview) { filePreview.style.display = 'none'; filePreview.innerHTML = ''; }
+        if (fileInput) fileInput.value = '';
+        S.conversationId = '';
+        writeConvId('');
+        S.messages = [];
+        if (S._updateContextCapacity) S._updateContextCapacity();
+        S.oldestCursor = null;
+        S.hasMore = false;
+        if (S.messagesEl) {
+          S.messagesEl.innerHTML = '';
+          if (typeof appendEmptyState === 'function') appendEmptyState(S.messagesEl);
+          else S.messagesEl.appendChild(buildEmptyState());
+        }
+        setAiRootState('ai-idle');
+        notify('已开始新的游客对话');
+        return;
+      }
       // ★ 2026-09-24 修复（课题①「新对话点不动/有延迟」）：
       //   旧实现只有 S.sending 守卫，点击后要等 /chat/new 网络往返才有视觉变化，
       //   期间按钮无 loading 态、无并发锁，用户重复点击会并发创建多个会话。
@@ -14280,7 +14342,7 @@ function showChatMessages() {
     S.viewportCleanup = bindVisualViewport(r.messagesEl, r.input, r.inputBar);
 
     // Do not make opening the chat wait for an auth refresh. The shell is useful immediately.
-    ensureUserAuthOrNotify().then(function(authOk) {
+    ensureUserAuthOrNotify({ allowGuest: true }).then(function(authOk) {
       if (lifecycleId !== S.lifecycleId || !S.active) return null;
       if (!authOk) {
         S.active = false;
@@ -14288,12 +14350,24 @@ function showChatMessages() {
         renderHistoryUnavailable(r.messagesEl, { status: 401, error_code: 'auth' });
         return null;
       }
+      // 访客只加载公开配置，不读取任何账号历史/会话列表/自定义模型，避免串出旧账号缓存。
+      if (!readUserName()) {
+        S.messages = [];
+        S._pendingLocalMsgs = [];
+        S.conversationId = '';
+        writeConvId('');
+        return Promise.allSettled([
+          ensureConfig().then(function(cfg) {
+            if (lifecycleId === S.lifecycleId && S.active) applyConfigToUI(cfg);
+          })
+        ]);
+      }
       return Promise.allSettled([
         ensureConfig().then(function(cfg) {
           if (lifecycleId === S.lifecycleId && S.active) applyConfigToUI(cfg);
         }),
         loadHistory(r.messagesEl, null),
-        // 打开面板时预拉取会话列表，修复"历史对话"点开后才加载、易误判为列表消失的问题
+        // 打开面板时预拉取会话列表，修复"历史对话"点开后才加载、易误判成列表消失
         fetchConversations().catch(function(e) {
           try { console.warn('[AI-CONV] 预拉取会话列表失败:', e && e.message); } catch (ee) {}
         }),

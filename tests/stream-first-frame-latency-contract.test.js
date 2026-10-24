@@ -48,7 +48,7 @@ function chatRouteCode() {
 test('首帧延迟：meta 事件早于额度校验下发', () => {
   const route = chatRouteCode();
   const metaIdx = route.indexOf("writeSse(res, { type: 'meta'");
-  const gateIdx = route.indexOf('var rl = await enforceAiChatAccess(');
+  const gateIdx = route.indexOf('enforceAiChatAccess(');
   assert.ok(metaIdx >= 0, '未找到 meta 事件下发');
   assert.ok(gateIdx >= 0, '未找到 enforceAiChatAccess 调用');
   assert.ok(
@@ -60,14 +60,14 @@ test('首帧延迟：meta 事件早于额度校验下发', () => {
 test('首帧延迟：early reasoning_start 早于额度校验下发', () => {
   const route = chatRouteCode();
   const earlyIdx = route.indexOf('early: true');
-  const gateIdx = route.indexOf('var rl = await enforceAiChatAccess(');
+  const gateIdx = route.indexOf('enforceAiChatAccess(');
   assert.ok(earlyIdx >= 0, '未找到 early reasoning_start 事件');
   assert.ok(earlyIdx < gateIdx, 'early reasoning_start 必须早于额度校验，让前端立刻稳固「思考中」态');
 });
 
 test('首帧延迟：SSE 头在校验前已 flush（含禁用代理缓冲）', () => {
   const route = chatRouteCode();
-  const gateIdx = route.indexOf('var rl = await enforceAiChatAccess(');
+  const gateIdx = route.indexOf('enforceAiChatAccess(');
   const headerBlock = route.slice(0, gateIdx);
   assert.match(headerBlock, /X-Accel-Buffering['"]\s*,\s*['"]no/);
   assert.match(headerBlock, /flushHeaders\(\)/);
@@ -75,7 +75,7 @@ test('首帧延迟：SSE 头在校验前已 flush（含禁用代理缓冲）', (
 
 test('首帧延迟：convId 生成前置且纯字符串运算（无 IO）', () => {
   const route = chatRouteCode();
-  const gateIdx = route.indexOf('var rl = await enforceAiChatAccess(');
+  const gateIdx = route.indexOf('enforceAiChatAccess(');
   const convIdx = route.indexOf('convId = genConvId()');
   assert.ok(convIdx >= 0, '未找到 genConvId 调用');
   assert.ok(convIdx < gateIdx, 'convId 生成必须前置到校验之前，才能保证 meta 先发');

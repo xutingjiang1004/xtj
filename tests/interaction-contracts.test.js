@@ -50,8 +50,8 @@ test('AI tools prewarm, render immediately, and bound history requests', () => {
   assert.doesNotMatch(launcher, /showPicker|ai-tools-select-hit/);
   assert.match(launcher, /nav\.addEventListener\('pointerenter'/);
   assert.match(launcher, /ensureAiAgentLoaded/);
-  assert.ok(openChat.indexOf("aiPanel.classList.add('active')") < openChat.indexOf('ensureUserAuthOrNotify()'));
-  assert.ok(openResearch.indexOf("panel.classList.add('active')") < openResearch.indexOf('ensureUserAuthOrNotify()'));
+  assert.ok(openChat.indexOf("aiPanel.classList.add('active')") < openChat.indexOf('ensureUserAuthOrNotify('));
+  assert.ok(openResearch.indexOf("panel.classList.add('active')") < openResearch.indexOf('ensureUserAuthOrNotify('));
   // 历史加载超时已放宽（弱网/Render 冷启动），断言与当前实现一致
   assert.match(history, /timeoutMs:\s*(8000|15000|18000)/);
   assert.match(openResearch, /mode=deep_think/);
