@@ -8,7 +8,7 @@ test('builtin completion preserves original images and text in durable history',
   sanitizeAssistantVisibleText:s=>s,normalizeDeepSeekUsageModel:s=>s,DEEPSEEK_MODEL_REASONER:'reasoner',
   AI_AGENT_MESSAGE_MARKER:'__ai_agent_msg__',getProcessEvents:()=>[],saveInterruptedChatTurn,assistantOutput,
   buildMsgMeta:(role,convId,usage,reasoning,seq,search,elapsed,extra)=>JSON.stringify({role,convId,...extra}),
-  recordAiTurnUsage:async()=>null,maybeUpdateConversationSummary:async()=>{},writeSse:(res,event)=>frames.push(event),console:{error(){},log(){}},Date};
+  recordAiTurnUsage:async()=>null,maybeUpdateConversationSummary:async()=>{},endSse:require('../render-api/sse-write').endSse,writeSse:(res,event)=>frames.push(event),console:{error(){},log(){}},Date};
  const a=source.indexOf('async function finishStream('),b=source.indexOf('\n// ★ 2026-09-13',a);assert.ok(a>=0&&b>a);
  vm.createContext(c);vm.runInContext(source.slice(a,b),c);
  const res={_aiClientRequestId:'request-1',_aiVisionUrls:['data:image/png;base64,QQ=='],_aiVisionRawText:'看这张图',writableEnded:false};
@@ -40,7 +40,7 @@ for(const status of ['ok','error','throw'])test('third-party chat reports actual
 });
 async function routeFixture({failSave=false,disconnect=false,incomplete=false,usage=null,contextManaged=false,history=[]}={}){
  const frames=[],stored=[],payloads=[],usageRecords=[];let handler,calls=0,signal;
- const c={app:{post(...args){handler=args.at(-1);}},authenticateUser(){},aiChatConcurrencyGate(){},aiRequestMiddleware(){},resolveAiModelReference(){},rateLimit:()=>null,express:{json:()=>null},AI_CHAT_HOURLY_IP_LIMIT:100,AI_CHAT_MESSAGE_MAX_LEN:12000,ADMIN_USERNAME:'admin',validateString:value=>value,genConvId:()=>'ABCDEF-NEW',AI_AGENT_MESSAGE_MARKER:'ai-message',URL,AbortController,TextDecoder,setTimeout,clearTimeout,setInterval,clearInterval,console,
+ const c={require:name=>require('../render-api/'+name.replace('./','')),endSse:require('../render-api/sse-write').endSse,app:{post(...args){handler=args.at(-1);}},authenticateUser(){},aiChatConcurrencyGate(){},aiRequestMiddleware(){},resolveAiModelReference(){},rateLimit:()=>null,express:{json:()=>null},AI_CHAT_HOURLY_IP_LIMIT:100,AI_CHAT_MESSAGE_MAX_LEN:12000,ADMIN_USERNAME:'admin',validateString:value=>value,genConvId:()=>'ABCDEF-NEW',AI_AGENT_MESSAGE_MARKER:'ai-message',URL,AbortController,TextDecoder,setTimeout,clearTimeout,setInterval,clearInterval,console,
   deepseekWeb:require('../render-api/deepseek-web'),deepSeekPricing:require('../render-api/deepseek-pricing'),normalizeDeepSeekModelName:model=>model,require:name=>require('../render-api/'+name.replace('./','')),assistantOutput,aiTaskPolicy:require('../render-api/ai-task-policy'),enforceAiChatAccess:async()=>({allowed:true}),getAiQuotaErrorMessage:()=>'',assertSafeWebUrl:async url=>({parsed:new URL(url),addresses:['93.184.216.34']}),extractVisionImageUrls:()=>[],getAiConfig:async()=>({name:'configured'}),buildAiCorePrompt:config=>'Configured '+config.name,aiToolsForWorkMode:()=>[{type:'function',function:{name:'get_weather'}}],toolFeedback,runRequiredSearch,normalizeToolResultItems:normalize,saveCustomChatTurn,saveInterruptedChatTurn,buildMsgMeta:buildMeta,getProcessEvents,
   executeToolCall:async()=>({tool_name:'get_weather',location:'福州',content:'福州晴',cards:[{protocol:'xtj.ai.ui.v1',id:'weather',type:'weather',data:{city:'福州',condition:'晴',temperature_c:26.7}}]}),parseDsmlToolCallsGlobal:()=>({calls:[]}),finalReplyContainsInternalProtocolGlobal:()=>false,looksLikeToolArgsFragment:()=>false,recordAiTurnUsage:async(_user,actual)=>{usageRecords.push(actual);},
   supabase:{from(){return {async insert(rows){stored.push(...rows);return failSave?{error:{}}:{error:null};}};}},writeSse(res,event){if(res.writableEnded)return false;frames.push(event);appendProcessEvent(res,event);return true;},
@@ -103,7 +103,7 @@ for(const requestId of ['new-send',''])test('built-in chat preserves a disconnec
  const stored=[],req=new EventEmitter(),res=new EventEmitter();let handler;
  req.userName='A';req.body={message:'还没回答完的问题',conversation_id:'ABCDEF-SHARED',client_request_id:requestId,thinking_mode:'high'};
  res.writableEnded=false;res.setHeader=()=>{};res.flushHeaders=()=>{};res.end=()=>{res.writableEnded=true;};
- const c={app:{post(...args){handler=args.at(-1);}},global:{},authenticateUser(){},aiChatConcurrencyGate(){},aiRequestMiddleware(){},resolveAiModelReference(){},rateLimit:()=>null,express:{json:()=>null},AI_CHAT_HOURLY_IP_LIMIT:100,AI_CHAT_MESSAGE_MAX_LEN:12000,AI_AGENT_MESSAGE_MARKER:'ai-message',AbortController,setTimeout,clearTimeout,setInterval,clearInterval,console:{log(){},warn(){},error(){}},
+ const c={require:name=>require('../render-api/'+name.replace('./','')),endSse:require('../render-api/sse-write').endSse,app:{post(...args){handler=args.at(-1);}},global:{},authenticateUser(){},aiChatConcurrencyGate(){},aiRequestMiddleware(){},resolveAiModelReference(){},rateLimit:()=>null,express:{json:()=>null},AI_CHAT_HOURLY_IP_LIMIT:100,AI_CHAT_MESSAGE_MAX_LEN:12000,AI_AGENT_MESSAGE_MARKER:'ai-message',AbortController,setTimeout,clearTimeout,setInterval,clearInterval,console:{log(){},warn(){},error(){}},
   validateString:v=>v,extractVisionImageUrls:()=>[],genConvId:()=>'ABCDEF-NEW',writeSse:()=>true,enforceAiChatAccess:async()=>({allowed:true}),normalizeDeepSeekModelName:()=>null,DEEPSEEK_MODEL_FLASH:'flash',DEEPSEEK_MODEL_PRO:'pro',DEEPSEEK_MODEL_REASONER:'reasoner',DEEPSEEK_MODEL_VISION:'vision',
   extractChatAttachments:async message=>({text:message,cards:[]}),unwrapAttachmentExtract:value=>value,loadAiContext:async()=>[],getAiConfig:async()=>{res.emit('close');return{};},
   saveInterruptedChatTurn,buildMsgMeta:buildMeta,getProcessEvents,sanitizeAssistantVisibleText:text=>text,supabase:{from(){return{async insert(rows){stored.push(...rows);return{error:null}}}}}};
@@ -112,7 +112,7 @@ for(const requestId of ['new-send',''])test('built-in chat preserves a disconnec
 });
 
 test('custom model route saves an encrypted mutation atomically for its authenticated account and echoes permanent deletions',async()=>{
- let handler,mutation;const c={app:{put(...args){handler=args.at(-1);}},authenticateUser(){},rateLimit:()=>null,
+ let handler,mutation;const c={require:name=>require('../render-api/'+name.replace('./','')),endSse:require('../render-api/sse-write').endSse,app:{put(...args){handler=args.at(-1);}},authenticateUser(){},rateLimit:()=>null,
   cleanAiModelIn:m=>({...m,api_key:undefined,api_key_enc:'encrypted-fixture'}),cleanDeletedUidList:uids=>uids||[],cleanAiPrefs:prefs=>prefs||{},decryptAiModelSecret:()=> 'fixture-key',console,
   supabase:{async rpc(name,args){assert.equal(name,'save_ai_custom_models_snapshot');mutation=args;return{data:{ok:true,models:[],deleted_uids:['last'],ai_prefs:{research_model:'flash'}}}}}};
  const a=source.indexOf("app.put('/api/agent/custom-models'");const b=source.indexOf("app.get('/api/agent/image'",a);const snippet=source.slice(a,b);vm.runInNewContext(snippet.slice(0,snippet.lastIndexOf('\n});')+4),c);

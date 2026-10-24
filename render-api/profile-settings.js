@@ -95,12 +95,11 @@ function createProfileSettings({
     res.set("Cache-Control", "no-store");
     next();
   });
-  async function save(actor, patch) {
-    const auth = await readAuthRecord(supabase, actor, "__auth__", "id");
-    if (!auth) throw Error("account_unavailable");
+  async function save(actor, accountId, patch) {
+    if (!accountId) throw Error("account_unavailable");
     const r = await supabase.rpc("save_account_profile_settings", {
       p_user_name: actor,
-      p_account_id: auth.id,
+      p_account_id: accountId,
       p_patch: patch,
     });
     if (!r || r.error || !r.data) throw Error("profile_save_failed");
@@ -124,7 +123,7 @@ function createProfileSettings({
       return res.status(400).json({ ok: false, error: "设置内容无效" });
     }
     try {
-      res.json({ ok: true, settings: await save(req.userName, patch) });
+      res.json({ ok: true, settings: await save(req.userName, req.accountId, patch) });
     } catch (_) {
       res.status(503).json({ ok: false, error: "设置未保存，请重试" });
     }
@@ -175,6 +174,8 @@ function createProfileSettings({
         meta.format;
       try {
         const bucket = supabase.storage.from("uploads");
+        const registered = await supabase.rpc("register_managed_image", { p_path: path });
+        if (!registered || registered.error || registered.data !== true) throw Error("image_registration_failed");
         const upload = await bucket.upload(path, req.body, {
           contentType: formats[meta.format],
           upsert: false,
@@ -186,7 +187,7 @@ function createProfileSettings({
         // published the new cover. Originals are stored without re-encoding.
         res.json({
           ok: true,
-          settings: await save(req.userName, { [kind + "_url"]: url }),
+          settings: await save(req.userName, req.accountId, { [kind + "_url"]: url }),
         });
       } catch (_) {
         res

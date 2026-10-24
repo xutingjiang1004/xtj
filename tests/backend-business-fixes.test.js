@@ -110,8 +110,8 @@ test('storage queue submits atomic path union RPC and never silently falls back 
 function cleanupWorkerFixture(interleave) {
   const source = fs.readFileSync(require.resolve('../render-api/server'), 'utf8');
   const start = source.indexOf('async function processStorageCleanupJobs()'), end = source.indexOf("app.post('/api/photo/delete'", start);
-  const row = { id: 1, bucket: 'uploads', paths: interleave === 'mixed' ? ['photos/old','avatars/a'] : ['photos/old'], attempts: 0, status: 'pending', claim_token: null }, removed = [], buckets = [];
-  const supabase = { async rpc(name,args){assert.equal(name,'claim_photo_cleanup_paths');return{data:{ok:true,paths:args.p_paths}};},
+  const row = { id: 1, bucket: 'uploads', paths: interleave === 'mixed' ? ['photos/old','avatars/a'] : interleave.startsWith('managed') ? ['profile-images/referenced','site-support/retired'] : ['photos/old'], attempts: 0, status: 'pending', claim_token: null }, removed = [], buckets = [];
+  const supabase = { async rpc(name,args){if(name==='enqueue_managed_image_orphans')return{data:0};if(name==='claim_managed_image_cleanup')return{data:{ok:true,paths:args.p_paths.filter(path=>path.endsWith('retired'))}};assert.equal(name,'claim_photo_cleanup_paths');return{data:{ok:true,paths:args.p_paths}};},
     from() { let update = null, filters = []; const q = {
       select() { return q; }, in() { return q; }, order() { return q; }, limit() { return q; },
       update(value) { update = value; return q; }, eq(k, v) { filters.push(r => r[k] === v); return q; }, is(k, v) { filters.push(r => r[k] === v); return q; },
@@ -120,7 +120,7 @@ function cleanupWorkerFixture(interleave) {
         if (!filters.every(f => f(row))) return { data: null }; Object.assign(row, update); return { data: structuredClone(row) };
       }, then(a, b) { return Promise.resolve({ data: [structuredClone(row)] }).then(a, b); }
     }; return q; },
-    storage: { from(bucket) { return { async remove(paths) { buckets.push(bucket); removed.push(paths.slice()); if (interleave === 'after-claim') { row.status = 'pending'; row.claim_token = null; row.paths.push('photos/new'); } return { data: paths.map(name => ({ name })) }; } }; } }
+    storage: { from(bucket) { return { async remove(paths) { buckets.push(bucket); removed.push(paths.slice()); if(interleave==='managed-fail')return{error:Error('storage unavailable')}; if (interleave === 'after-claim') { row.status = 'pending'; row.claim_token = null; row.paths.push('photos/new'); } return { data: paths.map(name => ({ name })) }; } }; } }
   };
   const context = { require(name){assert.equal(name,'./storage-cleanup');return require('../render-api/storage-cleanup');}, supabase, PHOTO_BUCKET:require('../render-api/photo-access').PHOTO_BUCKET, safePhotoPath:require('../render-api/photo-access').safePhotoPath, _storageCleanupRunning: false, STORAGE_CLEANUP_CLAIM_TIMEOUT_MS: 60000, STORAGE_CLEANUP_LEASE_MS: 60000, STORAGE_CLEANUP_REMOVE_TIMEOUT_MS: 30000, STORAGE_CLEANUP_MAX_ATTEMPTS: 5, crypto: require('node:crypto'), withStorageCleanupTimeout: promise => promise, isNotFoundError: () => false, console: { warn() {} } };
   vm.createContext(context); vm.runInContext(source.slice(start, end), context);
@@ -157,4 +157,10 @@ test('image redirect rejects site-local IPv6 DNS before the second connection', 
   const calls = fakeHttps(t, { 'a.example/start': { status: 302, headers: { location: 'https://b.example/final' } } });
   await assert.rejects(web.fetchSafeRedirectBuffer('https://a.example/start', { lookupImpl: async host => [{ address: host === 'b.example' ? 'fec0::1' : '93.184.216.34', family: host === 'b.example' ? 6 : 4 }] }), { code: 'IMAGE_UPSTREAM_BLOCKED' });
   assert.equal(calls.length, 1);
+});
+
+test('managed image cleanup protects current references and retries only the retired objects after storage failure',async()=>{
+ const f=cleanupWorkerFixture('managed-fail');await f.run();
+ assert.deepEqual(JSON.parse(JSON.stringify(f.removed)),[['site-support/retired']]);assert.equal(f.row.status,'pending');assert.deepEqual(Array.from(f.row.paths),['site-support/retired']);
+ const ok=cleanupWorkerFixture('managed');await ok.run();assert.equal(ok.row.status,'completed');assert.deepEqual(JSON.parse(JSON.stringify(ok.removed)),[['site-support/retired']]);
 });

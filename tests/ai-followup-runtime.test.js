@@ -89,7 +89,7 @@ function cachedResearchRoute(rows, cache = true, persistId = 'saved-current-id',
     researchCacheSet() {}, getAiConfig: async () => ({}), runSelfResearchFlow: async opts => { if (cancelFlow) opts.cancelToken.cancelled = true; return { answer: 'REPORT', sources: [] }; },
     persistResearchRecord: async (...args) => { persisted++; persistedArgs = args; return persistId; }, parseMsgMeta: row => JSON.parse(row.media_url || '{}'), resolveConvId: row => JSON.parse(row.media_url || '{}').convId,
     recordAiTurnUsage: async () => null, recordAbortedStreamUsage: async () => null, setInterval: () => 1, clearInterval() {},
-    writeSse(res,e) { res.events.push(e); return true; }, console: { warn() {}, error() {} } };
+    endSse:require('../render-api/sse-write').endSse,writeSse(res,e) { res.events.push(e); return true; }, console: { warn() {}, error() {} } };
   extract(server, "app.post('/api/agent/research/stream'", '// GET /api/agent/research/history', 'undefined', c);
   return { queries, get persisted() { return persisted; }, get persistedArgs() { return persistedArgs; }, async run() {
     const req = new EventEmitter(); Object.assign(req, { userName: 'alice', accountId: '11111111-1111-4111-8111-111111111111', body: { query: 'QUESTION', conversation_id: 'CURRENT1', attachments,research_model:researchModel } });
@@ -154,7 +154,7 @@ test('the fallback research agent uses its selected model and flushes all genuin
   const agent = extract(server,'async function runDeepThinkAgent(', 'async function runDeepThinkWorker(', 'runDeepThinkAgent', {
     AbortController, setTimeout, clearTimeout, DEEP_THINK_CONFIG:{MAX_DURATION_MS:10000}, DEEPSEEK_MODEL_REASONER:'deepseek-v4-pro',
     getPreferredDeepSeekModel:m=>m, normalizeDeepSeekUsageModel:m=>m, buildHistoryContext:()=>'',buildAiCorePrompt:()=> 'safe prompt',
-    console:{log(){},warn(){},error(){}}, writeSse:(_res,event)=>events.push(event),
+    console:{log(){},warn(){},error(){}}, endSse:require('../render-api/sse-write').endSse,writeSse:(_res,event)=>events.push(event),
     callDeepSeek:async(_messages,options)=>{calls.push(options);options.onThinkingChunk('FIRST REAL THOUGHT');options.onThinkingChunk('LAST REAL THOUGHT');return{content:'answer',model:options.model};}
   });
   const result=await agent({res:{},userName:'alice',message:'question',convId:'MODELS1',config:{},ctx:{},disableSearch:true,model:'deepseek-flash'});
@@ -173,7 +173,7 @@ for (const [thinkingMode, model, expectedModel, cached = false] of [['low', 'dee
     const handler = extract(server, 'async function handleDeepThinkChat(', '// POST /api/agent/chat/cancel', 'handleDeepThinkChat', {
       setInterval, clearInterval, AI_CHAT_MESSAGE_MAX_LEN: 50000, validateString: value => value, genConvId: () => 'GENERATED1',
       tryAcquireDeepResearch: () => () => {}, activeDeepThinkJobs: jobs, trackActiveDeepThinkJob: (id, token) => jobs.set(id, token),
-      enforceAiChatAccess: async () => ({ allowed: true }), writeSse: (_res, event) => events.push(event),
+      enforceAiChatAccess: async () => ({ allowed: true }), endSse:require('../render-api/sse-write').endSse,writeSse: (_res, event) => events.push(event),
       extractVisionImageUrls: () => [], extractChatAttachments: async text => ({ text: text + (cached ? '' : '\nORIGINAL DOCUMENT') }), unwrapAttachmentExtract: value => value,
       getAiConfig: async () => ({}), loadAiContext: async () => ({ history: [] }), canUseAiCache: () => cached,
       buildAiCacheKey: () => 'account-and-model-scoped-key', aiResponseCache: new Map([['account-and-model-scoped-key', {
@@ -234,7 +234,7 @@ function customResearchRoute({ saveError = null, incomplete = false, cancelled =
     supabase: { from: () => ({ insert: async value => { rows.push(value); return { error: saveError }; } }) },
     buildMsgMeta: (role, convId, usage, _reasoning, seq, _search, _elapsed, extra) => JSON.stringify({ role, convId, usage, seq, ...extra }),
     console: { log() {}, warn() {}, error() {} },
-    writeSse: (_res, event) => { events.push(event); if (cancelled && event.type === 'content') req.emit('aborted'); },
+    endSse:require('../render-api/sse-write').endSse,writeSse: (_res, event) => { events.push(event); if (cancelled && event.type === 'content') req.emit('aborted'); },
     requestPinnedStream: async (_url, _addresses, options) => {
       const payload = JSON.parse(options.body); calls.push(payload);
       if (!payload.stream) return new Response(JSON.stringify({ choices: [{ message: { content: calls.length === 1

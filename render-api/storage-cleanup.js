@@ -181,11 +181,20 @@ async function claimPhotoCleanupPaths(supabase, paths) {
   return result.data.paths;
 }
 
+async function claimManagedImageCleanupPaths(supabase, paths) {
+  const managed = paths.filter(path => /^(profile-images|site-support)\//.test(path));
+  if (!managed.length) return paths;
+  const result = await supabase.rpc('claim_managed_image_cleanup', { p_paths: managed });
+  if (!result || result.error || !result.data || !result.data.ok || !Array.isArray(result.data.paths)) throw result && result.error || Error('managed_image_cleanup_claim_failed');
+  return paths.filter(path => !managed.includes(path) || result.data.paths.includes(path));
+}
+
 module.exports = {
   normalizePaths,
   normalizePhotoId,
   isNotFoundError,
   enqueueStorageCleanupJob,
   removeStorageWithQueue,
-  claimPhotoCleanupPaths
+  claimPhotoCleanupPaths,
+  claimManagedImageCleanupPaths
 };

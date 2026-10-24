@@ -16,7 +16,7 @@ function setup(factory) {
 const response = { set() {}, status() { return this; }, json() {} };
 test('keyset queries preserve PostgreSQL microsecond timestamps',async () => {
   const profile = setup(createProfileRecords);
-  await profile.routes['/']({ userName: 'audit-fixture', query: { kind: 'likes', before_at: at, before_id: id } }, response);
+  await profile.routes['/']({ userName: 'audit-fixture', query: { kind: 'likes', before_at: at, before_id: '9223372036854775807' } }, response);
   const location = setup(createLocationHistory);
   await location.routes['/api/user/location-history']({ userName: 'audit-fixture', query: { cursor: Buffer.from(JSON.stringify({ at, id })).toString('base64url') } }, response);
   for (const [label, filters] of [['profile', profile.filters], ['location', location.filters]]) {

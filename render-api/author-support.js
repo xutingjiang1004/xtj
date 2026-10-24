@@ -4,12 +4,11 @@ const DISCLAIMER = '打赏完全自愿，金额由你自行决定，用于感谢
 const PROVIDERS = new Set(['wechat', 'alipay']);
 function createAuthorSupport({ express, supabase, sharp, authenticateUser, verifyToken, rateLimit, adminName }) {
   const router = express.Router();
-  let writes = Promise.resolve();
   const storage = () => supabase.storage.from('uploads');
   async function result(query) { const r = await query; if (!r || r.error) throw new Error('support_storage_failed'); return r.data; }
   async function read() {
     const rows = await result(supabase.from('posts').select('id,content').eq('media_type','__admin_meta__')
-      .eq('user_name',adminName).eq('media_url','author_support').order('created_at',{ascending:false}).limit(1));
+      .eq('user_name',adminName).eq('media_url','author_support').order('created_at',{ascending:false}).order('id',{ascending:false}).limit(1));
     const row = rows && rows[0];
     let codes = {}; try { codes = JSON.parse(row && row.content || '{}'); } catch (_) {}
     if (!codes || typeof codes!=='object' || Array.isArray(codes)) codes={};
@@ -43,21 +42,25 @@ function createAuthorSupport({ express, supabase, sharp, authenticateUser, verif
     catch (_) { return res.status(400).json({ok:false,error:'无法读取收款码图片'}); }
     if (!['png','jpeg','webp'].includes(meta.format) || (meta.pages || 1) > 1) return res.status(400).json({ok:false,error:'收款码请使用静态 PNG、JPEG 或 WebP 图片'});
     const path = 'site-support/' + provider + '_' + crypto.randomUUID() + '.' + (meta.format === 'jpeg' ? 'jpg' : meta.format);
-    const save = async () => {
-      const { row, codes } = await read();
+    try {
+      await result(supabase.rpc('register_managed_image', { p_path: path }));
       await result(storage().upload(path,bytes,{contentType:'image/' + meta.format,upsert:false,cacheControl:'31536000'}));
-      const next = { ...codes, [provider]:path };
+      // The database serializes first creation and merges only this provider.
+      // Old objects are queued in the same transaction as the new reference.
+      const codes = await result(supabase.rpc('update_author_support', {
+        p_admin_name: adminName, p_provider: provider, p_path: path
+      }));
+      res.json(publicConfig(codes));
+    } catch (_) {
+      // A failed response does not prove rollback. Read first; if verification
+      // fails retain the object for the bounded orphan sweep. The cleanup claim
+      // also fences a late commit before any storage deletion takes place.
       try {
-        await result(row ? supabase.from('posts').update({content:JSON.stringify(next)}).eq('id',row.id)
-          : supabase.from('posts').insert({user_name:adminName,media_type:'__admin_meta__',media_url:'author_support',actor_key:'author_support',content:JSON.stringify(next)}));
-      } catch (error) { await storage().remove([path]).catch(()=>{}); throw error; }
-      // Unique URLs make replacement immediate without a stale CDN QR code.
-      if (codes[provider] && /^site-support\//.test(codes[provider])) await storage().remove([codes[provider]]).catch(()=>{});
-      return publicConfig(next);
-    };
-    const pending = writes.then(save); writes = pending.catch(()=>{});
-    try { res.json(await pending); }
-    catch (_) { res.status(503).json({ok:false,error:'收款码保存失败，请重试'}); }
+        const current = await read();
+        if (!Object.values(current.codes).includes(path)) await require('./storage-cleanup').enqueueStorageCleanupJob(supabase, { paths:[path] });
+      } catch (_) {}
+      res.status(503).json({ok:false,error:'收款码未确认保存，请重新读取后重试'});
+    }
   });
   return router;
 }
