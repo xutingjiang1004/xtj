@@ -93,6 +93,17 @@ test('读取配置失败时访客开关按关闭处理', async function() {
   assert.equal(result.req.guestAi, undefined);
 });
 
+test('官方搜索默认开启且游客小时上限放宽', function() {
+  assert.match(serverSource, /allow_web_search: true,/);
+  assert.match(serverSource, /const GUEST_AI_HOURLY_LIMIT = 100;/);
+  // search_web 工具第一优先级就是 DeepSeek 官方 Search API（deepseek-web / v1/tools/search）
+  const deepseekWebSource = fs.readFileSync('render-api/deepseek-web.js', 'utf8');
+  assert.match(deepseekWebSource, /https:\/\/api\.deepseek\.com\/v1\/tools\/' \+ kind/);
+  const providersSource = fs.readFileSync('render-api/search-providers.js', 'utf8');
+  assert.match(providersSource, /name:\s*'DeepSeek'/);
+  assert.match(providersSource, /enabled: !options\.freeOnly && !!deepseekWeb\.credentials\(options\)/);
+});
+
 function guestExpressApp(config) {
   const runtime = serverGuestRuntime(config);
   const app = express();

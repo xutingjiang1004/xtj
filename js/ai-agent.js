@@ -14391,6 +14391,15 @@ function showChatMessages() {
 
   function applyConfigToUI(cfg) {
     if (!cfg) return;
+    // ★ 2026-10-25：后台开启联网搜索（allow_web_search=true）且用户从未手动设置过
+    //   面板开关（localStorage 无 xtj_ai_web_search）时，默认开启面板联网搜索，
+    //   让前端状态与后台官方搜索配置保持一致；用户手动开关后始终以用户为准。
+    try {
+      if (cfg.allow_web_search === true && localStorage.getItem('xtj_ai_web_search') === null) {
+        S.webSearchEnabled = true;
+        if (typeof updateSearchStatus === 'function') updateSearchStatus();
+      }
+    } catch (e) {}
     var avatarEl = document.getElementById('aiChatHeaderAvatar');
     var nameEl = document.getElementById('aiChatHeaderName');
     if (avatarEl) renderHeaderAvatar(avatarEl, cfg.avatar_url, cfg.avatar_version);

@@ -19497,7 +19497,7 @@ const AI_CHAT_LATEST_CONVERSATION_SCAN_LIMIT = 60;
 // 开启后，未登录访客只能使用普通聊天，且不写任何数据库记录；
 // 关闭后访客请求立即回到 authenticateUser（必须登录）。
 // 历史、深入研究、自定义模型、站内工具等依赖账号的 AI 功能仍要求登录。
-const GUEST_AI_HOURLY_LIMIT = 20;
+const GUEST_AI_HOURLY_LIMIT = 100;
 const GUEST_AI_DAILY_TURNS = 200;
 const GUEST_AI_MESSAGE_MAX_LEN = 50000;
 async function guestAiEnabled() {
@@ -20522,7 +20522,10 @@ const AI_DEFAULT_CONFIG = {
   tone: '',
   system_prompt: '',
   welcome_message: '我是小猫，徐旭泽的毒舌 AI 分身。有什么问题直接问，别绕弯子。',
-  allow_web_search: false,
+  // 联网搜索默认开启：search_web 工具优先走 DeepSeek 官方 Search API
+  //（deepseek-web.js / v1/tools/search），其次才是 Tavily/Brave/Serper/SearXNG 等。
+  // 管理员可在后台「AI 管理 → 智能体设置 → 联网搜索」关闭。
+  allow_web_search: true,
   reply_style: {
     directness: 'direct',
     detail_level: 'medium',
