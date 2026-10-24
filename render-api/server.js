@@ -19492,29 +19492,34 @@ const AI_CHAT_HOURLY_IP_LIMIT = 200;
 const AI_CHAT_HISTORY_FETCH_BUFFER = 24;
 const AI_CHAT_LATEST_CONVERSATION_SCAN_LIMIT = 60;
 
-// ===================== 临时游客 AI（2026-10-25 至 2026-10-27）=====================
-// Supabase 免费额度耗尽期间，允许未登录访客只使用普通聊天，不写任何数据库记录。
-// 到期后 guestAiEnabled() 恒为 false，路由自动回到 authenticateUser 行为。
-// 可用 GUEST_AI_UNTIL=off 或自定义 ISO 时间提前关闭/延长。
-const GUEST_AI_DEFAULT_UNTIL = '2026-10-27T23:59:59+08:00';
+// ===================== 访客 AI 通道（后台开关控制）=====================
+// 总开关在后台「AI 管理 → 智能体设置 → 访客可使用 AI」，存于 AI 配置
+// guest_access.enabled。关闭时访客请求一律走 authenticateUser（必须登录），
+// 不再有临时到期逻辑；后台保存配置会清缓存，切换即时生效。
+// 开启后访客只能普通聊天：不写任何账号数据（不存历史、不记额度、不建会话），
+// 只受 IP 小时上限与全站每日轮次上限约束。
 const GUEST_AI_HOURLY_LIMIT = 20;
 const GUEST_AI_DAILY_TURNS = 200;
 const GUEST_AI_MESSAGE_MAX_LEN = 50000;
-function resolveGuestAiUntil(raw) {
-  var value = String(raw == null ? '' : raw).trim();
-  if (value.toLowerCase() === 'off') return 0;
-  var parsed = value ? Date.parse(value) : Date.parse(GUEST_AI_DEFAULT_UNTIL);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-const GUEST_AI_UNTIL = resolveGuestAiUntil(process.env.GUEST_AI_UNTIL);
-function guestAiEnabled(now) {
-  return GUEST_AI_UNTIL > (now || Date.now());
+
+// 读后台开关。配置读取失败一律按关闭处理（fail closed），避免误放行。
+async function guestAiEnabled() {
+  try {
+    var cfg = await getAiConfig();
+    return !!(cfg && cfg.guest_access && cfg.guest_access.enabled === true);
+  } catch (e) {
+    console.error('[GUEST-AI] switch read failed:', e && e.message);
+    return false;
+  }
 }
 // 只对完全没有凭证的访客生效；带 token 的请求仍走真实认证，避免把过期会话降级成游客。
-function guestAiAuth(req, res, next) {
+async function guestAiAuth(req, res, next) {
   if (req.userName) return next();
-  if (!guestAiEnabled()) return authenticateUser(req, res, next);
   if (_getTokenFromRequest(req)) return authenticateUser(req, res, next);
+  var enabled = await guestAiEnabled();
+  if (!enabled) {
+    return res.status(403).json({ ok: false, code: 'guest_ai_disabled', retryable: false, error: '访客暂不能使用 AI，请登录后再试' });
+  }
   req.guestAi = true;
   req.userName = '';
   req.accountId = '';
@@ -20580,6 +20585,10 @@ const AI_DEFAULT_CONFIG = {
   //   现把 admin_debug 恢复为独立 key（与 6ae00e15 之前一致）。
   security: { hide_system_prompt_in_reasoning: true },  // 安全规则：思考过程中禁止复述系统提示词
   admin_debug: { show_effective_prompt: true, show_model_info: true, show_reasoning_length: true },
+  // ★ 2026-10-25：访客可使用 AI 开关（后台「AI 管理 → 智能体设置」）。
+  //   关闭（默认）时未登录访客不能发起 AI 对话；开启后访客可用普通聊天，
+  //   但不写入任何账号数据（历史、额度、会话都不落库）。
+  guest_access: { enabled: false },
   updated_at: '',
   updated_by: ''
 };
