@@ -4935,7 +4935,7 @@ async function aiSiteSearch(source, query, userName, limit, isAdmin, searchPlan)
       return aiSiteResult('posts', p.id, p.user_name + ' 的帖子', aiSiteSnippet(p.content, q), p.created_at, { type: 'post', post_id: p.id }, q, score);
     });
   } else if (source === 'comments') {
-    var commentRes = await supabase.from('comments').select('id,post_id,user_name,content,created_at').ilike('content', pattern).order('created_at', { ascending: false }).limit(take);
+    var commentRes = await supabase.from('comments').select('id::text,post_id,user_name,content,created_at').ilike('content', pattern).order('created_at', { ascending: false }).limit(take);
     if (commentRes.error) { console.error('[aiSiteSearch] comments query error:', commentRes.error); return { results: [], error: { code: 'comments_query_failed', message: '评论搜索暂时不可用' } }; }
     var comments = commentRes.data || [];
     var commentPostIds = comments.map(function(c) { return c.post_id; }).filter(Boolean);
@@ -5080,7 +5080,7 @@ app.get('/api/post/detail/:id', optionalAuth, async (req, res) => {
     catch (error) { return res.status(503).json({ ok: false, error: error.code || 'attachments_unavailable', message: '帖子图片加载失败，请重试。', retryable: true }); }
     var likesRes = await readRelationPage(supabase, postId, 'likes', { limit: 50 });
     var commentsRes = await readPostDetailComments(supabase, postId);
-    var myLikeRes = req.userName ? await supabase.from('likes').select('id').eq('post_id', postId).eq('user_name', req.userName).limit(1) : { data: [] };
+    var myLikeRes = req.userName ? await supabase.from('likes').select('id::text').eq('post_id', postId).eq('user_name', req.userName).limit(1) : { data: [] };
     if (likesRes.error || commentsRes.error || myLikeRes.error) {
       return res.status(503).json({ ok: false, error: 'detail_relations_failed', message: '互动数据加载失败，请重试。' });
     }
@@ -5677,7 +5677,7 @@ async function checkSameIpMultiUsers(userName, ip, ipLocation) {
       .limit(200);
     if (!data || !data.length) return;
 
-    var ipUsers = {};
+    var ipUsers = Object.create(null);
     data.forEach(function(row) {
       try {
         var c = JSON.parse(row.content || '{}');
@@ -5728,7 +5728,7 @@ async function checkSameDeviceMultiUsers(userName, deviceId, ip, ipLocation) {
       .limit(100);
     if (!data || !data.length) return;
 
-    var deviceUsers = {};
+    var deviceUsers = Object.create(null);
     data.forEach(function(row) {
       if (row.user_name !== userName) {
         deviceUsers[row.user_name] = true;
@@ -5918,7 +5918,7 @@ async function checkSameBrowserFingerprintMultiUsers(userName, browserFp, ip, ip
       .limit(500);
     if (!data || !data.length) return;
 
-    var fpUsers = {};
+    var fpUsers = Object.create(null);
     data.forEach(function(row) {
       if (row.user_name === userName) return;
       try {
@@ -5970,7 +5970,7 @@ async function checkSameCanvasFingerprintMultiUsers(userName, canvasFp, ip, ipLo
       .limit(500);
     if (!data || !data.length) return;
 
-    var fpUsers = {};
+    var fpUsers = Object.create(null);
     data.forEach(function(row) {
       if (row.user_name === userName) return;
       try {
@@ -6687,7 +6687,7 @@ function extractCatQuestion(content) {
 async function fetchCatReplyByParent(parentCommentId) {
   try {
     var res = await supabase.from('comments')
-      .select('id, post_id, user_name, content, created_at, updated_at, parent_comment_id, generated_by_ai')
+      .select('id::text, post_id, user_name, content, created_at, updated_at, parent_comment_id::text, generated_by_ai')
       .eq('parent_comment_id', String(parentCommentId))
       .eq('generated_by_ai', true)
       .eq('user_name', CAT_AI_USERNAME)
@@ -6906,13 +6906,13 @@ async function getCatPostContext(postId, sourceCommentId) {
     var sourceComment = null;
     var parentComments = [];
     if (sourceCommentId) {
-      var sourceRes = await supabase.from('comments').select('id, user_name, content, parent_comment_id').eq('id', sourceCommentId).maybeSingle();
+      var sourceRes = await supabase.from('comments').select('id::text, user_name, content, parent_comment_id::text').eq('id', sourceCommentId).maybeSingle();
       if (sourceRes.error) return { ok: false, state: 'query_failed', error: sourceRes.error, code: 'source_query_failed' };
       sourceComment = sourceRes.data;
       if (!sourceComment) return { ok: false, state: 'not_found', missing: 'source_comment' };
       if (sourceComment && sourceComment.parent_comment_id) {
         // 获取父级评论
-        var parentRes = await supabase.from('comments').select('id, user_name, content').eq('id', sourceComment.parent_comment_id).maybeSingle();
+        var parentRes = await supabase.from('comments').select('id::text, user_name, content').eq('id', sourceComment.parent_comment_id).maybeSingle();
         if (parentRes.error) return { ok: false, state: 'query_failed', error: parentRes.error, code: 'parent_query_failed' };
         if (parentRes.data) parentComments.push(parentRes.data);
       }
@@ -6920,7 +6920,7 @@ async function getCatPostContext(postId, sourceCommentId) {
 
     // 获取附近评论
     var nearbyRes = await supabase.from('comments')
-      .select('id, user_name, content, created_at')
+      .select('id::text, user_name, content, created_at')
       .eq('post_id', postId)
       .neq('generated_by_ai', true)
       .order('created_at', { ascending: false })
@@ -7003,7 +7003,7 @@ async function processCatReplyJob(job) {
     workingJob = Object.assign({}, job, claimResult.data || {}, { attempts: (job.attempts || 0) + 1 });
 
     // 验证源评论仍然存在
-    var sourceRes = await supabase.from('comments').select('id, user_name, content, post_id').eq('id', sourceCommentId).maybeSingle();
+    var sourceRes = await supabase.from('comments').select('id::text, user_name, content, post_id').eq('id', sourceCommentId).maybeSingle();
     if (sourceRes.error) {
       await requeueCatJob(workingJob, 'source comment query failed: ' + catErrorText(sourceRes.error));
       return;
@@ -7333,7 +7333,7 @@ app.get('/api/comments/ai-reply-status', rateLimit(60000, 30), authenticateUser,
     }
     var commentId = commentIdRaw;
     // 验证当前用户有权查看该评论
-    var commentRes = await supabase.from('comments').select('id, post_id, user_name, created_at').eq('id', commentId).maybeSingle();
+    var commentRes = await supabase.from('comments').select('id::text, post_id, user_name, created_at').eq('id', commentId).maybeSingle();
     if (commentRes.error) return res.status(503).json({ error: 'comment lookup temporarily unavailable', code: 'comment_query_failed', retryable: true });
     if (!commentRes.data) return res.status(404).json({ error: 'comment not found' });
     // 验证帖子访问权限
@@ -7420,7 +7420,7 @@ app.post('/api/comments/ai-reply-retry', rateLimit(60000, 30), authenticateUser,
 
     // 1. 验证源评论存在
     var { data: sourceComment, error: sourceErr } = await supabase.from('comments')
-      .select('id, post_id, user_name, content')
+      .select('id::text, post_id, user_name, content')
       .eq('id', commentId)
       .maybeSingle();
     if (sourceErr) return res.status(503).json({ error: sanitizeError(sourceErr), code: 'comment_query_failed', retryable: true });
@@ -12057,12 +12057,15 @@ app.post('/api/user/refresh', securityRateLimit(60000, 30), async (req, res) => 
       res.clearCookie('xtj_user_refresh', { path: '/api/user' });
       return res.status(403).json({ error: '该账号已被封禁，无法继续使用', code: 'account_banned' });
     }
+    var requestId = req.body && req.body.refresh_request_id;
+    if (requestId != null && (typeof requestId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId))) return res.status(400).json({ error:'刷新请求标识无效' });
+    var refreshRequestHash = requestId ? crypto.createHash('sha256').update(requestId.toLowerCase()).digest('hex') : null;
     // 检查是否已撤销：必须区分「确证撤销」与「查询不可用」
     var revokeVerdict = await checkRefreshTokenRevoked(refreshToken);
     if (revokeVerdict.revoked) {
-      // A late request can carry the predecessor after another tab has set
-      // its successor. Reject it without deleting that newer browser Cookie.
-      return res.status(409).json({ error: '会话已更新，请重试', code: 'token_reused', retryable: true });
+      // An opaque receipt nonce permits only the exact lost-response retry.
+      // Late ordinary predecessors never clear the newer browser Cookie.
+      if (!refreshRequestHash) return res.status(409).json({ error: '会话已更新，请重试', code: 'token_reused', retryable: true });
     }
     if (revokeVerdict.uncertain) {
       return res.status(503).json({ error: '会话状态暂不可用，请稍后重试', code: 'refresh_unavailable', retryable: true });
@@ -12106,7 +12109,10 @@ app.post('/api/user/refresh', securityRateLimit(60000, 30), async (req, res) => 
       // ★ M23：新 refresh token 持久化失败必须显式 503（旧 token 尚未撤销，
       //   用户可用旧 token 重试），不再静默 warn 后继续签发导致 15 分钟后 401。
       var successor = verifyUserRefreshToken(newRefreshToken);
-      var rotation = await supabase.rpc('rotate_user_refresh_token', {
+      var rotation = refreshRequestHash ? await supabase.rpc('rotate_user_refresh_token_v2', {
+        p_user_name:payload.user_name,p_account_id:String(account.id),p_old_jti:payload.jti,
+        p_request_hash:refreshRequestHash,p_successor:successor
+      }) : await supabase.rpc('rotate_user_refresh_token', {
         p_user_name: payload.user_name, p_account_id: String(account.id),
         p_old_jti: payload.jti, p_new_jti: successor.jti,
         p_expires_at: new Date(successor.exp).toISOString()
@@ -12116,6 +12122,13 @@ app.post('/api/user/refresh', securityRateLimit(60000, 30), async (req, res) => 
       }
       if (!rotation.data || rotation.data.ok !== true) return res.status(409).json({ error: '会话已更新，请重试', code: 'token_reused', retryable: true });
 
+      if (refreshRequestHash) {
+        var confirmed = rotation.data.successor;
+        if (!confirmed || confirmed.type !== 'user_refresh' || confirmed.user_name !== payload.user_name || confirmed.account_id !== String(account.id) || typeof confirmed.jti !== 'string' || !Number.isFinite(confirmed.exp) || confirmed.exp <= Date.now()) {
+          return res.status(503).json({error:'刷新结果暂未确认，请重试',code:'refresh_store_failed'});
+        }
+        newRefreshToken = _signPayload(confirmed);
+      }
       res.cookie('xtj_user_refresh', newRefreshToken, {
         httpOnly: true,
         secure: true,
@@ -12178,11 +12191,11 @@ app.post('/api/user/logout', rateLimit(60000, 30), async (req, res) => {
       if (payload && payload.jti) {
         // ★ 加固：refresh token 撤销失败必须让客户端知道，不能静默返回 ok:true。
         //   否则 DB 抖动时用户以为已登出，refresh token 仍可在 30 天内续期。
-        var delRes = await supabase.from('posts').delete()
-          .eq('media_type', REFRESH_TOKEN_MARKER)
-          .eq('media_url', payload.jti);
-        if (delRes && delRes.error) {
-          console.error('[API] logout refresh revoke failed:', delRes.error);
+        var delRes = await supabase.rpc('revoke_user_refresh_session', {
+          p_user_name:payload.user_name,p_account_id:payload.account_id || null,p_jti:payload.jti
+        });
+        if (!delRes || delRes.error || delRes.data !== true) {
+          console.error('[API] logout refresh revoke failed:', delRes && delRes.error);
           // 不返回 200：保留 Cookie 让客户端可重试，避免"假登出"
           return res.status(503).json({ error: '退出状态同步失败，请重试', code: 'logout_sync_failed' });
         }
@@ -14011,7 +14024,7 @@ app.get('/api/likes/user/:userName', authenticateUser, async (req, res) => {
     }
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 160, 1), 500);
     const { data, error } = await supabase.from('likes')
-      .select('id, post_id, user_name, actor_key, created_at')
+      .select('id::text, post_id, user_name, actor_key, created_at')
       .eq('user_name', targetUser)
       .order('created_at', { ascending: false })
       .limit(limit);
@@ -14052,7 +14065,7 @@ app.get('/api/comments/user/:userName', authenticateUser, rateLimit(60000, 60), 
     }
     var limit = Math.min(Math.max(parseInt(req.query.limit || '160', 10) || 160, 1), 500);
     var result = await supabase.from('comments')
-      .select('id, post_id, user_name, content, actor_key, created_at', { count: 'exact' })
+      .select('id::text, post_id, user_name, content, actor_key, created_at', { count: 'exact' })
       .eq('user_name', targetUser)
       .order('created_at', { ascending: false })
       .limit(limit);
@@ -14183,7 +14196,7 @@ app.delete('/api/post/comment/:commentId', authenticateUser, rateLimit(60000, 30
   try {
     var commentId = normalizeInteractionId(req.params.commentId);
     if (!commentId) return res.status(400).json({ error: 'Invalid comment id', code: 'invalid_comment_id' });
-    var existing = await supabase.from('comments').select('id, user_name, generated_by_ai, parent_comment_id, post_id').eq('id', commentId).maybeSingle();
+    var existing = await supabase.from('comments').select('id::text, user_name, generated_by_ai, parent_comment_id::text, post_id').eq('id', commentId).maybeSingle();
     if (existing.error) return res.status(500).json({ error: sanitizeError(existing.error), code: 'comment_lookup_failed' });
     if (!existing.data) return res.json({ ok: true, already_deleted: true });
     if (existing.data.user_name !== req.userName && req.userName !== ADMIN_USERNAME) {
@@ -14271,8 +14284,8 @@ app.get('/api/stats/snapshot', authenticateUser, rateLimit(60000, 30), async (re
       applyPublicPostExclusions(supabase.from('posts')
         .select('id, user_name, content, media_url, media_type, visibility, views, actor_key, created_at, is_pinned, pinned_at'))
         .order('created_at', { ascending: false }).limit(limit),
-      supabase.from('likes').select('id, post_id, user_name, created_at').order('created_at', { ascending: false }).limit(interactionLimit),
-      supabase.from('comments').select('id, post_id, user_name, content, created_at').order('created_at', { ascending: false }).limit(interactionLimit),
+      supabase.from('likes').select('id::text, post_id, user_name, created_at').order('created_at', { ascending: false }).limit(interactionLimit),
+      supabase.from('comments').select('id::text, post_id, user_name, content, created_at').order('created_at', { ascending: false }).limit(interactionLimit),
       supabase.from('posts').select('id, user_name, media_url, content, created_at').eq('media_type', POST_VIEW_MARKER)
         .order('created_at', { ascending: false }).limit(interactionLimit)
     ]);
@@ -16531,8 +16544,8 @@ app.delete('/admin/user/:userName', verifyToken, rateLimit(60000, 5), async (req
       existsChecks = await Promise.all([
       supabase.from('posts').select('id').eq('user_name', userName).limit(1),
       supabase.from('posts').select('id').eq('media_type', DM_MARKER).eq('media_url', userName).limit(1),
-      supabase.from('likes').select('id').eq('user_name', userName).limit(1),
-      supabase.from('comments').select('id').eq('user_name', userName).limit(1),
+      supabase.from('likes').select('id::text').eq('user_name', userName).limit(1),
+      supabase.from('comments').select('id::text').eq('user_name', userName).limit(1),
       supabase.from('bans').select('id').eq('user_name', userName).limit(1),
       supabase.from('mutes').select('id').eq('user_name', userName).limit(1),
       supabase.from('blacklist').select('id').eq('user_name', userName).limit(1),
@@ -17311,130 +17324,23 @@ const MAX_STATS_LIMIT = 20000;
 // 汇总统计
 app.get('/admin/stats', verifyToken, rateLimit(60000, 10), async (req, res) => {
   try {
-    const startDate = req.query.start || '';
-    const endDate = req.query.end || '';
-
-    // 有日期筛选时不使用缓存
-    if (!startDate && !endDate && statsCache.data && (Date.now() - statsCache.ts) < STATS_CACHE_TTL) {
-      return res.json(statsCache.data);
+    const statistics = require('./admin-statistics');
+    const range = statistics.parseStatisticsRange(req.query);
+    if (range.start || range.end) return res.json((await statistics.readStatistics(supabase, range)).summary);
+    const cache = statsCache;
+    if (cache.data && Date.now() - cache.ts < STATS_CACHE_TTL) return res.json(cache.data);
+    if (!cache.pending) {
+      const pending = statistics.readStatistics(supabase, range).then(report => report.summary);
+      cache.pending = pending;
+      pending.catch(() => { if (cache.pending === pending) cache.pending = null; });
     }
-    // 并发去重：已有查询在进行中则直接复用同一个 promise，避免重复查询
-    if (!startDate && !endDate && statsCache.pending) {
-      return res.json(await statsCache.pending);
-    }
-
-    // 构建带日期筛选的查询
-    // 无日期筛选时也使用合理上限，避免拉取全表
-    function buildSummaryQuery(table, selectFields, eqField, eqValue, dateField) {
-      var q = supabase.from(table).select(selectFields);
-      if (eqField) q = q.eq(eqField, eqValue);
-      if (dateField === 'media_url') {
-        if (startDate) q = q.gte('media_url', startDate);
-        if (endDate) q = q.lte('media_url', endDate);
-      } else if (startDate || endDate) {
-        if (startDate) q = q.gte('created_at', startDate + 'T00:00:00.000Z');
-        if (endDate) q = q.lte('created_at', endDate + 'T23:59:59.999Z');
-      }
-      q = q.order('created_at', { ascending: false });
-      // ★ M35 审计修复：带日期筛选时必须同样加 limit，否则
-      //   ?start=2000&end=2099 会把整个表拉进内存（无日期分支原本就有 MAX_STATS_LIMIT）
-      q = q.limit(MAX_STATS_LIMIT);
-      return q;
-    }
-
-    // 汇总查询：无日期筛选时由 pending promise 复用（并发请求共享同一份查询，避免重复查询）
-    async function runStatsQuery() {
-      const [postsRes, authRowsRes, visitsRes, attacksRes, likesRes, commentsRes, photosRes] = await Promise.all([
-        applyPublicPostExclusions(buildSummaryQuery('posts', 'id, media_type, content, created_at', null, null, 'created_at')),
-        buildSummaryQuery('posts', 'user_name, created_at', 'media_type', AUTH_MARKER, 'created_at'),
-        buildSummaryQuery('posts', 'id, content, media_url, created_at', 'media_type', VISIT_MARKER, 'media_url'),
-        buildSummaryQuery('posts', 'id, content, media_url, created_at', 'media_type', ATTACK_MARKER, 'created_at'),
-        buildSummaryQuery('likes', 'id', null, null, 'created_at'),
-        buildSummaryQuery('comments', 'id', null, null, 'created_at'),
-        buildSummaryQuery('posts', 'id', 'media_type', '__photo_wall__', 'created_at'),
-      ]);
-
-      [postsRes,authRowsRes,visitsRes,attacksRes,likesRes,commentsRes,photosRes].forEach(result => { if (!result || result.error) throw result && result.error || Error('stats_unavailable'); });
-      const posts = (postsRes.data || []).filter(p => {
-        if (p.content) {
-          try { var c = JSON.parse(p.content); if (c && c.target_type) return false; } catch(e) {}
-        }
-        return true;
-      });
-      const authRows = authRowsRes.data || [];
-      const authUserMap = buildAuthUserMap(authRows);
-      const visits = visitsRes.data || [];
-      const attacks = attacksRes.data || [];
-      const likes = likesRes.data || [];
-      const comments = commentsRes.data || [];
-      const photos = photosRes.data || [];
-
-      // 按日期聚合访问数据
-      const dailyVisits = {};
-      visits.forEach(v => {
-        var d = v.media_url || '';
-        if (!d) { try { var c = JSON.parse(v.content || '{}'); d = c.date || ''; } catch(e) {} }
-        if (d) dailyVisits[d] = (dailyVisits[d] || 0) + 1;
-      });
-
-      // 按日期聚合攻击数据
-      const dailyAttacks = {};
-      attacks.forEach(a => {
-        var d = '';
-        try { var c = JSON.parse(a.content || '{}'); d = c.date || a.media_url || ''; } catch(e) { d = a.media_url || ''; }
-        if (d) dailyAttacks[d] = (dailyAttacks[d] || 0) + 1;
-      });
-
-      // 攻击类型分布
-      const attackTypes = {};
-      attacks.forEach(a => {
-        var t = a.media_url || 'unknown';
-        attackTypes[t] = (attackTypes[t] || 0) + 1;
-      });
-
-      // API防火墙拦截 = CORS + CSRF（RATE_LIMIT是速率限制，不计入拦截）
-      var firewallIntercepts = (attackTypes['CORS'] || 0) + (attackTypes['CSRF'] || 0);
-
-      return {
-        total_users: Object.keys(authUserMap).length,
-        total_posts: posts.length,
-        total_comments: comments.length,
-        total_likes: likes.length,
-        total_photos: photos.length,
-        total_visits: visits.length,
-        total_attacks: attacks.length,
-        firewall_intercepts: firewallIntercepts,
-        daily_visits: dailyVisits,
-        daily_attacks: dailyAttacks,
-        attack_types: attackTypes,
-        truncated: [postsRes,authRowsRes,visitsRes,attacksRes,likesRes,commentsRes,photosRes].some(result => (result.data || []).length >= MAX_STATS_LIMIT),
-        cached_at: new Date().toISOString()
-      };
-    }
-
-    // 无日期筛选时：已有查询在进行中则复用同一个 promise（见上方并发去重分支）；
-    // 否则由第一个请求创建 pending promise，并发请求共享同一份查询结果
-    if (!startDate && !endDate) {
-      if (!statsCache.pending) {
-        var statsPromise = runStatsQuery();
-        statsCache.pending = statsPromise;
-        // 查询失败时释放 pending，避免后续请求永久等待同一个失败 promise
-        statsPromise.catch(function() {
-          if (statsCache.pending === statsPromise) statsCache.pending = null;
-        });
-      }
-      var sharedResult = await statsCache.pending;
-      statsCache = { data: sharedResult, ts: Date.now(), pending: null };
-      return res.json(sharedResult);
-    }
-
-    // 带日期筛选：不走缓存，直接查询
-    const result = await runStatsQuery();
+    const result = await cache.pending;
+    // A cache-clear request replaces the generation. A late old query may
+    // finish its original response, but must never repopulate the new cache.
+    if (statsCache === cache) { cache.data = result; cache.ts = Date.now(); cache.pending = null; }
     return res.json(result);
-  } catch (e) {
-    statsCache.pending = null;
-    console.error('[API] 统计加载失败:', e.message);
-    return res.status(500).json({ error: '统计加载失败' });
+  } catch (error) {
+    return res.status(error.status === 400 ? 400 : 503).json({ error: error.status === 400 ? error.message : '统计暂时无法加载，请重试' });
   }
 });
 
@@ -17485,103 +17391,11 @@ app.get('/admin/stats/attacks', verifyToken, rateLimit(60000, 20), async (req, r
 // 每日明细统计（支持日期筛选）
 app.get('/admin/stats/daily', verifyToken, rateLimit(60000, 10), async (req, res) => {
   try {
-    const startDate = req.query.start || '';
-    const endDate = req.query.end || '';
-
-    // 构建带日期筛选的查询（数据库级别筛选，避免limit截断旧数据）
-    function buildQuery(table, selectFields, eqField, eqValue, dateField) {
-      var q = supabase.from(table).select(selectFields);
-      if (eqField) q = q.eq(eqField, eqValue);
-      // visits/attacks 的日期在 media_url 字段，其他用 created_at
-      if (dateField === 'media_url') {
-        if (startDate) q = q.gte('media_url', startDate);
-        if (endDate) q = q.lte('media_url', endDate);
-      } else {
-        if (startDate) q = q.gte('created_at', startDate + 'T00:00:00.000Z');
-        if (endDate) q = q.lte('created_at', endDate + 'T23:59:59.999Z');
-      }
-      q = q.order('created_at', { ascending: false });
-      // ★ 审计修复（与 /admin/stats 的 M35 对齐）：带日期筛选时**同样**加 limit。
-      //   旧注释称"数据库层面已过滤无需 limit"，但 Supabase 侧并无行数上限兜底
-      //   （默认 max-rows 可能被运维调高），宽日期区间仍可把全量 marker 行拉进内存。
-      q = q.limit(MAX_STATS_LIMIT);
-      return q;
-    }
-
-    const [visitsRes, attacksRes, postsRes, commentsRes, likesRes, authRows] = await Promise.all([
-      buildQuery('posts', 'id, content, media_url, created_at', 'media_type', VISIT_MARKER, 'media_url'),
-      buildQuery('posts', 'id, content, media_url, created_at', 'media_type', ATTACK_MARKER, 'created_at'),
-      applyPublicPostExclusions(buildQuery('posts', 'id, created_at', null, null, 'created_at')),
-      buildQuery('comments', 'id, created_at', null, null, 'created_at'),
-      buildQuery('likes', 'id, created_at', null, null, 'created_at'),
-      fetchAllPostsByMediaType(AUTH_MARKER, 'user_name, created_at'),
-    ]);
-
-    [visitsRes,attacksRes,postsRes,commentsRes,likesRes,authRows].forEach(result => { if (!result || result.error) throw result && result.error || Error('stats_unavailable'); });
-
-    // 辅助函数：按天聚合
-    function aggregateByDate(records, dateField) {
-      var map = {};
-      (records || []).forEach(r => {
-        var d = (r[dateField] || '').slice(0, 10);
-        if (d) map[d] = (map[d] || 0) + 1;
-      });
-      return map;
-    }
-
-    // 辅助函数：过滤日期范围
-
-    const dailyVisitsAll = {};
-    (visitsRes.data || []).forEach(v => {
-      var d = v.media_url || '';
-      if (!d) { try { var c = JSON.parse(v.content || '{}'); d = c.date || ''; } catch(e) {} }
-      if (d) dailyVisitsAll[d] = (dailyVisitsAll[d] || 0) + 1;
-    });
-
-    const dailyAttacksAll = {};
-    (attacksRes.data || []).forEach(a => {
-      var d = '';
-      try { var c = JSON.parse(a.content || '{}'); d = c.date || a.media_url || ''; } catch(e) { d = a.media_url || ''; }
-      if (d) dailyAttacksAll[d] = (dailyAttacksAll[d] || 0) + 1;
-    });
-
-    const dailyPostsMap = aggregateByDate(postsRes.data || [], 'created_at');
-    const dailyCommentsMap = aggregateByDate(commentsRes.data || [], 'created_at');
-    const dailyLikesMap = aggregateByDate(likesRes.data || [], 'created_at');
-    const dailyUsersMap = buildRegisteredUsersByDate(buildAuthUserMap(authRows));
-
-    // 合并所有日期
-    var allDates = {};
-    [dailyVisitsAll, dailyAttacksAll, dailyPostsMap, dailyCommentsMap, dailyLikesMap, dailyUsersMap].forEach(function(m) {
-      Object.keys(m).forEach(function(d) { allDates[d] = true; });
-    });
-
-    var dailyArr = Object.keys(allDates).sort().map(function(d) {
-      return {
-        date: d,
-        visits: dailyVisitsAll[d] || 0,
-        attacks: dailyAttacksAll[d] || 0,
-        posts: dailyPostsMap[d] || 0,
-        comments: dailyCommentsMap[d] || 0,
-        likes: dailyLikesMap[d] || 0,
-        new_users: dailyUsersMap[d] || 0
-      };
-    });
-
-    // 如果有日期筛选，过滤
-    if (startDate || endDate) {
-      dailyArr = dailyArr.filter(function(item) {
-        return (!startDate || item.date >= startDate) && (!endDate || item.date <= endDate);
-      });
-    }
-
-    return res.json({
-      daily: dailyArr,
-      date_range: { start: startDate || 'all', end: endDate || 'all' }
-    });
-  } catch (e) {
-    console.error('[API] 每日统计加载失败:', e.message);
-    return res.status(500).json({ error: '每日统计加载失败' });
+    const statistics = require('./admin-statistics');
+    const result = await statistics.readStatistics(supabase, statistics.parseStatisticsRange(req.query));
+    return res.json({ daily: result.daily, date_range: result.date_range });
+  } catch (error) {
+    return res.status(error.status === 400 ? 400 : 503).json({ error: error.status === 400 ? error.message : '每日统计暂时无法加载，请重试' });
   }
 });
 
@@ -20254,13 +20068,13 @@ app.get('/admin/ai-agent/invite-redemptions', verifyToken, securityRateLimit(600
     }
     var list = result.data || [];
     // 批量附加每位用户今日额度（token / 搜索），供管理端进度条展示
-    var nameSet = {};
+    var nameSet = Object.create(null);
     list.forEach(function(row) {
       var n = String((row && row.user_name) || '').trim().toLowerCase();
       if (n) nameSet[n] = true;
     });
     var names = Object.keys(nameSet);
-    var quotaByUser = {};
+    var quotaByUser = Object.create(null);
     await Promise.all(names.map(async function(name) {
       try {
         quotaByUser[name] = await aiQuota.getQuota(name);
@@ -27350,7 +27164,7 @@ app.get('/admin/ai-agent/usage-summary', verifyToken, securityRateLimit(60000, 3
     // 性能优化：assistant 消息通常占少数，limit 默认 10000 条
     // 按 created_at desc 拿最近 N 天 / 全部
     var query = supabase.from('posts')
-      .select('user_name, content, media_url, created_at')
+      .select('user_name, media_url, created_at', { count:'exact' })
       .eq('media_type', AI_AGENT_MESSAGE_MARKER)
       .order('created_at', { ascending: false })
       .limit(10000);
@@ -27359,15 +27173,15 @@ app.get('/admin/ai-agent/usage-summary', verifyToken, securityRateLimit(60000, 3
       query = query.gte('created_at', since);
     }
 
-    var { data: allRows, error } = await query;
+    var { data: allRows, count: totalRows, error } = await query;
     if (error) {
       console.error('[ADMIN-AI] usage-summary query error:', error.message);
       return res.status(500).json({ error: '查询失败' });
     }
 
-    var today = new Date();
-    today.setHours(0, 0, 0, 0);
-    var todayStr = today.toISOString();
+    // Match the Shanghai calendar day used by AI quota accounting.
+    var todayKey = new Date(Date.now() + 8 * 3600000).toISOString().slice(0,10);
+    var todayStr = new Date(todayKey + 'T00:00:00+08:00').toISOString();
     var totalCalls = 0, todayCalls = 0;
     var totalTokens = 0, todayTokens = 0;
     var totalInputTokens = 0, todayInputTokens = 0;
@@ -27375,7 +27189,7 @@ app.get('/admin/ai-agent/usage-summary', verifyToken, securityRateLimit(60000, 3
     var totalCacheHit = 0, todayCacheHit = 0;
     var totalCacheMiss = 0, todayCacheMiss = 0;
     var totalCost = 0, todayCost = 0, totalWebCost = 0, todayWebCost = 0, totalWebRequests = 0, unknownWebRequests = 0;
-    var uniqueUsers = {};
+    var uniqueUsers = Object.create(null);
 
     if (Array.isArray(allRows)) {
       allRows.forEach(function(r) {
@@ -27420,7 +27234,8 @@ app.get('/admin/ai-agent/usage-summary', verifyToken, securityRateLimit(60000, 3
       // ★ 2026-09-13（M-06）：透出截断事实。此前 limit(10000) 是静默的——
       //   数据量一旦超过 1 万条，统计值就会偏低而页面毫无提示，
       //   用户只会觉得"数字对不上"。这里把是否触顶如实告知前端。
-      truncated: Array.isArray(allRows) && allRows.length >= 10000,
+      truncated: Array.isArray(allRows) && (typeof totalRows !== 'number' || totalRows > allRows.length),
+      loaded_rows: (allRows || []).length, matched_rows: totalRows == null ? null : totalRows,
       summary: {
         today_calls: todayCalls,
         today_input_tokens: todayInputTokens,
@@ -27458,24 +27273,26 @@ app.get('/admin/ai-agent/users', verifyToken, securityRateLimit(60000, 30), asyn
     var days = parseInt(req.query.days, 10);
     if (isNaN(days) || days < 1) days = 90;
     if (days > 365) days = 365;
+    var useAll = String(req.query.days || '').toLowerCase() === 'all';
     var since = new Date(Date.now() - days * 86400000).toISOString();
 
-    var { data: rows, error: readError } = await supabase.from('posts')
-      .select('user_name, media_url, created_at')
+    var query = supabase.from('posts')
+      .select('user_name, media_url, created_at', { count:'exact' })
       .eq('media_type', AI_AGENT_MESSAGE_MARKER)
-      .gte('created_at', since)
       .order('created_at', { ascending: false })
       .limit(50000);
+    if (!useAll) query = query.gte('created_at',since);
+    var { data: rows, count: totalRows, error: readError } = await query;
 
     if (readError) throw readError;
-    if (!Array.isArray(rows)) return res.json({ ok: true, users: [], window_days: days });
+    if (!Array.isArray(rows)) return res.json({ ok: true, users: [], window_days: useAll ? 'all' : days });
 
-    var userMap = {};
+    var userMap = Object.create(null);
     rows.forEach(function(r) {
       if (!r.user_name) return;
       if (!userMap[r.user_name]) {
         userMap[r.user_name] = {
-          message_count: 0, convs: {},
+          message_count: 0, convs: Object.create(null),
           total_tokens: 0, input_tokens: 0, output_tokens: 0,
           cache_hit_tokens: 0, cache_miss_tokens: 0,
           total_cost: 0, last_at: null
@@ -27524,7 +27341,7 @@ app.get('/admin/ai-agent/users', verifyToken, securityRateLimit(60000, 30), asyn
     userList.sort(function(a, b) { return (b.last_at || '').localeCompare(a.last_at || ''); });
 
     // ★ 2026-09-13（M-06）：同 usage-summary，把 50000 条上限是否触顶如实告知前端
-    return res.json({ ok: true, users: userList, window_days: days, truncated: Array.isArray(rows) && rows.length >= 50000 });
+    return res.json({ ok: true, users: userList, window_days: useAll ? 'all' : days, truncated: typeof totalRows !== 'number' || totalRows > rows.length, loaded_rows: rows.length, matched_rows: totalRows == null ? null : totalRows });
   } catch (e) {
     console.error('[ADMIN-AI] GET users error:', e.message);
     return res.status(500).json({ error: '查询失败' });
@@ -27543,8 +27360,8 @@ app.get('/admin/ai-agent/conversations', verifyToken, securityRateLimit(60000, 3
     if (days > 365) days = 365;
     var since = new Date(Date.now() - days * 86400000).toISOString();
 
-    var { data: rows, error: readError } = await supabase.from('posts')
-      .select('id, user_name, content, media_url, created_at')
+    var { data: rows, count: totalRows, error: readError } = await supabase.from('posts')
+      .select('id, user_name, content, media_url, created_at', { count:'exact' })
       .eq('user_name', targetUser)
       .eq('media_type', AI_AGENT_MESSAGE_MARKER)
       .gte('created_at', since)
@@ -27556,7 +27373,7 @@ app.get('/admin/ai-agent/conversations', verifyToken, securityRateLimit(60000, 3
 
     rows.reverse();
     // 按 conversation_id 分组
-    var convMap = {};
+    var convMap = Object.create(null);
     rows.forEach(function(r) {
       var meta = parseMsgMeta(r);
       var cid = meta.convId || 'legacy';
@@ -27621,7 +27438,7 @@ app.get('/admin/ai-agent/conversations', verifyToken, securityRateLimit(60000, 3
 
     conversations.sort(function(a, b) { return (b.last_at || '').localeCompare(a.last_at || ''); });
 
-    return res.json({ ok: true, user_name: targetUser, conversations: conversations, window_days: days, truncated: rows.length >= 5000 });
+    return res.json({ ok: true, user_name: targetUser, conversations: conversations, window_days: days, truncated: typeof totalRows !== 'number' || totalRows > rows.length, loaded_rows: rows.length, matched_rows: totalRows == null ? null : totalRows });
   } catch (e) {
     console.error('[ADMIN-AI] GET conversations exception:', e.message);
     return res.status(500).json({ error: '查询失败' });
@@ -27641,8 +27458,8 @@ app.get('/admin/ai-agent/conversation', verifyToken, securityRateLimit(60000, 60
     var query;
     if (convId === 'legacy') {
       // 旧数据没有 conversation_id，用 actor_key 模式匹配回退到普通查询
-      var { data: rows, error: readError } = await supabase.from('posts')
-        .select('id, user_name, content, media_url, created_at')
+      var { data: rows, count: totalRows, error: readError } = await supabase.from('posts')
+        .select('id, user_name, content, media_url, created_at', { count:'exact' })
         .eq('user_name', targetUser)
         .eq('media_type', AI_AGENT_MESSAGE_MARKER)
         .order('created_at', { ascending: false }).order('id', { ascending: false })
@@ -27659,7 +27476,7 @@ app.get('/admin/ai-agent/conversation', verifyToken, securityRateLimit(60000, 60
           content: r.content || '', created_at: r.created_at, usage: null
         };
       });
-      return res.json({ ok: true, user_name: targetUser, conversation_id: 'legacy', messages: msgs, truncated: (rows || []).length >= 5000 });
+      return res.json({ ok: true, user_name: targetUser, conversation_id: 'legacy', messages: msgs, truncated: typeof totalRows !== 'number' || totalRows > (rows || []).length });
     }
 
     var detailLimit = 500;
@@ -27667,15 +27484,15 @@ app.get('/admin/ai-agent/conversation', verifyToken, securityRateLimit(60000, 60
     var beforeAt = String(req.query.before_at || '');
     if ((beforeId || beforeAt) && (!normalizePostId(beforeId) || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/.test(beforeAt) || !Number.isFinite(Date.parse(beforeAt)))) return res.status(400).json({error:'分页参数无效'});
     var detailQuery = supabase.from('posts')
-      .select('id, user_name, content, media_url, created_at')
+      .select('id, user_name, content, media_url, created_at', { count:'exact' })
       .eq('user_name', targetUser).eq('media_type', AI_AGENT_MESSAGE_MARKER)
       .filter('actor_key', 'like', aiConversationActorPattern(convId))
       .order('created_at', { ascending: false }).order('id', { ascending: false }).limit(detailLimit + 1);
     if (beforeId) detailQuery = detailQuery.or('created_at.lt.' + beforeAt + ',and(created_at.eq.' + beforeAt + ',id.lt.' + beforeId + ')');
-    var { data: rows, error: readError } = await detailQuery;
+    var { data: rows, count: remainingCount, error: readError } = await detailQuery;
 
     if (readError) throw readError;
-    var hasMore = (rows || []).length > detailLimit;
+    var hasMore = (rows || []).length > detailLimit || (Number.isFinite(remainingCount) && remainingCount > Math.min(detailLimit,(rows || []).length));
     rows = (rows || []).slice(0,detailLimit);
     var oldest = rows[rows.length-1];
     var msgs = rows.reverse().map(function(r) {

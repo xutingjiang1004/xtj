@@ -19,7 +19,7 @@ test('admin shows online users and user detail at device-dialog width', async ({
     if (key === '/admin/stats/online') return json(route, {
       online_count: 1,
       device_stats: { mobile: 1, desktop: 0, tablet: 0, unknown: 0 },
-      users: [{ user_name: 'test-user', device_label: 'iPhone · iOS · Safari', ip: '203.0.113.10', location: 'Test region' }]
+      users: [{ user_name: 'test-user', device_label: 'iPhone · iOS · Safari', ip: '203.0.113.10', ip_location: { text:'测试地区', source_ip:'203.0.113.10', city_confidence:'single_source', providers:['fixture'] } }]
     });
     if (key === '/admin/login-events') return json(route, { data: [], behavior: [] });
     if (key === '/admin/security-alerts' || key === '/admin/mutes' || key === '/admin/reports') return json(route, { data: [] });
@@ -39,7 +39,7 @@ test('admin shows online users and user detail at device-dialog width', async ({
 
   await page.locator('#tabOnlineBtn').click();
   await expect(page.locator('#tabOnline')).toContainText('203.0.113.10');
-  await expect(page.locator('#tabOnline')).toContainText('Test region');
+  await expect(page.locator('#tabOnline')).toContainText('测试地区');
 
   await page.locator('#tabProfileBtn').click();
   await expect(page.locator('#profileDirectoryRows')).toBeVisible();

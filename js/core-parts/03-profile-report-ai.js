@@ -583,6 +583,7 @@
                     'xtj-theme': 1,
                     'xtj_theme': 1,
                     'xtj_device_id': 1,
+                    'xtj_pending_refresh_request': 1,
                     'xtj_pending_behavior': 1,
                     'xtj-notif': 1,
                     'xtj_report_reply_check': 1,

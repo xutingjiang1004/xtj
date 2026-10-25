@@ -22,7 +22,7 @@ function signed(payload) {
 const claims = token => JSON.parse(Buffer.from(token.split('.')[0], 'base64url'));
 function fixture(options = {}) {
   const records = [{ id: 'account-1', user_name: 'alice', media_type: '__auth__', media_url: options.verifier || sha(PASSWORD), created_at: '2020-01-01T00:00:00Z' }];
-  const calls = [];
+  const calls = [], receipts = new Map();let lostRotationResponse=false;
   const response = data => new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } });
   async function fetcher(input, init) {
     const url = new URL(input), body = init.body && JSON.parse(init.body);
@@ -36,6 +36,21 @@ function fixture(options = {}) {
     if (url.pathname.endsWith('/rpc/record_user_auth_event')) return response({ event_id: 'event-1', login_at: new Date().toISOString(), registered_at: '2020-01-01T00:00:00Z' });
     if (url.pathname.endsWith('/rpc/record_auth_ip_location')) return response({ok:true,event_updated:true,current_updated:true});
     if (url.pathname.endsWith('/rpc/merge_user_info')) return response({ ok: true });
+    if (url.pathname.endsWith('/rpc/revoke_user_refresh_session')) {
+      const receipt=receipts.get(body.p_jti), ids=[body.p_jti,receipt?.successor.jti];
+      for(let i=records.length-1;i>=0;i--)if(records[i].user_name===body.p_user_name&&records[i].media_type==='__refresh_token__'&&ids.includes(records[i].media_url))records.splice(i,1);
+      receipts.delete(body.p_jti);return response(true);
+    }
+    if (url.pathname.endsWith('/rpc/rotate_user_refresh_token_v2')) {
+      const receipt=receipts.get(body.p_old_jti);
+      if(receipt)return response(receipt.hash===body.p_request_hash&&records.some(r=>r.media_type==='__refresh_token__'&&r.media_url===receipt.successor.jti)?{ok:true,recovered:true,successor:receipt.successor}:{ok:false});
+      const old=records.find(r=>r.media_type==='__refresh_token__'&&r.media_url===body.p_old_jti&&r.user_name===body.p_user_name);
+      if(!old||options.rotationConflict)return response({ok:false});records.splice(records.indexOf(old),1);
+      records.push({id:crypto.randomUUID(),user_name:body.p_user_name,media_type:'__refresh_token__',media_url:body.p_successor.jti});
+      receipts.set(body.p_old_jti,{hash:body.p_request_hash,successor:body.p_successor});
+      if(options.loseRotationResponse&&!lostRotationResponse){lostRotationResponse=true;return new Response('{}',{status:503});}
+      return response({ok:true,recovered:false,successor:body.p_successor});
+    }
     if (url.pathname.endsWith('/rpc/rotate_user_refresh_token')) {
       const old = records.find(r => r.media_type === '__refresh_token__' && r.media_url === body.p_old_jti);
       if (!old || options.rotationConflict) return response({ ok: false });
@@ -322,4 +337,23 @@ test('Supabase egress restrictions retain the existing 402 contract and do not c
     assert.equal(data.retryable, false); assert.equal(response.headers.has('Set-Cookie'), false);
     assert.equal(JSON.stringify(data).includes('fixture-provider-secret'), false);
   }
+});
+
+test('edge lost rotation acknowledgement recovers the exact signed successor and logout with the predecessor revokes it',async()=>{
+ const f=fixture({loseRotationResponse:true}),login=await f.request('/api/user/login',{user_name:'alice',password:PASSWORD});assert.equal(login.status,200);
+ const cookie=login.headers.getSetCookie().find(s=>s.startsWith('xtj_user_refresh=')).split(';')[0],nonce=crypto.randomUUID();
+ assert.equal((await f.request('/api/user/refresh',{refresh_request_id:nonce},{cookie})).status,503);
+ const recovered=await f.request('/api/user/refresh',{refresh_request_id:nonce},{cookie});assert.equal(recovered.status,200);const saved=recovered.headers.getSetCookie().find(s=>s.startsWith('xtj_user_refresh=')).split(';')[0].split('=')[1];assert.equal(claims(saved).user_name,'alice');assert.notEqual(saved,cookie.split('=')[1]);
+ const repeated=await f.request('/api/user/refresh',{refresh_request_id:nonce},{cookie});assert.equal(repeated.headers.getSetCookie().find(s=>s.startsWith('xtj_user_refresh=')).split(';')[0],'xtj_user_refresh='+saved);
+ for(const body of [{refresh_request_id:crypto.randomUUID()},{}]){const denied=await f.request('/api/user/refresh',body,{cookie});assert.equal(denied.status,409);assert.deepEqual(denied.headers.getSetCookie(),[]);}
+ assert.equal((await f.request('/api/user/refresh',{refresh_request_id:'invalid'},{cookie})).status,400);
+ const logout=await f.request('/api/user/logout',{}, {cookie});assert.equal(logout.status,200);assert.equal((await f.request('/api/user/refresh',{refresh_request_id:nonce},{cookie})).status,409);
+});
+
+test('edge logout revokes a recovered successor even when its signed predecessor has no account_id',async()=>{
+ const f=fixture(),login=await f.request('/api/user/login',{user_name:'alice',password:PASSWORD});assert.equal(login.status,200);
+ const modern=login.headers.getSetCookie().find(s=>s.startsWith('xtj_user_refresh=')).split(';')[0].split('=')[1],legacyClaims=claims(modern);delete legacyClaims.account_id;
+ const cookie='xtj_user_refresh='+signed(legacyClaims),nonce=crypto.randomUUID();assert.equal((await f.request('/api/user/refresh',{refresh_request_id:nonce},{cookie})).status,200);
+ assert.equal((await f.request('/api/user/logout',{}, {cookie})).status,200);assert.equal((await f.request('/api/user/refresh',{refresh_request_id:nonce},{cookie})).status,409);
+ const revoke=f.calls.find(call=>call.url.pathname.endsWith('/rpc/revoke_user_refresh_session'));assert.equal(revoke.body.p_account_id,null);
 });

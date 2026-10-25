@@ -262,11 +262,11 @@ test('terminal reasoning after tools and its real duration survive completion an
 });
 
 for(const theme of ['light','dark'])test('glass bars and new-content pill expose the scrolling conversation in '+theme,{timeout:60000},async t=>{
- const f=await fixture(t,{theme}),p=f.page;await send(p,'阅读长回复');await finish(p,0,Array.from({length:35},(_,i)=>'第'+i+'段。上下滚动时，文字应从玻璃背后透出。').join('\n\n'),{followups:['怎样核对这些内容的来源？']});await p.locator('.ai-followup').waitFor();
- await scrollUpToRead(p,p.locator('#aiChatMessagesArea'));await p.locator('#aiChatRoot .ai-new-content').evaluate(n=>n.hidden=false);await p.waitForFunction(()=>getComputedStyle(document.querySelector('#aiChatRoot .ai-new-content')).opacity==='1');
+ const f=await fixture(t,{theme}),p=f.page;await send(p,'阅读长回复');await finish(p,0,Array.from({length:100},(_,i)=>'第'+i+'段。上下滚动时，文字应从玻璃背后透出。').join('\n\n'),{followups:['怎样核对这些内容的来源？']});await p.locator('.ai-followup').waitFor();
+ await p.waitForFunction(()=>{var n=document.querySelector('#aiChatMessagesArea');return n.scrollHeight-n.clientHeight-n.scrollTop<100;});await scrollUpToRead(p,p.locator('#aiChatMessagesArea'));await p.locator('#aiChatRoot .ai-new-content').evaluate(n=>n.hidden=false);await p.waitForFunction(()=>getComputedStyle(document.querySelector('#aiChatRoot .ai-new-content')).opacity==='1');
  const geometry=await p.evaluate(()=>{const root=document.querySelector('#aiChatRoot'),area=document.querySelector('#aiChatMessagesArea'),header=root.querySelector('.ai-chat-header'),bar=root.querySelector('.ai-chat-input-bar');return {area:area.getBoundingClientRect().toJSON(),header:header.getBoundingClientRect().toJSON(),bar:bar.getBoundingClientRect().toJSON(),styles:[header,bar,root.querySelector('.ai-new-content')].map(n=>({background:getComputedStyle(n).backgroundColor,filter:getComputedStyle(n).backdropFilter,opacity:getComputedStyle(n).opacity})),paddingTop:parseFloat(getComputedStyle(area).paddingTop),paddingBottom:parseFloat(getComputedStyle(area).paddingBottom)};});
  assert.ok(geometry.area.top<=geometry.header.top+1);assert.ok(geometry.area.bottom>=geometry.bar.bottom-1);assert.ok(geometry.paddingTop>=geometry.header.height);assert.ok(geometry.paddingBottom>=geometry.bar.height);
- for(const style of geometry.styles){assert.match(style.background,/, 0\.2\)$/);assert.match(style.filter,/blur\(/);assert.equal(style.opacity,'1');}
+ for(const [index,style] of geometry.styles.entries()){assert.match(style.background,index<2?/, 0\.12\)$/:/, 0\.2\)$/);assert.match(style.filter,index<2?/blur\(5px\)/:/blur\(/);assert.equal(style.opacity,'1');}
  await capture(p,'phone-glass-'+theme,'#aiChatRoot');assert.deepEqual(f.errors,[]);
 });
 
