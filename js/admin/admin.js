@@ -5233,7 +5233,7 @@
                 '<h4 style="font-size:14px;font-weight:700;margin:16px 0 10px 0;padding-bottom:6px;border-bottom:1px solid var(--border,rgba(140,196,158,0.25));">当前生效 Prompt 预览</h4>',
                 '<div id="aiEffectivePrompt">',
                 '<button id="aiLoadEffectiveBtn" class="save-btn" style="background:transparent;color:var(--primary);">查看当前生效 Prompt</button>',
-                '<pre id="aiEffectivePromptContent" style="display:none;white-space:pre-wrap;font-size:12px;background:#f5f5f5;padding:8px;border-radius:4px;max-height:400px;overflow-y:auto;"></pre>',
+                '<pre id="aiEffectivePromptContent" style="display:none;white-space:pre-wrap;font-size:12px;padding:8px;border-radius:4px;max-height:400px;overflow-y:auto;"></pre>',
                 '</div>',
                 '</div>',
 
@@ -5507,13 +5507,14 @@
             var usersWin = usersData && usersData.window_days ? usersData.window_days : 90;
             var summaryTruncated = summaryData && summaryData.truncated === true;
             var usersTruncated = usersData && usersData.truncated === true;
+            var usersWindowLabel = String(usersWin) === 'all' ? '全部历史' : '近 ' + usersWin + ' 天';
 
             var html = [];
 
             // ★ M-05/M-06：时间窗切换控件。放在最前，让用户明确知道自己看的是哪段时间的数据。
-            html.push('<div class="ai-usage-toolbar" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;padding:8px 12px;background:var(--bg-secondary,#f7f8fa);border-radius:8px;">');
+            html.push('<div class="ai-usage-toolbar" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;padding:8px 12px;border-radius:8px;">');
             html.push('<span style="font-size:12px;color:var(--text-muted)">统计时间窗</span>');
-            html.push('<select id="aiUsageDaysSel" style="padding:5px 10px;border-radius:6px;border:1px solid var(--border);background:#fff;font-size:13px;">');
+            html.push('<select id="aiUsageDaysSel" style="padding:5px 10px;border-radius:6px;border:1px solid var(--border);font-size:13px;">');
             [['1', '今日'], ['7', '近 7 天'], ['30', '近 30 天'], ['90', '近 90 天'], ['365', '近 365 天'], ['all', '全部']].forEach(function(opt) {
                 html.push('<option value="' + opt[0] + '"' + (String(_win) === opt[0] ? ' selected' : '') + '>' + opt[1] + '</option>');
             });
@@ -5533,20 +5534,20 @@
                 html.push('</div>');
                 html.push('<p style="font-size:12px;color:var(--text-muted)">网页调用估算：今日 ¥' + Number(summary.today_web_cost_cny || 0).toFixed(3) + '，本窗口 ¥' + Number(summary.total_web_cost_cny || 0).toFixed(3) + '（CNY）；' + Number(summary.total_web_requests || 0) + ' 次请求，另有 ' + Number(summary.unknown_web_requests || 0) + ' 次费用待确认。以服务商账单为准。</p>');
                 // ★ M-05/M-06：标注统计窗口；"今日"卡片始终是当日，与窗口无关，需说明避免误读
-                html.push('<div style="margin:-4px 0 12px;font-size:11px;color:var(--text-muted);">「今日」为当日实时数据，与时间窗无关；「累计」统计范围为 <b>' + (String(summaryWin) === 'all' ? '全部历史' : '近 ' + summaryWin + ' 天') + '</b>。</div>');
+                html.push('<div style="margin:-4px 0 12px;font-size:11px;color:var(--text-muted);">「今日」按北京时间统计，与时间窗无关；「累计」统计范围为 <b>' + (String(summaryWin) === 'all' ? '全部历史' : '近 ' + summaryWin + ' 天') + '</b>。</div>');
                 if (summaryTruncated) {
-                    html.push('<div style="margin:0 0 12px;padding:8px 12px;background:rgba(245,158,11,0.10);border:1px solid rgba(245,158,11,0.28);border-radius:8px;font-size:12px;color:#b45309;">⚠️ 消息记录数已达单次查询上限（10000 条），统计结果可能偏低。请缩短时间窗后查看。</div>');
+                    html.push('<div class="ai-partial-warning" style="margin:0 0 12px;padding:8px 12px;background:rgba(245,158,11,0.10);border:1px solid rgba(245,158,11,0.28);border-radius:8px;font-size:12px;">⚠️ 部分消息未计入当前结果，统计可能偏低（数据库或接口返回数量受限）。请缩短时间窗后查看。</div>');
                 }
             }
 
             // 用户列表
             if (!users.length) {
-                html.push('<div style="text-align:center;padding:30px;color:var(--text-muted)">暂无用户 AI 聊天记录（近 ' + usersWin + ' 天）</div>');
+                html.push('<div style="text-align:center;padding:30px;color:var(--text-muted)">暂无用户 AI 聊天记录（' + usersWindowLabel + '）</div>');
             } else {
                 // ★ M-06：显式标注两个接口各自的时间窗，并在到达上限时给出截断提示
-                html.push('<div class="ai-section-header">用户列表（' + users.length + ' 人 · 近 ' + usersWin + ' 天）</div>');
+                html.push('<div class="ai-section-header">用户列表（' + users.length + ' 人 · ' + usersWindowLabel + '）</div>');
                 if (usersTruncated) {
-                    html.push('<div style="margin:0 0 10px;padding:8px 12px;background:rgba(245,158,11,0.10);border:1px solid rgba(245,158,11,0.28);border-radius:8px;font-size:12px;color:#b45309;">⚠️ 记录数已达单次查询上限（50000 条），列表与统计可能不完整。可缩短时间窗（改用下方下拉）或调大 days 参数后重试。</div>');
+                    html.push('<div class="ai-partial-warning" style="margin:0 0 10px;padding:8px 12px;background:rgba(245,158,11,0.10);border:1px solid rgba(245,158,11,0.28);border-radius:8px;font-size:12px;">⚠️ 当前返回的记录未覆盖全部匹配消息，列表与统计可能不完整。请缩短上方时间窗后重试。</div>');
                 }
                 html.push('<ul class="ai-conv-users-list">');
                 users.forEach(function(u) {
@@ -5985,7 +5986,7 @@
                 '<div class="ai-conv-header"><h3>' + escapeHtml(_aiAdminConvUser) + ' 的会话</h3><div class="conv-stat-line">共 ' + convs.length + ' 个会话</div></div>'
             ];
 
-            if(data.truncated)html.push('<p role="status">仅显示最近5000条消息中的会话，早期统计可能不完整。</p>');
+            if(data.truncated)html.push('<p role="status">仅显示本次已加载消息中的会话，早期统计可能不完整。</p>');
             if (!convs.length) {
                 html.push('<div style="text-align:center;padding:30px;color:var(--text-muted)">该用户暂无 AI 聊天记录</div>');
             } else {

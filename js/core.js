@@ -493,6 +493,7 @@ const ADMIN_NAME = "xxz";
             // hashes are never retained as a session fallback.
             function clearAllAuthState(options) {
                 options = options || {};
+                clearPendingRefreshRequest();
                 _authStateEpoch++;
                 var revokeRemote = options.revokeRemote !== false;
                 var shouldBroadcast = options.broadcast !== false;
@@ -632,7 +633,24 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                 return result;
             }
             window.__xtjWithSessionRequestLock = withSessionRequestLock;
+            // Persist an opaque nonce only. The signed refresh token remains in
+            // its HttpOnly Cookie. Reuse the nonce after a lost response/reload.
+            var _pendingRefreshRequestId = '';
+            function pendingRefreshRequestId() {
+                var stored = '';
+                try { stored = localStorage.getItem('xtj_pending_refresh_request') || ''; } catch (_) {}
+                if (/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(stored)) _pendingRefreshRequestId = stored;
+                if (!_pendingRefreshRequestId && window.crypto && typeof window.crypto.randomUUID === 'function') _pendingRefreshRequestId = window.crypto.randomUUID();
+                if (_pendingRefreshRequestId) { try { localStorage.setItem('xtj_pending_refresh_request',_pendingRefreshRequestId); } catch (_) {} }
+                return _pendingRefreshRequestId || undefined;
+            }
+            function clearPendingRefreshRequest(id) {
+                if (!id || _pendingRefreshRequestId === id) _pendingRefreshRequestId = '';
+                try { if (!id || localStorage.getItem('xtj_pending_refresh_request') === id) localStorage.removeItem('xtj_pending_refresh_request'); } catch (_) {}
+            }
+
             window.__xtjBeginAuthIdentityChange = function() {
+                clearPendingRefreshRequest();
                 try { if (window.xtjClearOriginalMediaCache) window.xtjClearOriginalMediaCache(); } catch (_) {}
                 _authStateEpoch++;
                 _refreshPromise = null;
@@ -655,6 +673,7 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                     //   就要重新登录"的直接触发点。后端抖动一次，用户就被踢。
                     //   现在：5xx / 409（轮换并发冲突）/ 网络异常 → 退避重试 1 次；
                     //   只有 401 / 403（服务端确证未登录）才进入冷却并视为失效。
+                    var refreshRequestId = pendingRefreshRequestId();
                     var attempts = 0;
                     while (attempts < 2) {
                         if (refreshEpoch !== _authStateEpoch) return { token: "", user_name: "" };
@@ -666,13 +685,14 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                                 method: 'POST',
                                 credentials: 'include',
                                 headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ device_id: getXtjDeviceId() })
+                                body: JSON.stringify({ device_id: getXtjDeviceId(), refresh_request_id: refreshRequestId })
                             }, 10000);
                             if (refreshEpoch !== _authStateEpoch) return { token: "", user_name: "" };
                             if (res.ok) {
                                 var data = await res.json().catch(function(){ return {}; });
                                 if (refreshEpoch !== _authStateEpoch) return { token: "", user_name: "" };
                                 if (data && data.token) {
+                                    clearPendingRefreshRequest(refreshRequestId);
                                     setUserToken(data.token, data.user_name);
                                     // ★ 使用服务端返回的规范 user_name
                                     var serverUserName = (data.user_name || '').trim();
@@ -686,6 +706,7 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                                 return { token: '', user_name: '' };
                             }
                             if (res.status === 401 || res.status === 403) {
+                                clearPendingRefreshRequest(refreshRequestId);
                                 // 服务端确证：没有有效 refresh 会话
                                 _lastRefreshAuthResult = {
                                     ok: false,
@@ -2919,11 +2940,13 @@ function isAdmin() {
             }
 
             var authModalFocusOrigin = null;
+            var authModalFocusVersion = 0;
             window.openAuthModal = function (mode) {
                 const id = mode === 'login' ? 'loginModal' : 'registerModal';
                 const modal = document.getElementById(id);
                 if (!modal) return;
                 if (modal.classList.contains('active')) return;
+                const focusVersion = ++authModalFocusVersion;
                 authModalFocusOrigin = document.activeElement;
                 modal.removeAttribute('inert');
                 modal.setAttribute('aria-hidden', 'false');
@@ -2933,7 +2956,9 @@ function isAdmin() {
                 // Desktop keyboard users still get focus; touch users choose the field themselves.
                 if (window.matchMedia && window.matchMedia('(hover: hover) and (pointer: fine)').matches) {
                     setTimeout(() => {
-                        if (!modal.classList.contains('active')) return;
+                        // Preserve a field already chosen by the user or password manager.
+                        // A callback from an earlier opening cannot focus a later one.
+                        if (focusVersion !== authModalFocusVersion || !modal.classList.contains('active') || modal.contains(document.activeElement)) return;
                         const nickInp = document.getElementById(mode === 'login' ? 'loginNickInp' : 'regNickInp');
                         if (nickInp) nickInp.focus();
                     }, 200);
@@ -3819,6 +3844,7 @@ function isAdmin() {
                     'xtj-theme': 1,
                     'xtj_theme': 1,
                     'xtj_device_id': 1,
+                    'xtj_pending_refresh_request': 1,
                     'xtj_pending_behavior': 1,
                     'xtj-notif': 1,
                     'xtj_report_reply_check': 1,

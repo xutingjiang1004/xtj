@@ -37,7 +37,7 @@ function createPersonalExport({express,supabase,authenticateUser,rateLimit,priva
    } else {
     let q;
     if(kind==='locations')q=supabase.from('user_location_history').select('id,latitude,longitude,accuracy_m,captured_at,received_at,source,capture_reason,resolution_status,resolved_address,resolve_error,resolved_at').eq('user_name',actor);
-    else if(kind==='likes'||kind==='comments')q=supabase.from(kind).select(kind==='likes'?'id,post_id,user_name,created_at':'id,post_id,user_name,content,created_at,parent_comment_id').eq('user_name',actor);
+    else if(kind==='likes'||kind==='comments')q=supabase.from(kind).select(kind==='likes'?'id::text,post_id,user_name,created_at':'id::text,post_id,user_name,content,created_at,parent_comment_id::text').eq('user_name',actor);
     else if(kind==='photo_views')q=supabase.from('photo_viewers').select('photo_id,first_viewed_at').eq('viewer_name',actor);
     else {
      q=supabase.from('posts').select(FIELDS).eq('user_name',actor);

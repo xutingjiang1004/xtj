@@ -30,13 +30,13 @@ function parseRelationCursor(value) {
   if (!value) return null;
   let cursor;
   try { cursor = typeof value === 'string' ? JSON.parse(value) : value; } catch (_) { throw new Error('invalid_cursor'); }
-  if (!cursor || !ROW_ID.test(String(cursor.id || '')) || !TIMESTAMP.test(String(cursor.at || '')) || !Number.isFinite(Date.parse(cursor.at))) throw new Error('invalid_cursor');
+  if (!cursor || (typeof cursor.id === 'number' && !Number.isSafeInteger(cursor.id)) || !ROW_ID.test(String(cursor.id || '')) || !TIMESTAMP.test(String(cursor.at || '')) || !Number.isFinite(Date.parse(cursor.at))) throw new Error('invalid_cursor');
   return { at: cursor.at, id: String(cursor.id) };
 }
 
 async function readRelationPage(db, postId, kind, options = {}) {
   const table = kind === 'likes' ? 'likes' : 'comments';
-  const columns = table === 'likes' ? 'id,post_id,user_name,created_at' : 'id,post_id,user_name,content,parent_comment_id,generated_by_ai,created_at';
+  const columns = table === 'likes' ? 'id::text,post_id,user_name,created_at' : 'id::text,post_id,user_name,content,parent_comment_id::text,generated_by_ai,created_at';
   const limit = Math.min(50, Math.max(1, Number(options.limit) || 30));
   const ascending = table === 'comments';
   const cursor = parseRelationCursor(options.cursor);

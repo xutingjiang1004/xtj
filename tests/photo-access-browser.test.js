@@ -223,3 +223,22 @@ test('a relationship notification resumes pending user search while retaining th
     assert.equal(await page.locator('#dockChatSocialSearchForm input').inputValue(),'peer draft');assert.deepEqual(f.errors,[]);
   }finally{if(release)release();await f.close();}
 });
+
+test('delayed desktop authentication autofocus preserves a chosen password field and ignores a prior modal opening',async()=>{
+ const f=await postBrowserFixture({user:'',publicPosts:true,counts:[1]});try{
+  const result=await f.page.evaluate(()=>{
+   const original=setTimeout,jobs=[];window.setTimeout=function(fn,delay,...args){if(delay===200){jobs.push(()=>fn(...args));return 0;}return original(fn,delay,...args)};
+   try{
+    const values=[];
+    for(const mode of ['login','register']){
+     openAuthModal(mode);const input=document.getElementById(mode==='login'?'loginPwInp':'regPwInp');input.focus();input.value='test-only-password';
+     const job=jobs.shift();if(!job)throw Error('Desktop autofocus callback was not scheduled');job();values.push({mode,focused:document.activeElement.id,password:input.value});closeModal(mode==='login'?'loginModal':'registerModal');
+    }
+    openAuthModal('login');const stale=jobs.shift();closeModal('loginModal');openAuthModal('login');const current=jobs.shift();
+    const before=document.activeElement.id;stale();const after=document.activeElement.id;current();return{values,before,after,final:document.activeElement.id};
+   }finally{window.setTimeout=original;}
+  });
+  for(const value of result.values){assert.equal(value.focused,value.mode==='login'?'loginPwInp':'regPwInp');assert.equal(value.password,'test-only-password');}
+  assert.equal(result.before,result.after,'an old modal timer must not focus a later opening');assert.equal(result.final,'loginNickInp');assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
