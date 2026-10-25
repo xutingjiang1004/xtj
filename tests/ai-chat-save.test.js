@@ -22,9 +22,9 @@ test('custom completion persists request identity for exact pending-turn reconci
   buildMeta:(role,convId,usage,reasoning,seq,search,elapsed,extra)=>JSON.stringify({role,convId,...extra}),marker:'__ai_agent_msg__'});
  assert.equal(stored.length,2);for(const row of stored)assert.equal(JSON.parse(row.media_url).client_request_id,'custom-request');
 });
-test('custom actual usage and three generated followups survive durable history without footer text in the answer',async()=>{
+test('custom actual usage and one generated followup survive durable history without footer text in the answer',async()=>{
  let rows;await saveCustomChatTurn({db:{from:()=>({insert:async value=>{rows=value;return{error:null};}})},userName:'alice',convId:'CURRENT01',message:'问题',content:'实际回答',model:'chosen',usage:{prompt_tokens:100,completion_tokens:50,total_tokens:150},followups:['问题一？','问题二？','问题三？'],buildMeta:(role,conv,usage,reasoning,seq,search,time,extra)=>JSON.stringify({role,usage,...extra}),marker:'__ai_agent_msg__'});
- const meta=JSON.parse(rows[1].media_url);assert.equal(meta.usage.total_tokens,150);assert.equal(meta.followups.length,3);assert.equal(rows[1].content,'实际回答');
+ const meta=JSON.parse(rows[1].media_url);assert.equal(meta.usage.total_tokens,150);assert.deepEqual(meta.followups,['问题一？']);assert.equal(rows[1].content,'实际回答');
 });
 const {toolFeedback,runRequiredSearch}=require('../render-api/ai-tool-feedback');
 const {appendProcessEvent,getProcessEvents}=require('../render-api/ai-process-events');

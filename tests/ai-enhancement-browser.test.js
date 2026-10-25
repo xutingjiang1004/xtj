@@ -73,13 +73,13 @@ async function capture(page,name,scope){
   if(fs.existsSync(localAxe)){if(!await page.evaluate(()=>typeof window.axe!=='undefined'))await page.addScriptTag({path:localAxe});axe=await page.evaluate(async scope=>(await window.axe.run(scope,{runOnly:{type:'tag',values:['wcag2a','wcag2aa','wcag21aa']}})).violations.map(v=>({id:v.id,impact:v.impact,nodes:v.nodes.map(n=>({target:n.target,summary:n.failureSummary}))})),scope);}
   const evidence={screenshot:filename,scope,axe};fs.writeFileSync(path.join(ARTIFACTS,name+'.json'),JSON.stringify(evidence,null,2));return evidence;
 }
-test('three followups send one selected question while retaining the next draft and its original attachment',{timeout:60000},async t=>{
+test('one followup from a legacy array sends the selected question while retaining the next draft and its original attachment',{timeout:60000},async t=>{
   const f=await fixture(t),p=f.page;await send(p,'如何比较这两种方案？');
-  await finish(p,0,'这两种方案的主要差异如下。',{followups:['可以列一个对照表吗？','有哪些限制？','我应该怎样选择？']});await p.locator('.ai-followup').nth(2).waitFor();assert.equal(await p.locator('.ai-followup').count(),3);
+  await finish(p,0,'这两种方案的主要差异如下。',{followups:['可以列一个对照表吗？','有哪些限制？','我应该怎样选择？']});await p.locator('.ai-followup').waitFor();assert.equal(await p.locator('.ai-followup').count(),1);
   await p.locator('#aiChatMsgInput').fill('下一条真实草稿');await p.locator('#aiChatFileInp').setInputFiles({name:'草稿资料.txt',mimeType:'text/plain',buffer:Buffer.from('留给下一轮的完整资料')});await p.locator('#aiChatFilePreview .ai-file-info').waitFor();
   const before=await p.evaluate(()=>aiPolish.streams.length);await p.locator('.ai-followup').filter({hasText:'可以列一个对照表吗？'}).click();await p.waitForFunction(before=>aiPolish.streams.length===before+1,before);
   const request=await p.evaluate(()=>aiPolish.streams.at(-1).body);assert.equal(request.message,'可以列一个对照表吗？');assert.ok(!request.attachments||request.attachments.length===0);assert.equal(await p.locator('#aiChatMsgInput').inputValue(),'下一条真实草稿');assert.match(await p.locator('#aiChatFilePreview').textContent(),/草稿资料.txt/);
-  await finish(p,1,'下面给出对照表。',{followups:['还需要补充哪些条件？','能结合预算选择吗？','怎样验证这个结论？']});await p.waitForFunction(()=>document.querySelectorAll('.ai-followup').length===6);
+  await finish(p,1,'下面给出对照表。',{followups:['还需要补充哪些条件？','能结合预算选择吗？','怎样验证这个结论？']});await p.waitForFunction(()=>document.querySelectorAll('.ai-followup').length===2);
   const evidence=await capture(p,'phone-followups-draft','#aiChatRoot');assert.deepEqual(evidence.axe||[],[]);assert.deepEqual(f.errors,[]);
 });
 test('normal chat keeps tool invocation with the model and exposes no manual workbench',{timeout:60000},async t=>{
@@ -130,7 +130,7 @@ test('context window shows the real supplied budget and summary, then sends the 
  const prepared=context.prepareContext({history,fixed:[{role:'system',content:'真实规则'},{role:'user',content:'继续研究'}],conversationId:'POLISH01'});
  await send(p,'继续研究');assert.equal((await p.evaluate(()=>aiPolish.streams[0].body)).context_management,true);
  await emit(p,0,{type:'meta',conversation_id:'POLISH01',context_budget:prepared.budget,context_memory:prepared.memory});await finish(p,0,'近期回复原文保留。',{context_budget:prepared.budget,context_memory:prepared.memory});
- await p.getByRole('button',{name:/上下文窗口，剩余/}).click();const popup=p.getByRole('region',{name:'上下文窗口详情'});await popup.waitFor();assert.match(await popup.textContent(),/网站工作预算/);assert.match(await popup.textContent(),/厂商模型上限未确认/);assert.match(await popup.textContent(),/不额外请求模型/);
+ await p.getByRole('button',{name:/上下文窗口/}).click();const popup=p.getByRole('region',{name:'上下文窗口详情'});await popup.waitFor();assert.match(await popup.textContent(),/网站工作预算/);assert.match(await popup.textContent(),/厂商模型上限未确认/);assert.match(await popup.textContent(),/不额外请求模型/);
  await popup.getByText('查看历史提取摘要',{exact:true}).click();assert.equal(await popup.locator('pre').textContent(),prepared.memory.summary);const geometry=await popup.boundingBox();assert.ok(geometry.x>=0&&geometry.x+geometry.width<=391&&geometry.y>=0&&geometry.y+geometry.height<=845,JSON.stringify(geometry));
  const evidence=await capture(p,'dark-phone-context-window','#panelAiChat');assert.deepEqual(evidence.axe||[],[]);
  await popup.getByLabel('网站工作窗口',{exact:true}).selectOption('131072');await p.keyboard.press('Escape');assert.equal(await popup.isVisible(),false);assert.match(await p.evaluate(()=>document.activeElement.getAttribute('aria-label')),/上下文窗口/);
@@ -143,8 +143,8 @@ test('pausing a context-compaction stage clears its active indicator and keeps t
 });
 test('changing the next context budget during a reply survives late metadata from its original request',{timeout:60000},async t=>{
  const f=await fixture(t),p=f.page;await send(p,'这次请求仍使用原工作窗口');assert.equal((await p.evaluate(()=>aiPolish.streams[0].body)).context_window_tokens,65536);
- await p.getByRole('button',{name:/上下文窗口，剩余/}).click();const popup=p.getByRole('region',{name:'上下文窗口详情'}),select=popup.getByLabel('网站工作窗口',{exact:true});await select.selectOption('131072');
- const budget={estimated_tokens:12000,window_tokens:65536,capacity_source:'site_budget',history_retained:1,compaction_status:'ready',preview:false};await emit(p,0,{type:'meta',conversation_id:'POLISH01',context_budget:budget});
+ await p.getByRole('button',{name:/上下文窗口/}).click();const popup=p.getByRole('region',{name:'上下文窗口详情'}),select=popup.getByLabel('网站工作窗口',{exact:true});await select.selectOption('131072');
+ const budget={estimated_tokens:12000,system_prompt_tokens:1000,window_tokens:65536,capacity_source:'site_budget',history_retained:1,compaction_status:'ready',preview:false};await emit(p,0,{type:'meta',conversation_id:'POLISH01',context_budget:budget});
  assert.equal(await select.inputValue(),'131072');assert.match(await popup.locator('.ai-context-usage').textContent(),/65,536/);await p.keyboard.press('Escape');await finish(p,0,'原请求已完成',{context_budget:budget});
  await send(p,'新请求使用更改后的工作窗口',1);assert.equal((await p.evaluate(()=>aiPolish.streams[1].body)).context_window_tokens,131072);assert.deepEqual(f.errors,[]);
 });
@@ -239,4 +239,44 @@ test('historical right-click copying survives lazy unloading, which cancels a pe
   const expected=(await bubble.textContent()).trim();await rightClickSettledBubble(p,bubble);await p.locator('.ai-copy-menu .ai-copy-btn').click();await p.waitForFunction(expected=>window.enhancementCopied===expected,expected);
   await bubble.dispatchEvent('pointerdown',{pointerType:'touch',isPrimary:true,clientX:50,clientY:120});await messages.evaluate(node=>{node.scrollTop=node.scrollHeight;node.dispatchEvent(new Event('scroll'));});await first.locator('.ai-reading-placeholder').waitFor();await p.waitForTimeout(600);assert.equal(await p.locator('.ai-copy-menu').count(),0,'an unloaded bubble opened its pending touch menu');
   await messages.evaluate(node=>{node.scrollTop=0;node.dispatchEvent(new Event('scroll'));});await first.locator('.ai-reading-placeholder').waitFor({state:'detached'});await p.evaluate(()=>window.enhancementCopied=null);await rightClickSettledBubble(p,bubble);await p.locator('.ai-copy-menu .ai-copy-btn').click();await p.waitForFunction(expected=>window.enhancementCopied===expected,expected);assert.equal((await bubble.textContent()).trim(),expected);assert.deepEqual(f.errors,[]);
+});
+
+test('typing and opening context details cannot replace the active server budget with a smaller preview',{timeout:60000},async t=>{
+ const f=await fixture(t),p=f.page;await send(p,'核对上下文');
+ const budget={estimated_tokens:24000,window_tokens:65536,system_prompt_tokens:13000,tool_schema_tokens:10000,reserved_output_tokens:8192,history_retained:0,compaction_status:'ready',preview:false};
+ await emit(p,0,{type:'meta',conversation_id:'POLISH01',context_budget:budget});await p.waitForFunction(()=>document.querySelector('.ai-context-label').textContent.includes('51%'));
+ const before=await p.locator('.ai-context-label').textContent();await p.locator('#aiChatMsgInput').fill('继续');await p.getByRole('button',{name:/上下文窗口/}).click();
+ const popup=p.getByRole('region',{name:'上下文窗口详情'});assert.equal(await p.locator('.ai-context-label').textContent(),before);assert.match(await popup.locator('.ai-context-usage').textContent(),/24,000/);
+ await p.keyboard.press('Escape');await finish(p,0,'上下文按同一口径估算。',{context_budget:budget});await p.waitForFunction(()=>document.querySelector('#aiChatPauseBtn').style.display==='none');
+ await p.getByRole('button',{name:/上下文窗口/}).click();const detail=await popup.locator('.ai-context-usage').textContent();assert.match(detail,/23,/);assert.match(await popup.textContent(),/剩余比例已扣除预留/);assert.deepEqual(f.errors,[]);
+});
+
+test('terminal reasoning after tools and its real duration survive completion and history reopening',{timeout:60000},async t=>{
+ const f=await fixture(t),p=f.page;await send(p,'核对福州的天气');
+ await emit(p,0,{type:'reasoning_start'});await emit(p,0,{type:'tool_calls',tools:[{id:'weather-final',name:'get_weather',args:{location:'福州'}}]});await emit(p,0,{type:'tool_result',call_id:'weather-final',tool_name:'get_weather',success:true,summary:'已取得天气'});
+ await finish(p,0,'## 天气核对\n\n已核对地点与数据时间。',{reasoning:'我先核对地点，再检查天气数据的更新时间。',thinking_mode:'low',thinking_elapsed_ms:4200});
+ await p.getByRole('button',{name:'思考过程',exact:true}).click();assert.match(await p.locator('.ai-thinking-body').textContent(),/我先核对地点/);assert.equal(await p.locator('.ai-thinking-label').textContent(),'已思考 4s');
+ await capture(p,'phone-terminal-thinking-restored','#aiChatRoot');
+ await p.evaluate(()=>{const saved=JSON.parse(JSON.stringify(document.querySelector('.ai-msg.assistant')._msgRef));__xtjAiAgent.close();const base=fetch;window.fetch=(url,opts)=>new URL(url,location.href).pathname==='/api/agent/chat/history'?Promise.resolve(new Response(JSON.stringify({ok:true,conversation_id:'POLISH01',messages:[saved],has_more:false}),{headers:{'Content-Type':'application/json'}})):base(url,opts);__xtjAiAgent.open();});
+ await p.locator('.ai-thinking-label').waitFor();assert.equal(await p.locator('.ai-thinking-label').textContent(),'已思考 4s');await p.getByRole('button',{name:'思考过程',exact:true}).click();assert.match(await p.locator('.ai-thinking-body').textContent(),/我先核对地点/);assert.match(await p.locator('.ai-thinking-body').textContent(),/已取得天气/);assert.deepEqual(f.errors,[]);
+});
+
+for(const theme of ['light','dark'])test('glass bars and new-content pill expose the scrolling conversation in '+theme,{timeout:60000},async t=>{
+ const f=await fixture(t,{theme}),p=f.page;await send(p,'阅读长回复');await finish(p,0,Array.from({length:35},(_,i)=>'第'+i+'段。上下滚动时，文字应从玻璃背后透出。').join('\n\n'),{followups:['怎样核对这些内容的来源？']});await p.locator('.ai-followup').waitFor();
+ await scrollUpToRead(p,p.locator('#aiChatMessagesArea'));await p.locator('#aiChatRoot .ai-new-content').evaluate(n=>n.hidden=false);await p.waitForFunction(()=>getComputedStyle(document.querySelector('#aiChatRoot .ai-new-content')).opacity==='1');
+ const geometry=await p.evaluate(()=>{const root=document.querySelector('#aiChatRoot'),area=document.querySelector('#aiChatMessagesArea'),header=root.querySelector('.ai-chat-header'),bar=root.querySelector('.ai-chat-input-bar');return {area:area.getBoundingClientRect().toJSON(),header:header.getBoundingClientRect().toJSON(),bar:bar.getBoundingClientRect().toJSON(),styles:[header,bar,root.querySelector('.ai-new-content')].map(n=>({background:getComputedStyle(n).backgroundColor,filter:getComputedStyle(n).backdropFilter,opacity:getComputedStyle(n).opacity})),paddingTop:parseFloat(getComputedStyle(area).paddingTop),paddingBottom:parseFloat(getComputedStyle(area).paddingBottom)};});
+ assert.ok(geometry.area.top<=geometry.header.top+1);assert.ok(geometry.area.bottom>=geometry.bar.bottom-1);assert.ok(geometry.paddingTop>=geometry.header.height);assert.ok(geometry.paddingBottom>=geometry.bar.height);
+ for(const style of geometry.styles){assert.match(style.background,/, 0\.2\)$/);assert.match(style.filter,/blur\(/);assert.equal(style.opacity,'1');}
+ await capture(p,'phone-glass-'+theme,'#aiChatRoot');assert.deepEqual(f.errors,[]);
+});
+
+for(const theme of ['light','dark'])test('unified menu keeps real controls and reverses closing motion in '+theme,{timeout:60000},async t=>{
+ const f=await fixture(t,{theme}),p=f.page,plus=p.locator('.ai-plus-btn'),menu=p.locator('#aiPlusPanelShell');
+ await plus.click();await menu.locator('[data-action="open-model"]').waitFor();
+ assert.equal(await menu.locator('.ai-task-budget').count(),0);assert.equal(await menu.locator('.ai-panel-row').count(),7);
+ const styles=await menu.locator('.ai-panel-row-icon').evaluateAll(nodes=>nodes.map(n=>({color:getComputedStyle(n).color,background:getComputedStyle(n).backgroundColor,hasSvg:!!n.querySelector('svg')})));
+ assert.ok(styles.every(s=>s.hasSvg&&s.color===styles[0].color&&s.background===styles[0].background));
+ await plus.click();await plus.click();await p.waitForFunction(()=>document.querySelector('#aiPlusPanelShell').classList.contains('open'));
+ assert.equal(await plus.getAttribute('aria-expanded'),'true');await capture(p,'unified-menu-'+theme,'#aiChatRoot');
+ await menu.locator('[data-action="open-model"]').click();await p.getByRole('dialog').waitFor();await p.keyboard.press('Escape');assert.deepEqual(f.errors,[]);
 });

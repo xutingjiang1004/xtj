@@ -1,4 +1,5 @@
 'use strict';
+const { normalizeFollowups } = require('./ai-assistant-output');
 
 async function saveDeepThinkChatTurn(options) {
   const { db, userName, convId, message, content, marker, buildMeta, userExtra, assistantExtra, usage, searchMeta, durationMs } = options;
@@ -25,7 +26,7 @@ async function saveCustomChatTurn(options) {
   const identity = options.requestId ? { client_request_id: options.requestId } : {};
   const userExtra = { ...identity, chat_mode: 'normal', web_search: webSearch === true, vision_urls: visionUrls };
   const assistantExtra = { chat_mode: 'normal', web_search: webSearch === true,
-    ...identity, followups: options.followups || [],context_memory:options.contextMemory,context_budget:options.contextBudget, process_events: processEvents, site_cards: (cards || []).slice(0, 32) };
+    ...identity, followups: normalizeFollowups(options.followups, message),context_memory:options.contextMemory,context_budget:options.contextBudget, process_events: processEvents, site_cards: (cards || []).slice(0, 32) };
   const rows = [
     { user_name: userName, content: String(message).slice(0, 60000), media_type: marker,
       media_url: buildMeta('user', convId, null, null, 1, null, 0, userExtra),

@@ -383,11 +383,12 @@ function withSearchProviderTimeout(providerFn, timeoutMs, externalSignal) {
 
 async function searchWeb(query, maxResults, options) {
   options = options || {};
+  var officialOnly = options.officialOnly === true || require('./ai-request-features').current()?.officialOnly === true;
   if(options.signal && options.signal.aborted) throw Object.assign(new Error('Search cancelled'),{name:'AbortError'});
   maxResults = Math.max(1, Math.min(50, Math.floor(maxResults) || 5));
   var searchQuery = buildSearchQuery(query);
   if (!searchQuery) searchQuery = String(query || '').trim();
-  var cacheKey = createHash('sha256').update(JSON.stringify([searchQuery.trim(), maxResults, !!options.need_content, !!options.freeOnly, deepseekWeb.credentials(options), process.env.TAVILY_API_KEY || '', process.env.BRAVE_SEARCH_API_KEY || '', process.env.SERPER_API_KEY || '', process.env.SEARCH_API_URL || ''])).digest('hex');
+  var cacheKey = createHash('sha256').update(JSON.stringify([searchQuery.trim(), maxResults, !!options.need_content, !!options.freeOnly, officialOnly, deepseekWeb.credentials(options), process.env.TAVILY_API_KEY || '', process.env.BRAVE_SEARCH_API_KEY || '', process.env.SERPER_API_KEY || '', process.env.SEARCH_API_URL || ''])).digest('hex');
   var cached = searchCache.get(cacheKey);
   if (cached && cached.results) {
     var cachedResults = cached.results.results || [];
@@ -420,6 +421,7 @@ async function searchWeb(query, maxResults, options) {
     provider_results: [],
     provider_errors: []
   };
+  if (officialOnly) providerList = providerList.filter(provider => provider.name === 'DeepSeek');
 
   var mergedResults = [];
   var usedProvider = null;
@@ -464,12 +466,17 @@ async function searchWeb(query, maxResults, options) {
   }
 
   if(options.signal && options.signal.aborted){clearTimeout(searchTimer);throw Object.assign(new Error('Search cancelled'),{name:'AbortError'});}
+  if (officialOnly && !usedProvider && diagnostics.provider_results.some(item => item.provider === 'DeepSeek')) usedProvider = 'DeepSeek';
   var finalResult = {
     results: mergedResults,
     diagnostics: diagnostics,
     cache_hit: false,
     used_provider: usedProvider
   };
+  if (officialOnly && usedProvider !== 'DeepSeek') {
+    finalResult.error = 'DeepSeek 官方搜索暂不可用，本次未使用第三方搜索。';
+    finalResult.code = 'official_search_unavailable';
+  }
 
   var cacheTtl = mergedResults.length > 0 ? SEARCH_CACHE_TTL_MS : SEARCH_EMPTY_CACHE_TTL_MS;
   searchCache.set(cacheKey, { ts: Date.now(), results: finalResult, expiresAt: Date.now() + cacheTtl });

@@ -67,3 +67,25 @@ test('saved assistant metadata carries the same bounded memory and budget while 
  assert.equal(rows[0].content,'真实用户原文');const meta=JSON.parse(rows[1].media_url);assert.equal(meta.context_memory.summary,prepared.memory.summary);assert.equal(meta.context_budget.window_tokens,65536);
  assert.equal(JSON.parse(buildMeta('assistant','OTHER1',null,null,2,null,0,{context_memory:prepared.memory})).context_memory,null);
 });
+
+test('one or two long history entries compact at 80 percent before they overflow the window',()=>{
+ for(const count of [1,2]){
+  const history=Array.from({length:count},(_,i)=>({role:i?'assistant':'user',context_id:'large-'+i,content:(i?'真实分析：':'必须保留原图，预算200元。')+'甲'.repeat(Math.floor(15000/count))}));
+  const result=context.prepareContext({history,fixed,conversationId:'CURRENT1',windowTokens:32768});
+  assert.equal(result.budget.compaction_status,'compressed');assert.ok(result.budget.compressed_this_request>0);assert.match(result.memory.summary,/预算200元/);
+  assert.ok(result.budget.estimated_tokens+result.budget.reserved_output_tokens<32768*.8);
+ }
+});
+test('browser previews and server use the same history, summary, system, tools and reply reserve',()=>{
+ const window={XtjAiCore:{}};vm.runInNewContext(fs.readFileSync('js/ai-core/assistant-features.js','utf8'),{window,URL,URLSearchParams,AbortController,TextEncoder,TextDecoder,Blob});
+ const history=[{role:'user',context_id:'one',content:'保留中文与 English。'},{role:'assistant',context_id:'two',content:'实际回答。'}],question='下一条问题',tools=[{name:'actual tool',description:'真实工具说明'}];
+ const server=context.prepareContext({history,fixed:[fixed[0],{role:'user',content:question}],tools,conversationId:'CURRENT1'});
+ const preview=window.XtjAiCore.AssistantFeatures.estimate(history,question,false,{managed:true,windowTokens:65536,budget:server.budget});
+ assert.equal(preview.estimated_tokens,server.budget.estimated_tokens);assert.equal(preview.reserved_output_tokens,server.budget.reserved_output_tokens);assert.equal(preview.overhead_known,true);
+ const prepared=context.prepareContext({history:longHistory(),fixed,conversationId:'CURRENT1'});
+ const retained=longHistory().filter(m=>!prepared.memory.covered_ids.includes(context.messageKey(m)));
+ const next=context.prepareContext({history:retained,fixed,conversationId:'CURRENT1',memory:prepared.memory});
+ const reused=window.XtjAiCore.AssistantFeatures.estimate(retained,fixed[1].content,false,{managed:true,memory:prepared.memory,budget:next.budget});
+ assert.equal(reused.estimated_tokens,next.budget.estimated_tokens);
+ const unknown=window.XtjAiCore.AssistantFeatures.estimate([],question,false,{managed:true});assert.equal(unknown.overhead_known,false);
+});

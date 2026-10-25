@@ -3,16 +3,18 @@ const {insideFence} = require('./markdown-fences');
 
 const FOLLOWUP_OPEN = '<xtj-followups>';
 const FOLLOWUP_CLOSE = '</xtj-followups>';
-const FOLLOWUP_INSTRUCTION = '\n回答正文结束后，在单独一行输出 <xtj-followups>["结合本轮内容的下一问1","下一问2","下一问3"]</xtj-followups>。只推荐用户可能继续提出的三个短问题，不回答这些问题；不要重复本轮提问，不编造事实。这一块由界面单独显示。工具调用、规划 JSON 和中断时不要输出这一块。';
+const FOLLOWUP_INSTRUCTION = '\n回答正文结束后，在单独一行输出 <xtj-followups>["最贴合当前对话的一条下一问"]</xtj-followups>。最多推荐一个用户视角的简短追问，不回答该问题。这一块由界面单独显示。推荐前结合最近几轮对话、用户最新意图与纠正、以及本轮实际回答，选择最有价值且尚未回答的下一问；最新意图优先于历史话题。用户只说“不对”“继续”等短句时，承接最近的具体话题与待核对事项。不要重复或改写用户已经问过的问题，不要推荐本轮已经解答的内容，不要臆造地点、日期、数值、偏好或工具能力。不要仅因回答提到“接口”“数据”“来源”等词就跳转到编程或研究；天气对话应围绕同一地点与时间的天气核对或出行需要。禁止套用与当前任务无关的“最小可运行例子”“边界情况”等通用模板。无法确定相关且有用的下一问时，输出 <xtj-followups>[]</xtj-followups>，不要凑数。工具调用、规划 JSON 和中断时不要输出这一块。';
 
-function normalizeFollowups(value) {
+function normalizeFollowups(value, question) {
   const result = [];
+  const comparable = text => String(text || '').replace(/[\s?？!！。．.]/g, '').toLowerCase();
+  const currentQuestion = comparable(question);
   for (const item of Array.isArray(value) ? value : []) {
     if (typeof item !== 'string') continue;
     const text = String(item || '').replace(/[\x00-\x1f\x7f]/g, ' ').trim();
-    if (!text || text.length > 100 || /https?:\/\/|<\/?(?:script|xtj-followups)/i.test(text) || result.includes(text)) continue;
+    if (!text || text.length > 100 || /https?:\/\/|<\/?(?:script|xtj-followups)/i.test(text) || (currentQuestion && comparable(text) === currentQuestion)) continue;
     result.push(text);
-    if (result.length === 3) break;
+    break;
   }
   return result;
 }
@@ -32,18 +34,6 @@ function withoutIncompleteFooter(value) {
   if(marker && !marker[1].startsWith(FOLLOWUP_OPEN) && !FOLLOWUP_OPEN.startsWith(marker[1]))return text;
   if (!marker || insideFence(text.slice(0, marker.index))) return text;
   return text.slice(0, marker.index).trimEnd();
-}
-
-function contextualFollowups(question, answer) {
-  const sample = String(question || '').slice(0, 1000) + '\n' + String(answer || '').slice(0, 3000);
-  if (/你是什么模型|你是.*模型|模型.*能力|模型.*区别/.test(sample)) return ['你更擅长处理哪些任务？', '使用这个模型有哪些限制？', '怎样提问能得到更好的回答？'];
-  if (/对比|比较|区别|选购|选型/.test(sample)) return ['可以用表格列出关键差异吗？', '结合我的使用场景应该怎样选择？', '还有哪些容易忽略的限制？'];
-  if (/研究|来源|证据|报告|资料/.test(sample)) return ['哪些结论有直接证据支持？', '有哪些相反观点或不确定的地方？', '可以把关键发现整理成行动建议吗？'];
-  if (/代码|程序|报错|接口|函数|部署/.test(sample)) return ['可以给出一个最小可运行的例子吗？', '应该怎样验证这一步是否正确？', '有哪些边界情况需要处理？'];
-  if (/学习|课程|考试|知识|概念/.test(sample)) return ['可以用一个具体例子解释吗？', '初学者最容易误解哪些地方？', '可以给我一道练习题吗？'];
-  if (/旅行|旅游|行程|酒店|景点/.test(sample)) return ['可以按天整理具体行程吗？', '这份方案的预算应该怎样安排？', '有哪些需要提前准备的事项？'];
-  const heading = String(answer || '').match(/^#{1,3}\s+([^\n]{2,35})/m);
-  return heading ? ['可以进一步解释“' + heading[1].replace(/[*`]/g, '') + '”吗？', '能给一个贴近实际的例子吗？', '接下来我应该怎样做？'] : ['能给一个贴近实际的例子吗？', '还有哪些条件或限制需要考虑？', '接下来我应该怎样做？'];
 }
 
 function contextEstimate(messages, details={}) {
@@ -142,4 +132,4 @@ function createSafeAssistantStream(options = {}) {
   };
 }
 
-module.exports = { FOLLOWUP_OPEN, FOLLOWUP_CLOSE, FOLLOWUP_INSTRUCTION, normalizeFollowups, splitFollowups, contextualFollowups, contextEstimate, createFollowupStream, createSafeAssistantStream };
+module.exports = { FOLLOWUP_OPEN, FOLLOWUP_CLOSE, FOLLOWUP_INSTRUCTION, normalizeFollowups, splitFollowups, contextEstimate, createFollowupStream, createSafeAssistantStream };

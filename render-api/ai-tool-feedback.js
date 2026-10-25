@@ -32,6 +32,11 @@ function toolFeedback(result, callId, normalizeItems, fallbackName) {
   if (result.pending_confirmation_id) { event.summary = '已准备操作，等待确认'; return event; }
   if (SEARCH_TOOLS.has(name)) {
     event.summary = count === null ? '检索完成，服务未提供结果数量' : '找到 ' + count + ' 个网页';
+    const provider = result.used_provider || result.provider;
+    if (['DeepSeek','Tavily','Brave','Serper','CustomApi','BingHtml','SearXNG'].includes(provider)) {
+      event.provider = provider;
+      event.summary += ' · ' + (provider === 'DeepSeek' ? 'DeepSeek 官方搜索' : provider);
+    }
   } else {
     const card = Array.isArray(result.cards) && result.cards[0];
     const data = card && card.data || {};

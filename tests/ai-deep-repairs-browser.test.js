@@ -95,7 +95,7 @@ test('new conversations discard the previous request context usage immediately',
   });
   await p.waitForFunction(() => document.querySelector('#aiChatPauseBtn').style.display === 'none');
   await p.locator('.ai-chat-new-btn').click(); await p.waitForFunction(() => __xtjAiAgent.getConversationId() === 'POLISHNEW01');
-  assert.match(await p.locator('.ai-context-trigger').textContent(), /剩余 100%/);
+  assert.match(await p.locator('.ai-context-trigger').textContent(), /待服务端估算/);
   assert.deepEqual(f.errors, []);
 });
 test('sending while a replacement attachment is reading cannot send the previous file or discard the selected original', { timeout: 45000 }, async t => {

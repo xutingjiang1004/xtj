@@ -4,6 +4,7 @@ const {createHash, randomBytes} = require('node:crypto');
 const requests = new AsyncLocalStorage();
 const CID = /^[A-Za-z0-9-]{6,100}$/;
 const REF = /^[A-Za-z0-9_-]{43}$/;
+const DEFAULT_TASK_BUDGET = Object.freeze({max_searches:30,max_duration_seconds:600});
 function failure(code, message, status=400) { return Object.assign(Error(message), {code,status}); }
 function current() { return requests.getStore(); }
 function ownerOf(req) { if(!req.userName || !req.accountId)throw failure('auth_required','请先登录',401);return String(req.accountId); }
@@ -64,8 +65,13 @@ function makeMiddleware(deps={}){
   return async function(req,res,next){
     let scope,timer;
     try{
-      const body=req.body||{},owner=req.guestAi?('guest:'+String(req.ip||'')):ownerOf(req),policy=parseBudget(body),cid=String(body.conversation_id||'');
-      scope={owner,cid,policy,documents:[],controller:new AbortController(),cache};
+      const body=req.body||{},owner=req.guestAi?('guest:'+String(req.ip||'')):ownerOf(req);
+      const config=deps.getAiConfig?await deps.getAiConfig():{};
+      // Only administrator settings control limits. Ignore retired client values,
+      // including old local-storage preferences and hand-crafted request bodies.
+      const policy=parseBudget({...body,task_budget:{...DEFAULT_TASK_BUDGET,...config?.task_budget}}),cid=String(body.conversation_id||'');
+      delete body.task_budget;
+      scope={owner,cid,policy,officialOnly:config?.search?.official_only===true,documents:[],controller:new AbortController(),cache};
       const refs=new Map(),urls=new Map();let attachmentBytes=0,attachmentCount=0;
       function inspect(attachment){
         if(!attachment||typeof attachment!=='object')return;
@@ -98,7 +104,7 @@ function makeMiddleware(deps={}){
       if(policy.maxSeconds)timer=setTimeout(()=>{
         if(res.writableEnded||res.destroyed)return;
         scope.controller.abort();req.aiBudgetExceeded=true;
-        const error={type:'error',code:'task_budget_exceeded',error:'本次任务达到时间限额，已保留已收到的内容；可调整限额后继续。'};
+        const error={type:'error',code:'task_budget_exceeded',error:'本次任务达到网站设置的时间限额，已保留已收到的内容；可以继续提问。'};
         if(res.headersSent){if(String(res.getHeader('Content-Type')||'').includes('text/event-stream'))deps.writeSse(res,error);}
         else res.status(408).json({ok:false,...error});
         // The existing transports all release their upstream work on this event.
@@ -174,4 +180,4 @@ async function executeDocument(name,args,parse){
     return {tool_name:name,results_count:hits.length,hits,content:JSON.stringify({hits,returned_chars:chars,coverage:'仅检索当前已提取文字（每文件最多 200000 字符）；P 是提取段落编号，不是 PDF 页码。Excel 仍受原有工作表与行列提取上限约束。未找到不代表未提取部分不存在。'})};
   }catch(error){return {tool_name:name,error:error.message,code:error.code||'document_read_failed'};}
 }
-module.exports={current,createAttachmentStore,store,install,makeMiddleware,parseCached,DOCUMENT_TOOLS,tools,executeDocument,guardTool,assertNetwork,search,parseBudget,instructions};
+module.exports={current,createAttachmentStore,store,install,makeMiddleware,parseCached,DOCUMENT_TOOLS,tools,executeDocument,guardTool,assertNetwork,search,parseBudget,instructions,DEFAULT_TASK_BUDGET};
