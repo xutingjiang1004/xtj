@@ -32,6 +32,10 @@ function toolFeedback(result, callId, normalizeItems, fallbackName) {
   if (result.pending_confirmation_id) { event.summary = '已准备操作，等待确认'; return event; }
   if (SEARCH_TOOLS.has(name)) {
     event.summary = count === null ? '检索完成，服务未提供结果数量' : '找到 ' + count + ' 个网页';
+    // ★ 显示真实搜索后端：DeepSeek=官方 Search API；其他为第三方来源。
+    //   前端据此渲染「DeepSeek 官方搜索」，用户才能分辨是否在用厂家搜索。
+    var provider = String(result.provider || '').trim();
+    if (provider) event.provider = provider.slice(0, 40);
   } else {
     const card = Array.isArray(result.cards) && result.cards[0];
     const data = card && card.data || {};

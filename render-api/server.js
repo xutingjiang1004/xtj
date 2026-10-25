@@ -76,7 +76,8 @@ const {
   searchBingHtml,
   buildSearchQuery,
   cleanSearchResults,
-  withSearchProviderTimeout
+  withSearchProviderTimeout,
+  setOfficialOnlySearch
 } = require('./search-providers');
 const deepseekWeb = require('./deepseek-web');
 const openRouter = require('./openrouter');
@@ -1777,7 +1778,11 @@ async function executeToolCall(toolCall, context) {
           results_count: resultsArr.length,
           content: JSON.stringify(webModelItems),
           diagnostics: result && result.diagnostics ? result.diagnostics : null,
-          cards: webItems.length ? [aiSiteCard('web_search', '联网搜索', { query: q, results: webItems })] : []
+          // ★ 真实执行搜索的后端（DeepSeek=官方 Search API；其余为第三方）。
+          //   前端据此显示「DeepSeek 官方搜索」而不是笼统的「搜索网页」，
+          //   避免用户分不清到底用了厂家搜索还是自己的第三方 API。
+          provider: (result && result.used_provider) || null,
+          cards: webItems.length ? [aiSiteCard('web_search', '联网搜索', { query: q, results: webItems, provider: (result && result.used_provider) || '' })] : []
         };
       } catch (e) {
         // 脱敏：不把底层 provider/状态码透传给模型与前端
@@ -20558,7 +20563,7 @@ const AI_DEFAULT_CONFIG = {
     avoid: ['不要写括号动作', '不要写心理动作', '不要废话', '不要假装搜索成功', '不要编造事实', '不要用括号描述你的动作神态心理活动'],
     format: ['必要时使用标题和清单', '复杂问题先说结论再给步骤']
   },
-  search: { allow_web_search: false, search_provider: 'searxng', max_results: 5, timeout_ms: 4000, use_weather_tool: true },
+  search: { allow_web_search: false, search_provider: 'searxng', official_only: false, max_results: 5, timeout_ms: 4000, use_weather_tool: true },
     // ★ M: default_thinking_mode 从 max 改成 low
   //   用户要求: 普通聊天改成默认low思考
   //   管理员可在 /admin/ai-agent/config 切换为 low/medium/high/max
@@ -20674,7 +20679,10 @@ function migrateConfig(config) {
 
 async function getAiConfig() {
   var now = Date.now();
-  if (aiConfigCache && (now - aiConfigFetchedAt) < 30000) return aiConfigCache;
+  if (aiConfigCache && (now - aiConfigFetchedAt) < 30000) {
+    syncOfficialOnlySearch(aiConfigCache);
+    return aiConfigCache;
+  }
   try {
     var { data: row } = await supabase.from('posts')
       .select('id, content, media_url, created_at')
@@ -20711,7 +20719,16 @@ async function getAiConfig() {
     aiConfigCache = JSON.parse(JSON.stringify(AI_DEFAULT_CONFIG));
   }
   aiConfigFetchedAt = now;
+  syncOfficialOnlySearch(aiConfigCache);
   return aiConfigCache;
+}
+
+// 后台「仅使用 DeepSeek 官方搜索」开关 → 搜索 provider 链。
+// 开启后 search_web 只走 DeepSeek 官方 Search API（/v1/tools/search），
+// 官方不可用即返回空结果，不再回落 Tavily/Brave/Serper/SearXNG。
+function syncOfficialOnlySearch(config) {
+  var sc = (config && config.search) || {};
+  setOfficialOnlySearch(sc.official_only === true);
 }
 
 
@@ -27181,6 +27198,8 @@ app.post('/admin/ai-agent/config', verifyToken, securityRateLimit(60000, 20), as
     // 清理配置缓存
     aiConfigCache = null;
     aiConfigFetchedAt = 0;
+    // 保存即生效：同步「仅使用 DeepSeek 官方搜索」开关，无需重启服务。
+    syncOfficialOnlySearch(payload);
 
     // 高危操作审计：管理员保存 AI 配置（复用既有 logAdminAudit 审计通道）
     try { await logAdminAudit('ai_config_update', req.adminName || 'admin', 'name:' + name + ' version:' + (payload.avatar_version || 0)); } catch (e) { console.warn('[ADMIN-AI] audit log failed:', e && e.message); }

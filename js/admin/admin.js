@@ -5131,6 +5131,10 @@
                 '<label style="display:flex;align-items:center;gap:4px;font-weight:400;cursor:pointer;"><input type="checkbox" id="searchEnabled"' + (getCfgVal(cfg,'search.allow_web_search') || cfg.allow_web_search ? ' checked' : '') + ' style="width:16px;height:16px;accent-color:var(--primary,#2E9465);" /> 开启联网搜索</label>',
                 '</div>',
                 '<div style="font-size:11px;color:#c44;margin:4px 0 8px 0;line-height:1.4;padding:6px 8px;background:rgba(204,68,68,0.08);border-radius:4px;"><strong>⚠ 注意：</strong>如未在 Render 环境变量中配置 <code>TAVILY_API_KEY</code>、<code>BRAVE_SEARCH_API_KEY</code> 或 <code>SERPER_API_KEY</code>，将使用公共 SearXNG / Bing HTML 作为兜底，可能因网络限制而搜索失败。</div>',
+                '<div class="form-group" style="display:flex;align-items:center;gap:8px;">',
+                '<label style="display:flex;align-items:center;gap:4px;font-weight:400;cursor:pointer;"><input type="checkbox" id="searchOfficialOnly"' + (sc.official_only === true ? ' checked' : '') + ' style="width:16px;height:16px;accent-color:var(--primary,#2E9465);" /> 仅使用 DeepSeek 官方搜索</label>',
+                '</div>',
+                '<div style="font-size:11px;color:#888;margin:4px 0 8px 0;line-height:1.4;padding:6px 8px;background:rgba(46,148,101,0.06);border-radius:4px;">开启后，联网搜索只走 DeepSeek 厂家官方 Search API（<code>/v1/tools/search</code>），官方不可用就直接返回空结果，<strong>不再回落</strong> Tavily / Brave / Serper / SearXNG 等第三方。关闭时按「DeepSeek 官方优先 → 第三方兜底」的顺序选择。</div>',
                 '<div class="form-group"><label>搜索提供商</label><input id="searchProvider" value="' + escapeHtml(sc.search_provider || 'searxng') + '" placeholder="searxng" /></div>',
                 '<div class="form-group"><label>最大结果数</label><input type="number" id="searchMaxResults" value="' + (sc.max_results || 5) + '" min="1" max="20" /></div>',
                 '<div class="form-group"><label>搜索超时(ms)</label><input type="number" id="searchTimeout" value="' + (sc.timeout_ms || 4000) + '" min="1000" max="30000" step="500" /></div>',
@@ -5327,6 +5331,7 @@
                             search: {
                                 allow_web_search: cfgChecked('searchEnabled'),
                                 search_provider: cfgVal('searchProvider').trim() || 'searxng',
+                                official_only: cfgChecked('searchOfficialOnly'),
                                 max_results: cfgInt('searchMaxResults', 5),
                                 timeout_ms: cfgInt('searchTimeout', 4000),
                                 use_weather_tool: cfgChecked('searchWeather')

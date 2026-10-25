@@ -116,6 +116,13 @@ setInterval(function() {
 // 每个 provider 返回 { results: [...], error: string|null }
 // results 每条为 { title, url, snippet, source, published_at }
 
+// ★ 官方搜索限定开关（后台「仅使用 DeepSeek 官方搜索」）：
+//   开启后 provider 链只剩 DeepSeek 官方 Search API，官方不可用即返回空结果，
+//   不再回落 Tavily/Brave/Serper/SearXNG 等第三方来源。
+var officialOnlySearch = false;
+function setOfficialOnlySearch(value) { officialOnlySearch = value === true; }
+function isOfficialOnlySearch() { return officialOnlySearch === true; }
+
 // Provider 1: Tavily API
 async function searchTavily(query, maxResults, extraOpts) {
   var apiKey = process.env.TAVILY_API_KEY;
@@ -387,7 +394,7 @@ async function searchWeb(query, maxResults, options) {
   maxResults = Math.max(1, Math.min(50, Math.floor(maxResults) || 5));
   var searchQuery = buildSearchQuery(query);
   if (!searchQuery) searchQuery = String(query || '').trim();
-  var cacheKey = createHash('sha256').update(JSON.stringify([searchQuery.trim(), maxResults, !!options.need_content, !!options.freeOnly, deepseekWeb.credentials(options), process.env.TAVILY_API_KEY || '', process.env.BRAVE_SEARCH_API_KEY || '', process.env.SERPER_API_KEY || '', process.env.SEARCH_API_URL || ''])).digest('hex');
+  var cacheKey = createHash('sha256').update(JSON.stringify([searchQuery.trim(), maxResults, !!options.need_content, !!options.freeOnly, officialOnlySearch, deepseekWeb.credentials(options), process.env.TAVILY_API_KEY || '', process.env.BRAVE_SEARCH_API_KEY || '', process.env.SERPER_API_KEY || '', process.env.SEARCH_API_URL || ''])).digest('hex');
   var cached = searchCache.get(cacheKey);
   if (cached && cached.results) {
     var cachedResults = cached.results.results || [];
@@ -403,6 +410,8 @@ async function searchWeb(query, maxResults, options) {
   }
 
   // 按优先级定义 provider 列表（串行：前面的成功就不走后面的，省 API 配额）
+  // officialOnly=true 时只保留 DeepSeek 官方 Search API（/v1/tools/search），
+  // 官方不可用就直接返回空结果，不再回落 Tavily/Brave/Serper/SearXNG 等第三方。
   var providerList = [
     { name:'DeepSeek', fn:function(signal){return deepseekWeb.search(searchQuery,maxResults,Object.assign({},options,{signal:signal}));}, requiresEnv:'DEEPSEEK_API_KEY', enabled: !options.freeOnly && !!deepseekWeb.credentials(options) },
     { name: 'Tavily', fn: function(signal) { return searchTavily(searchQuery, maxResults, {signal:signal}); }, requiresEnv: 'TAVILY_API_KEY', enabled: !options.freeOnly && !!process.env.TAVILY_API_KEY },
@@ -412,6 +421,9 @@ async function searchWeb(query, maxResults, options) {
     { name: 'BingHtml', fn: function(signal) { return searchBingHtml(searchQuery, maxResults, {signal:signal}); }, requiresEnv: null, enabled: true },
     { name: 'SearXNG', fn: function(signal) { return searchSearxng(searchQuery, maxResults, {signal:signal}); }, requiresEnv: null, enabled: true }
   ];
+  if (options.officialOnly || officialOnlySearch) {
+    providerList = providerList.filter(function(provider) { return provider.name === 'DeepSeek'; });
+  }
 
   var diagnostics = {
     query: searchQuery,
@@ -494,6 +506,8 @@ module.exports = {
   buildSearchQuery: buildSearchQuery,
   cleanSearchResults: cleanSearchResults,
   withSearchProviderTimeout: withSearchProviderTimeout,
+  setOfficialOnlySearch: setOfficialOnlySearch,
+  isOfficialOnlySearch: isOfficialOnlySearch,
   // for health diagnostics / tests
   _searchCache: typeof searchCache !== "undefined" ? searchCache : null
 };

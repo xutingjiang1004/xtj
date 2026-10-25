@@ -1,5 +1,13 @@
 # 更新日志
 
+## 2026-10-25 官方搜索可见化与「仅用官方搜索」开关
+
+- 用户反馈无法分辨小猫 AI 到底用的是厂家搜索还是自己配置的第三方 API。线上实测确认：搜索结果里的 `source` 是「墨迹天气」「天气网」「Meteum」等站点名，这是 DeepSeek 官方 Search API 的 `site_name` 字段，第三方 provider 返回的是 `tavily`/`brave`/`searxng` 之类标识——即实际早已在走官方搜索，只是界面统一显示「搜索网页」看不出来。
+- 现在把真实执行后端通过 SSE `provider` 字段下发，前端在工具步骤与搜索卡片上显示「DeepSeek 官方搜索」（其他来源显示对应名称）。
+- 后台「AI 管理 → 智能体设置 → 联网搜索」新增「仅使用 DeepSeek 官方搜索」开关（配置字段 `search.official_only`）。开启后搜索 provider 链只保留 DeepSeek 官方 `/v1/tools/search`，官方不可用即返回空结果，不再回落 Tavily/Brave/Serper/SearXNG；关闭时维持「官方优先 → 第三方兜底」。保存即生效，无需重启。
+- 搜索缓存键加入官方限定状态，避免开关切换后命中旧来源的缓存结果。
+- 新增官方搜索开关的静态契约与运行时测试（运行时用例断言出站目标只含 `api.deepseek.com`）；未新增数据库迁移。
+
 ## 2026-10-25 联网搜索默认开启与游客限流放宽
 
 - DeepSeek 官方 Search API 一直作为 `search_web` 工具的第一优先级来源接入（`deepseek-web.js` 调用官方 `/v1/tools/search` 与 `/v1/tools/fetch`，仅需 `DEEPSEEK_API_KEY`），但后台「联网搜索」默认关闭导致两个模型不主动搜索。现把 AI 默认配置 `allow_web_search` 改为 true：系统提示词明确告知模型可搜索，模型会调用官方搜索，其次才降级到 Tavily/Brave/Serper/SearXNG 等第三方来源；管理员仍可在后台关闭。

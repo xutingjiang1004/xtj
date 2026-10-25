@@ -3082,8 +3082,23 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   //   把它们混加进「已搜索 N 个网页」会得到一个似是而非的数字，
   //   所以只有真正的检索引擎结果才参与网页计数。
   var TOOL_WEBSEARCH_KINDS = { search_web: 1, tavily_search: 1, search_social: 1 };
+  // ★ 搜索后端标签：DeepSeek=厂家官方 Search API；其余为第三方来源。
+  //   用户要求能一眼看出「用的是不是模型厂家自己的搜索」，故显式标注。
+  var SEARCH_PROVIDER_LABELS = { DeepSeek: 'DeepSeek 官方搜索' };
+  function searchProviderLabel(provider) {
+    var key = String(provider || '').trim();
+    if (!key) return '';
+    return SEARCH_PROVIDER_LABELS[key] || (key + ' 搜索');
+  }
   function toolResultFeedback(event) {
-    if (event.summary) return String(event.summary).slice(0, 160);
+    if (event.summary) {
+      var base = String(event.summary).slice(0, 160);
+      if (TOOL_WEBSEARCH_KINDS[String(event.tool_name || '')]) {
+        var tag = searchProviderLabel(event.provider);
+        if (tag && base.indexOf(tag) < 0) base = base + ' · ' + tag;
+      }
+      return base;
+    }
     if (TOOL_WEBSEARCH_KINDS[String(event.tool_name || '')]) {
       var count = Number.isInteger(event.count) && event.count >= 0 ? event.count
         : Number.isInteger(event.items_total) && event.items_total > 0 ? event.items_total
@@ -9001,6 +9016,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     } else if (type === 'web_search' && Array.isArray(data.results)) {
       if (data.query) {
         shell.appendChild(el('div', { class: 'ai-tool-card-meta', text: '搜索：' + String(data.query).slice(0, 120) }));
+      }
+      var providerTag = searchProviderLabel(data.provider);
+      if (providerTag) {
+        shell.appendChild(el('div', { class: 'ai-tool-card-meta', text: '来源：' + providerTag }));
       }
       var webList = el('div', { class: 'ai-tool-card-list' });
       data.results.slice(0, 12).forEach(function(item) {
