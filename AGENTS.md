@@ -4,7 +4,7 @@ Before changing product behavior, read `docs/current-product-decisions.md` and t
 
 For the 2026-10-21 administrator fixes and releases containing them, also read `docs/admin-audit-fixes-2026-10-21.md`. It records pending migrations, unchanged scope and incomplete verification; recheck its dated deployment state before releasing.
 
-Keep the five Dock entries, their order, SVGs, dimensions, button animations and navigation business logic unchanged. On 2026-10-25 the user explicitly authorized upgrading the selected capsule's material and drag feedback; see the newest Dock section in `docs/current-product-decisions.md`. The outer Dock must remain fully transparent and click-through, with only the actual buttons receiving touches. This authorization does not extend to redesigning other pages.
+Keep the bottom Dock buttons, capsule, dimensions and animations unchanged. The independently completed transparent, click-through outer area remains in place.
 
 Edit `js/core-parts/*`, then assemble and build; do not hand-edit generated `js/core.js` or minified assets. Run the relevant runtime tests, full `npm test`, syntax checks and build consistency check before publishing. Browser emulation and Linux WebKit do not count as physical iPhone/iPad or genuine multi-device acceptance.
 
