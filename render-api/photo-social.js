@@ -22,14 +22,14 @@ function installPhotoSocial(app, options) {
       const known = String(req.query.known || '').split(',').filter(Boolean);
       if (known.length > 500 || known.some(value=>!ROW_ID.test(value))) return res.status(400).json({ok:false,error:'评论同步参数无效'});
       if (before && !ROW_ID.test(String(before)) && !String(before).startsWith('{')) return res.status(400).json({ok:false,error:'评论分页参数无效'});
-      let query = supabase.from('comments').select('id,user_name,content,created_at').eq('post_id',id).order('created_at',{ascending:false}).order('id',{ascending:false}).limit(31);
+      let query = supabase.from('comments').select('id::text,user_name,content,created_at').eq('post_id',id).order('created_at',{ascending:false}).order('id',{ascending:false}).limit(31);
       // UUID cursor resolves its timestamp within this photo, never another post.
       if (before) {
         let cursor;
         if (String(before).startsWith('{')) {
           try { cursor=parseRelationCursor(before); } catch (_) { return res.status(400).json({ok:false,error:'评论分页参数无效'}); }
         } else {
-          const saved = await supabase.from('comments').select('id,created_at').eq('post_id',id).eq('id',before).maybeSingle();
+          const saved = await supabase.from('comments').select('id::text,created_at').eq('post_id',id).eq('id',before).maybeSingle();
           if (saved.error) throw saved.error;
           if (!saved.data) return res.status(400).json({ok:false,error:'评论分页位置已失效，请刷新'});
           cursor={id:String(saved.data.id),at:saved.data.created_at};
@@ -37,11 +37,11 @@ function installPhotoSocial(app, options) {
         query = query.or('created_at.lt.' + cursor.at + ',and(created_at.eq.' + cursor.at + ',id.lt.' + cursor.id + ')');
       }
       const [likes,comments,count,mine,viewers,retained] = await Promise.all([
-        supabase.from('likes').select('id',{count:'exact',head:true}).eq('post_id',id), query,
-        supabase.from('comments').select('id',{count:'exact',head:true}).eq('post_id',id),
-        req.userName ? supabase.from('likes').select('id').eq('post_id',id).eq('user_name',req.userName).limit(1) : Promise.resolve({data:[]}),
+        supabase.from('likes').select('id::text',{count:'exact',head:true}).eq('post_id',id), query,
+        supabase.from('comments').select('id::text',{count:'exact',head:true}).eq('post_id',id),
+        req.userName ? supabase.from('likes').select('id::text').eq('post_id',id).eq('user_name',req.userName).limit(1) : Promise.resolve({data:[]}),
         supabase.from('photo_viewers').select('photo_id',{count:'exact',head:true}).eq('photo_id',id),
-        known.length ? supabase.from('comments').select('id,user_name,content,created_at').eq('post_id',id).in('id',known).limit(500) : Promise.resolve({data:[]})
+        known.length ? supabase.from('comments').select('id::text,user_name,content,created_at').eq('post_id',id).in('id',known).limit(500) : Promise.resolve({data:[]})
       ]);
       for (const result of [likes,comments,count,mine,viewers,retained]) if (result.error) throw result.error;
       const rows = comments.data || [], more = rows.length > 30, page = rows.slice(0,30);

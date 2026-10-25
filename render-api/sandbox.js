@@ -253,26 +253,39 @@ function runInIsolatedVm(code, input, opts) {
   const isolate = new ivm.Isolate({ memoryLimit: memoryMb });
   let context = null;
   let injectedLibs = 0;
+  let logRef = null;
+  let resultRef = null, resultLimiter = null;
   try {
     context = isolate.createContextSync();
     const guest = context.global;
 
     // ---- 1) console 采集：沙箱内 __hostLog.applySync 回传 ----
     const logBuffer = [];
-    const logRef = new ivm.Reference(function (level, text) {
-      if (logBuffer.length >= MAX_LOGS) return;
-      const lv = String(level);
-      logBuffer.push(lv === 'log' ? String(text) : '[' + lv + '] ' + String(text));
-    });
+    let logChars = 0, logsTruncated = false;
+    function collectLog(level, text, truncated) {
+      if (truncated) logsTruncated = true;
+      if (logBuffer.length >= MAX_LOGS || logChars >= MAX_OUTPUT_LEN) { logsTruncated = true; return; }
+      const lv = String(level).slice(0, 16);
+      const prefix = lv === 'log' ? '' : '[' + lv + '] ';
+      if (prefix.length + String(text).length > MAX_OUTPUT_LEN - logChars) logsTruncated = true;
+      const line = (prefix + String(text).slice(0, MAX_OUTPUT_LEN - logChars)).slice(0, MAX_OUTPUT_LEN - logChars);
+      // Copy the bounded string so it cannot retain a large backing buffer.
+      logBuffer.push(Buffer.from(line, 'utf8').toString('utf8'));
+      logChars += line.length + 1;
+    }
+    logRef = new ivm.Reference(collectLog);
     guest.setSync('__hostLog', logRef);
 
     const consoleBootstrap =
-      'var console = (function(){' +
-      '  function fmt(v){ try { return (typeof v === "object" && v !== null) ? JSON.stringify(v) : String(v); } catch(e){ return String(v); } }' +
-      '  function send(level, args){ var parts=[]; for (var i=0;i<args.length;i++) parts.push(fmt(args[i])); __hostLog.applySync(undefined, [level, parts.join(" ")]); }' +
-      '  return { log:function(){send("log",arguments);}, info:function(){send("info",arguments);},' +
-      '           warn:function(){send("warn",arguments);}, error:function(){send("error",arguments);} };' +
-      '})();';
+      'var console = (function(hostLog){ var remaining=' + MAX_OUTPUT_LEN + ', count=0, overflow=false;' +
+      '  var str=String, json=JSON.stringify, slice=Function.prototype.call.bind(String.prototype.slice);' +
+      '  function fmt(v){ try { return str((typeof v === "object" && v !== null) ? json(v) : v); } catch(e){ return str(v); } }' +
+      '  function send(level, args){ if(remaining<=0||count>=' + MAX_LOGS + '){if(!overflow){overflow=true;hostLog.applySync(undefined,[level,"",true]);}return;}' +
+      '    var text="",cut=false;for(var i=0;i<args.length;i++){if(text.length>=remaining){cut=true;break;}if(i)text+=" ";var value=fmt(args[i]),room=remaining-text.length;if(value.length>room)cut=true;text+=slice(value,0,room);}' +
+      '    remaining-=text.length+1;count++;hostLog.applySync(undefined,[level,text,cut]); }' +
+      '  return {log:function(){send("log",arguments);},info:function(){send("info",arguments);},' +
+      '          warn:function(){send("warn",arguments);},error:function(){send("error",arguments);} };' +
+      '})(__hostLog); delete globalThis.__hostLog;';
     isolate.compileScriptSync(consoleBootstrap).runSync(context, { timeout: 2000 });
 
     // ---- 2) 注入预装库 ----
@@ -284,7 +297,7 @@ function runInIsolatedVm(code, input, opts) {
         injectedLibs = boot.injected;
       } catch (e) {
         // 库注入失败不应阻断执行，只记录提示
-        logBuffer.push('[warn] 预装库注入失败：' + ((e && e.message) || e));
+        collectLog('warn', '预装库注入失败：' + ((e && e.message) || e));
       }
     }
 
@@ -298,22 +311,35 @@ function runInIsolatedVm(code, input, opts) {
 
     // ---- 4) 执行用户代码 ----
     // 用 IIFE 包裹，兼容用户在顶层写 return 的习惯
-    const wrapped = '"use strict";\n(function(){\n' + code + '\n})();';
-    const raw = isolate.compileScriptSync(wrapped).runSync(context, { timeout: timeout, copy: true });
+    // Format and bound the result inside the isolate. Copying an arbitrary
+    // result first and slicing in the host retains its original backing store.
+    const wrapped = '"use strict";\n(function(){ const format=' + safeStringify.toString() +
+      '; const str=String, slice=Function.prototype.call.bind(String.prototype.slice); const value=(function(){\n' + code + '\n})();' +
+      'if(value===undefined||value===null)return null;const text=str(format(value));' +
+      'return {text:slice(text,0,' + MAX_OUTPUT_LEN + '),truncated:text.length>' + MAX_OUTPUT_LEN + '};})();';
+    // User source can close its wrapper early. Never copy its result before an
+    // independent limiter, whose captured intrinsics are hidden from that code.
+    resultLimiter = isolate.compileScriptSync('(function(){const str=String,slice=Function.prototype.call.bind(String.prototype.slice);return function(value){if(value===undefined||value===null)return null;const text=str(value.text);return {text:slice(text,0,' + MAX_OUTPUT_LEN + '),truncated:value.truncated===true||text.length>' + MAX_OUTPUT_LEN + '};};})()')
+      .runSync(context, { reference: true });
+    resultRef = isolate.compileScriptSync(wrapped).runSync(context, { timeout: timeout, reference: true });
+    const raw = resultLimiter.applySync(undefined, [resultRef.derefInto()], { timeout: Math.min(timeout, 2000), result: { copy: true } });
 
     // ---- 5) 组装输出 ----
     const out = [];
     if (logBuffer.length) out.push(logBuffer.join('\n'));
     if (raw !== undefined && raw !== null) {
-      const s = safeStringify(raw);
+      const s = raw.text;
       if (s !== undefined) out.push((out.length ? '【返回值】\n' : '') + s);
     }
 
     if (!out.length) return '（代码执行完毕，无输出。请用 return 或 console.log 返回结果）';
     let text = out.join('\n');
-    if (text.length > MAX_OUTPUT_LEN) text = text.slice(0, MAX_OUTPUT_LEN) + '\n...(输出过长已截断)';
+    if (text.length > MAX_OUTPUT_LEN || logsTruncated || raw && raw.truncated) text = text.slice(0, MAX_OUTPUT_LEN) + '\n...(输出过长已截断)';
     return text;
   } finally {
+    try { if (resultRef) resultRef.release(); } catch (_) {}
+    try { if (resultLimiter) resultLimiter.release(); } catch (_) {}
+    try { if (logRef) logRef.release(); } catch (_) {}
     try { isolate.dispose(); } catch (e) { /* 忽略 */ }
   }
 }

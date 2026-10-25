@@ -115,6 +115,17 @@
         cursor: pointer;
         appearance: auto;
     }
+    #aiEffectivePromptContent {
+        background: #f5f5f5;
+    }
+    #aiUsageDaysSel {
+        background: #fff;
+        color: var(--text);
+    }
+    .ai-usage-toolbar {
+        background: #f7f8fa;
+    }
+    .ai-partial-warning { color: #92400e; }
     .ai-settings-section {
         background: #fff;
         border: 1px solid rgba(5,150,105,0.1);
@@ -397,7 +408,7 @@
     }
     .ai-status-pill.is-warn {
         background: rgba(245,158,11,0.14);
-        color: #b45309;
+        color: #92400e;
     }
     .ai-status-pill.is-bad {
         background: rgba(239,68,68,0.12);
@@ -409,7 +420,7 @@
         border-radius: 8px;
         border: 1px solid rgba(239,68,68,0.22);
         background: rgba(239,68,68,0.06);
-        color: #dc2626;
+        color: #b91c1c;
         font-size: 12px;
         font-weight: 650;
         cursor: pointer;
@@ -871,6 +882,42 @@
         --text-muted: #9a9ab0;
         --border: rgba(255,255,255,0.07);
     }
+    [data-theme="dark"] .ai-admin-tab:not(.active),
+    [data-theme="dark"] .ai-settings-section,
+    [data-theme="dark"] .ai-usage-toolbar,
+    [data-theme="dark"] .ai-invite-card,
+    [data-theme="dark"] .ai-invite-copy-btn:not(.is-copied),
+    [data-theme="dark"] .ai-invite-copy-all-btn {
+        background: var(--card-bg);
+    }
+    [data-theme="dark"] .ai-admin-settings input,
+    [data-theme="dark"] .ai-admin-settings textarea,
+    [data-theme="dark"] .ai-admin-settings select,
+    [data-theme="dark"] .ai-invite-field input,
+    [data-theme="dark"] .ai-invite-field input:focus,
+    [data-theme="dark"] #aiEffectivePromptContent,
+    [data-theme="dark"] #aiUsageDaysSel {
+        background: var(--bg);
+        color: var(--text);
+        color-scheme: dark;
+    }
+    [data-theme="dark"] .ai-invite-table-wrap thead th {
+        background: rgba(5,150,105,0.12);
+        color: var(--text-muted);
+    }
+    [data-theme="dark"] .ai-invite-card-head .count-pill,
+    [data-theme="dark"] .ai-invite-result,
+    [data-theme="dark"] .ai-invite-gen-head,
+    [data-theme="dark"] .ai-invite-code,
+    [data-theme="dark"] .ai-status-pill.is-ok,
+    [data-theme="dark"] .ai-invite-copy-btn:not(.is-copied),
+    [data-theme="dark"] .ai-invite-copy-all-btn {
+        color: #6ee7b7;
+    }
+    [data-theme="dark"] .ai-status-pill.is-warn,
+    [data-theme="dark"] .ai-partial-warning { color: #fbbf24; }
+    [data-theme="dark"] .ai-status-pill.is-bad,
+    [data-theme="dark"] .ai-invite-del-btn { color: #fca5a5; }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;

@@ -181,11 +181,13 @@
             }
 
             var authModalFocusOrigin = null;
+            var authModalFocusVersion = 0;
             window.openAuthModal = function (mode) {
                 const id = mode === 'login' ? 'loginModal' : 'registerModal';
                 const modal = document.getElementById(id);
                 if (!modal) return;
                 if (modal.classList.contains('active')) return;
+                const focusVersion = ++authModalFocusVersion;
                 authModalFocusOrigin = document.activeElement;
                 modal.removeAttribute('inert');
                 modal.setAttribute('aria-hidden', 'false');
@@ -195,7 +197,9 @@
                 // Desktop keyboard users still get focus; touch users choose the field themselves.
                 if (window.matchMedia && window.matchMedia('(hover: hover) and (pointer: fine)').matches) {
                     setTimeout(() => {
-                        if (!modal.classList.contains('active')) return;
+                        // Preserve a field already chosen by the user or password manager.
+                        // A callback from an earlier opening cannot focus a later one.
+                        if (focusVersion !== authModalFocusVersion || !modal.classList.contains('active') || modal.contains(document.activeElement)) return;
                         const nickInp = document.getElementById(mode === 'login' ? 'loginNickInp' : 'regNickInp');
                         if (nickInp) nickInp.focus();
                     }, 200);

@@ -19,7 +19,7 @@ describe('cat-ai-reply-status API behavior', function() {
 
   it('completed 分支必须 select 完整字段（id, post_id, user_name, content, created_at, parent_comment_id, generated_by_ai）', function() {
     // 检查 completed 分支中的 select 语句
-    const completedSelect = server.match(/\.select\('id,\s*post_id,\s*user_name,\s*content,\s*created_at[^)]*parent_comment_id[^)]*generated_by_ai[^)]*'\)/);
+    const completedSelect = server.match(/\.select\('id(?:::text)?,\s*post_id,\s*user_name,\s*content,\s*created_at[^)]*parent_comment_id[^)]*generated_by_ai[^)]*'\)/);
     assert.ok(completedSelect, 'completed 分支必须 select 完整字段');
   });
 
@@ -54,7 +54,7 @@ describe('cat-ai-reply-status API behavior', function() {
     const fnStart = server.indexOf('async function fetchCatReplyByParent');
     const fnBlock = server.slice(fnStart, fnStart + 1200);
     // 必须包含完整字段（含 updated_at），杜绝只 select id 的 buildSummaryQuery 式精简查询
-    assert.match(fnBlock, /id,\s*post_id,\s*user_name,\s*content,\s*created_at,\s*updated_at,\s*parent_comment_id,\s*generated_by_ai/, '统一函数必须 select 完整列');
+    assert.match(fnBlock, /id(?:::text)?,\s*post_id,\s*user_name,\s*content,\s*created_at,\s*updated_at,\s*parent_comment_id(?:::text)?,\s*generated_by_ai/, '统一函数必须 select 完整列');
   });
 });
 
@@ -451,7 +451,7 @@ describe('processCatReplyJob no buildSummaryQuery', function() {
   it('已有 AI 回复查询必须 select 完整字段（由统一函数保证）', function() {
     const fnStart = server.indexOf('async function fetchCatReplyByParent');
     const fnBlock = server.slice(fnStart, fnStart + 1200);
-    assert.match(fnBlock, /\.select\(['"]id,\s*post_id,\s*user_name,\s*content,\s*created_at[^)]*parent_comment_id[^)]*generated_by_ai['"]\)/, '统一函数必须 select 完整字段');
+    assert.match(fnBlock, /\.select\(['"]id(?:::text)?,\s*post_id,\s*user_name,\s*content,\s*created_at[^)]*parent_comment_id[^)]*generated_by_ai['"]\)/, '统一函数必须 select 完整字段');
   });
 
   it('查询已有 AI 回复必须检查 error', function() {
