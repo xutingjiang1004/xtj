@@ -3827,7 +3827,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
   function createThinkingTimer(reasoningNode) {
     var intervalId = null;
-    var startedAt = 0;
+    var startedAt = null;
     var stopped = false;
     var elapsedMs = 0;
 
@@ -3836,19 +3836,21 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       setThinkingStatus(reasoningNode, prefix + ' ' + formatThinkingElapsed(elapsedMs));
     }
 
-    return {
-      start: function() {
+    function begin() {
         if (stopped || intervalId) return;
         startedAt = Date.now();
-        update('正在思考中', 0);
+        update('正在思考中', elapsedMs);
         setThinkingActive(reasoningNode, true);
         intervalId = setInterval(function() {
           if (!reasoningNode || !reasoningNode.isConnected) return;
-          update('正在思考中', Date.now() - startedAt);
+          update('正在思考中', elapsedMs + Date.now() - startedAt);
         }, 500);
-      },
+    }
+    return {
+      start: begin,
+      resume: function() { if (stopped) { stopped = false; begin(); } },
       stop: function() {
-        if (!stopped && startedAt) elapsedMs = Math.max(0, Date.now() - startedAt);
+        if (!stopped && startedAt != null) elapsedMs += Math.max(0, Date.now() - startedAt);
         if (intervalId) {
           try { clearInterval(intervalId); } catch (e) {}
           intervalId = null;
@@ -4624,6 +4626,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }
     // V6: 流水跟包 — 高吞吐 + 积压追赶，避免打字机一顿一顿
     var lastFrameTime = 0;
+    var pendingDeadline = 0;
     // 以网络到达为准：最大程度跟上 DeepSeek 输出节奏；积压追赶与 50ms markdown 门限仍防卡顿
     var charsPerMs = options.charsPerMs != null
       ? options.charsPerMs
@@ -4685,7 +4688,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         pending = '';
       } else {
         // Keep catch-up bounded so a large packet does not appear in one jump.
-        var frameBudget = Math.min(32, Math.max(1, Math.floor(budget || 4), Math.ceil(pending.length / 20)));
+        var frameBudget = Math.min(128, Math.max(1, Math.floor(budget || 4)));
         var maxChunkOpt = options.maxChunk || 48;
         while (pending && next.length < frameBudget) {
           var chunk = takeSmoothTextChunk(pending, Object.assign({}, options, { maxChunk: Math.min(maxChunkOpt, frameBudget - next.length) }));
@@ -4729,7 +4732,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       lastFrameTime = timestamp;
       // 下限提高：慢帧也至少吐一批，保证「流水」感
       var budget = Math.max(1, Math.floor(Math.min(40, elapsed || 16) * charsPerMs));
-      emitText(false, budget);
+      if (!pendingDeadline) pendingDeadline = timestamp + 180;
+      var catchUpBudget = Math.ceil(pending.length * Math.min(24, elapsed || 16) / Math.max(16, pendingDeadline - timestamp));
+      emitText(false, Math.max(budget, catchUpBudget));
       if (pending) schedule();
       else if (drainState) api.finish(drainState.finalText);
     }
@@ -4750,7 +4755,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       isCancelled: false,
       append: function(text) {
         if (cancelled || !targetEl || !text || finished) return;
-        if (!pending) lastFrameTime = 0;
+        if (!pending) { lastFrameTime = 0; pendingDeadline = 0; }
         pending += String(text);
         if (S.activeRenderers.indexOf(api) === -1) S.activeRenderers.push(api);
         if (!paused) schedule();
@@ -10051,7 +10056,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         // answer is rendered makes a completed answer look permanently stuck.
         clearAssistantTransientStatus(node);
         if (thinkingTimer) {
-          finalThinkingElapsedMs = finalThinkingElapsedMs || thinkingTimer.stop();
+          finalThinkingElapsedMs = thinkingTimer.stop();
         }
         if (evt && typeof evt.thinking_elapsed_ms === 'number' && Number.isFinite(evt.thinking_elapsed_ms) && evt.thinking_elapsed_ms >= 0) finalThinkingElapsedMs = evt.thinking_elapsed_ms;
         if (reasoningRenderer) reasoningRenderer.finish();
@@ -10383,7 +10388,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             maxChunk: 64,
             // ★ 2026-09-17 正文流优化：charsPerMs 100 → 130，配合预算算法提速，
             //   减少"字一个个蹦"的延迟感；上限仍受 maxChunk 约束不会暴冲。
-            charsPerMs: 130,
+            charsPerMs: 260,
             streamClass: 'ai-streaming-soft',
             onRender: function() {
               // ★ 2026-09-17 滚动节流：原实现每帧都调 scrollToBottom，
@@ -10606,6 +10611,19 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             var toolList = evt.tools || [];
             streamToolCount += toolList.length;
             var timeline = ensureToolTimeline(true, evt);
+            // Keep a tool round's progress narration with its process. The
+            // final answer can then grow without replacing a different prefix.
+            if (aiContent.trim()) {
+              var narration = el('p', {class:'ai-tool-narration',text:aiContent});
+              timeline.insertBefore(narration,timeline.firstChild);
+              if (contentRenderer) { contentRenderer.cancel(); contentRenderer = null; }
+              aiContent = '';
+              assistantBubble.replaceChildren();
+              assistantBubble.style.display = 'none';
+              assistantBubble.classList.remove('ai-typing');
+            }
+            _thinkingSettledOnContent = false;
+            if (_sendThinkingMode !== 'off') { reasoningStarted = true; ensureThinkingTimer().resume(); }
             // ★★★ 2026-09-17 重写（P0「工具调用动画全部展开、堆叠占位」）：
             //   用户诉求：像 ChatGPT / Codex 那样——并行调用 N 个工具时只显示
             //   N 行紧凑的"正在搜索中…"，全部完成后原地换成"已完成"，
@@ -11312,6 +11330,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             } else { chunkText = ''; }
             // C 修复：用户关闭思考时，跳过流式渲染（仅静默累积，收尾由 finishAiMessage 统一隐藏）
             if (_sendThinkingMode === 'off') continue;
+            ensureThinkingTimer().resume();
             // 如果 reasoning_start 事件丢失，首次收到 reasoning 也启动计时器
             if (!reasoningStarted) {
               reasoningStarted = true;
@@ -11337,7 +11356,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
                 reasoningRenderer = createSmoothTextRenderer(body, {
                   minChunk: 6,
                   maxChunk: 64,
-                  charsPerMs: 140,
+                  charsPerMs: 320,
                   plainStream: true,
                   onRender: function() {
                     var _now2 = Date.now();
@@ -11379,7 +11398,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
                 var _tn = assistantNode.querySelector('.ai-thinking');
                 if (_tn) {
                   if (thinkingTimer) {
-                    finalThinkingElapsedMs = finalThinkingElapsedMs || thinkingTimer.stop();
+                    finalThinkingElapsedMs = thinkingTimer.stop();
                   }
                   setThinkingStatus(_tn, '已思考 ' + formatThinkingElapsed(finalThinkingElapsedMs));
                   setThinkingActive(_tn, false);
@@ -12625,8 +12644,9 @@ function showChatMessages() {
     try {
       var savedWebSearch = localStorage.getItem('xtj_ai_web_search');
       S.webSearchEnabled = savedWebSearch === 'true';
-      S.networkMode = localStorage.getItem('xtj_ai_network_mode')==='off'?'off':null;
-      if(S.networkMode==='off')S.webSearchEnabled=false;
+      var savedNetworkMode = localStorage.getItem('xtj_ai_network_mode');
+      S.networkMode = ['off','auto','required'].indexOf(savedNetworkMode) >= 0 ? savedNetworkMode : null;
+      if (S.networkMode) S.webSearchEnabled = S.networkMode === 'required';
 
       // ★ 修复: 恢复搜索开关时校验额度。若额度显示搜索已不可用，自动关闭该开关，
       //   避免刷新后带着超限状态继续触发第三方搜索。额度未拉到（S.quota 为 null）时
@@ -12702,7 +12722,7 @@ function showChatMessages() {
     // 模型 / 思考行：视觉层 + 透明 select 全行热区
     panelShell.innerHTML =
       '<div class="ai-plus-panel-content">' +
-        '<div class="ai-menu-heading"><span>对话工具</span><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M8 25C9 14 15 7 25 6c0 11-6 18-15 17M8 25l12-13"/></svg></div>' +
+        '<div class="ai-menu-heading"><span>对话工具</span><button type="button" class="ai-menu-close" data-action="close-panel" aria-label="关闭更多选项"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>' +
         '<div class="ai-panel-page is-active" id="aiPanelPrimary" data-page="primary">' +
           '<div class="ai-quota-card" id="aiQuotaCard" role="status" aria-live="polite">' +
             '<div class="ai-quota-card-head">' +
@@ -12757,6 +12777,13 @@ function showChatMessages() {
                   '<span class="ai-panel-row-value" id="aiSearchStatus">自动</span>'
                 ) +
               '</button>' +
+              '<div class="ai-network-rail" role="radiogroup" aria-label="网页搜索模式">' +
+                '<span class="ai-network-indicator" aria-hidden="true"></span>' +
+                '<button type="button" role="radio" aria-checked="false" tabindex="-1" data-network-mode="off" aria-label="仅使用当前资料">仅资料</button>' +
+                '<button type="button" role="radio" aria-checked="true" tabindex="0" data-network-mode="auto" aria-label="自动判断是否检索">自动</button>' +
+                '<button type="button" role="radio" aria-checked="false" tabindex="-1" data-network-mode="required" aria-label="必须实际检索">联网</button>' +
+              '</div>' +
+              '<p class="ai-network-note" aria-live="polite"></p>' +
             '</div>' +
           '</div>' +
         '</div>' +
@@ -12987,6 +13014,39 @@ function showChatMessages() {
       }
     }
 
+    var networkRail = null;
+    function setNetworkMode(next) {
+      if (next === 'required' && (!S.quota || searchQuotaExhausted(S.quota))) {
+        notify('当前搜索额度不可用，可以使用自动判断或仅当前资料');
+        return;
+      }
+      S.networkMode = next; S.webSearchEnabled = next === 'required';
+      try { localStorage.setItem('xtj_ai_network_mode', next); localStorage.setItem('xtj_ai_web_search', S.webSearchEnabled ? 'true' : 'false'); } catch (_) {}
+      updateSearchStatus();
+    }
+    var networkControl = panelShell.querySelector('.ai-network-rail');
+    if (networkControl) {
+      if (window.xtjInstallSelectionRail) networkRail = window.xtjInstallSelectionRail({
+        rail: networkControl, indicator: networkControl.querySelector('.ai-network-indicator'), buttons: '[data-network-mode]', axis: 'x',
+        selected: function() { return networkControl.querySelector('[aria-checked="true"]'); },
+        select: function(button) { setNetworkMode(button.dataset.networkMode); }
+      });
+      networkControl.addEventListener('click', function(event) {
+        var button = event.target.closest('[data-network-mode]');
+        if (button) { event.stopPropagation(); setNetworkMode(button.dataset.networkMode); }
+      });
+      networkControl.addEventListener('keydown', function(event) {
+        var buttons = Array.from(networkControl.querySelectorAll('[data-network-mode]'));
+        var index = buttons.indexOf(document.activeElement), next;
+        if (event.key === 'ArrowRight') next = Math.min(buttons.length - 1, index + 1);
+        else if (event.key === 'ArrowLeft') next = Math.max(0, index - 1);
+        else if (event.key === 'Home') next = 0;
+        else if (event.key === 'End') next = buttons.length - 1;
+        else return;
+        event.preventDefault(); setNetworkMode(buttons[next].dataset.networkMode); buttons[next].focus({preventScroll:true});
+      });
+      panelAbortController.signal.addEventListener('abort', function() { if (networkRail) networkRail.dispose(); }, {once:true});
+    }
     function updateSearchStatus() {
       var st = panelShell.querySelector('#aiSearchStatus');
       var btn = panelShell.querySelector('[data-action="search"]');
@@ -12995,6 +13055,16 @@ function showChatMessages() {
       var mode=networkSettings().networkMode,label={auto:'自动',required:'必须检索',off:'仅当前资料'}[mode];
       if(st){st.textContent=label;st.classList.toggle('on',mode==='required');}
       if(btn){btn.setAttribute('aria-label','网页搜索：'+label+'，点击切换');btn.classList.toggle('is-selected',mode==='required');btn.removeAttribute('aria-checked');btn.removeAttribute('aria-disabled');btn.classList.remove('is-disabled');}
+      if (networkControl) {
+        networkControl.querySelectorAll('[data-network-mode]').forEach(function(button) {
+          var selected = button.dataset.networkMode === mode;
+          button.setAttribute('aria-checked', String(selected)); button.tabIndex = selected ? 0 : -1;
+          if (button.dataset.networkMode === 'required') button.setAttribute('aria-disabled', String(!q || searchQuotaExhausted(q)));
+        });
+        var note = panelShell.querySelector('.ai-network-note');
+        if (note) note.textContent = {off:'仅使用对话和已提供的资料',auto:'由 AI 按问题决定是否检索',required:'先检索，再结合来源回答'}[mode];
+        if (networkRail) networkRail.sync();
+      }
       if (hint) {
         if (q && (q.search_unlimited === true || Number(q.search_limit) < 0)) {
           hint.textContent = '无限';
@@ -13130,13 +13200,14 @@ function showChatMessages() {
         return;
       }
       _selectPopClosingEl = node;
+      node.classList.remove('is-open');
       try { node.classList.add('is-closing'); } catch (eCls) {}
-      // 与 CSS aiSelectPopOut（260ms）对齐，多留 20ms 余量再摘除节点。
+      // Remove after the 160ms compositor exit transition.
       _selectPopCloseTimer = setTimeout(function() {
         _selectPopCloseTimer = null;
         if (node && node.parentNode) node.parentNode.removeChild(node);
         if (_selectPopClosingEl === node) _selectPopClosingEl = null;
-      }, 280);
+      }, 180);
     }
     function positionSelectPopup() {
       if (!_selectPopEl) return;
@@ -13148,17 +13219,21 @@ function showChatMessages() {
       var visibleWidth = viewport ? viewport.width : window.innerWidth;
       var width = Math.max(48, Math.min(visibleWidth - 24, Math.max(rect ? rect.width : 260, 260)));
       var left = rect ? Math.max(visibleLeft + 12, Math.min(rect.left, visibleLeft + visibleWidth - width - 12)) : visibleLeft + 12;
-      var maxHeight = Math.max(48, Math.min(visibleHeight - 24, visibleHeight * 0.8));
+      var header = root.querySelector('.ai-chat-header'), composer = root.querySelector('.ai-chat-input-bar');
+      var safeTop = Math.max(visibleTop + 12, header ? header.getBoundingClientRect().bottom + 8 : visibleTop + 12);
+      var safeBottom = visibleTop + visibleHeight - 12;
+      if (composer && _selectPopAnchor && panelShell.contains(_selectPopAnchor)) safeBottom = Math.min(safeBottom, composer.getBoundingClientRect().top - 8);
+      if (safeBottom - safeTop < 100) { safeTop = visibleTop + 12; safeBottom = visibleTop + visibleHeight - 12; }
+      var maxHeight = Math.max(48, safeBottom - safeTop);
       _selectPopEl.style.width = width + 'px';
       _selectPopEl.style.minWidth = width + 'px';
       _selectPopEl.style.maxHeight = maxHeight + 'px';
       var height = _selectPopEl.offsetHeight;
       var top = rect ? rect.bottom + 6 : visibleTop + 12;
-      if (rect && top + height > visibleTop + visibleHeight - 12) top = rect.top - height - 6;
-      top = Math.max(visibleTop + 12, Math.min(top, visibleTop + visibleHeight - height - 12));
+      if (rect && top + height > safeBottom) top = rect.top - height - 8;
+      top = Math.max(safeTop, Math.min(top, safeBottom - height));
       _selectPopEl.style.left = left + 'px';
       _selectPopEl.style.top = top + 'px';
-      if (rect) _selectPopEl.style.setProperty('--pop-ox', Math.max(8, Math.min(rect.left + rect.width / 2 - left, width - 8)) + 'px');
     }
     function openSelectPopup(kind, anchor) {
       closeSelectPopup(true);
@@ -13166,11 +13241,11 @@ function showChatMessages() {
       var options = kind === 'model'
         ? buildModelOptions()
         : [
-            { value: 'off', label: '关闭' },
-            { value: 'low', label: '轻度' },
-            { value: 'medium', label: '中度' },
-            { value: 'high', label: '深度' },
-            { value: 'max', label: '极致' }
+            { value: 'off', label: '关闭', description: '关闭推理模式，直接回复' },
+            { value: 'low', label: '轻度', description: '适合简单、明确的问题' },
+            { value: 'medium', label: '中度', description: '适合日常讨论与判断' },
+            { value: 'high', label: '深度', description: '适合复杂分析与多步任务' },
+            { value: 'max', label: '极致', description: '更高推理预算，耗时可能增加' }
           ];
       var current = kind === 'model'
         ? (S.selectedModel || 'deepseek-flash')
@@ -13183,10 +13258,23 @@ function showChatMessages() {
           class: 'ai-select-pop-item' + (isOn ? ' on' : ''),
           role: 'option',
           tabindex: isOn ? '0' : '-1',
+          'aria-label': opt.label,
           'aria-selected': isOn ? 'true' : 'false'
         });
-        item.appendChild(el('span', { text: opt.label }));
-        item.appendChild(el('span', { class: 'ai-select-pop-check', text: isOn ? '✓' : '', 'aria-hidden': 'true' }));
+        item.dataset.value = opt.value;
+        var copy = el('span', {class:'ai-select-option-copy'});
+        var title = opt.label, description = opt.description;
+        if (kind === 'model') {
+          if (opt.value === 'deepseek-flash') { title = 'DeepSeek V4.1 Flash'; description = 'DeepSeek-V4.1-Flash-1017'; }
+          else if (opt.value === 'deepseek-v4-pro') { title = 'DeepSeek V4 Pro'; description = 'deepseek-v4-pro'; }
+          else if (opt.value === '__add_custom__') { title = '添加自定义模型'; description = '连接你自己的模型服务'; }
+          else description = '已保存的模型配置';
+        }
+        copy.appendChild(el('span', {class:'ai-select-option-title', text:title}));
+        copy.appendChild(el('span', {class:'ai-select-option-description', text:description || ''}));
+        var check = el('span', {class:'ai-select-pop-check', 'aria-hidden':'true'});
+        check.innerHTML = '<svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></svg>';
+        item.append(copy, check);
         item.addEventListener('click', function(ev) {
           ev.preventDefault();
           ev.stopPropagation();
@@ -13209,6 +13297,7 @@ function showChatMessages() {
       _selectPopEl.appendChild(listEl);
       document.body.appendChild(_selectPopEl);
       positionSelectPopup();
+      _selectPopEl.classList.add('is-open');
       var selected = listEl.querySelector('[aria-selected="true"]') || listEl.firstChild;
       if (selected) { selected.tabIndex = 0; selected.focus({ preventScroll: true }); selected.scrollIntoView({ block: 'nearest' }); }
       listEl.addEventListener('keydown', function(event) {
@@ -13270,39 +13359,33 @@ function showChatMessages() {
       renderQuotaUI();
       fetchAiQuota(true);
       positionPanel();
-      panelShell.classList.remove('is-closing', 'open');
-      panelShell.classList.add('is-opening');
+      panelShell.classList.remove('is-closing');
+      panelShell.classList.add('is-opening', 'open');
+      panelShell.inert = false;
+      panelShell.setAttribute('aria-hidden', 'false');
       plusBtn.classList.add('active');
       plusWrap.classList.add('is-open');
       plusBtn.setAttribute('aria-expanded', 'true');
-      // ★ 修复「+ 面板卡死在左下角极小的页面 / 打不开也关不上」：
-      //   旧实现把 .open 放进 requestAnimationFrame 里补加。rAF 一旦被浏览器
-      //   节流/延迟（切窗口、GPU 忙、原生 select 弹层阻塞渲染循环），
-      //   .open 迟迟不加 → 面板停在 is-opening（opacity:0 不可见），
-      //   用户再点 + 又被 panelOpen=true 守卫挡住，表现为点了没反应；
-      //   而被中断的 transform transition 在部分环境下会把元素留在
-      //   scale(0.14) 的中间帧（可见但极小，正是用户截图的形态）。
-      //   现在：reflow 后同步加 .open（过渡起点仍由 reflow 保证），
-      //   视觉补间改用 keyframes 动画（时间驱动、必然到达终态，
-      //   从机制上杜绝卡在中间态）。
-      void panelShell.offsetWidth; // 强制 reflow，保证动画从关闭态起算
-      panelShell.classList.add('open');
+      // Apply the interactive state synchronously. The transition reverses
+      // from its current pose without a forced reflow or a queued frame.
       if (closeTimer) clearTimeout(closeTimer);
-      // 与 CSS clip-path 揭示时长（320ms）对齐，多留 20ms 余量。
+      // Clear the temporary motion hint after the 220ms transition.
       closeTimer = setTimeout(function() {
         panelShell.classList.remove('is-opening');
         closeTimer = null;
-      }, 340);
+      }, 230);
     }
 
     function closePanel(animate) {
       if (!panelOpen && !panelClosing) return;
-      if (!panelOpen && panelClosing) return;
+      if (!panelOpen && panelClosing && animate !== false) return;
       closeSelectPopup();
       panelClosing = true;
       panelOpen = false;
       panelShell.classList.remove('is-opening', 'open');
       panelShell.classList.add('is-closing');
+      panelShell.inert = true;
+      panelShell.setAttribute('aria-hidden', 'true');
       plusBtn.classList.remove('active');
       plusWrap.classList.remove('is-open');
       plusBtn.setAttribute('aria-expanded', 'false');
@@ -13317,13 +13400,12 @@ function showChatMessages() {
         return;
       }
       if (closeTimer) clearTimeout(closeTimer);
-      // 与 CSS clip-path 揭示时长（320ms）对齐，多留 20ms 余量。
-      // 锁定窗口必须 ≥ 动画时长，否则"动画还在播、点击已被放行"会与动画打架。
+      // The exit lasts 160ms; a new open action can interrupt it immediately.
       closeTimer = setTimeout(function() {
         panelShell.classList.remove('is-closing');
         panelClosing = false;
         closeTimer = null;
-      }, 340);
+      }, 180);
     }
 
     function closeInviteModal() {
@@ -13886,6 +13968,7 @@ function showChatMessages() {
       if (!t) return;
 
       var action = t.getAttribute('data-action');
+      if (action === 'close-panel') { closePanel(); plusBtn.focus({preventScroll:true}); return; }
       if (action === 'open-model' || action === 'open-think') {
         // ★ 自定义选项弹层（不再交给系统原生 select）
         openSelectPopup(action === 'open-model' ? 'model' : 'think', t);
@@ -13909,10 +13992,7 @@ function showChatMessages() {
           // Always allow the safe local-only choice even when quota is exhausted.
           next='off';notify('当前搜索额度不可用，已切换为仅当前资料');
         }
-        S.networkMode=next;S.webSearchEnabled=next==='required';
-        try{localStorage.setItem('xtj_ai_network_mode',next);localStorage.setItem('xtj_ai_web_search',S.webSearchEnabled?'true':'false');}catch(_){}
-        updateSearchStatus();
-        notify({auto:'由 AI 自动判断是否检索',required:'本次必须实际检索，仍受账号额度与任务限额约束',off:'仅使用当前对话和已提供资料，不读取网络或其他站内记录'}[next]);
+        setNetworkMode(next);
       }
     });
 
@@ -14421,13 +14501,13 @@ function showChatMessages() {
 
   function applyConfigToUI(cfg) {
     if (!cfg) return;
-    // ★ 2026-10-25：后台开启联网搜索（allow_web_search=true）且用户从未手动设置过
-    //   面板开关（localStorage 无 xtj_ai_web_search）时，默认开启面板联网搜索，
-    //   让前端状态与后台官方搜索配置保持一致；用户手动开关后始终以用户为准。
+    // The administrator enables the search capability. The user's "required"
+    // detent separately requests a search on this turn; enabling the capability
+    // must not silently force pre-search for every greeting or ordinary question.
     try {
-      if (cfg.allow_web_search === true && localStorage.getItem('xtj_ai_web_search') === null) {
-        S.webSearchEnabled = true;
-        if (typeof updateSearchStatus === 'function') updateSearchStatus();
+      if (localStorage.getItem('xtj_ai_web_search') === null && localStorage.getItem('xtj_ai_network_mode') === null) {
+        S.networkMode = 'auto';
+        S.webSearchEnabled = false;
       }
     } catch (e) {}
     var avatarEl = document.getElementById('aiChatHeaderAvatar');

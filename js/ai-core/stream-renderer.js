@@ -106,6 +106,7 @@
     var requestFrame = window.requestAnimationFrame ? window.requestAnimationFrame.bind(window) : function (cb) { return setTimeout(cb, 16); };
     var cancelFrame = window.cancelAnimationFrame ? window.cancelAnimationFrame.bind(window) : clearTimeout;
     var lastFrameTime = 0;
+    var pendingDeadline = 0;
     var charsPerMs = options.charsPerMs != null
       ? options.charsPerMs
       : 0.14;
@@ -181,7 +182,7 @@
         pending = '';
       } else {
         // Keep catch-up bounded so a large packet does not appear in one jump.
-        var frameBudget = Math.min(32, Math.max(1, Math.floor(budget || 4), Math.ceil(pending.length / 20)));
+        var frameBudget = Math.min(128, Math.max(1, Math.floor(budget || 4)));
         var maxChunkOpt = options.maxChunk || 48;
         while (pending && next.length < frameBudget) {
           var chunk = takeSmoothChunk(pending, Object.assign({}, options, { maxChunk: Math.min(maxChunkOpt, frameBudget - next.length) }));
@@ -220,7 +221,9 @@
       var elapsed = timestamp - lastFrameTime;
       lastFrameTime = timestamp;
       var budget = Math.max(1, Math.floor(Math.min(40, elapsed || 16) * charsPerMs));
-      emitText(false, budget);
+      if (!pendingDeadline) pendingDeadline = timestamp + 180;
+      var catchUpBudget = Math.ceil(pending.length * Math.min(24, elapsed || 16) / Math.max(16, pendingDeadline - timestamp));
+      emitText(false, Math.max(budget, catchUpBudget));
       if (pending) schedule();
       else if (drainState) api.finish(drainState.finalText);
     }
@@ -237,7 +240,7 @@
     var api = {
       append: function (text) {
         if (cancelled || !targetEl || !text || finished) return;
-        if (!pending) lastFrameTime = 0;
+        if (!pending) { lastFrameTime = 0; pendingDeadline = 0; }
         pending += String(text);
         if (!paused) schedule();
       },
@@ -351,6 +354,7 @@
         rendered = '';
         plainTextBuffer = '';
         lastFrameTime = 0;
+        pendingDeadline = 0;
         removeCursor();
         if (targetEl) targetEl.replaceChildren();
         plainTextNode = null;

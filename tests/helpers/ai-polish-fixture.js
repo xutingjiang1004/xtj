@@ -12,8 +12,8 @@ async function aiPolishFixture(options = {}) {
       const body = typeof opts.body === 'string' ? JSON.parse(opts.body) : null;
       aiPolish.calls.push({ path, method: opts.method || 'GET', body });
       const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
-      if (path.endsWith('/config')) return json({ ok: true, config: { enabled: true, name: '小猫', deep_think: { enabled: true }, tavily_research: { enabled: true } } });
-      if (path.endsWith('/quota')) return json({ ok: true, quota: { can_chat: true, can_search: true, tokens_used: 0, tokens_limit: 100000, tokens_remaining: 100000, search_used: 0, search_limit: 10, search_remaining: 10, is_pro: false } });
+      if (path.endsWith('/config')) return json({ ok: true, config: Object.assign({ enabled: true, name: '小猫', deep_think: { enabled: true }, tavily_research: { enabled: true } },options.config || {}) });
+      if (path.endsWith('/quota')) return json({ ok: true, quota: Object.assign({ can_chat: true, can_search: true, tokens_used: 0, tokens_limit: 100000, tokens_remaining: 100000, search_used: 0, search_limit: 10, search_remaining: 10, is_pro: false },options.quota || {}) });
       if (path.endsWith('/custom-models')) {
         if (opts.method === 'PUT') {
           if (aiPolish.modelWriteStatus !== 200) return json({ ok: false, error: 'Isolated save failure' }, aiPolish.modelWriteStatus);

@@ -3,6 +3,8 @@
 
   if (window.__xtjDesktopShellBound) return;
   window.__xtjDesktopShellBound = true;
+  var navigationRail = null;
+  var activeSyncFrame = 0;
 
   // Media viewers implement their own pinch handling; page gestures are handled by mobile-viewport.js.
 
@@ -14,12 +16,16 @@
     }
     if (typeof window.switchDockTab === 'function') {
       window.switchDockTab(tab, true, { animate: true, source: 'desktop-sidebar' });
+      syncActiveTab();
     }
   }
 
   function openAiChat() {
     if (typeof window.__xtjOpenAiChat === 'function') {
-      return window.__xtjOpenAiChat();
+      var result = window.__xtjOpenAiChat();
+      syncActiveTab();
+      if (result && typeof result.then === 'function') result.then(scheduleActiveTabSync, scheduleActiveTabSync);
+      return result;
     }
     var fallback = document.querySelector('[data-ai-tool="chat"]');
     if (fallback) fallback.click();
@@ -40,6 +46,12 @@
         else button.removeAttribute('aria-current');
       }
     });
+    if (navigationRail) navigationRail.sync();
+  }
+
+  function scheduleActiveTabSync() {
+    if (activeSyncFrame) return;
+    activeSyncFrame = window.requestAnimationFrame(function() { activeSyncFrame = 0; syncActiveTab(); });
   }
 
   function syncUser() {
@@ -279,6 +291,23 @@
   function init() {
     // P0: 存储 MutationObserver 引用，页面切换时断开防止内存泄漏
     var _observers = [];
+    var nav = document.querySelector('.desktop-workbench-nav');
+    if (nav && window.xtjInstallSelectionRail) {
+      var indicator = document.createElement('span');
+      indicator.className = 'desktop-nav-indicator';
+      indicator.setAttribute('aria-hidden', 'true');
+      nav.prepend(indicator);
+      navigationRail = window.xtjInstallSelectionRail({
+        rail: nav, indicator: indicator, buttons: '.desktop-nav-item', axis: 'y',
+        selected: function() { return nav.querySelector('.desktop-nav-item.is-active'); },
+        select: function(button) {
+          if (button.getAttribute('data-desktop-action') === 'ai-chat') openAiChat();
+          else openTab(button.getAttribute('data-desktop-tab'));
+          scheduleActiveTabSync();
+        }
+      });
+      nav.classList.add('has-selection-indicator');
+    }
 
     // ★ 双击刷新处理
     document.addEventListener('dblclick', function (event) {
@@ -308,26 +337,28 @@
         event.preventDefault();
         var tab = tabButton.getAttribute('data-desktop-tab');
         openTab(tab);
-        window.requestAnimationFrame(syncActiveTab);
+        scheduleActiveTabSync();
         return;
       }
       var actionButton = event.target.closest('[data-desktop-action="ai-chat"]');
       if (actionButton) {
         event.preventDefault();
         openAiChat();
-        window.requestAnimationFrame(syncActiveTab);
+        scheduleActiveTabSync();
       }
     });
 
     var panels = document.getElementById('dockPanels');
     if (panels && window.MutationObserver) {
-      var obs1 = new MutationObserver(syncActiveTab);
-      obs1.observe(panels, { attributes: true, subtree: true, attributeFilter: ['class'] });
+      var obs1 = new MutationObserver(scheduleActiveTabSync);
+      panels.querySelectorAll(':scope > .dock-panel').forEach(function(panel) {
+        obs1.observe(panel, { attributes: true, attributeFilter: ['class'] });
+      });
       _observers.push(obs1);
     }
     var aiPanel = document.getElementById('panelAiChat');
     if (aiPanel && window.MutationObserver) {
-      var obs2 = new MutationObserver(syncActiveTab);
+      var obs2 = new MutationObserver(scheduleActiveTabSync);
       obs2.observe(aiPanel, { attributes: true, attributeFilter: ['class'] });
       _observers.push(obs2);
     }
@@ -367,6 +398,8 @@
 
     // P0: 在页面卸载时断开所有 Observer
     window.addEventListener('beforeunload', function() {
+      if (navigationRail) navigationRail.dispose();
+      if (activeSyncFrame) window.cancelAnimationFrame(activeSyncFrame);
       for (var i = 0; i < _observers.length; i++) {
         try { _observers[i].disconnect(); } catch (e) {}
       }

@@ -36,12 +36,31 @@
   function createCapacity(host,options){
     options=options||{};var life=new AbortController(),disposed=false,currentValue=null,currentMemory=null,resizeObserver=null,fitFrame=0;
     var trigger=node('button','ai-context-trigger'),ring=global.document.createElementNS('http://www.w3.org/2000/svg','svg'),label=node('span','ai-context-label'),popup=node('section','ai-context-popup'),title=node('strong','','上下文窗口'),close=node('button','ai-context-close','关闭'),usage=node('p','ai-context-usage'),source=node('p','ai-context-note'),status=node('p','ai-context-status'),limits=node('label','ai-context-setting','网站工作窗口（下次发送）'),select=node('select'),memoryDetails=node('details','ai-context-memory'),memorySummary=node('summary','','查看历史提取摘要'),memoryText=node('pre',''),note=node('p','ai-context-note','接近窗口 80% 时，在发送前自动提取较早对话的关键内容，保留近期原文。摘要可能省略细节；完整聊天记录仍可查看。整理过程不额外请求模型。');
-    trigger.type=close.type='button';popup.id='ai-context-popup-'+(++capacitySerial);popup.hidden=true;popup.setAttribute('role','region');popup.setAttribute('aria-label','上下文窗口详情');trigger.setAttribute('aria-controls',popup.id);trigger.setAttribute('aria-expanded','false');ring.setAttribute('viewBox','0 0 36 36');ring.setAttribute('aria-hidden','true');ring.setAttribute('focusable','false');
+    trigger.type=close.type='button';popup.id='ai-context-popup-'+(++capacitySerial);popup.hidden=true;popup.setAttribute('role','region');popup.setAttribute('aria-label','上下文窗口详情');close.setAttribute('aria-label','关闭上下文详情');trigger.setAttribute('aria-controls',popup.id);trigger.setAttribute('aria-expanded','false');ring.setAttribute('viewBox','0 0 36 36');ring.setAttribute('aria-hidden','true');ring.setAttribute('focusable','false');
     ['ai-context-ring-track','ai-context-ring-value'].forEach(function(cls){var circle=global.document.createElementNS('http://www.w3.org/2000/svg','circle');circle.setAttribute('class',cls);circle.setAttribute('cx','18');circle.setAttribute('cy','18');circle.setAttribute('r','14');ring.append(circle);});trigger.append(ring,label);host.append(trigger);popup.append(title,close,usage,source,status);
     [32768,65536,131072].forEach(function(n){var option=node('option','',n.toLocaleString()+' tokens');option.value=String(n);select.append(option);});select.setAttribute('aria-label','网站工作窗口');limits.append(select);popup.append(limits);memoryText.tabIndex=0;memoryDetails.append(memorySummary,memoryText);popup.append(memoryDetails,note);host.append(popup);
     function current(){return !disposed&&host.isConnected&&(!options.current||options.current());}
-    function fit(){if(!current()||popup.hidden)return;var vv=global.visualViewport,left=vv&&vv.offsetLeft||0,top=vv&&vv.offsetTop||0,width=vv&&vv.width||global.innerWidth,height=vv&&vv.height||global.innerHeight,bounds=trigger.getBoundingClientRect();popup.style.width=Math.min(360,width-24)+'px';popup.style.maxHeight=Math.max(100,height-24)+'px';var rect=popup.getBoundingClientRect();popup.style.left=Math.max(left+12,Math.min(bounds.left,left+width-rect.width-12))+'px';popup.style.top=Math.max(top+12,Math.min(bounds.top-rect.height-10,top+height-rect.height-12))+'px';}
-    function setOpen(open,restore){popup.hidden=!open;trigger.setAttribute('aria-expanded',String(open));if(open)fit();else if(restore&&trigger.isConnected)trigger.focus({preventScroll:true});}
+    function fit(){
+      if(!current()||popup.hidden)return;
+      var vv=global.visualViewport,left=vv&&vv.offsetLeft||0,top=vv&&vv.offsetTop||0,width=vv&&vv.width||global.innerWidth,height=vv&&vv.height||global.innerHeight,bounds=trigger.getBoundingClientRect();
+      var composer=host.closest('.ai-chat-input-bar'),anchor=composer?composer.getBoundingClientRect().top:bounds.top;
+      var popupWidth=Math.min(360,width-24),bottom=Math.max(top+76,Math.min(anchor-10,top+height-12));
+      popup.style.width=popupWidth+'px';popup.style.maxHeight=Math.max(64,bottom-top-12)+'px';
+      popup.style.left=Math.max(left+12,Math.min(bounds.left,left+width-popupWidth-12))+'px';
+      // A bottom anchor lets an expanded summary grow upward immediately,
+      // without an intermediate overflow frame or another popup measurement.
+      popup.style.top='auto';popup.style.bottom=(global.innerHeight-bottom)+'px';
+    }
+    function requestFit(){if(!fitFrame&&!popup.hidden)fitFrame=global.requestAnimationFrame(function(){fitFrame=0;fit();});}
+    function setOpen(open,restore){
+      if(!open&&popup.hidden){if(restore&&trigger.isConnected)trigger.focus({preventScroll:true});return;}
+      // Backdrop filters establish a containing block for fixed descendants.
+      // Portal the open popup out of the glass composer so viewport coordinates
+      // remain viewport coordinates on Safari and Chromium alike.
+      if(open&&popup.parentNode!==global.document.body)global.document.body.append(popup);
+      popup.hidden=!open;trigger.setAttribute('aria-expanded',String(open));
+      if(open)fit();else{if(host.isConnected)host.append(popup);if(restore&&trigger.isConnected)trigger.focus({preventScroll:true});}
+    }
     function update(value,memory){
       if(disposed)return;currentValue=value||{};currentMemory=memory||null;
       var capacity=Number(currentValue.window_tokens)||65536,used=Math.max(0,Number(currentValue.estimated_tokens)||0),reserved=Math.max(0,Number(currentValue.reserved_output_tokens)||0);
@@ -57,8 +76,8 @@
       memoryDetails.hidden=!currentMemory||!currentMemory.summary;memoryText.textContent=currentMemory&&currentMemory.summary||'';fit();
     }
     trigger.addEventListener('click',function(){if(!current()){dispose();return;}if(popup.hidden&&options.onOpen)options.onOpen();setOpen(popup.hidden);},{signal:life.signal});close.addEventListener('click',function(){setOpen(false,true);},{signal:life.signal});select.addEventListener('change',function(){if(options.onWindowChange)options.onWindowChange(Number(select.value));},{signal:life.signal});
-    memoryDetails.addEventListener('toggle',fit,{signal:life.signal});if(typeof global.ResizeObserver==='function'){resizeObserver=new global.ResizeObserver(function(){if(!fitFrame)fitFrame=global.requestAnimationFrame(function(){fitFrame=0;fit();});});resizeObserver.observe(popup);}
-    global.document.addEventListener('pointerdown',function(event){if(!host.contains(event.target))setOpen(false);},{capture:true,signal:life.signal});global.document.addEventListener('keydown',function(event){if(!popup.hidden&&event.key==='Escape'){event.preventDefault();event.stopPropagation();setOpen(false,true);}},{capture:true,signal:life.signal});global.addEventListener('resize',fit,{signal:life.signal});global.addEventListener('xtj:auth-changed',dispose,{signal:life.signal});global.addEventListener('pagehide',dispose,{signal:life.signal});if(global.visualViewport){global.visualViewport.addEventListener('resize',fit,{signal:life.signal});global.visualViewport.addEventListener('scroll',fit,{signal:life.signal});}global.addEventListener('scroll',fit,{capture:true,passive:true,signal:life.signal});
+    memoryDetails.addEventListener('toggle',requestFit,{signal:life.signal});if(typeof global.ResizeObserver==='function'){resizeObserver=new global.ResizeObserver(requestFit);resizeObserver.observe(popup);}
+    global.document.addEventListener('pointerdown',function(event){if(!host.contains(event.target)&&!popup.contains(event.target))setOpen(false);},{capture:true,signal:life.signal});global.document.addEventListener('keydown',function(event){if(!popup.hidden&&event.key==='Escape'){event.preventDefault();event.stopPropagation();setOpen(false,true);}},{capture:true,signal:life.signal});global.addEventListener('resize',requestFit,{signal:life.signal});global.addEventListener('xtj:auth-changed',dispose,{signal:life.signal});global.addEventListener('pagehide',function(){setOpen(false);},{signal:life.signal});if(global.visualViewport){global.visualViewport.addEventListener('resize',requestFit,{signal:life.signal});global.visualViewport.addEventListener('scroll',requestFit,{signal:life.signal});}global.addEventListener('scroll',requestFit,{capture:true,passive:true,signal:life.signal});
     function dispose(){if(disposed)return;disposed=true;life.abort();if(resizeObserver)resizeObserver.disconnect();if(fitFrame)global.cancelAnimationFrame(fitFrame);popup.remove();trigger.remove();}
     return {update:update,stage:function(){update(Object.assign({},currentValue,{compaction_status:'compacting'}),currentMemory);},settle:function(){if(currentValue&&currentValue.compaction_status==='compacting')update(Object.assign({},currentValue,{compaction_status:'ready'}),currentMemory);},close:function(){setOpen(false);},dispose:dispose};
   }

@@ -1445,144 +1445,30 @@ html[data-xtj-motion="off"] .ai-chat-input-bar {
   pointer-events: none; /* 视觉层不抢点击，交给 select */
 }
 
-/* Hero：从 + 按钮原点 spring 展开 / 原路收回 */
+/* One reversible compositor transition; content never stretches or clips. */
 .ai-plus-panel-shell {
-  position: absolute;
-  left: 8px;
-  bottom: calc(100% + 10px);
-  width: min(308px, calc(100vw - 20px));
-  max-height: min(78vh, 640px);
-  border-radius: 18px;
-  border: 1px solid rgba(120, 170, 155, 0.16);
-  /* 纯实色，绝不糊字 */
-  background: #eef6f2;
-  z-index: 30;
-  opacity: 0;
-  visibility: hidden;
-  pointer-events: none;
-  /* ★★ 2026-09-22 恢复原始「流动揭示」动画（8-6 版本，用户要的那个）。
-     关键不是缩放，而是 clip-path: inset() —— 面板内容像被一股流从 + 按钮
-     所在的左下角**推开铺满**，而不是"从小放大"或"炸开"。
-       · 关闭态 inset(100% 82% 0 0)：顶部裁掉 100%、右侧裁掉 82%，
-         只剩左下角一小条（正是 + 按钮的位置）；
-       · 打开态 inset(0)：完整显示。
-     与 scale() 的本质区别：缩放会连带拉伸文字（糊字、形变），
-     clip-path 只做**揭示**，内容本身不变形 —— 这就是"流动感"的来源。
-     打开与关闭共用同一条 transition（双向对称），曲线为平滑减速的
-     cubic-bezier(0.22, 0.61, 0.36, 1)，全程无过冲、无回弹。 */
-  transform: translateY(8px);
-  transform-origin: bottom left;
-  clip-path: inset(100% 82% 0 0 round 18px);
-  transition:
-    opacity 240ms ease-out,
-    visibility 0ms 240ms,
-    transform 320ms cubic-bezier(0.22, 0.61, 0.36, 1),
-    clip-path 320ms cubic-bezier(0.22, 0.61, 0.36, 1);
-  box-shadow:
-    0 16px 40px rgba(40, 80, 70, 0.14),
-    0 4px 12px rgba(40, 80, 70, 0.06);
-  overflow: hidden;
-  -webkit-font-smoothing: antialiased;
-  text-rendering: geometricPrecision;
-  /* 禁止 backdrop-filter，防止正文被“磨砂遮挡” */
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
-}
-.ai-plus-panel-shell::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  /* Hero 展开时的顶部斜向高光，配合 spring 缩放形成"液体玻璃"的透光感 */
-  background: linear-gradient(
-    165deg,
-    rgba(255, 255, 255, 0.22) 0%,
-    rgba(255, 255, 255, 0.06) 45%,
-    rgba(255, 255, 255, 0) 100%
-  );
-  pointer-events: none;
-  z-index: 0;
-}
-/* ★★ 2026-09-22：打开瞬间一道流光自右上扫到左下 —— 呼应 iOS 26/27 Siri 的
-   「边缘流光」，让"面板是被一股流推开"这件事被真正看见（此前只有几何位移，
-   缺少光感，所以改了也像没改）。一次性、不循环、不挡点击。 */
-.ai-plus-panel-shell.open::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  pointer-events: none;
-  z-index: 2;
-  background: linear-gradient(
-    105deg,
-    rgba(120, 220, 180, 0) 34%,
-    rgba(120, 220, 180, 0.34) 50%,
-    rgba(120, 220, 180, 0) 66%
-  );
-  background-size: 240% 100%;
-  animation: aiPlusPanelSweep 560ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
-}
-@keyframes aiPlusPanelSweep {
-  from { background-position: 190% 0; opacity: 0.95; }
-  to   { background-position: -90% 0; opacity: 0; }
+  position:absolute; left:8px; bottom:calc(100% + 10px);
+  width:min(308px,calc(100vw - 20px)); max-height:min(78vh,640px);
+  box-sizing:border-box; border-radius:22px;
+  border:1px solid rgba(120,170,155,.18); background:#f4faf6;
+  box-shadow:0 12px 32px rgba(40,80,70,.12); z-index:30;
+  opacity:0; visibility:hidden; pointer-events:none; overflow:hidden;
+  transform:translateY(8px); transform-origin:bottom left;
+  clip-path:none; backdrop-filter:none; -webkit-backdrop-filter:none;
+  transition:opacity 160ms ease,transform 220ms cubic-bezier(.2,.8,.2,1),visibility 0s 220ms;
 }
 .ai-plus-panel-shell.open {
-  opacity: 1;
-  visibility: visible;
-  pointer-events: auto;
-  transform: translateY(0);
-  /* 揭示完成态：裁切归零，面板完整呈现 */
-  clip-path: inset(0 round 18px);
-  transition:
-    opacity 240ms ease-out,
-    visibility 0ms 0ms,
-    transform 320ms cubic-bezier(0.22, 0.61, 0.36, 1),
-    clip-path 320ms cubic-bezier(0.22, 0.61, 0.36, 1);
+  opacity:1; visibility:visible; pointer-events:auto; transform:translateY(0);
+  transition:opacity 160ms ease,transform 220ms cubic-bezier(.2,.8,.2,1),visibility 0s;
 }
-/* 面板内容错峰淡入：整块内容"长出来"而不是一次性糊上去 */
-@keyframes aiPlusPanelItemIn {
-  from { opacity: 0; transform: translateY(7px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-.ai-plus-panel-shell.open .ai-quota-card,
-.ai-plus-panel-shell.open .ai-panel-group {
-  animation: aiPlusPanelItemIn 260ms cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-.ai-plus-panel-shell.open .ai-quota-card { animation-delay: 20ms; }
-.ai-plus-panel-shell.open .ai-panel-group:nth-of-type(1) { animation-delay: 60ms; }
-.ai-plus-panel-shell.open .ai-panel-group:nth-of-type(2) { animation-delay: 110ms; }
-.ai-plus-panel-shell.open .ai-panel-group:nth-of-type(3) { animation-delay: 160ms; }
-/* 仅关闭过程禁点；打开动画期间必须可点（否则模型/思考点不动） */
-.ai-plus-panel-shell.is-opening {
-  will-change: transform, opacity, clip-path;
-}
+.ai-plus-panel-shell.is-opening { will-change:transform,opacity; }
 .ai-plus-panel-shell.is-closing {
-  will-change: transform, opacity, clip-path;
-  pointer-events: none;
-  /* 关闭 = 打开的**逆过程**：同一条曲线、同一时长，clip-path 收回到
-     左下角那一小条，视觉上是"被流吸回去"，而不是"缩小消失"。
-     用 transition 而非 keyframes：clip-path 揭示必须双向对称才有流动感，
-     keyframes 只能单向播放。
-     ★ 防卡死的保障：关闭终态 = 基础隐藏态（inset(100% 82% 0 0)），
-       且基础态已声明为同一值，即使补间被打断，最终也会落到隐藏态；
-       纵然中途冻结，形态也只是"部分揭示"，不会像 scale(0.14) 那样
-       留下一个畸形小方块。 */
-  opacity: 0;
-  visibility: hidden;
-  transform: translateY(8px);
-  clip-path: inset(100% 82% 0 0 round 18px);
-  /* 与打开完全对称：同一条曲线、同一时长（320ms），
-     visibility 延迟到动画结束才切到 hidden，避免收起途中突然消失。 */
-  transition:
-    opacity 240ms ease-out,
-    visibility 0ms 320ms,
-    transform 320ms cubic-bezier(0.22, 0.61, 0.36, 1),
-    clip-path 320ms cubic-bezier(0.22, 0.61, 0.36, 1);
+  opacity:0; visibility:hidden; pointer-events:none; transform:translateY(8px);
+  transition:opacity 130ms ease,transform 160ms cubic-bezier(.4,0,.6,1),visibility 0s 160ms;
+  will-change:transform,opacity;
 }
-.ai-plus-panel-shell > .ai-plus-panel-content {
-  position: relative;
-  z-index: 1;
-}
+.ai-plus-panel-shell::before,.ai-plus-panel-shell::after { content:none; }
+.ai-plus-panel-shell > .ai-plus-panel-content { position:relative; z-index:1; }
 
 .ai-plus-panel-content {
   position: relative;
@@ -7424,62 +7310,20 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
 /* ===================== 自定义「模型 / 思考」选择弹层 =====================
    替代系统原生 select（部分设备原生下拉渲染不全/错位），全部由站点自绘。 */
 .ai-select-pop {
-  position: fixed;
-  z-index: 12000;
-  max-height: 60vh;
-  overflow-y: auto;
-  padding: 6px;
-  border-radius: 14px;
-  background: rgba(252, 255, 253, 0.98);
-  border: 1px solid rgba(120, 177, 170, 0.28);
-  box-shadow: 0 18px 48px rgba(30, 80, 63, 0.18);
-  backdrop-filter: blur(18px) saturate(140%);
-  -webkit-backdrop-filter: blur(18px) saturate(140%);
-  /* ★★ 2026-09-22（二次改）：模型/思考弹层改为「自上而下的流动揭示」。
-     上一版用 scale(0.94) 缩放淡入 —— 缩放会连带拉伸弹层里的文字（糊字），
-     且"整块弹出"的观感偏硬，正是用户说的"生硬很丑"。
-     现在改用 clip-path: inset(0 0 100% 0)：弹层像被一层流从锚点那一行
-     **自上而下抹开**，内容本身零形变；关闭是同一动作的逆过程，
-     收回到锚点行里，而不是"缩小消失"。
-     关键帧只做单向播放，但进出两条用同一条曲线、同一时长，
-     视觉上仍是对称的"展开 / 收回"。 */
-  transform-origin: var(--pop-ox, 50%) 0;
-  animation: aiSelectPopIn 260ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+  position:fixed; z-index:12000; box-sizing:border-box; overflow-y:auto;
+  max-height:60vh; padding:8px; border-radius:20px;
+  background:#f6fbf8; color:#284b40; border:1px solid rgba(120,177,170,.24);
+  box-shadow:0 12px 32px rgba(30,80,63,.15);
+  backdrop-filter:none; -webkit-backdrop-filter:none;
+  opacity:0; transform:translateY(6px);
+  transition:opacity 150ms ease,transform 210ms cubic-bezier(.2,.8,.2,1);
 }
-@keyframes aiSelectPopIn {
-  from {
-    opacity: 0;
-    transform: translateY(-6px);
-    clip-path: inset(0 0 100% 0 round 14px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-    clip-path: inset(0 0 0 0 round 14px);
-  }
-}
+.ai-select-pop.is-open { opacity:1; transform:translateY(0); }
 .ai-select-pop.is-closing {
-  pointer-events: none;
-  /* 关闭 = 打开的逆过程：同一曲线、同一时长，收回到锚点那一行 */
-  animation: aiSelectPopOut 260ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+  opacity:0; transform:translateY(6px); pointer-events:none;
+  transition:opacity 120ms ease,transform 160ms cubic-bezier(.4,0,.6,1);
 }
-@keyframes aiSelectPopOut {
-  from {
-    opacity: 1;
-    transform: translateY(0);
-    clip-path: inset(0 0 0 0 round 14px);
-  }
-  to {
-    opacity: 0;
-    transform: translateY(-6px);
-    clip-path: inset(0 0 100% 0 round 14px);
-  }
-}
-.ai-select-pop-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
+.ai-select-pop-list { display:flex; flex-direction:column; gap:4px; }
 /* 选项错峰落下（最多 5 项，超出统一用最后一段延迟） */
 .ai-select-pop-item {
   animation: aiSelectItemIn 260ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
@@ -7658,6 +7502,7 @@ html.xtj-ios-viewport.xtj-keyboard-open .ai-chat-input-bar { padding-bottom:8px!
     font-weight: 600;
     color: var(--ai-text, #223130);
 }
+.ai-tool-narration { margin:4px 0 8px; font-size:12px; line-height:1.65; color:var(--ai-text-muted,#617b6f); white-space:pre-wrap; overflow-wrap:anywhere; }
 .ai-select-pop-close {
     display: inline-flex;
     align-items: center;

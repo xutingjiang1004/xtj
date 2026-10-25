@@ -1664,6 +1664,8 @@ html.xtj-ios-viewport .dock-panel {
 
   .desktop-workbench-nav {
     display: flex;
+    position: relative;
+    isolation: isolate;
     margin-top: 24px;
     padding: 0 !important;
     flex-direction: column;
@@ -1678,6 +1680,11 @@ html.xtj-ios-viewport .dock-panel {
 
   .desktop-nav-item {
     display: grid;
+    position: relative;
+    z-index: 1;
+    touch-action: pan-x;
+    -webkit-user-select: none;
+    user-select: none;
     grid-template-columns: 25px minmax(0, 1fr) auto;
     gap: 12px;
     align-items: center;
@@ -1972,6 +1979,7 @@ html.xtj-ios-viewport .dock-panel {
     background-image: none !important;
     box-shadow: none !important;
     transform: none;
+    touch-action: pan-x !important;
   }
 
   [data-theme] .app-container .desktop-workbench-sidebar button.desktop-nav-item:hover {
@@ -1988,7 +1996,26 @@ html.xtj-ios-viewport .dock-panel {
     background-color: var(--wb-accent-soft) !important;
     background-image: none !important;
   }
+
+  .desktop-nav-indicator {
+    position: absolute; inset: 0 auto auto 0; z-index: 0;
+    box-sizing: border-box; border-radius: 999px; opacity: 0;
+    background: var(--wb-accent-soft);
+    border: 1px solid color-mix(in srgb, var(--wb-accent) 24%, transparent);
+    pointer-events: none;
+    transition: transform 220ms cubic-bezier(.2,.8,.2,1), width 180ms ease, height 180ms ease;
+  }
+  [data-theme] .app-container .desktop-workbench-sidebar .has-selection-indicator button.desktop-nav-item.is-active {
+    background: transparent !important; background-color: transparent !important;
+    border-color: transparent !important;
+  }
+  .desktop-workbench-nav.is-dragging,
+  .desktop-workbench-nav.is-dragging .desktop-nav-item { cursor: grabbing; }
 }
+
+html #dockBar .dock-tab { touch-action: pan-y; -webkit-user-select: none; user-select: none; }
+@media (prefers-reduced-motion: reduce) { .desktop-nav-indicator { transition: none; } }
+html[data-xtj-motion="off"] .desktop-nav-indicator { transition: none; }
 
 /* Compact workbench: tablets use the same desktop information architecture,
    with the optional right rail collapsed to preserve the primary workspace. */

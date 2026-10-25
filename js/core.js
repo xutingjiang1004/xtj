@@ -12414,6 +12414,7 @@ function renderProfileActivityList(kind) {
                 var dockBar = document.getElementById('dockBar');
                 var indicator = document.getElementById('dockIndicator');
                 if (!dockBar || !indicator) return;
+                if (dockBar.__xtjSelectionRail) { dockBar.__xtjSelectionRail.sync(); return; }
                 var activeBtn = dockBar.querySelector('.dock-tab.active') || dockBar.querySelector('.dock-tab[data-tab="' + currentDockTab + '"]');
                 if (!activeBtn) {
                     indicator.style.opacity = '0';
@@ -12428,76 +12429,6 @@ function renderProfileActivityList(kind) {
                 indicator.style.opacity = '1';
             }
             window.syncDockIndicator = syncDockIndicator;
-
-            function getDockIndicatorMetrics() {
-                var dockBar = document.getElementById('dockBar');
-                var indicator = document.getElementById('dockIndicator');
-                if (!dockBar || !indicator) return null;
-                var dockTabs = Array.prototype.slice.call(dockBar.querySelectorAll('.dock-tab'));
-                if (!dockTabs.length) return null;
-                var barRect = dockBar.getBoundingClientRect();
-                var indicatorRect = indicator.getBoundingClientRect();
-                var activeBtn = dockBar.querySelector('.dock-tab.active') || dockBar.querySelector('.dock-tab[data-tab="' + currentDockTab + '"]') || dockTabs[0];
-                var activeRect = activeBtn.getBoundingClientRect();
-                var indicatorWidth = activeRect.width || indicatorRect.width || 72;
-                var indicatorHeight = activeRect.height || indicatorRect.height || 48;
-                var currentX = indicatorRect.width
-                    ? (indicatorRect.left - barRect.left)
-                    : (activeRect.left - barRect.left);
-                var firstRect = dockTabs[0].getBoundingClientRect();
-                var lastRect = dockTabs[dockTabs.length - 1].getBoundingClientRect();
-                return {
-                    dockBar: dockBar,
-                    indicator: indicator,
-                    dockTabs: dockTabs,
-                    barRect: barRect,
-                    currentX: currentX,
-                    currentY: activeRect.top - barRect.top,
-                    currentWidth: indicatorWidth,
-                    currentHeight: indicatorHeight,
-                    minX: (firstRect.left - barRect.left) - firstRect.width * 0.2,
-                    maxX: (lastRect.right - barRect.left) - indicatorWidth + lastRect.width * 0.2,
-                    minY: (firstRect.top - barRect.top) - firstRect.height * 0.2,
-                    maxY: (lastRect.bottom - barRect.top) - indicatorHeight + lastRect.height * 0.2
-                };
-            }
-
-            function findNearestDockTab(clientX) {
-                var dockBar = document.getElementById('dockBar');
-                if (!dockBar) return null;
-                var dockTabs = Array.prototype.slice.call(dockBar.querySelectorAll('.dock-tab'));
-                if (!dockTabs.length) return null;
-                var nearest = dockTabs[0];
-                var nearestDistance = Infinity;
-                dockTabs.forEach(function(tab) {
-                    var rect = tab.getBoundingClientRect();
-                    var centerX = rect.left + rect.width / 2;
-                    var distance = Math.abs(clientX - centerX);
-                    if (distance < nearestDistance) {
-                        nearest = tab;
-                        nearestDistance = distance;
-                    }
-                });
-                return nearest;
-            }
-            function findNearestDockTabY(clientY) {
-                var dockBar = document.getElementById('dockBar');
-                if (!dockBar) return null;
-                var dockTabs = Array.prototype.slice.call(dockBar.querySelectorAll('.dock-tab'));
-                if (!dockTabs.length) return null;
-                var nearest = dockTabs[0];
-                var nearestDistance = Infinity;
-                dockTabs.forEach(function(tab) {
-                    var rect = tab.getBoundingClientRect();
-                    var centerY = rect.top + rect.height / 2;
-                    var distance = Math.abs(clientY - centerY);
-                    if (distance < nearestDistance) {
-                        nearest = tab;
-                        nearestDistance = distance;
-                    }
-                });
-                return nearest;
-            }
 
             function setPhotoWallLockedState(isLocked) {
                 var sort = document.getElementById('pwAlbumSort');
@@ -12585,100 +12516,15 @@ function renderProfileActivityList(kind) {
                 var indicator = document.getElementById('dockIndicator');
                 if (!dockBar || !indicator || dockBar.__xtjDockDragInstalled) return;
                 dockBar.__xtjDockDragInstalled = true;
-
-                var drag = null;
-                var dragHandledTs = 0;
-
-                dockBar.addEventListener('pointerdown', function(e) {
-                    if (e.pointerType === 'mouse' && e.button !== 0) return;
-                    var metrics = getDockIndicatorMetrics();
-                    if (!metrics) return;
-                    syncDockIndicator();
-                    metrics = getDockIndicatorMetrics();
-                    if (!metrics) return;
-                    var isVertical = getComputedStyle(dockBar).flexDirection === 'column';
-                    drag = {
-                        id: e.pointerId,
-                        sx: e.clientX,
-                        sy: e.clientY,
-                        ix: metrics.currentX,
-                        iy: metrics.currentY,
-                        w: metrics.currentWidth,
-                        h: metrics.currentHeight,
-                        mx: isVertical ? metrics.maxY : metrics.maxX,
-                        nx: isVertical ? metrics.minY : metrics.minX,
-                        indicator: metrics.indicator,
-                        moved: false,
-                        onTab: !!(e.target && e.target.closest && e.target.closest('.dock-tab')),
-                        vertical: isVertical
-                    };
-                    drag.indicator.style.width = drag.w + 'px';
-                    drag.indicator.style.height = drag.h + 'px';
-                    drag.indicator.style.transition = 'none';
-                    drag.indicator.style.opacity = '1';
-                    drag.indicator.style.transform = 'translate3d(' + drag.ix + 'px,' + drag.iy + 'px,0)';
-                    if(!window._throttledDragMove) window._throttledDragMove = window.throttleRAF(onDragMove);
-                    document.addEventListener('pointermove', window._throttledDragMove, {passive: false});
-                    document.addEventListener('pointerup', onDragUp);
-                    document.addEventListener('pointercancel', onDragCancel);
+                if (window.xtjInstallSelectionRail) window.xtjInstallSelectionRail({
+                    rail: dockBar, indicator: indicator, buttons: '.dock-tab',
+                    axis: function() { return getComputedStyle(dockBar).flexDirection === 'column' ? 'y' : 'x'; },
+                    selected: function() { return dockBar.querySelector('.dock-tab.active'); },
+                    select: function(button) { switchDockTab(button.dataset.tab, true, { animate: true, source: 'dock-drag' }); }
                 });
-
-                function onDragMove(e) {
-                    if (!drag || e.pointerId !== drag.id) return;
-                    e.preventDefault();
-                    if (drag.vertical) {
-                        var dy = e.clientY - drag.sy;
-                        if (Math.abs(dy) > 2) drag.moved = true;
-                        var ny = Math.max(drag.nx, Math.min(drag.mx, drag.iy + dy));
-                        drag.indicator.style.transform = 'translate3d(' + drag.ix + 'px,' + ny + 'px,0)';
-                        drag.cy = ny;
-                    } else {
-                        var dx = e.clientX - drag.sx;
-                        if (Math.abs(dx) > 2) drag.moved = true;
-                        var nx = Math.max(drag.nx, Math.min(drag.mx, drag.ix + dx));
-                        drag.indicator.style.transform = 'translate3d(' + nx + 'px,' + drag.iy + 'px,0)';
-                        drag.cx = nx;
-                    }
-                }
-
-                function cleanupDrag() {
-                    document.removeEventListener('pointermove', window._throttledDragMove || onDragMove);
-                    document.removeEventListener('pointerup', onDragUp);
-                    document.removeEventListener('pointercancel', onDragCancel);
-                }
-
-                function onDragUp(e) {
-                    if (!drag) { cleanupDrag(); return; }
-                    if (e.pointerId !== drag.id) return;
-                    var state = drag;
-                    drag = null;
-                    cleanupDrag();
-                    if (state.moved) {
-                        var tab = state.vertical
-                            ? findNearestDockTabY(e.clientY || state.sy)
-                            : findNearestDockTab(e.clientX || state.sx);
-                        if (tab) {
-                            dragHandledTs = Date.now();
-                            switchDockTab(tab.dataset.tab, true, { animate: true, source: 'dock-drag' });
-                        }
-                    }
-                    requestAnimationFrame(syncDockIndicator);
-                }
-
-                function onDragCancel(e) {
-                    if (!drag) { cleanupDrag(); return; }
-                    if (e.pointerId !== drag.id) return;
-                    drag = null;
-                    cleanupDrag();
-                    requestAnimationFrame(syncDockIndicator);
-                }
-
-                // 按钮点击：事件委托在 dockBar 上统一处理
-                dockBar.addEventListener('click', function(e) {
-                    var tabBtn = e.target.closest('.dock-tab');
-                    if (!tabBtn) return;
-                    if (Date.now() - dragHandledTs < 350) return;
-                    switchDockTab(tabBtn.dataset.tab, false, { animate: true, source: 'dock-click' });
+                dockBar.addEventListener('click', function(event) {
+                    var button = event.target.closest('.dock-tab');
+                    if (button) switchDockTab(button.dataset.tab, false, { animate: true, source: 'dock-click' });
                 });
             }
 
