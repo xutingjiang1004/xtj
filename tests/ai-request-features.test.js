@@ -5,7 +5,7 @@ const file=(text,name='notes.txt')=>({name,data_url:'data:text/plain;base64,'+Bu
 async function scoped(body,action,cache=features.createAttachmentStore()){
   const req=Object.assign(new EventEmitter(),{accountId:'account-a',userName:'alice',body});
   const res=Object.assign(new EventEmitter(),{statusCode:200,status(code){this.statusCode=code;return this;},json(value){this.value=value;this.emit('finish');},getHeader(){return '';}});
-  return new Promise((resolve,reject)=>{features.makeMiddleware({store:cache})(req,res,()=>Promise.resolve().then(()=>action(req,res)).then(value=>{res.emit('finish');resolve(value);},reject)).then(()=>{if(res.value)reject(Object.assign(Error(res.value.error),{code:res.value.code,status:res.statusCode}));},reject);});
+  return new Promise((resolve,reject)=>{features.makeMiddleware({store:cache,getAiConfig:async()=>({task_budget:body.task_budget})})(req,res,()=>Promise.resolve().then(()=>action(req,res)).then(value=>{res.emit('finish');resolve(value);},reject)).then(()=>{if(res.value)reject(Object.assign(Error(res.value.error),{code:res.value.code,status:res.statusCode}));},reject);});
 }
 test('attachment references preserve exact bytes and are bound to account, conversation, expiry and capacity',()=>{
   let now=0;const cache=features.createAttachmentStore({now:()=>now,ttl:100,maxBytes:30,ownerBytes:24});
@@ -74,7 +74,7 @@ test('time budget emits a distinct terminal event, cancels upstream work and rel
   const events=[],req=Object.assign(new EventEmitter(),{accountId:'account-a',userName:'alice',body:{task_budget:{max_duration_seconds:30}}});let aborted=0;
   req.on('aborted',()=>aborted++);
   const res=Object.assign(new EventEmitter(),{headersSent:true,writableEnded:false,getHeader:()=> 'text/event-stream',end(){this.writableEnded=true;this.emit('finish');}});
-  await features.makeMiddleware({writeSse:(_res,event)=>events.push(event)})(req,res,()=>{});
+  await features.makeMiddleware({writeSse:(_res,event)=>events.push(event),getAiConfig:async()=>({task_budget:{max_duration_seconds:30}})})(req,res,()=>{});
   t.mock.timers.tick(30000);assert.equal(aborted,1);assert.equal(events.length,1);assert.equal(events[0].code,'task_budget_exceeded');assert.ok(req.aiRequestScope.controller.signal.aborted);assert.equal(res.writableEnded,true);
   t.mock.timers.tick(60000);assert.equal(aborted,1);
 });
@@ -89,4 +89,22 @@ test('ordinary-chat Chinese PDF tool produces a real downloadable PDF containing
   const result=await require('./helpers/ai-tool-executor').execute('generate_pdf',{filename:'核对报告',title:'真实中文报告',blocks:[{type:'p',text:'应退款三百元；不能把文件生成冒充成功。'},{type:'table',headers:['项目','金额'],rows:[['退款','300 元']]}]});
   assert.equal(result.error,undefined);const file=result.cards[0].data;assert.equal(file.format,'pdf');assert.equal(file.is_html_delivery,false);assert.match(file.data_url,/^data:application\/pdf;base64,/);
   const buffer=Buffer.from(file.data_url.split(',')[1],'base64');assert.equal(buffer.subarray(0,5).toString(),'%PDF-');const parsed=await require('../render-api/file-parsers').parsePdfBuffer(buffer);assert.match(parsed.text,/应退款三百元/);assert.match(parsed.text,/300 元/);
+});
+
+test('only administrator budgets apply; retired client limits cannot shrink or raise them',async()=>{
+ for(const configured of [undefined,{max_searches:2,max_duration_seconds:90}])for(const client of [{max_searches:1,max_duration_seconds:30},{max_searches:999,max_duration_seconds:9999}]){
+  const req=Object.assign(new EventEmitter(),{accountId:'account-a',userName:'alice',body:{task_budget:client}}),res=Object.assign(new EventEmitter(),{status(){return this;},json(value){throw Error(value.error);}});
+  let reached=false;
+  await features.makeMiddleware({getAiConfig:async()=>({task_budget:configured})})(req,res,()=>{reached=true;assert.equal(features.current().policy.maxSearches,configured?.max_searches??30);assert.equal(features.current().policy.maxSeconds,configured?.max_duration_seconds??600);assert.equal(req.body.task_budget,undefined);res.emit('finish');});
+  assert.equal(reached,true);
+ }
+});
+
+test('official-only configuration stays with its request while concurrent users use automatic fallback',async()=>{
+ let release;const waiting=new Promise(resolve=>release=resolve),states=[];
+ async function run(flag){
+  const req=Object.assign(new EventEmitter(),{accountId:'account-'+flag,userName:'alice',body:{}}),res=Object.assign(new EventEmitter(),{status(){return this;},json(value){throw Error(value.error)}});
+  await new Promise((resolve,reject)=>features.makeMiddleware({getAiConfig:async()=>({search:{official_only:flag}})})(req,res,()=>Promise.resolve().then(async()=>{if(flag)await waiting;else release();states.push([flag,features.current().officialOnly]);res.emit('finish');resolve();}).catch(reject)).catch(reject));
+ }
+ await Promise.all([run(true),run(false)]);assert.deepEqual(states.sort((a,b)=>Number(a[0])-Number(b[0])),[[false,false],[true,true]]);
 });

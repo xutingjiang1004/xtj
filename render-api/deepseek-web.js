@@ -47,10 +47,10 @@ function middleware(req, res, next) {
     next();
   });
 }
-function record(kind, outcome, options) {
+function record(kind, outcome, options, detail = {}) {
   const targets = new Set([turnUsage.getStore(), options.context && (options.context.webUsage ||= { search: 0, fetch: 0, successful: 0, empty: 0, failed: 0, unknown: 0 })]);
   for (const target of targets) if (target) { target[kind]++; target[outcome]++; }
-  console.info('[DEEPSEEK-WEB-REQUEST]',JSON.stringify({endpoint:kind,outcome:outcome,price_version:PRICE_VERSION}));
+  console.info('[DEEPSEEK-WEB-REQUEST]',JSON.stringify({endpoint:kind,outcome:outcome,price_version:PRICE_VERSION,...detail}));
 }
 function enrichUsage(usage, context) {
   const web = context?.webUsage || turnUsage.getStore();
@@ -83,7 +83,7 @@ async function request(kind, body, options = {}) {
       if((budget.started||0)>=maxRequests || ((budget.started||0)+1)*5000>Math.round(maxCost*1e6))throw new Error('DeepSeek web turn budget reached');
       budget.started=(budget.started||0)+1;
     }
-    const controller = new AbortController(); let sent = false, received = false, accepted = false, recorded = false;
+    const controller = new AbortController(); let sent = false, received = false, accepted = false, recorded = false, httpStatus = null;
     const abort = () => controller.abort();
     options.signal?.addEventListener('abort', abort, { once: true });
     const timer = setTimeout(abort, 12000);
@@ -94,6 +94,7 @@ async function request(kind, body, options = {}) {
         body: JSON.stringify(body), signal: controller.signal
       });
       received = true;
+      httpStatus = response.status;
       if (!response.ok) { await response.body?.cancel().catch(() => {}); throw new Error('DeepSeek web status ' + response.status); }
       accepted = true;
       const data = await readJson(response);
@@ -101,9 +102,10 @@ async function request(kind, body, options = {}) {
       record(kind, nonempty ? 'successful' : 'empty', options); recorded = true;
       checkAbort(options.signal); return data;
     } catch (error) {
-      if (sent && !recorded) record(kind, accepted || !received || controller.signal.aborted ? 'unknown' : 'failed', options);
+      const code = controller.signal.aborted ? 'DEEPSEEK_WEB_ABORTED' : httpStatus && !accepted ? 'DEEPSEEK_WEB_HTTP_' + httpStatus : received ? 'DEEPSEEK_WEB_INVALID_RESPONSE' : 'DEEPSEEK_WEB_NETWORK';
+      if (sent && !recorded) record(kind, accepted || !received || controller.signal.aborted ? 'unknown' : 'failed', options, {code,http_status:httpStatus});
       if (options.signal?.aborted) throw abortError();
-      throw new Error('DeepSeek web request failed');
+      throw Object.assign(new Error('DeepSeek web request failed'),{code,http_status:httpStatus});
     } finally { clearTimeout(timer); options.signal?.removeEventListener('abort', abort); }
   }, options.signal);
 }

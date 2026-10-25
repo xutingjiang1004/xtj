@@ -108,8 +108,9 @@ function writeSse(res,payload,eventName){
     const parsed=res._aiFollowupStream?res._aiFollowupStream.finish(typeof payload.content==='string'?payload.content:undefined):assistantOutput.splitFollowups(payload.content||'');
     payload={...payload,content:parsed.text};
     if(typeof payload.sanitized_content==='string')payload.sanitized_content=assistantOutput.splitFollowups(payload.sanitized_content).text;
-    if(payload.complete!==false&&parsed.text.trim())payload.followups=assistantOutput.normalizeFollowups([payload.followups,parsed.followups,res._aiFollowups].find(value=>Array.isArray(value)&&value.length));
-    if(payload.complete!==false&&parsed.text.trim()&&(!payload.followups||payload.followups.length!==3))payload.followups=assistantOutput.contextualFollowups(res._aiFollowupQuestion,parsed.text);
+    payload.followups=payload.complete!==false&&parsed.text.trim()
+      ? assistantOutput.normalizeFollowups([payload.followups,parsed.followups,res._aiFollowups].find(value=>Array.isArray(value)&&value.length),res._aiFollowupQuestion)
+      : [];
   }
   return writeSseRaw(res,payload,eventName);
 }

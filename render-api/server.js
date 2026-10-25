@@ -1753,6 +1753,7 @@ async function executeToolCall(toolCall, context) {
       try {
         var result = await searchWeb(q, maxR, {signal:context.signal,context:context,deepseekKey:context.deepseekKey,freeOnly:context.freeOnly});
         var resultsArr = result && Array.isArray(result.results) ? result.results : [];
+        if (result && result.code === 'official_search_unavailable') return {tool_name:name,query:q,error:result.error,code:result.code};
         var searchDiagnostics = result && result.diagnostics;
         if (!resultsArr.length && (result && result.error || searchDiagnostics && searchDiagnostics.provider_errors && searchDiagnostics.provider_errors.length && !(searchDiagnostics.provider_results || []).length)) {
           return { tool_name: name, query: q, error: '搜索服务暂时不可用，请稍后重试' };
@@ -1775,9 +1776,10 @@ async function executeToolCall(toolCall, context) {
           tool_name: name,
           query: q,
           results_count: resultsArr.length,
+          used_provider: result && result.used_provider || null,
           content: JSON.stringify(webModelItems),
           diagnostics: result && result.diagnostics ? result.diagnostics : null,
-          cards: webItems.length ? [aiSiteCard('web_search', '联网搜索', { query: q, results: webItems })] : []
+          cards: webItems.length ? [aiSiteCard('web_search', '联网搜索', { query: q, provider: result && result.used_provider || null, results: webItems })] : []
         };
       } catch (e) {
         // 脱敏：不把底层 provider/状态码透传给模型与前端
@@ -1785,6 +1787,13 @@ async function executeToolCall(toolCall, context) {
       }
     }
     case 'tavily_search': {
+      if (context.preferDeepseek || context.deepseekKey || typeof aiRequestFeatures !== 'undefined' && aiRequestFeatures.current()?.officialOnly) {
+        var officialArgs = Object.assign({},args,{max_results:args.max_results||5});
+        var timeHints = {day:'最近一天',week:'最近一周',month:'最近一个月',year:'最近一年'};
+        if(timeHints[args.time_range])officialArgs.query=String(args.query||'')+' '+timeHints[args.time_range];
+        var officialResult = await executeToolCall({function:{name:'search_web',arguments:JSON.stringify(officialArgs)}},context);
+        return Object.assign({},officialResult,{tool_name:name});
+      }
       if (context.freeOnly) return {tool_name:name,error:'MiniMax 免费模式不调用付费搜索服务，请使用 search_web 免费搜索'};
       var tq = String(args.query || '').trim().slice(0, 200);
       var tMax = Math.min(Math.max(parseInt(args.max_results, 10) || 5, 1), 10);
@@ -3734,7 +3743,7 @@ async function finishStream(res, opt) {
   var rawContent = String(opt.contentBuffer || '');
   var assistantParts = assistantOutput.splitFollowups(rawContent);
   rawContent = assistantParts.text;
-  if(res._aiFollowupEnabled && assistantParts.followups.length!==3 && rawContent.trim())assistantParts.followups=assistantOutput.contextualFollowups(res._aiFollowupQuestion,rawContent);
+  assistantParts.followups = res._aiFollowupEnabled && rawContent.trim() ? assistantOutput.normalizeFollowups(assistantParts.followups, res._aiFollowupQuestion) : [];
   res._aiFollowups = assistantParts.followups;
   // ★ 修复：角色扮演开启时跳过动作描写清洗，保留扮演中的动作神态描写
   var content = sanitizeAssistantVisibleText(rawContent, { skipActionCleanup: !!(opt && opt.roleplayEnabled) });
@@ -10856,6 +10865,7 @@ function requestSearchCtx(req, userName) {
       ? host._searchApiCalls : { userName: userName || '', searchConsumed: 0 };
   }
   if (!host._searchCtx.userName) host._searchCtx.userName = userName || '';
+  if (/^\/api\/agent\/chat(?:\/stream)?$/.test(String(req.path||''))) host._searchCtx.preferDeepseek = true;
   // 游客标记：让搜索配额门禁跳过账号级 RPC（见 claimSearchSlot）。
   if (req.guestAi) host._searchCtx.guest = true;
   return host._searchCtx;
@@ -20558,7 +20568,7 @@ const AI_DEFAULT_CONFIG = {
     avoid: ['不要写括号动作', '不要写心理动作', '不要废话', '不要假装搜索成功', '不要编造事实', '不要用括号描述你的动作神态心理活动'],
     format: ['必要时使用标题和清单', '复杂问题先说结论再给步骤']
   },
-  search: { allow_web_search: false, search_provider: 'searxng', max_results: 5, timeout_ms: 4000, use_weather_tool: true },
+  search: { allow_web_search: false, search_provider: 'searxng', official_only: false, max_results: 5, timeout_ms: 4000, use_weather_tool: true },
     // ★ M: default_thinking_mode 从 max 改成 low
   //   用户要求: 普通聊天改成默认low思考
   //   管理员可在 /admin/ai-agent/config 切换为 low/medium/high/max
@@ -20592,6 +20602,7 @@ const AI_DEFAULT_CONFIG = {
   // 访客 AI 开关：管理员在后台「AI 管理 → 智能体设置」控制。
   // 默认开启，保证 Supabase 读取失败时仍可用的内置行为；管理员保存 false 后关闭。
   allow_guest_ai: true,
+  task_budget: {max_searches:30,max_duration_seconds:600},
   admin_debug: { show_effective_prompt: true, show_model_info: true, show_reasoning_length: true },
   updated_at: '',
   updated_by: ''
@@ -21506,7 +21517,7 @@ async function handleDeepThinkChat(req, res) {
 
 // POST /api/agent/chat/cancel - 取消正在进行的深度思考
 require('./ai-conversation-features').install(app,{db:supabase,authenticateUser,rateLimit});
-const aiRequestMiddleware = aiRequestFeatures.install(app,{ authenticateUser, rateLimit, writeSse, jsonMiddleware:express.json({limit:'80mb'}) });
+const aiRequestMiddleware = aiRequestFeatures.install(app,{ authenticateUser, rateLimit, writeSse, getAiConfig, jsonMiddleware:express.json({limit:'80mb'}) });
 
 app.post('/api/agent/chat/cancel', authenticateUser, async (req, res) => {
   try {
@@ -21671,10 +21682,11 @@ app.post('/api/agent/chat', authenticateUser, aiChatConcurrencyGate, rateLimit(3
       // Tavily 并行搜索
       var tavilyPromise = null;
       var tavilyResults = null;
+      var presearchProvider = null;
       if (useTavilyCluster && !webSearchEnabled) {
         var tavilyQuery = message.slice(0, 150);
         tavilyPromise = searchWebForUser(userName, tavilyQuery, 20, req._searchApiCalls).then(function(r) {
-          if (r && Array.isArray(r.results)) tavilyResults = r.results;
+          if (r && Array.isArray(r.results)) { tavilyResults = r.results; presearchProvider = r.used_provider || null; }
           return r;
         }).catch(function(e) {
           console.error('[AGENT-CHAT] Tavily search error:', e && e.message);
@@ -22482,7 +22494,7 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
       //   若整段都是内部协议残留，则用一句可重试的提示替代，避免用户看到原文。
       var _customParts = customVisibleStream.finish(assistantContent);
       var _cnFinal = _customParts.text;
-      if(res._aiFollowupEnabled && _customParts.followups.length!==3 && _cnFinal.trim())_customParts.followups=assistantOutput.contextualFollowups(res._aiFollowupQuestion,_cnFinal);
+      _customParts.followups = res._aiFollowupEnabled && _cnFinal.trim() ? assistantOutput.normalizeFollowups(_customParts.followups, res._aiFollowupQuestion) : [];
       res._aiFollowups = _customParts.followups;
       if (!_cnFinal && assistantContent.trim() && (finalReplyContainsInternalProtocolGlobal(assistantContent) || looksLikeToolArgsFragment(assistantContent))) {
         _cnFinal = '（工具调用解析失败，请重试。）';
@@ -23753,6 +23765,7 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, rateLimit
       // 服务端预搜补充（仅第三方额度未用尽时）
       var tavilyPromise = null;
       var tavilyResults = null;
+      var presearchProvider = null;
       var shouldServerSearch = webSearchPref !== true && thirdPartySearchOk && allowSearch && !blockAutoSearchForOcr && (
         (useTavilyCluster && !hasImageOcrMsg)
         || (useThinking && proactiveSearch)
@@ -23763,7 +23776,7 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, rateLimit
       if (shouldServerSearch && tavilyQueryBase.length >= 2 && !/png|jpeg|ocr\.space|base64|用户上传文件/i.test(tavilyQueryBase)) {
         var tavilyQuery = tavilyQueryBase.slice(0, 150);
         tavilyPromise = (_preloadedSearchPromise || searchWebForUser(userName, tavilyQuery, 20, req._searchApiCalls)).then(function(r) {
-          if (r && Array.isArray(r.results)) tavilyResults = r.results;
+          if (r && Array.isArray(r.results)) { tavilyResults = r.results; presearchProvider = r.used_provider || null; }
           return r;
         }).catch(function(e) {
           console.error('[AGENT-STREAM] server presearch error:', e && e.message);
@@ -24004,14 +24017,14 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, rateLimit
         } catch (e) {}
         if (tavilyResults && tavilyResults.length > 0) {
           searchResultsCollected = searchResultsCollected.concat(tavilyResults.slice(0, 20));
-          writeSse(res, { type: 'search', count: tavilyResults.length, source: 'tavily', results: tavilyResults.slice(0, 5), query: (tavilyQueryBase || searchCleanMessage || '').slice(0, 100) });
+          writeSse(res, { type: 'search', count: tavilyResults.length, source: presearchProvider || 'web', provider: presearchProvider, results: tavilyResults.slice(0, 5), query: (tavilyQueryBase || searchCleanMessage || '').slice(0, 100) });
         }
       }
 
       // Clear private followup metadata before sanitizing and persisting prose.
       var responsesParts=require('./ai-assistant-output').splitFollowups(responsesContent);
       responsesContent=responsesParts.text;
-      if(res._aiFollowupEnabled && responsesParts.followups.length!==3)responsesParts.followups=require('./ai-assistant-output').contextualFollowups(res._aiFollowupQuestion,responsesContent);
+      responsesParts.followups = res._aiFollowupEnabled && responsesContent.trim() ? assistantOutput.normalizeFollowups(responsesParts.followups, res._aiFollowupQuestion) : [];
       res._aiFollowups=responsesParts.followups;
       responsesContent = sanitizeAssistantVisibleText(responsesContent, { skipActionCleanup: roleplayEnabled });
       if (!responsesContent) responsesContent = '（AI 没有回复，请稍后再试）';
@@ -25366,7 +25379,8 @@ app.get('/api/agent/search-health', authenticateUser, rateLimit(60000, 5), async
       return res.status(403).json({ ok: false, code: 'admin_required', error: '仅管理员可检查联网搜索状态' });
     }
     var q = String(req.query.q || '济州岛最新新闻').trim().slice(0, 100);
-    var result = await searchWeb(q, 3);
+    var healthConfig = await getAiConfig();
+    var result = await searchWeb(q, 3, {officialOnly:healthConfig.search && healthConfig.search.official_only === true});
     var diagnostics = result && result.diagnostics ? result.diagnostics : {};
     return res.json({
       ok: diagnostics.provider_results && diagnostics.provider_results.length > 0,
@@ -27082,7 +27096,7 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
           site_cards: Array.isArray(m.site_cards) ? m.site_cards : [],
           tool_retry_updated_at: m.tool_retry_updated_at || null,
           tool_retry_revision: Number.isSafeInteger(m.tool_retry_revision) ? m.tool_retry_revision : 0,
-          thinking_elapsed_ms: m.thinking_elapsed_ms || 0,
+          thinking_elapsed_ms: typeof m.thinking_elapsed_ms === 'number' && Number.isFinite(m.thinking_elapsed_ms) && m.thinking_elapsed_ms >= 0 ? m.thinking_elapsed_ms : null,
           // ★ 多模态：把用户消息里保存的图片 data URL 带回，前端用于
           //   历史图片消息的「重新生成」时复用原图。
           vision_urls: (m.role === 'user' && Array.isArray(m.vision_urls)) ? m.vision_urls : [],
@@ -27147,6 +27161,12 @@ app.post('/admin/ai-agent/config', verifyToken, securityRateLimit(60000, 20), as
   try {
     var body = req.body || {};
     var configPayload = migrateConfig(body);
+    if (body.task_budget !== undefined) {
+      try {
+        var taskPolicy = require('./ai-request-features').parseBudget({task_budget:body.task_budget});
+        configPayload.task_budget = {max_searches:taskPolicy.maxSearches ?? 30,max_duration_seconds:taskPolicy.maxSeconds ?? 600};
+      } catch (budgetError) { return res.status(400).json({ok:false,error:budgetError.message}); }
+    }
     var name = String(configPayload.name || '小猫').trim().slice(0, 30);
     var avatar = String(configPayload.avatar || '🤖').trim().slice(0, 10);
     var description = String(configPayload.description || '').trim().slice(0, 200);
@@ -27173,6 +27193,7 @@ app.post('/admin/ai-agent/config', verifyToken, securityRateLimit(60000, 20), as
       name: name, avatar: avatar, description: description, persona: persona,
       tone: tone, system_prompt: systemPrompt, welcome_message: welcomeMessage,
       allow_guest_ai: allowGuestAi,
+      task_budget: body.task_budget === undefined ? existingConfig.task_budget : configPayload.task_budget,
       avatar_url: avatarUrl, avatar_type: avatarType, avatar_version: avatarVersion,
       updated_at: nowIso, updated_by: req.adminName || 'admin'
     });

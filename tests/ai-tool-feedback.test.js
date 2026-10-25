@@ -51,3 +51,18 @@ test('real search executor distinguishes provider outage, successful zero and de
  const zero=await execute({query:'福州'},{});assert.equal(zero.error,undefined);assert.equal(zero.results_count,0);assert.equal(toolFeedback(zero,'zero',normalize).summary,'找到 0 个网页');
  allowed=false;const denied=await execute({query:'福州'},{});assert.match(denied.error,/额度/);assert.equal(calls,2);
 });
+
+test('search feedback shows the actual provider and preserves ordinary unknown-provider outcomes',()=>{
+ const base={tool_name:'search_web',results_count:2,content:'[]'};
+ assert.equal(toolFeedback({...base,used_provider:'DeepSeek'},'search',normalize).summary,'找到 2 个网页 · DeepSeek 官方搜索');
+ assert.equal(toolFeedback({...base,used_provider:'Tavily'},'search',normalize).provider,'Tavily');
+ assert.equal(toolFeedback(base,'search',normalize).summary,'找到 2 个网页');
+ assert.equal(toolFeedback({...base,used_provider:'untrusted private detail'},'search',normalize).provider,undefined);
+});
+test('built-in DeepSeek legacy Tavily calls use the shared official-first search and only one quota claim',async()=>{
+ const vm=require('node:vm');let searches=0,claims=0;
+ const sandbox={console,aiRequestFeatures:require('../render-api/ai-request-features'),AI_SITE_TOOL_REGISTRY:{},claimSearchSlot:async()=>{claims++;return{allowed:true}},searchWeb:async()=>{searches++;return{used_provider:'DeepSeek',results:[{title:'真实来源',url:'https://example.com/source',snippet:'实际摘录'}]}},aiSiteCard:(type,title,data)=>({type,title,data}),process:{env:{}}};
+ vm.createContext(sandbox);const a=source.indexOf('async function executeToolCall('),b=source.indexOf('// 搜索结果自动补全',a);vm.runInContext(source.slice(a,b),sandbox);
+ const result=await sandbox.executeToolCall({function:{name:'tavily_search',arguments:JSON.stringify({query:'福州天气'})}},{preferDeepseek:true});
+ assert.equal(searches,1);assert.equal(claims,1);assert.equal(result.tool_name,'tavily_search');assert.equal(result.used_provider,'DeepSeek');assert.equal(result.cards[0].data.provider,'DeepSeek');
+});

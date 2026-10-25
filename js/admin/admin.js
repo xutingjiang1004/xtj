@@ -5064,6 +5064,7 @@
             var dt = cfg.deep_think || {};  // ★ P 新增: 深度思考子配置
             var sec = cfg.security || {};
             var dbg = cfg.admin_debug || {};
+            var taskBudget = cfg.task_budget || {max_searches:30,max_duration_seconds:600};
 
             var html = [
                 '<div class="ai-admin-settings">',
@@ -5130,8 +5131,8 @@
                 '<div class="form-group" style="display:flex;align-items:center;gap:8px;">',
                 '<label style="display:flex;align-items:center;gap:4px;font-weight:400;cursor:pointer;"><input type="checkbox" id="searchEnabled"' + (getCfgVal(cfg,'search.allow_web_search') || cfg.allow_web_search ? ' checked' : '') + ' style="width:16px;height:16px;accent-color:var(--primary,#2E9465);" /> 开启联网搜索</label>',
                 '</div>',
-                '<div style="font-size:11px;color:#c44;margin:4px 0 8px 0;line-height:1.4;padding:6px 8px;background:rgba(204,68,68,0.08);border-radius:4px;"><strong>⚠ 注意：</strong>如未在 Render 环境变量中配置 <code>TAVILY_API_KEY</code>、<code>BRAVE_SEARCH_API_KEY</code> 或 <code>SERPER_API_KEY</code>，将使用公共 SearXNG / Bing HTML 作为兜底，可能因网络限制而搜索失败。</div>',
-                '<div class="form-group"><label>搜索提供商</label><input id="searchProvider" value="' + escapeHtml(sc.search_provider || 'searxng') + '" placeholder="searxng" /></div>',
+                '<div class="form-group"><label><input type="checkbox" id="searchOfficialOnly"' + (sc.official_only === true ? ' checked' : '') + ' /> 仅使用 DeepSeek 官方搜索（不回退第三方）</label></div>',
+                '<p style="font-size:12px;color:var(--text-muted);line-height:1.6;">默认优先使用 DeepSeek 官方 Search API，复用服务端 DeepSeek Key。关闭官方限定时，官方不可用才使用已配置的第三方备用服务；搜索结果显示实际服务商。免费模型不会因此调用收费搜索。</p>',
                 '<div class="form-group"><label>最大结果数</label><input type="number" id="searchMaxResults" value="' + (sc.max_results || 5) + '" min="1" max="20" /></div>',
                 '<div class="form-group"><label>搜索超时(ms)</label><input type="number" id="searchTimeout" value="' + (sc.timeout_ms || 4000) + '" min="1000" max="30000" step="500" /></div>',
                 '<div class="form-group" style="display:flex;align-items:center;gap:8px;">',
@@ -5201,6 +5202,12 @@
                 '</div>',
                 '</div>',
 
+                '<div class="ai-settings-section">',
+                '<h4>单次任务限额</h4>',
+                '<div class="form-group"><label for="aiTaskMaxSearches">最多检索次数</label><input type="number" id="aiTaskMaxSearches" min="1" max="30" step="1" value="' + (Number.isInteger(taskBudget.max_searches) ? taskBudget.max_searches : 30) + '" /></div>',
+                '<div class="form-group"><label for="aiTaskMaxSeconds">最长耗时（秒）</label><input type="number" id="aiTaskMaxSeconds" min="30" max="600" step="1" value="' + (Number.isInteger(taskBudget.max_duration_seconds) ? taskBudget.max_duration_seconds : 600) + '" /></div>',
+                '<p style="font-size:12px;color:var(--text-muted);line-height:1.6;">统一管理普通聊天、深入研究和双模型对比；默认最大 30 次检索、600 秒。保存后对新请求生效，账号额度与服务商超时仍适用。</p>',
+                '</div>',
                 // ---- 模块8: 安全 ----
                 '<div class="ai-settings-section">',
                 '<h4 style="font-size:14px;font-weight:700;margin:16px 0 10px 0;padding-bottom:6px;border-bottom:1px solid var(--border,rgba(140,196,158,0.25));">安全规则</h4>',
@@ -5326,7 +5333,8 @@
                             },
                             search: {
                                 allow_web_search: cfgChecked('searchEnabled'),
-                                search_provider: cfgVal('searchProvider').trim() || 'searxng',
+                                search_provider: 'auto',
+                                official_only: cfgChecked('searchOfficialOnly'),
                                 max_results: cfgInt('searchMaxResults', 5),
                                 timeout_ms: cfgInt('searchTimeout', 4000),
                                 use_weather_tool: cfgChecked('searchWeather')
@@ -5358,6 +5366,7 @@
                                 hide_system_prompt_in_reasoning: cfgChecked('secHidePrompt')
                             },
                             allow_guest_ai: cfgChecked('guestAiEnabled'),
+                            task_budget: {max_searches:cfgInt('aiTaskMaxSearches',30),max_duration_seconds:cfgInt('aiTaskMaxSeconds',600)},
                             admin_debug: {
                                 show_effective_prompt: cfgChecked('debugPrompt'),
                                 show_model_info: cfgChecked('debugModelInfo'),

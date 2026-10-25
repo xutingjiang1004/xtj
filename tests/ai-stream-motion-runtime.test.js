@@ -220,3 +220,11 @@ for(const implementation of ['main','shared'])test(implementation+': repeated or
   assert.equal(result,24);
  }finally{await browser.close();}
 });
+
+test('thinking duration freezes at the first answer and repeated terminal stops preserve a genuine zero',()=>{
+ const vm=require('node:vm');let now=1000;const labels=[];
+ const context={Date:{now:()=>now},setInterval:()=>1,clearInterval(){},setThinkingStatus:(_node,text)=>labels.push(text),setThinkingActive(){},formatThinkingElapsed:ms=>Math.floor(ms/1000)+'s'};
+ const create=vm.runInNewContext('('+section('  function createThinkingTimer(', '  function buildReasoningNode(').trim()+')',context),node={isConnected:true},timer=create(node);
+ timer.start();now=5000;assert.equal(timer.stop(),4000);now=30000;assert.equal(timer.stop(),4000);
+ timer.syncFinal(0);now=40000;assert.equal(timer.stop(),0);assert.equal(labels.at(-1),'已思考 0s');
+});

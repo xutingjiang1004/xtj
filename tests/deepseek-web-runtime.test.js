@@ -150,3 +150,17 @@ test('research aggregation preserves per-model and per-time prices instead of re
  price.accumulate(target,{prompt_tokens:100});assert.equal(target.cost_incomplete,true);assert.equal(target.cost,41);
  price.accumulate(target,{cost:2,currency:'USD'});assert.equal(target.cost,null);assert.equal(target.currency,'mixed');assert.equal(target.costs_by_currency.USD,2);
 });
+
+for(const outcome of ['empty','http-error','success'])test('official-only '+outcome+' never calls a third-party provider',async t=>{
+ configure(t);process.env.TAVILY_API_KEY='isolated-backup-key';const calls=[];
+ t.mock.method(global,'fetch',async(url)=>{calls.push(String(url));assert.equal(String(url),'https://api.deepseek.com/v1/tools/search');return outcome==='http-error'?new Response('{}',{status:503}):new Response(JSON.stringify({results:outcome==='success'?[{title:'官方结果',url:'https://example.com/native',site_name:'站点名'}]:[]}));});
+ const result=await providers.searchWeb('仅官方搜索-'+outcome,2,{officialOnly:true,context:{}});
+ assert.equal(calls.length,1);assert.ok(result.diagnostics.enabled_providers.every(p=>p==='DeepSeek'));
+ if(outcome!=='http-error'){assert.equal(result.used_provider,'DeepSeek');assert.equal(result.error,undefined);assert.equal(result.results.length,outcome==='empty'?0:1);}else{assert.equal(result.code,'official_search_unavailable');assert.match(result.error,/未使用第三方/);}
+});
+test('official-only cache never reuses a third-party result cached in automatic mode',async t=>{
+ configure(t);process.env.TAVILY_API_KEY='isolated-backup-key';const calls=[];
+ t.mock.method(global,'fetch',async(url)=>{calls.push(String(url));return String(url).includes('api.deepseek.com')?new Response('{}',{status:503}):new Response(JSON.stringify({results:[{title:'备用搜索',url:'https://example.com/backup',content:'备用摘要'}]}));});
+ const automatic=await providers.searchWeb('相同查询的来源隔离',2,{context:{}});assert.equal(automatic.used_provider,'Tavily');
+ const strict=await providers.searchWeb('相同查询的来源隔离',2,{officialOnly:true,context:{}});assert.equal(strict.cache_hit,false);assert.equal(strict.code,'official_search_unavailable');assert.equal(calls.length,3);
+});

@@ -451,7 +451,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   }
   // 解析自定义模型的选项值 → 配置对象（含 provider/base/api_key/model）
   function networkSettings() {
-    return {networkMode:S.networkMode==='off'?'off':S.webSearchEnabled?'required':'auto',taskBudget:Object.assign({},S.taskBudget)};
+    return {networkMode:S.networkMode==='off'?'off':S.webSearchEnabled?'required':'auto'};
   }
   var modelCapabilityCache = new Map();
   function capabilityKey(config) { return JSON.stringify([config.provider,config.base_url,config.model,config.model_uid||config.uid||'',config.config_revision||'',config.api_key||'']); }
@@ -595,7 +595,6 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     lastSendAt: 0,
     webSearchEnabled: false,
     networkMode: null,
-    taskBudget: {},
     // ★ 工作模式（work_mode）：在当前对话框直接切换，AI 自主拆解任务并调用全部工具完成，
     //   输出"任务结果"而非研究报告（区别于深入研究 deep_think，那是独立二级页面出报告）。
     //   开启时同时继承原「思考Max」的长上下文特性（不自动压缩）。
@@ -1215,6 +1214,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       else labelText = '联网完成';
       if (expired) labelText += '（过期）';
     }
+    if (opts.provider) labelText += ' · ' + (opts.provider === 'DeepSeek' ? 'DeepSeek 官方搜索' : String(opts.provider).slice(0,40));
     head.appendChild(el('span', { class: 'ai-search-status-label', text: labelText }));
     bar.appendChild(head);
 
@@ -1668,7 +1668,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           return '<tr>' + header.map(function (_, index) { return '<td>' + (row[index] || '') + '</td>'; }).join('') + '</tr>';
         }).join('') + '</tbody>';
       }
-      return (whole.charAt(0) === '\n' ? '\n' : '') + html;
+      return (whole.charAt(0) === '\n' ? '\n' : '') + html + '</table>\n';
     });
     s = s.replace(/^- (.+)$/gm, '<li class="ul-item">$1</li>');
     s = s.replace(/(<li class="ul-item">.*<\/li>(?:\n+(?=<li class="ul-item">)|\n)?)+/g, function(m) {
@@ -2937,11 +2937,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     if (!msg) return 'off';
     if (msg.usage && msg.usage.thinking_mode) return msg.usage.thinking_mode;
     if (msg.thinking_mode) return msg.thinking_mode;
-    return msg.reasoning ? 'medium' : 'off';
+    return msg.reasoning || (msg.process_events || []).some(function(event){return event.type==='reasoning'&&String(event.text||'').trim();}) || msg.thinking_elapsed_ms>0 ? 'medium' : 'off';
   }
 
   function shouldRenderReasoning(msg) {
-    return !!(msg && msg.reasoning && getMessageThinkingMode(msg) !== 'off');
+    return !!(msg && (msg.reasoning || msg.thinking_elapsed_ms>0) && getMessageThinkingMode(msg) !== 'off');
   }
 
   // ★ 2026-09-11：工具进展自动跟随所需的两个状态（见 followToolProgress 注释）。
@@ -3829,6 +3829,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var intervalId = null;
     var startedAt = 0;
     var stopped = false;
+    var elapsedMs = 0;
 
     function update(prefix, elapsedMs) {
       if (!reasoningNode || !reasoningNode.isConnected) return;
@@ -3847,13 +3848,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         }, 500);
       },
       stop: function() {
+        if (!stopped && startedAt) elapsedMs = Math.max(0, Date.now() - startedAt);
         if (intervalId) {
           try { clearInterval(intervalId); } catch (e) {}
           intervalId = null;
         }
         stopped = true;
         setThinkingActive(reasoningNode, false);
-        return startedAt ? Math.max(0, Date.now() - startedAt) : 0;
+        return elapsedMs;
       },
       cancel: function() {
         if (intervalId) {
@@ -3864,6 +3866,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         setThinkingActive(reasoningNode, false);
       },
       syncFinal: function(ms) {
+        elapsedMs = Math.max(0, Number(ms) || 0);
         if (intervalId) {
           try { clearInterval(intervalId); } catch (e) {}
           intervalId = null;
@@ -3885,7 +3888,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       'aria-expanded': 'false',
       'aria-label': '思考过程'
     });
-    var label = el('span', { class: 'ai-thinking-label', text: elapsedMs > 0 ? ('已思考 ' + formatThinkingElapsed(elapsedMs)) : '思考中' });
+    var label = el('span', { class: 'ai-thinking-label', text: elapsedMs > 0 ? ('已思考 ' + formatThinkingElapsed(elapsedMs)) : reasoning ? '思考过程' : '思考中' });
     if (typeof elapsedMs === 'number' && elapsedMs === 0) label.textContent = '已思考 0s';
     toggle.appendChild(label);
     toggle.appendChild(el('span', { class: 'ai-thinking-caret', text: '\u25be', 'aria-hidden': 'true' }));
@@ -4157,6 +4160,17 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     return events;
   }
 
+  function reconcileReasoningBody(body, reasoning) {
+    if (!body || !reasoning) return;
+    var text = cleanReasoningText(reasoning);
+    if (!body.__orderedProcess) { body.textContent = text; return; }
+    var segments = Array.from(body.querySelectorAll('.ai-reasoning-segment'));
+    var shown = segments.map(function(segment){return segment.textContent;}).join('');
+    if (text === shown) return;
+    if (!shown) body.insertBefore(el('div', {class:'ai-reasoning-segment',text:text}), body.firstChild);
+    else if (text.indexOf(shown) === 0) body.appendChild(el('div', {class:'ai-reasoning-segment',text:text.slice(shown.length)}));
+  }
+
   function buildOrderedProcessNode(msg, messagesEl) {
     var reasoning = getMessageThinkingMode(msg) !== 'off';
     var node = reasoning ? buildReasoningNode('', messagesEl, msg.thinking_elapsed_ms) : el('div', { class: 'ai-process-history' });
@@ -4190,7 +4204,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         body.appendChild(group);
       }
     });
-    if (reasoning) setThinkingStatus(node, typeof msg.thinking_elapsed_ms === 'number' && msg.thinking_elapsed_ms >= 0 ? '已思考 ' + formatThinkingElapsed(msg.thinking_elapsed_ms) : '思考过程');
+    if (reasoning) {
+      reconcileReasoningBody(body, msg.reasoning);
+      setThinkingStatus(node, typeof msg.thinking_elapsed_ms === 'number' && msg.thinking_elapsed_ms >= 0 ? '已思考 ' + formatThinkingElapsed(msg.thinking_elapsed_ms) : '思考过程');
+    }
     return node;
   }
 
@@ -4968,14 +4985,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     window.addEventListener('xtj:visual-viewport-change', viewportHandler);
     input.addEventListener('blur', onBlur);
     input.addEventListener('focus', onFocus);
-    var composerObserver = researchViewport && typeof ResizeObserver === 'function' ? new ResizeObserver(viewportHandler) : null;
+    var composerObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(researchViewport ? viewportHandler : window.throttleRAF(updateInputMetrics)) : null;
     if (composerObserver) {
       // Padding and borders can move the composer while the content box stays
       // unchanged, especially when keyboard styles or model controls arrive.
       composerObserver.observe(inputBar, { box: 'border-box' });
       composerObserver.observe(root, { box: 'border-box' });
-      composerObserver.observe(messagesEl);
-      var researchHeader = root.querySelector('.dt-header');
+      if(researchViewport)composerObserver.observe(messagesEl);
+      var researchHeader = root.querySelector(researchViewport ? '.dt-header' : '.ai-chat-header');
       if (researchHeader) composerObserver.observe(researchHeader, { box: 'border-box' });
     }
     var researchPage=researchViewport?input.closest('.dt-page'):null;
@@ -6611,7 +6628,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             headers: authHeaders,
             credentials: 'include',
             body: JSON.stringify({
-              query: String(query || ''),attachments:opts&&opts.attachments,web_search:opts&&opts.webSearch,network_mode:opts&&opts.networkMode,task_budget:opts&&opts.taskBudget,reuse_documents:true,
+              query: String(query || ''),attachments:opts&&opts.attachments,web_search:opts&&opts.webSearch,network_mode:opts&&opts.networkMode,reuse_documents:true,
               checkpoint: true, checkpoint_id: opts && opts.checkpointId || undefined,
               client_request_id: opts && opts.requestId || undefined,
               model: (opts && opts.model) || 'pro',
@@ -6937,7 +6954,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           }
         }
         if (prog.sources) sources = prog.sources;
-      }, { model: researchModel, researchModel: opts.researchModel, mode: opts.mode || 'hybrid', rewrite: opts.rewrite !== false, controller: controller, refresh: opts.refresh === true, requestId: reqId, checkpointId: opts.checkpointId,attachments:opts.attachments,webSearch:opts.webSearch,networkMode:opts.networkMode,taskBudget:opts.taskBudget });
+      }, { model: researchModel, researchModel: opts.researchModel, mode: opts.mode || 'hybrid', rewrite: opts.rewrite !== false, controller: controller, refresh: opts.refresh === true, requestId: reqId, checkpointId: opts.checkpointId,attachments:opts.attachments,webSearch:opts.webSearch,networkMode:opts.networkMode });
       var result = await researchPromise;
       if (S._dtCurrentReqId !== reqId || !customModelIdentityCurrent(flowIdentity) || S.dtLifecycleId !== flowLifecycle) return 'done';
       answer = (result && result.answer) || '';
@@ -7963,7 +7980,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             messagesEl: dtMessagesEl,
             text: text,
             originalUserText: originalUserText,
-            fileData: fileData,attachments:attachmentPayload,webSearch:researchFileList.length?dtSettings.webSearch:undefined,networkMode:dtSettings.networkMode,taskBudget:dtSettings.taskBudget,
+            fileData: fileData,attachments:attachmentPayload,webSearch:researchFileList.length?dtSettings.webSearch:undefined,networkMode:dtSettings.networkMode,
             reqId: reqId,
             model: dtSettings.mode,
             researchModel: dtSettings.researchModel,
@@ -8046,7 +8063,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       // Omit the field for ordinary messages so the server's response cache
       // remains eligible; an empty attachments array is truthy in JS.
       attachments: attachmentPayload || undefined,
-      web_search: dtSettings.webSearch,network_mode:dtSettings.networkMode,task_budget:dtSettings.taskBudget,
+      web_search: dtSettings.webSearch,network_mode:dtSettings.networkMode,
       model: dtSettings.model
     }, dtSettings.custom || {}));
 
@@ -8999,6 +9016,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       }
       if (data.rows) shell.appendChild(el('div', { class: 'ai-tool-card-meta', text: data.rows + ' 行数据' }));
     } else if (type === 'web_search' && Array.isArray(data.results)) {
+      if(data.provider)shell.appendChild(el('div',{class:'ai-tool-card-meta',text:'搜索服务：'+(data.provider==='DeepSeek'?'DeepSeek 官方搜索':String(data.provider).slice(0,40))}));
       if (data.query) {
         shell.appendChild(el('div', { class: 'ai-tool-card-meta', text: '搜索：' + String(data.query).slice(0, 120) }));
       }
@@ -9647,7 +9665,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         thinking_mode: _sendThinkingMode,
         thinking_max: sendSettings.thinkMax === true,
         work_mode: sendSettings.workMode === true,
-        web_search: sendSettings.webSearch === true,network_mode:sendSettings.networkMode,task_budget:sendSettings.taskBudget,
+        web_search: sendSettings.webSearch === true,network_mode:sendSettings.networkMode,
         tools_enabled: (sendSettings.webSearch === true || sendSettings.thinkMax === true || sendSettings.workMode === true),
         // ★ 修复：自定义模型通道此前漏发 attachments，文件内容无法传给模型
         attachments: attachmentPayload || undefined,
@@ -9680,7 +9698,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         work_mode: sendSettings.workMode === true,
         response_profile: sendSettings.responseProfile === 'enhanced' ? 'enhanced' : 'normal',
         attachments: attachmentPayload || undefined,
-        web_search: sendSettings.webSearch,network_mode:sendSettings.networkMode,task_budget:sendSettings.taskBudget,
+        web_search: sendSettings.webSearch,network_mode:sendSettings.networkMode,
         model: sendSettings.model
       });
     }
@@ -10078,7 +10096,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         }
         setAiRootState('ai-idle');
         
-        if ((thinking || node.querySelector('.ai-process-timeline')) && finalThinkingMode !== 'off' && _sendThinkingMode !== 'off') {
+        if ((thinking || node.querySelector('.ai-process-timeline') || reasoningStarted && finalThinkingElapsedMs>0) && finalThinkingMode !== 'off' && _sendThinkingMode !== 'off') {
           // ★ 修复：优先用 reasoningContainer（流式期间创建的），但必须验证节点仍在 DOM 中。
           //   本轮使用发送时的档位，切换设置只影响下一次发送。
           //   此前若 reasoningContainer 持有脱离 DOM 的陈旧引用（search_supplement 重置、
@@ -10090,7 +10108,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             node.insertBefore(rNode, node.firstChild);
           } else if (rNode) {
             var body = rNode.querySelector('.ai-thinking-body');
-            if (body && !body.__orderedProcess) body.textContent = cleanReasoningText(thinking);
+            reconcileReasoningBody(body, thinking);
           }
           if (rNode) {
             setThinkingExpanded(rNode, !!rNode.classList.contains('expanded'), messagesEl);
@@ -10509,19 +10527,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             var searchNote = el('div', { class: 'ai-search-supplement', text: '正在联网补充信息...' });
             if (assistantNode) assistantNode.insertBefore(searchNote, assistantBubble);
             // 清空旧内容，让第二轮 stream 重新生成
-            cleanupRenderers();
+            closeReasoningSegment();
+            if(contentRenderer){contentRenderer.cancel();contentRenderer=null;}
             hideAssistantTyping();
             if (assistantBubble) try { assistantBubble.innerHTML = ''; } catch (e) {}
             // ★ 修复：reasoning 节点引用一并失效。旧节点可能已随 supplement 被清理/脱管，
             // 若继续复用脱离 DOM 的节点，新一轮 thinking 内容会插入已 detached 节点而不显示。
-            reasoningContainer = null;
-            if (reasoningRenderer) { try { reasoningRenderer.cancel(); } catch (eR) {} reasoningRenderer = null; }
             aiContent = '';
-            aiReasoning = '';
-            reasoningStarted = false;
             doneReceived = false;
-            finalThinkingElapsedMs = 0;
-            finalThinkingMode = null;
             continue;
           }
 
@@ -10547,6 +10560,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             var searchBar = assistantNode.querySelector('.ai-search-status');
             var searchFresh = buildSearchStatusBar({
               count: searchCount,
+              provider: evt.provider,
               query: evt.query || '',
               results: evt.results || []
             });
@@ -11367,6 +11381,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
                   if (thinkingTimer) {
                     finalThinkingElapsedMs = finalThinkingElapsedMs || thinkingTimer.stop();
                   }
+                  setThinkingStatus(_tn, '已思考 ' + formatThinkingElapsed(finalThinkingElapsedMs));
                   setThinkingActive(_tn, false);
                   // 收尾思考渲染器：把缓冲里剩余字符一次性落定，避免尾部丢字
                   if (reasoningRenderer) { try { reasoningRenderer.flush(); } catch (eRF) {} }
@@ -11427,8 +11442,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
                 aiContent = evt.content;
               }
               // 搜索路径若流式 reasoning 丢失，done 包里仍可能带完整 reasoning
-              if ((!aiReasoning || !String(aiReasoning).trim()) && evt.reasoning) {
-                aiReasoning = String(evt.reasoning);
+              if (typeof evt.reasoning === 'string' && (!aiReasoning.trim() || evt.reasoning.indexOf(aiReasoning) === 0)) {
+                aiReasoning = evt.reasoning.slice(0,200000);
               }
               if (evt.quota) applyQuota(evt.quota);
               else fetchAiQuota(true);
@@ -11454,6 +11469,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               finishAiMessage(assistantNode, aiContent, aiReasoning, evt);
             }
             S.sending = false;
+            if(S._updateContextCapacity)S._updateContextCapacity();
             S.abortController = null;
             // ★ 2026-09-29（审计 M11，接上方注释）：收尾渲染完成后再清理渲染器，
             //   避免"先清空气泡再兜底重绘"造成的收尾闪烁。
@@ -12598,7 +12614,7 @@ function showChatMessages() {
       S.webSearchEnabled = savedWebSearch === 'true';
       S.networkMode = localStorage.getItem('xtj_ai_network_mode')==='off'?'off':null;
       if(S.networkMode==='off')S.webSearchEnabled=false;
-      try{var savedBudget=JSON.parse(localStorage.getItem('xtj_ai_task_budget')||'{}');S.taskBudget={};if([1,3,6,12,30].indexOf(savedBudget.max_searches)>=0)S.taskBudget.max_searches=savedBudget.max_searches;if([60,120,240,600].indexOf(savedBudget.max_duration_seconds)>=0)S.taskBudget.max_duration_seconds=savedBudget.max_duration_seconds;}catch(_){S.taskBudget={};}
+
       // ★ 修复: 恢复搜索开关时校验额度。若额度显示搜索已不可用，自动关闭该开关，
       //   避免刷新后带着超限状态继续触发第三方搜索。额度未拉到（S.quota 为 null）时
       //   交给 applyQuota 在额度到达后兜底关闭。
@@ -12653,6 +12669,7 @@ function showChatMessages() {
     // 简洁可辨识图标（星 / 云上传 / 立方体 / 大脑 / 地球）
     var ICO = {
       pro: '<svg class="ai-panel-svg ai-panel-svg--fill" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.1l2.2 5.1 5.5.5-4.2 3.6 1.3 5.4L12 14.9 7.2 17.7l1.3-5.4-4.2-3.6 5.5-.5L12 3.1z"/></svg>',
+      compare: '<svg class="ai-panel-svg" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="8" height="14" rx="2"/><rect x="13" y="5" width="8" height="14" rx="2"/></svg>',
       upload: '<svg class="ai-panel-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 17.5h8.2a3.3 3.3 0 0 0 .3-6.6 5 5 0 0 0-9.6-1.3A3.6 3.6 0 0 0 8 17.5z"/><path d="M12 15.2V9.8"/><path d="M9.8 11.6L12 9.4l2.2 2.2"/></svg>',
       folder: '<svg class="ai-panel-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4.2l2 2.4h8.8A1.5 1.5 0 0 1 21 8.9v8.1a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17z"/></svg>',
       model: '<svg class="ai-panel-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5L5 7.2v9.6L12 20.5l7-3.7V7.2L12 3.5z"/><path d="M5 7.2l7 3.8 7-3.8"/><path d="M12 11v9.5"/></svg>',
@@ -12672,6 +12689,7 @@ function showChatMessages() {
     // 模型 / 思考行：视觉层 + 透明 select 全行热区
     panelShell.innerHTML =
       '<div class="ai-plus-panel-content">' +
+        '<div class="ai-menu-heading"><span>对话工具</span><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M8 25C9 14 15 7 25 6c0 11-6 18-15 17M8 25l12-13"/></svg></div>' +
         '<div class="ai-panel-page is-active" id="aiPanelPrimary" data-page="primary">' +
           '<div class="ai-quota-card" id="aiQuotaCard" role="status" aria-live="polite">' +
             '<div class="ai-quota-card-head">' +
@@ -12955,16 +12973,6 @@ function showChatMessages() {
         if (flash) flashPanelValue(sum);
       }
     }
-    var budgetBox=el('fieldset',{class:'ai-task-budget'});
-    budgetBox.appendChild(el('legend',{text:'单次任务限额（可选）'}));
-    function budgetSelect(key,label,values,unit){
-      var wrap=el('label',{text:label}),select=el('select',{'aria-label':label});select.appendChild(el('option',{value:'',text:'沿用原有限额'}));
-      values.forEach(function(value){select.appendChild(el('option',{value:String(value),text:value+unit}));});select.value=S.taskBudget[key]==null?'':String(S.taskBudget[key]);
-      select.addEventListener('change',function(){if(select.value)S.taskBudget[key]=Number(select.value);else delete S.taskBudget[key];try{localStorage.setItem('xtj_ai_task_budget',JSON.stringify(S.taskBudget));}catch(_){}});wrap.appendChild(select);budgetBox.appendChild(wrap);
-    }
-    budgetSelect('max_searches','最多检索',[1,3,6,12,30],' 次');budgetSelect('max_duration_seconds','最长耗时',[60,120,240,600],' 秒');
-    budgetBox.appendChild(el('small',{text:'从下一次发送生效。检索按动作计数，重试和服务商计费可能不同；停止不能保证远端立即停止计费。'}));
-    panelShell.querySelector('.ai-panel-menu-list .ai-panel-group:last-child').appendChild(budgetBox);
 
     function updateSearchStatus() {
       var st = panelShell.querySelector('#aiSearchStatus');
@@ -13235,7 +13243,7 @@ function showChatMessages() {
     }, { capture: true, signal: panelAbortController.signal });
 
     function openPanel() {
-      if (panelOpen || panelClosing) return;
+      if (panelOpen) return;
       if (closeTimer) {
         clearTimeout(closeTimer);
         closeTimer = null;
@@ -14073,18 +14081,27 @@ function showChatMessages() {
     var featureIdentity=customModelIdentity();
     function featureCurrent(){return S.active && input.isConnected && voiceLifecycle===S.lifecycleId && customModelIdentityCurrent(featureIdentity);}
     var menuGroup=panelShell.querySelector('.ai-panel-menu-list .ai-panel-group:last-child');
-    function addFeatureEntry(label,action){var button=el('button',{type:'button',class:'ai-panel-row'});button.appendChild(el('span',{class:'ai-panel-row-icon','aria-hidden':'true',text:'✧'}));button.appendChild(el('span',{class:'ai-panel-row-title',text:label}));button.addEventListener('click',function(){closePanel(true);action();});menuGroup.appendChild(button);return button;}
+    function addFeatureEntry(label,action){var button=el('button',{type:'button',class:'ai-panel-row'});var icon=el('span',{class:'ai-panel-row-icon','aria-hidden':'true'});icon.innerHTML=ICO.compare;button.appendChild(icon);button.appendChild(el('span',{class:'ai-panel-row-title',text:label}));button.addEventListener('click',function(){closePanel(true);action();});menuGroup.appendChild(button);return button;}
     addFeatureEntry('双模型对比',function(){var features=assistantFeatures();if(!features)return;if(S.sending){notify('当前回复完成或暂停后，可以开始双模型对比');return;}var models=[{id:'deepseek-flash',label:'DeepSeek-V4.1-Flash-1017'},{id:'deepseek-v4-pro',label:'V4 Pro'}];loadCustomModels().forEach(function(config){if((config.key_configured||config.server_managed)&&config.model)models.push({id:'custom:'+config.uid,label:config.label||config.model,config:Object.assign({},config)});});var latestUser=S.messages.slice().reverse().find(function(m){return m.role==='user';});if(S._modelCompare)S._modelCompare.dispose();S._modelCompare=features.openCompare({models:models,thinkingMode:S.thinkingMode,question:input.value.trim() || latestUser&&latestUser.content || '',current:featureCurrent,notify:notify,renderMarkdown:renderMarkdown,context:function(){return buildAiConversationHistory(CONTEXT_LIMIT_NORMAL,MSG_MAX_CHARS_NORMAL,null,null);},run:runModelComparison});});
     var capacity=el('div',{class:'ai-context-capacity',id:'aiContextCapacity'}),capacityWidget=null,lastContextBudget=null,capacityModel='',capacityConversation='';
     function contextMemory(){for(var i=S.messages.length-1;i>=0;i--){var memory=S.messages[i]&&S.messages[i].context_memory;if(memory&&memory.v===1&&memory.conversation_id===S.conversationId&&typeof memory.summary==='string'&&memory.summary.trim()&&memory.summary.length<=8000)return memory;}return null;}
     function contextWindowTokens(){var value=Number(scopedStorageGet('xtj_ai_context_window_'+S.selectedModel));return [32768,65536,131072].indexOf(value)>=0?value:65536;}
-    function updateCapacity(value){var features=assistantFeatures();if(!features)return;if(capacityModel!==S.selectedModel||capacityConversation!==S.conversationId){lastContextBudget=null;capacityModel=S.selectedModel;capacityConversation=S.conversationId;}if(value)lastContextBudget=value;var memory=contextMemory(),preview=features.estimate(S.messages,input.value,isCustomModelId(S.selectedModel),{managed:true,memory:memory,windowTokens:contextWindowTokens(),overhead:lastContextBudget&&lastContextBudget.tool_schema_tokens||0});if(capacityWidget)capacityWidget.update(value||preview,memory);else capacity.textContent=features.capacityText(value||preview);}
-    var capacityFeatures=assistantFeatures();if(capacityFeatures&&capacityFeatures.createCapacity)capacityWidget=capacityFeatures.createCapacity(capacity,{current:featureCurrent,configuredWindowTokens:contextWindowTokens,onOpen:function(){updateCapacity(capacityModel===S.selectedModel&&capacityConversation===S.conversationId&&!input.value?lastContextBudget:null);},onWindowChange:function(value){try{localStorage.setItem('xtj_ai_context_window_'+S.selectedModel+'__'+aiStorageScopeName(),String(value));}catch(_){}lastContextBudget=null;updateCapacity();}});
+    function updateCapacity(value){
+      var features=assistantFeatures();if(!features)return;
+      if(capacityModel!==S.selectedModel||capacityConversation!==S.conversationId){lastContextBudget=null;capacityModel=S.selectedModel;capacityConversation=S.conversationId;}
+      if(value)lastContextBudget=value;
+      if(!lastContextBudget){for(var ci=S.messages.length-1;ci>=0;ci--){var saved=S.messages[ci];if(saved.context_budget&&(!saved.usage||!saved.usage.model||saved.usage.model===S.selectedModel)){lastContextBudget=saved.context_budget;break;}}}
+      var memory=contextMemory(),shown;
+      if(S.sending&&lastContextBudget)shown=lastContextBudget;
+      else shown=features.estimate(buildAiConversationHistory(256,32000,null,null,true),input.value,isCustomModelId(S.selectedModel),{managed:true,memory:memory,windowTokens:contextWindowTokens(),budget:lastContextBudget});
+      if(capacityWidget)capacityWidget.update(shown,memory);else capacity.textContent=features.capacityText(shown);
+    }
+    var capacityFeatures=assistantFeatures();if(capacityFeatures&&capacityFeatures.createCapacity)capacityWidget=capacityFeatures.createCapacity(capacity,{current:featureCurrent,configuredWindowTokens:contextWindowTokens,onWindowChange:function(value){try{localStorage.setItem('xtj_ai_context_window_'+S.selectedModel+'__'+aiStorageScopeName(),String(value));}catch(_){}updateCapacity();}});
     S._contextCapacity=capacityWidget;S._contextManaged=!!capacityWidget;S._contextWindowTokens=contextWindowTokens;S._contextMemoryResolver=contextMemory;
     input.addEventListener('input',function(){updateCapacity();});S._updateContextCapacity=updateCapacity;updateCapacity();
     inputBar.appendChild(capacity);
     async function runModelComparison(model,text,history,signal,onEvent){
-      var config=model.config,body={message:text,messages:history,messages_include_current:false,context_management:true,context_window_tokens:contextWindowTokens(),model:model.id,thinking_mode:model.thinkingMode,client_request_id:'compare_'+Date.now()+'_'+Math.random().toString(36).slice(2),web_search:false,network_mode:networkSettings().networkMode,task_budget:networkSettings().taskBudget,followup_suggestions:false};
+      var config=model.config,body={message:text,messages:history,messages_include_current:false,context_management:true,context_window_tokens:contextWindowTokens(),model:model.id,thinking_mode:model.thinkingMode,client_request_id:'compare_'+Date.now()+'_'+Math.random().toString(36).slice(2),web_search:false,network_mode:networkSettings().networkMode,followup_suggestions:false};
       if(config)Object.assign(body,{provider:config.provider,api_key:undefined,model_uid:config.uid,model:config.model,base_url:config.base_url,reasoning_effort_supported:config.reasoning_effort_supported===true});
       var auth=await getUserAuthPayload({forceNoToken:false});if(!featureCurrent()||signal.aborted)throw Error('对比已取消');
       var timeout=setTimeout(function(){if(S._modelCompare)S._modelCompare.dispose();},300000),reader=null,content='',done=false,usage=null;

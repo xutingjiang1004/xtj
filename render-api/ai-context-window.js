@@ -97,19 +97,19 @@ function prepareContext(options) {
   }
   const before = total(kept, memory);
   let compressed = [], didCompact = false;
-  if ((before + reserved >= capacity * .8 || kept.length >= 224) && kept.length > 2) {
+  if ((before + reserved >= capacity * .8 || kept.length >= 224) && kept.length) {
     didCompact = true;
     if (options.onCompacting) options.onCompacting();
     const summaryChars = Math.max(300, Math.min(8000, Math.floor((capacity - fixedEstimate.tokens - tools - reserved) * .18 / 1.5)));
     do {
       check();
-      const count = Math.min(kept.length - 2, Math.max(2, Math.ceil(kept.length / 3)));
+      const count = kept.length > 2 ? Math.min(kept.length - 2, Math.max(2, Math.ceil(kept.length / 3))) : 1;
       compressed.push(...kept.splice(0, count));
       memory = {v:1,conversation_id:options.conversationId,summary:summarize(previousMemory?previousMemory.summary:'', compressed, summaryChars,snippets),
         covered_ids:[...covered, ...compressed.map(messageKey)].slice(-1024),
         covered_count:(previousMemory?.covered_count||0)+compressed.length,
         revision:(previousMemory?.revision||0)+1};
-    } while (kept.length > 2 && total(kept, memory) + reserved > capacity * .65);
+    } while (kept.length && total(kept, memory) + reserved > capacity * .65);
   }
   let used = total(kept, memory);
   // If a recent exceptionally long turn still cannot fit, extract it too.
@@ -132,7 +132,9 @@ function prepareContext(options) {
   const messages = kept.map(message => ({role:message.role,content:message.content}));
   if (memory && memory.summary) messages.unshift(memoryMessage(memory));
   const budget = {estimated_tokens:used,window_tokens:capacity,capacity_source:'site_budget',exact_window:null,
-    reserved_output_tokens:reserved,tool_schema_tokens:tools,image_count:fixedEstimate.images + estimateMessages(kept).images,
+    reserved_output_tokens:reserved,tool_schema_tokens:tools,system_prompt_tokens:estimateMessages(fixed.filter(message=>message.role==='system')).tokens,
+    fixed_tokens:fixedEstimate.tokens,history_tokens:kept.reduce((sum,row)=>sum+estimates.get(row),0),memory_tokens:memory&&memory.summary?estimateMessages([memoryMessage(memory)]).tokens:0,
+    image_count:fixedEstimate.images + estimateMessages(kept).images,
     history_retained:kept.length,history_compressed:memory ? memory.covered_count : 0,
     history_omitted:Math.max(0,supplied.length-bounded.length),history_truncated:bounded.filter(message=>message.context_truncated).length,summary_tokens:memory?estimateText(memory.summary):0,
     compaction_status:didCompact?'compressed':memory&&memory.summary?'summary_reused':'ready',
