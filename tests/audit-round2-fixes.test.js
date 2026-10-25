@@ -70,8 +70,14 @@ test('M-05: 前端统计与用户列表统一传同一个 days 参数', () => {
 });
 
 test('M-06: 后端两个接口都透出 truncated 标记', () => {
-  assert.match(server, /truncated:\s*Array\.isArray\(allRows\) && allRows\.length >= 10000/);
-  assert.match(server, /truncated:\s*Array\.isArray\(rows\) && rows\.length >= 50000/);
+  for (const endpoint of ['usage-summary', 'users']) {
+    const start = server.indexOf("app.get('/admin/ai-agent/" + endpoint + "',");
+    const end = server.indexOf('\n// GET /admin/ai-agent/', start);
+    const body = server.slice(start, end);
+    assert.match(body, /truncated:/, endpoint + ' must expose whether its response is partial');
+    assert.match(body, /loaded_rows:/, endpoint + ' must expose its actual loaded range');
+    assert.match(body, /matched_rows:/, endpoint + ' must distinguish matching rows from the loaded range');
+  }
 });
 
 test('M-06: 前端提供时间窗下拉控件并绑定 change 事件', () => {
@@ -86,7 +92,8 @@ test('M-06: 前端对截断状态给出可见提示', () => {
   const body = admin.slice(start, end);
   assert.match(body, /usersTruncated/, '未消费 users 的 truncated 标记');
   assert.match(body, /summaryTruncated/, '未消费 summary 的 truncated 标记');
-  assert.ok(body.split('已达单次查询上限').length - 1 >= 2, '截断提示文案应覆盖两个接口');
+  assert.match(body, /if\s*\(summaryTruncated\)\s*\{[\s\S]*?部分消息未计入/, 'summary must visibly explain partial statistics');
+  assert.match(body, /if\s*\(usersTruncated\)\s*\{[\s\S]*?未覆盖全部/, 'users must visibly explain its partial range');
 });
 
 // ----------------------------------------------------------------- M-10

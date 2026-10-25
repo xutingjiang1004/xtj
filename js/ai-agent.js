@@ -11477,6 +11477,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             // Attachments are single-use: remove the preview only after a
             // successful terminal event; errors and aborts remain retryable.
             consumeAiAttachment(fileData);
+            if(S.autoScrollPinned&&!_aiUserPinnedUp)scrollToBottom(messagesEl,true);
             
             // 中断/未保存提示
             if (streamInterrupted && aiContent) {
@@ -12567,19 +12568,31 @@ function showChatMessages() {
     root.appendChild(header);
 
     var messagesEl = el('div', { class: 'ai-chat-messages', id: 'aiChatMessagesArea' });
+    var userReadingHistory=false,lastReadTop=0,lastReadHeight=0,touchReadY=null;
+    function markReadingHistory(){userReadingHistory=true;S.autoScrollPinned=false;_aiUserPinnedUp=true;}
+    messagesEl.addEventListener('wheel',function(event){if(event.deltaY<0)markReadingHistory();},{passive:true});
+    messagesEl.addEventListener('touchstart',function(event){touchReadY=event.touches[0]?event.touches[0].clientY:null;},{passive:true});
+    messagesEl.addEventListener('touchmove',function(event){if(touchReadY!==null&&event.touches[0]&&event.touches[0].clientY>touchReadY+4)markReadingHistory();},{passive:true});
+    messagesEl.addEventListener('keydown',function(event){if(['ArrowUp','PageUp','Home'].indexOf(event.key)>=0&&!/INPUT|TEXTAREA|SELECT/.test(event.target.tagName))markReadingHistory();});
     messagesEl.addEventListener('scroll', window.throttleRAF(function() {
       var _nearBottom = isNearBottom(messagesEl, 84);
-      S.autoScrollPinned = _nearBottom;
+      // Layout growth also emits scroll events. Only a real upward move at a
+      // stable content height (or an explicit reading gesture) unpins a reply.
+      if(messagesEl.scrollTop<lastReadTop-4&&Math.abs(messagesEl.scrollHeight-lastReadHeight)<2)userReadingHistory=true;
+      lastReadTop=messagesEl.scrollTop;lastReadHeight=messagesEl.scrollHeight;
       // ★ 2026-09-11：区分"用户主动上翻看历史"与"程序触发的滚动校准"。
       //   工具事件（tool_calls/tool_result/card）会让容器高度突增，scroll 事件随之
       //   触发且此刻已不在底部 —— 若把它当成用户意图，工具进展就永远不会自动跟随。
-      //   用户连续两次远离底部才判定为"主动上翻"，此后工具进展不再打扰用户阅读。
+      //   明确的阅读手势或内容高度稳定时向上移动才判定为主动上翻。
       if (_nearBottom) {
+        S.autoScrollPinned = true;
+        userReadingHistory = false;
         _aiUserPinnedUp = false;
         _aiAwayFromBottomCount = 0;
-      } else {
+      } else if (userReadingHistory) {
+        S.autoScrollPinned = false;
         _aiAwayFromBottomCount++;
-        if (_aiAwayFromBottomCount >= 2) _aiUserPinnedUp = true;
+        _aiUserPinnedUp = true;
       }
       // ★ 修复 M2：历史会话列表页（messagesEl display:none）或 hasMore 残留时
       // 不得触发历史分页加载，避免拼接错乱/误拉取。offsetParent 为 null 表示元素不可见。

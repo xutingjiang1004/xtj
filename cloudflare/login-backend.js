@@ -370,12 +370,20 @@ function createLoginBackend(expectedUrl, revokedMarker, cryptoApi, BufferApi, op
         if (restriction.is_banned) return result(403, { error: '该账号已被封禁，无法继续使用', code: 'account_banned' });
         const current = await identity(payload.user_name);
         if (!matches(payload, current, REFRESH_MS)) return invalid();
+        const nonce = body.refresh_request_id;
+        if (nonce != null && (typeof nonce !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(nonce))) return result(400,{error:'刷新请求标识无效'});
+        const requestHash = nonce ? hash(nonce.toLowerCase()) : null;
         const active = await rows({ select: 'id', media_type: 'eq.__refresh_token__', media_url: 'eq.' + payload.jti, limit: '2' });
-        if (active.length !== 1) return result(409, { error: '会话已更新，请重试', code: 'token_reused', retryable: true });
+        if (active.length !== 1 && !requestHash) return result(409, { error: '会话已更新，请重试', code: 'token_reused', retryable: true });
         const session = tokens(payload.user_name, current, device);
-        const rotated = await rpc('rotate_user_refresh_token', { p_user_name: payload.user_name, p_account_id: String(current.id),
+        const rotated = requestHash ? await rpc('rotate_user_refresh_token_v2',{p_user_name:payload.user_name,p_account_id:String(current.id),p_old_jti:payload.jti,p_request_hash:requestHash,p_successor:session.payload}) : await rpc('rotate_user_refresh_token', { p_user_name: payload.user_name, p_account_id: String(current.id),
           p_old_jti: payload.jti, p_new_jti: session.payload.jti, p_expires_at: new Date(session.payload.exp).toISOString() });
         if (rotated?.ok !== true) return result(409, { error: '会话已更新，请重试', code: 'token_reused', retryable: true });
+        if (requestHash) {
+          const confirmed = rotated.successor;
+          if (!confirmed || confirmed.type !== 'user_refresh' || confirmed.user_name !== payload.user_name || confirmed.account_id !== String(current.id) || typeof confirmed.jti !== 'string' || !Number.isFinite(confirmed.exp) || confirmed.exp<=now()) return unavailable('refresh_store_failed');
+          session.payload=confirmed;session.refresh=sign(confirmed);
+        }
         return sessionResponse(payload.user_name, session);
       }
       if (path === '/admin/logout') {
@@ -395,7 +403,9 @@ function createLoginBackend(expectedUrl, revokedMarker, cryptoApi, BufferApi, op
         if (accessPayload && (!actor || accessPayload.user_name === actor)) { await persistRevoke(access, accessPayload); actor ||= accessPayload.user_name; }
         const refresh = verify(cookies.xtj_user_refresh, 'user_refresh');
         if (refresh && actor && refresh.user_name !== actor) return result(200, { ok: true, preserved_other_session: true });
-        if (refresh) await rows({ media_type: 'eq.__refresh_token__', media_url: 'eq.' + refresh.jti, user_name: 'eq.' + refresh.user_name, select: 'id' }, 'DELETE');
+        if (refresh) {
+          if (await rpc('revoke_user_refresh_session',{p_user_name:refresh.user_name,p_account_id:refresh.account_id || null,p_jti:refresh.jti}) !== true) throw Error('logout_sync_failed');
+        }
         return result(200, { ok: true }, clearUserCookies());
       }
       const token = bearer(), payload = verify(token, 'user_access');

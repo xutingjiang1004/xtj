@@ -39,13 +39,17 @@ async function fixturePage(browser,state={}){
    if(p==='/admin/users/register-alerts')body={ok:true,unread_count:0,users:[]};
    if(p.startsWith('/api/avatar/public'))body={ok:true,avatar_url:mediaGatewayUrl(raw('avatar'),storageOrigin)};
    if(p==='/admin/author-support')body={ok:true,wechat_url:null,alipay_url:null,disclaimer:'自愿打赏'};
+   if(p==='/admin/stats')body={total_posts:21005,total_users:42,total_comments:1205,total_likes:1205,total_photos:17,total_visits:306,total_attacks:2,firewall_intercepts:1,daily_visits:{'2026-10-23':306},daily_attacks:{'2026-10-23':2},attack_types:{CORS:1,constructor:1},truncated:false,cached_at:now};
+   if(p==='/admin/stats/daily')body={daily:[{date:'2026-10-23',posts:21005,comments:1205,likes:1205,new_users:42,visits:306,attacks:2}],date_range:{start:'all',end:'all'}};
    if(p==='/admin/stats/online')body={online_count:0,users:[],device_stats:{}};
    if(p==='/admin/stats/online' && state.online)body=state.online;
    if(p==='/admin/user-profile' && state.profile)body=state.profile;
    if(p==='/admin/ai-agent/config')body={ok:true,config:{name:'小猫',avatar:'🐱',avatar_url:mediaGatewayUrl(raw('ai-avatar'),storageOrigin),model:{reasoner_model:'deepseek-v4-flash-vision-exp'}}};
    if(p==='/admin/ai-agent/effective-prompt')body={ok:true,core_prompt:'实际配置的提示词'};
-   if(p==='/admin/ai-agent/usage-summary')body={ok:true,summary:{},currency:'CNY'};
-   if(p==='/admin/ai-agent/users')body={ok:true,users:[{user_name:'alice',message_count:3}],window_days:30};
+   if(p==='/admin/ai-agent/invite-codes')body={ok:true,list:state.inviteCodes||[]};
+   if(p==='/admin/ai-agent/usage-summary')body={ok:true,window_days:url.searchParams.get('days')==='all'?'all':30,summary:{today_calls:3,today_total_tokens:9,today_cost:0.01,total_calls:3,total_tokens:9,total_users:1,total_cost:0.01,currency:'CNY'},currency:'CNY'};
+   if(p==='/admin/ai-agent/users')body={ok:true,users:[{user_name:'alice',message_count:3,conversation_count:1,total_tokens:9,last_at:now}],window_days:url.searchParams.get('days')==='all'?'all':30};
+   if(state.aiPartial && (p==='/admin/ai-agent/users'||p==='/admin/ai-agent/usage-summary'))Object.assign(body,{truncated:true,loaded_rows:3,matched_rows:1005});
    if((p==='/admin/ai-agent/users'||p==='/admin/ai-agent/usage-summary') && state.aiUsageFailure){status=state.aiUsageFailure===503?503:402;body={ok:false,code:status===402?'egress_quota_exceeded':'database_unavailable',retryable:status!==402,error:'数据服务暂时受限，请等待恢复'};}
    if(p==='/admin/ai-agent/conversations')body={ok:true,conversations:[{conversation_id:'conv-1234',message_count:2,created_at:now,last_at:now}]};
    if(p==='/admin/ai-agent/conversations' && state.aiConvsFailure){status=503;body={ok:false,code:'database_unavailable',retryable:true,error:'会话暂不可用'};}
@@ -175,7 +179,7 @@ test('all 19 fixed administrator tabs fit desktop, tablet and phone screenshots 
   const f=await fixturePage(browser),page=f.page;await login(page);
   for(const [name,width,height] of [['desktop',1440,1000],['tablet',768,1024],['phone',375,812]]){
    await page.setViewportSize({width,height});
-   for(const tab of tabs){await switchTab(page,tab);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,name+':'+tab);await screenshot(page,name+'-'+tab);}
+   for(const tab of tabs){await switchTab(page,tab);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,name+':'+tab);if(tab==='stats'){assert.match(await page.locator('#tabStats').innerText(),/21005/);assert.match(await page.locator('#tabStats').innerText(),/1205/);}await screenshot(page,name+'-'+tab);}
    if(name==='phone'){
     assert.ok(await page.locator('.dash-header').evaluate(n=>n.getBoundingClientRect().height)<100);await page.click('#adminNavToggle');assert.equal(await page.locator('#adminNavToggle').getAttribute('aria-expanded'),'true');await screenshot(page,'phone-menu-open',false);await page.locator('#tabUsersBtn').click();await page.waitForSelector('#tabUsers.active');assert.equal(await page.locator('#adminNavToggle').getAttribute('aria-expanded'),'false');const wrap=page.locator('#tabUsers .table-wrap');assert.ok(await wrap.evaluate(n=>n.scrollWidth>n.clientWidth));assert.equal(await wrap.getAttribute('tabindex'),'0');
    }
@@ -220,5 +224,48 @@ test('retained AI views keep time-window, user, conversation and older-message a
   const convRequest=page.waitForRequest(request=>{const u=new URL(request.url());return u.pathname==='/admin/ai-agent/conversation' && u.searchParams.get('user_name')==='alice' && u.searchParams.get('conversation_id')==='conv-1234';},{timeout:5000});await page.locator('.ai-conversation-item').click();await convRequest;await page.waitForSelector('#aiAdminOlderMessages');
   state.aiDetailFailure=true;await page.locator('#aiAdminOlderMessages').click();await page.waitForFunction(()=>document.getElementById('aiAdminContent').textContent.includes('数据加载失败'));await page.waitForFunction(()=>!document.getElementById('aiAdminOlderMessages').disabled);state.aiDetailFailure=false;
   const olderRequest=page.waitForRequest(request=>{const u=new URL(request.url());return u.pathname==='/admin/ai-agent/conversation' && u.searchParams.get('before_id')===uuid && u.searchParams.get('before_at')==='2026-10-11T01:00:00.123456+00:00';},{timeout:5000});await page.locator('#aiAdminOlderMessages').click();await olderRequest;await page.waitForFunction(()=>document.getElementById('aiAdminContent').textContent.includes('更早消息'));assert.match(await page.locator('#aiAdminContent').innerText(),/最新消息/);assert.deepEqual(f.errors,[]);
+ }finally{await browser.close();}
+});
+
+test('AI administrator all-history labels and nonzero usage match the selected server window',{timeout:45000},async()=>{
+ const browser=await chromium.launch(options);try{
+  const f=await fixturePage(browser),page=f.page;await login(page);await switchTab(page,'ai');await page.evaluate(()=>window._switchAiAdminSubTab('users'));await page.waitForSelector('#aiUsageDaysSel');await page.selectOption('#aiUsageDaysSel','all');
+  await page.waitForFunction(()=>document.getElementById('aiAdminContent').textContent.includes('用户列表（1 人 · 全部历史）'));
+  const text=await page.locator('#aiAdminContent').innerText();assert.doesNotMatch(text,/近 all 天|undefined|NaN/);assert.match(text,/北京时间/);assert.match(text,/累计 Token\s*9/i);await screenshot(page,'ai-usage-all');assert.deepEqual(f.errors,[]);
+ }finally{await browser.close();}
+});
+
+test('AI administrator settings, prompt, usage selector and invite fields remain readable in both themes',{timeout:60000},async()=>{
+ const browser=await chromium.launch(options);try{
+  const f=await fixturePage(browser,{aiPartial:true,inviteCodes:[
+   {code:'READABLE-A',days:30,max_uses:1,used_count:0},
+   {code:'READABLE-B',days:30,max_uses:1,used_count:1},
+   {code:'READABLE-C',days:30,max_uses:1,used_count:0,expires_at:'2020-01-01T00:00:00Z'}
+  ]}),page=f.page;await login(page);await page.addStyleTag({content:'*,*::before,*::after{transition:none !important;animation:none !important;}'});
+  async function checkContrast(selector){
+   const rows=await page.locator(selector).evaluateAll(nodes=>{
+    const color=s=>(s.match(/[\d.]+/g)||[]).map(Number);
+    const over=(a,b)=>{const alpha=a.length>3?a[3]:1;return [0,1,2].map(i=>a[i]*alpha+b[i]*(1-alpha));};
+    function background(node){const chain=[];while(node){chain.unshift(node);node=node.parentElement;}return chain.reduce((c,n)=>over(color(getComputedStyle(n).backgroundColor),c),[255,255,255]);}
+    function luminance(c){const a=c.map(v=>{v/=255;return v<=.04045?v/12.92:((v+.055)/1.055)**2.4;});return .2126*a[0]+.7152*a[1]+.0722*a[2];}
+    return nodes.filter(n=>n.getClientRects().length).map(n=>{const bg=background(n),fg=over(color(getComputedStyle(n).color),bg),a=luminance(fg),b=luminance(bg);return {theme:document.documentElement.dataset.theme,field:n.id||n.textContent.trim().slice(0,35),foreground:fg,background:bg,ratio:(Math.max(a,b)+.05)/(Math.min(a,b)+.05)};});
+   });
+   assert.ok(rows.length>0,selector);assert.deepEqual(rows.filter(row=>row.ratio<4.5),[],'Text contrast below 4.5: '+JSON.stringify(rows.filter(row=>row.ratio<4.5)));
+  }
+  for(const theme of ['light','dark']){
+   await page.evaluate(theme=>document.documentElement.setAttribute('data-theme',theme),theme);
+   for(const width of [1440,375]){
+    await page.setViewportSize({width,height:900});await switchTab(page,'ai');await page.evaluate(()=>window._switchAiAdminSubTab('settings'));await page.waitForSelector('#aiCfgName');
+    assert.equal(await page.locator('#aiCfgName').inputValue(),'小猫');
+    await checkContrast('.ai-settings-section h4,.ai-admin-settings label,#aiCfgName,#aiCfgSysPrompt,.ai-admin-settings select,.ai-admin-tab:not(.active)');
+    await page.click('#aiLoadEffectiveBtn');await page.waitForSelector('#aiEffectivePromptContent',{state:'visible'});assert.match(await page.locator('#aiEffectivePromptContent').innerText(),/实际配置的提示词/);await checkContrast('#aiEffectivePromptContent');
+    await screenshot(page,'ai-readable-'+theme+'-'+width);
+    await page.evaluate(()=>window._switchAiAdminSubTab('users'));await page.waitForSelector('#aiUsageDaysSel');assert.equal(await page.locator('.ai-partial-warning').count(),2);await checkContrast('#aiUsageDaysSel,.ai-usage-toolbar span,.ai-usage-card .lbl,.ai-partial-warning');
+    await page.evaluate(()=>window._switchAiAdminSubTab('invite'));await page.waitForSelector('#aiInviteCount');await checkContrast('.ai-invite-card h3,.ai-invite-field label,.ai-invite-field input,.ai-invite-table-wrap th,.ai-invite-table-wrap td,.ai-invite-code,.ai-status-pill,.ai-invite-copy-btn,.ai-invite-del-btn');
+    await page.locator('#aiInviteCount').focus();await checkContrast('#aiInviteCount');await screenshot(page,'ai-invite-readable-'+theme+'-'+width);
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+   }
+  }
+  assert.deepEqual(f.errors,[]);
  }finally{await browser.close();}
 });

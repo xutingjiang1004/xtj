@@ -113,28 +113,39 @@
 #panelAiChat #aiChatRoot > .ai-chat-header,
 #panelAiChat #aiChatRoot > .ai-chat-input-bar {
   grid-column: 1 / -1;
-  background: rgba(248,253,251,.2);
-  -webkit-backdrop-filter: blur(12px) saturate(160%)!important;
-  backdrop-filter: blur(12px) saturate(160%)!important;
-  border-color: rgba(255,255,255,.5);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.6), inset 0 -1px 0 rgba(141,193,173,.16), 0 4px 20px rgba(40,90,70,.06);
+  background: rgba(248,253,251,.12);
+  -webkit-backdrop-filter: blur(5px) saturate(180%) brightness(1.025)!important;
+  backdrop-filter: blur(5px) saturate(180%) brightness(1.025)!important;
+  border-color: rgba(255,255,255,.38);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.8), inset 0 -1px 0 rgba(255,255,255,.3), 0 3px 14px rgba(40,90,70,.035);
 }
 #panelAiChat #aiChatRoot > .ai-chat-header { grid-row: 1; }
 #panelAiChat #aiChatRoot > .ai-chat-input-bar { grid-row: 3; }
+#panelAiChat #aiChatRoot > .ai-chat-header::before,
+#panelAiChat #aiChatRoot > .ai-chat-input-bar::before {
+  content: ''; position: absolute; left: 0; right: 0; top: 0; height: 1px;
+  background: linear-gradient(90deg,transparent,rgba(255,255,255,.9) 22%,rgba(255,255,255,.18) 52%,rgba(255,255,255,.8) 82%,transparent);
+  pointer-events: none;
+}
+#panelAiChat #aiChatRoot > .ai-chat-header::after,
+#panelAiChat #aiChatRoot > .ai-chat-input-bar::after {
+  content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; z-index: -1;
+  background: linear-gradient(112deg,rgba(255,255,255,.1),transparent 24%,transparent 76%,rgba(216,248,237,.08));
+}
 #panelAiChat #aiChatRoot > .ai-chat-header button,
 #panelAiChat #aiChatRoot > .ai-chat-input-bar :is(.ai-chat-input,.ai-plus-btn,.ai-voice-btn,.ai-chat-send,.ai-chat-pause) {
-  background: rgba(255,255,255,.2)!important;
+  background: rgba(255,255,255,.12)!important;
   border-color: rgba(255,255,255,.5);
   box-shadow: inset 0 1px 0 rgba(255,255,255,.55), 0 2px 10px rgba(40,90,70,.04);
 }
 [data-theme=dark] #panelAiChat #aiChatRoot > .ai-chat-header,
 [data-theme=dark] #panelAiChat #aiChatRoot > .ai-chat-input-bar {
-  background: rgba(18,42,36,.2); border-color: rgba(184,224,201,.22);
-  box-shadow: inset 0 1px 0 rgba(223,239,229,.2), inset 0 -1px 0 rgba(0,0,0,.18), 0 4px 20px rgba(0,0,0,.12);
+  background: rgba(18,42,36,.12); border-color: rgba(184,224,201,.18);
+  box-shadow: inset 0 1px 0 rgba(223,239,229,.4), inset 0 -1px 0 rgba(223,239,229,.13), 0 3px 14px rgba(0,0,0,.08);
 }
 [data-theme=dark] #panelAiChat #aiChatRoot > .ai-chat-header button,
 [data-theme=dark] #panelAiChat #aiChatRoot > .ai-chat-input-bar :is(.ai-chat-input,.ai-plus-btn,.ai-voice-btn,.ai-chat-send,.ai-chat-pause) {
-  background: rgba(36,74,56,.2)!important; border-color: rgba(184,224,201,.24);
+  background: rgba(36,74,56,.12)!important; border-color: rgba(184,224,201,.24);
   box-shadow: inset 0 1px 0 rgba(223,239,229,.18), 0 2px 10px rgba(0,0,0,.08);
 }
 @media (min-width:768px) {
