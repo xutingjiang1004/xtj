@@ -73,70 +73,107 @@
   pointer-events: none !important;
 }
 
+/* The selected capsule owns its material. The outer Dock stays clear and
+   click-through. Web approximation of the optical principles described at:
+   developer.apple.com/documentation/technologyoverviews/adopting-liquid-glass */
 .dock-bar > .dock-indicator {
+  --dock-light-x: 50%; --dock-light-y: 20%; --dock-press: 0;
+  --dock-glass-brightness: 1.015;
+  --dock-glass-solid: #edf7f2;
   display: block !important;
-  position: absolute !important;
-  top: 0 !important;
-  left: 0 !important;
-  z-index: 0 !important;
-  overflow: hidden !important;
-  isolation: isolate;
-  border-radius: 999px !important;
-  opacity: 0;
-  pointer-events: none !important;
+  position: absolute !important; top: 0 !important; left: 0 !important;
+  z-index: 0 !important; box-sizing: border-box;
+  overflow: hidden !important; isolation: isolate;
+  border-radius: 50% / 50% !important;
+  clip-path: none !important;
+  transform-origin: 50% 50%;
+  opacity: 0; pointer-events: none !important;
   background:
-    radial-gradient(ellipse at 50% 50%, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.06) 46%, rgba(255, 255, 255, 0.18) 74%, rgba(255, 255, 255, 0.32) 100%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.20) 0%, rgba(255, 255, 255, 0.08) 48%, rgba(76, 200, 190, 0.12) 100%) !important;
-  border: 1px solid rgba(255, 255, 255, 0.28) !important;
+    linear-gradient(165deg,rgba(255,255,255,.07),rgba(255,255,255,.015) 46%,rgba(129,202,179,.045)),
+    rgba(241,252,247,.075) !important;
+  border: 1px solid rgba(255,255,255,.23) !important;
   outline: none !important;
-  box-shadow:
-    0 14px 30px rgba(38, 113, 135, 0.12),
-    0 4px 10px rgba(38, 113, 135, 0.07),
-    inset 0 1px 1px rgba(255, 255, 255, 0.62),
-    inset 0 -1px 2px rgba(24, 88, 110, 0.16),
-    inset 12px 0 20px rgba(210, 255, 246, 0.16),
-    inset -12px 0 20px rgba(170, 220, 255, 0.13),
-    inset 0 -13px 22px rgba(42, 168, 172, 0.12) !important;
-  backdrop-filter: blur(18px) saturate(230%) contrast(1.14) brightness(1.05) !important;
-  -webkit-backdrop-filter: blur(18px) saturate(230%) contrast(1.14) brightness(1.05) !important;
-  transition:
-    transform 0.32s var(--xtj-ease-standard),
-    width 0.32s var(--xtj-ease-standard),
-    height 0.32s var(--xtj-ease-standard),
-    opacity 0.2s ease;
+  box-shadow: 0 3px 10px rgba(27,74,64,.07),
+    inset 0 1px .5px rgba(255,255,255,.48),
+    inset 0 -1px 1px rgba(33,79,66,.12),
+    inset 1px 0 1px rgba(255,255,255,.21),
+    inset -1px 0 1px rgba(255,255,255,.14) !important;
+  -webkit-backdrop-filter: blur(1.5px) saturate(135%) brightness(var(--dock-glass-brightness)) !important;
+  backdrop-filter: blur(1.5px) saturate(135%) brightness(var(--dock-glass-brightness)) !important;
+  transition: opacity 160ms ease;
 }
-
+.dock-bar > .dock-indicator.is-moving { will-change: transform; }
+.dock-bar[data-dock-refraction="true"] > .dock-indicator {
+  -webkit-backdrop-filter: url("#xtj-liquid-refract") blur(.35px) saturate(135%) brightness(var(--dock-glass-brightness)) !important;
+  backdrop-filter: url("#xtj-liquid-refract") blur(.35px) saturate(135%) brightness(var(--dock-glass-brightness)) !important;
+}
 .dock-bar > .dock-indicator::before,
-.dock-bar > .dock-indicator::after {
-  content: none !important;
-  display: none !important;
-}
-
+.dock-bar > .dock-indicator::after,
 .dock-bar > .dock-indicator .dock-liquid-lens,
 .dock-bar > .dock-indicator .dock-liquid-shine {
-  position: absolute;
-  border-radius: inherit;
-  pointer-events: none;
+  content: '' !important; display: block !important;
+  position: absolute; inset: 0 !important; height: auto !important;
+  border-radius: inherit !important; pointer-events: none !important;
 }
-
+.dock-bar > .dock-indicator::before {
+  background: conic-gradient(from 110deg,transparent,rgba(255,255,255,.44) 26%,transparent 43%,rgba(255,255,255,.24) 69%,transparent) !important;
+  -webkit-mask-image: radial-gradient(ellipse,transparent 66%,#000 98%);
+  mask-image: radial-gradient(ellipse,transparent 66%,#000 98%);
+  opacity: .62 !important;
+}
+.dock-bar > .dock-indicator::after {
+  background: transparent !important; opacity: 1 !important;
+  box-shadow: inset 0 1px 1px rgba(255,255,255,.18),inset 0 -2px 2px rgba(61,123,97,.07);
+}
 .dock-bar > .dock-indicator .dock-liquid-lens {
-  inset: 0;
-  background:
-    radial-gradient(ellipse at 4% 50%, rgba(255, 255, 255, 0.82) 0%, rgba(196, 255, 244, 0.42) 14%, rgba(196, 255, 244, 0.08) 34%, transparent 56%),
-    radial-gradient(ellipse at 96% 50%, rgba(255, 255, 255, 0.72) 0%, rgba(164, 218, 255, 0.38) 16%, rgba(164, 218, 255, 0.08) 36%, transparent 58%),
-    radial-gradient(ellipse at 50% 112%, rgba(42, 170, 170, 0.20) 0%, rgba(42, 170, 170, 0.08) 34%, transparent 68%);
-  opacity: 0.76;
-  mix-blend-mode: screen;
+  background: radial-gradient(ellipse at 50% 48%,transparent 54%,rgba(231,255,246,.025) 74%,rgba(231,255,246,.2) 100%);
+  opacity: .8; mix-blend-mode: normal;
 }
-
 .dock-bar > .dock-indicator .dock-liquid-shine {
-  left: 23%;
-  right: 23%;
-  top: 5px;
-  height: 15%;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.72) 0%, rgba(255, 255, 255, 0.30) 44%, rgba(255, 255, 255, 0) 100%);
-  filter: blur(0.55px);
-  opacity: 0.58;
+  background: radial-gradient(ellipse at var(--dock-light-x) var(--dock-light-y),rgba(255,255,255,.55),rgba(255,255,255,.12) 25%,transparent 58%);
+  filter: none;
+  opacity: calc(.18 + var(--dock-press)*.34);
+}
+[data-theme="dark"] .dock-bar > .dock-indicator {
+  --dock-glass-brightness: .98; --dock-glass-solid: #18312a;
+  background: linear-gradient(160deg,rgba(215,247,233,.045),transparent 50%,rgba(90,169,149,.055)),rgba(12,29,25,.17) !important;
+  border-color: rgba(222,255,240,.17) !important;
+  box-shadow: 0 3px 10px rgba(0,0,0,.13),inset 0 1px 1px rgba(232,255,246,.27),inset 0 -1px 1px rgba(0,0,0,.18),inset 1px 0 1px rgba(231,255,246,.12) !important;
+}
+[data-theme="dark"] .dock-bar > .dock-indicator .dock-liquid-lens { opacity: .5; }
+[data-theme="dark"] .dock-bar > .dock-indicator .dock-liquid-shine { opacity: calc(.13 + var(--dock-press)*.24); }
+.dock-bar .dock-tab { touch-action: none !important; -webkit-user-select: none; user-select: none; }
+.dock-bar .dock-tab .dt-label { text-shadow: 0 1px 2px rgba(255,255,255,.6); }
+.dock-bar .dock-tab.active { color: #145f62 !important; }
+[data-theme="dark"] .dock-bar .dock-tab { color: #d6eee5; }
+[data-theme="dark"] .dock-bar .dock-tab .dt-label { text-shadow: 0 1px 2px rgba(0,0,0,.65); }
+[data-theme="dark"] .dock-bar .dock-tab.active { color: #e2fff4 !important; }
+.perf-lite .dock-bar > #dockIndicator {
+  background: rgba(231,247,240,.16) !important;
+  -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
+}
+[data-theme="dark"].perf-lite .dock-bar > #dockIndicator { background: rgba(24,49,42,.24) !important; }
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))) {
+  .dock-bar > #dockIndicator { background: var(--dock-glass-solid) !important; }
+}
+@media (prefers-reduced-motion:reduce) {
+  .dock-bar > #dockIndicator { transition: none !important; will-change: auto; }
+}
+html[data-xtj-motion="off"] .dock-bar > #dockIndicator { transition: none !important; will-change: auto; }
+@media (prefers-reduced-transparency:reduce), (prefers-contrast:more) {
+  .dock-bar > #dockIndicator,
+  html.perf-lite .dock-bar > #dockIndicator,
+  html[data-theme="dark"].perf-lite .dock-bar > #dockIndicator {
+    background: var(--dock-glass-solid) !important;
+    -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
+  }
+  .dock-bar > #dockIndicator .dock-liquid-lens,
+  .dock-bar > #dockIndicator .dock-liquid-shine { opacity: 0; }
+}
+@media (forced-colors:active) {
+  .dock-bar > #dockIndicator,
+  html.perf-lite .dock-bar > #dockIndicator,
+  html[data-theme="dark"].perf-lite .dock-bar > #dockIndicator { background: Canvas !important; border-color: ButtonText !important; box-shadow: none !important; }
 }
 
 .dock-tab[data-tab="ai"] .dt-icon .dt-svg {
