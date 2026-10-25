@@ -1417,31 +1417,92 @@
             let lastTabTapCount = {};
             let isRefreshing = {};
             function syncDockIndicator() {
-                var bar=document.getElementById('dockBar');
-                if(bar && bar.__xtjDockGlass) {bar.__xtjDockGlass.sync();return;}
-                var metrics=getDockIndicatorMetrics();
-                if(!metrics)return;
-                var indicator=metrics.indicator,rect=metrics.active;
-                indicator.style.width=rect.width+'px';indicator.style.height=rect.height+'px';
-                indicator.style.transform='translate3d('+rect.x+'px,'+rect.y+'px,0)';
-                indicator.style.opacity='1';
+                var dockBar = document.getElementById('dockBar');
+                var indicator = document.getElementById('dockIndicator');
+                if (!dockBar || !indicator) return;
+                var activeBtn = dockBar.querySelector('.dock-tab.active') || dockBar.querySelector('.dock-tab[data-tab="' + currentDockTab + '"]');
+                if (!activeBtn) {
+                    indicator.style.opacity = '0';
+                    return;
+                }
+                var barRect = dockBar.getBoundingClientRect();
+                var btnRect = activeBtn.getBoundingClientRect();
+                indicator.style.transition = '';
+                indicator.style.width = btnRect.width + 'px';
+                indicator.style.height = btnRect.height + 'px';
+                indicator.style.transform = 'translate3d(' + (btnRect.left - barRect.left) + 'px,' + (btnRect.top - barRect.top) + 'px,0)';
+                indicator.style.opacity = '1';
             }
             window.syncDockIndicator = syncDockIndicator;
 
-            // Read all tab bounds together at a gesture boundary or resize,
-            // never from pointermove or from the spring's animation frames.
             function getDockIndicatorMetrics() {
-                var bar=document.getElementById('dockBar'),indicator=document.getElementById('dockIndicator');
-                if(!bar || !indicator)return null;
-                var barRect=bar.getBoundingClientRect();
-                if(!barRect.width || !barRect.height)return null;
-                var tabs=Array.prototype.map.call(bar.querySelectorAll('.dock-tab'),function(button) {
-                    var rect=button.getBoundingClientRect();
-                    return {button:button,x:rect.left-barRect.left,y:rect.top-barRect.top,width:rect.width,height:rect.height};
-                }).filter(function(item){return item.width>0 && item.height>0;});
-                if(!tabs.length)return null;
-                var active=tabs.find(function(item){return item.button.classList.contains('active');}) || tabs[0];
-                return {barRect:barRect,indicator:indicator,tabs:tabs,active:active};
+                var dockBar = document.getElementById('dockBar');
+                var indicator = document.getElementById('dockIndicator');
+                if (!dockBar || !indicator) return null;
+                var dockTabs = Array.prototype.slice.call(dockBar.querySelectorAll('.dock-tab'));
+                if (!dockTabs.length) return null;
+                var barRect = dockBar.getBoundingClientRect();
+                var indicatorRect = indicator.getBoundingClientRect();
+                var activeBtn = dockBar.querySelector('.dock-tab.active') || dockBar.querySelector('.dock-tab[data-tab="' + currentDockTab + '"]') || dockTabs[0];
+                var activeRect = activeBtn.getBoundingClientRect();
+                var indicatorWidth = activeRect.width || indicatorRect.width || 72;
+                var indicatorHeight = activeRect.height || indicatorRect.height || 48;
+                var currentX = indicatorRect.width
+                    ? (indicatorRect.left - barRect.left)
+                    : (activeRect.left - barRect.left);
+                var firstRect = dockTabs[0].getBoundingClientRect();
+                var lastRect = dockTabs[dockTabs.length - 1].getBoundingClientRect();
+                return {
+                    dockBar: dockBar,
+                    indicator: indicator,
+                    dockTabs: dockTabs,
+                    barRect: barRect,
+                    currentX: currentX,
+                    currentY: activeRect.top - barRect.top,
+                    currentWidth: indicatorWidth,
+                    currentHeight: indicatorHeight,
+                    minX: (firstRect.left - barRect.left) - firstRect.width * 0.2,
+                    maxX: (lastRect.right - barRect.left) - indicatorWidth + lastRect.width * 0.2,
+                    minY: (firstRect.top - barRect.top) - firstRect.height * 0.2,
+                    maxY: (lastRect.bottom - barRect.top) - indicatorHeight + lastRect.height * 0.2
+                };
+            }
+
+            function findNearestDockTab(clientX) {
+                var dockBar = document.getElementById('dockBar');
+                if (!dockBar) return null;
+                var dockTabs = Array.prototype.slice.call(dockBar.querySelectorAll('.dock-tab'));
+                if (!dockTabs.length) return null;
+                var nearest = dockTabs[0];
+                var nearestDistance = Infinity;
+                dockTabs.forEach(function(tab) {
+                    var rect = tab.getBoundingClientRect();
+                    var centerX = rect.left + rect.width / 2;
+                    var distance = Math.abs(clientX - centerX);
+                    if (distance < nearestDistance) {
+                        nearest = tab;
+                        nearestDistance = distance;
+                    }
+                });
+                return nearest;
+            }
+            function findNearestDockTabY(clientY) {
+                var dockBar = document.getElementById('dockBar');
+                if (!dockBar) return null;
+                var dockTabs = Array.prototype.slice.call(dockBar.querySelectorAll('.dock-tab'));
+                if (!dockTabs.length) return null;
+                var nearest = dockTabs[0];
+                var nearestDistance = Infinity;
+                dockTabs.forEach(function(tab) {
+                    var rect = tab.getBoundingClientRect();
+                    var centerY = rect.top + rect.height / 2;
+                    var distance = Math.abs(clientY - centerY);
+                    if (distance < nearestDistance) {
+                        nearest = tab;
+                        nearestDistance = distance;
+                    }
+                });
+                return nearest;
             }
 
             function setPhotoWallLockedState(isLocked) {
@@ -1526,248 +1587,105 @@
             });
 
             function installDockIndicatorDrag() {
-                var bar = document.getElementById('dockBar');
-                var glass = document.getElementById('dockIndicator');
-                if (!bar || !glass || bar.__xtjDockGlass) return;
+                var dockBar = document.getElementById('dockBar');
+                var indicator = document.getElementById('dockIndicator');
+                if (!dockBar || !indicator || dockBar.__xtjDockDragInstalled) return;
+                dockBar.__xtjDockDragInstalled = true;
 
-                var frame = 0, previousTime = 0, needsMeasure = true, suspended = false;
-                var metrics = null, pose = null, target = null, drag = null;
-                var velocity = {x:0,y:0,w:0,h:0,sx:0,sy:0};
-                var light = {x:.5,y:.2}, suppressClick = null;
-                var motion = window.matchMedia('(prefers-reduced-motion: reduce)');
-                var transparency = window.matchMedia('(prefers-reduced-transparency: reduce)');
-                var mapReady = false;
-                function clamp(value, min, max) { return Math.max(min, Math.min(max, value)); }
-                function quiet() {
-                    return motion.matches || document.documentElement.dataset.xtjMotion === 'off' || document.documentElement.classList.contains('perf-lite');
-                }
-                function aim(rect) { return {x:rect.x,y:rect.y,w:rect.width,h:rect.height,sx:1,sy:1}; }
-                function wake() {
-                    if (!frame && !suspended && !document.hidden) frame = requestAnimationFrame(tick);
-                }
-                function sync() { needsMeasure = true; wake(); }
-                function paint(moving) {
-                    glass.style.width = pose.w.toFixed(3) + 'px';
-                    glass.style.height = pose.h.toFixed(3) + 'px';
-                    glass.style.transform = 'translate3d(' + pose.x.toFixed(3) + 'px,' + pose.y.toFixed(3) + 'px,0) scale(' + pose.sx.toFixed(4) + ',' + pose.sy.toFixed(4) + ')';
-                    glass.style.opacity = '1';
-                    glass.style.setProperty('--dock-light-x', (light.x*100).toFixed(1)+'%');
-                    glass.style.setProperty('--dock-light-y', (light.y*100).toFixed(1)+'%');
-                    glass.style.setProperty('--dock-press', drag ? '1' : '0');
-                    glass.classList.toggle('is-moving', moving);
-                    bar.classList.toggle('is-dragging', !!(drag && drag.moved));
-                    bar.dataset.dockRefraction = mapReady && !quiet() && !transparency.matches ? 'true' : 'false';
-                }
-                function tick(now) {
-                    frame = 0;
-                    if (needsMeasure) {
-                        needsMeasure = false;
-                        metrics = getDockIndicatorMetrics();
-                        if (!metrics) {
-                            glass.style.opacity = '0';
-                            glass.classList.remove('is-moving');
-                            previousTime = 0;
-                            return;
-                        }
-                        if (!drag) target = aim(metrics.active);
+                var drag = null;
+                var dragHandledTs = 0;
+
+                dockBar.addEventListener('pointerdown', function(e) {
+                    if (e.pointerType === 'mouse' && e.button !== 0) return;
+                    var metrics = getDockIndicatorMetrics();
+                    if (!metrics) return;
+                    syncDockIndicator();
+                    metrics = getDockIndicatorMetrics();
+                    if (!metrics) return;
+                    var isVertical = getComputedStyle(dockBar).flexDirection === 'column';
+                    drag = {
+                        id: e.pointerId,
+                        sx: e.clientX,
+                        sy: e.clientY,
+                        ix: metrics.currentX,
+                        iy: metrics.currentY,
+                        w: metrics.currentWidth,
+                        h: metrics.currentHeight,
+                        mx: isVertical ? metrics.maxY : metrics.maxX,
+                        nx: isVertical ? metrics.minY : metrics.minX,
+                        indicator: metrics.indicator,
+                        moved: false,
+                        onTab: !!(e.target && e.target.closest && e.target.closest('.dock-tab')),
+                        vertical: isVertical
+                    };
+                    drag.indicator.style.width = drag.w + 'px';
+                    drag.indicator.style.height = drag.h + 'px';
+                    drag.indicator.style.transition = 'none';
+                    drag.indicator.style.opacity = '1';
+                    drag.indicator.style.transform = 'translate3d(' + drag.ix + 'px,' + drag.iy + 'px,0)';
+                    if(!window._throttledDragMove) window._throttledDragMove = window.throttleRAF(onDragMove);
+                    document.addEventListener('pointermove', window._throttledDragMove, {passive: false});
+                    document.addEventListener('pointerup', onDragUp);
+                    document.addEventListener('pointercancel', onDragCancel);
+                });
+
+                function onDragMove(e) {
+                    if (!drag || e.pointerId !== drag.id) return;
+                    e.preventDefault();
+                    if (drag.vertical) {
+                        var dy = e.clientY - drag.sy;
+                        if (Math.abs(dy) > 2) drag.moved = true;
+                        var ny = Math.max(drag.nx, Math.min(drag.mx, drag.iy + dy));
+                        drag.indicator.style.transform = 'translate3d(' + drag.ix + 'px,' + ny + 'px,0)';
+                        drag.cy = ny;
+                    } else {
+                        var dx = e.clientX - drag.sx;
+                        if (Math.abs(dx) > 2) drag.moved = true;
+                        var nx = Math.max(drag.nx, Math.min(drag.mx, drag.ix + dx));
+                        drag.indicator.style.transform = 'translate3d(' + nx + 'px,' + drag.iy + 'px,0)';
+                        drag.cx = nx;
                     }
-                    if (!target) return;
-                    if (!pose) pose = Object.assign({},target);
-                    if(drag && now-drag.lastTime>80){drag.speed=0;target.sx=target.sy=1;}
-                    var immediate = quiet();
-                    var dt = Math.min(.025, Math.max(.001, previousTime ? (now-previousTime)/1000 : 1/60));
-                    var moving = false;
-                    Object.keys(velocity).forEach(function(key) {
-                        var distance = target[key]-pose[key];
-                        if (immediate) { pose[key]=target[key]; velocity[key]=0; return; }
-                        velocity[key] += (distance*480-velocity[key]*38)*dt;
-                        pose[key] += velocity[key]*dt;
-                        var precision = key === 'sx' || key === 'sy' ? .0005 : .025;
-                        if (Math.abs(target[key]-pose[key]) > precision || Math.abs(velocity[key]) > precision*30) moving=true;
-                        else {pose[key]=target[key];velocity[key]=0;}
-                    });
-                    if(drag)updateLight(drag.clientX,drag.clientY);
-                    paint(moving);
-                    previousTime = moving ? now : 0;
-                    if (moving) wake();
                 }
-                function updateLight(x,y) {
-                    if (!pose || !metrics) return;
-                    light.x = clamp((x-metrics.barRect.left-pose.x)/pose.w,.06,.94);
-                    light.y = clamp((y-metrics.barRect.top-pose.y)/pose.h,.06,.94);
+
+                function cleanupDrag() {
+                    document.removeEventListener('pointermove', window._throttledDragMove || onDragMove);
+                    document.removeEventListener('pointerup', onDragUp);
+                    document.removeEventListener('pointercancel', onDragCancel);
                 }
-                function releaseCapture(state) {
-                    try { if (state.button.hasPointerCapture(state.id)) state.button.releasePointerCapture(state.id); } catch (_) {}
-                }
-                function removeDragListeners() {
-                    document.removeEventListener('pointermove',move);
-                    document.removeEventListener('pointerup',up);
-                    document.removeEventListener('pointercancel',cancel);
-                }
-                function finish(commit,event) {
-                    if (!drag || event && event.pointerId !== undefined && event.pointerId !== drag.id) return;
-                    if (commit && event) {
-                        updateTarget(event);
-                        if(!drag)return;
-                    }
+
+                function onDragUp(e) {
+                    if (!drag) { cleanupDrag(); return; }
+                    if (e.pointerId !== drag.id) return;
                     var state = drag;
                     drag = null;
-                    removeDragListeners();
-                    releaseCapture(state);
-                    light={x:.5,y:.2};
-                    if (state.moved || state.cancelled) suppressClick={id:state.id,until:performance.now()+700};
-                    if (commit && state.moved) {
-                        var center = state.vertical ? target.y+target.h/2 : target.x+target.w/2;
-                        var nearest = metrics.tabs.reduce(function(best,item) {
-                            var distance=Math.abs((state.vertical?item.y+item.height/2:item.x+item.width/2)-center);
-                            return !best || distance<best.distance ? {item:item,distance:distance} : best;
-                        },null).item;
-                        target = aim(nearest);
-                        if (!quiet()) {
-                            var key=state.vertical?'y':'x';
-                            velocity[key]=clamp(velocity[key]+state.speed*.16,-650,650);
+                    cleanupDrag();
+                    if (state.moved) {
+                        var tab = state.vertical
+                            ? findNearestDockTabY(e.clientY || state.sy)
+                            : findNearestDockTab(e.clientX || state.sx);
+                        if (tab) {
+                            dragHandledTs = Date.now();
+                            switchDockTab(tab.dataset.tab, true, { animate: true, source: 'dock-drag' });
                         }
-                        // Keep the existing navigation, icon animations, badges and tab state.
-                        switchDockTab(nearest.button.dataset.tab,true,{animate:true,source:'dock-drag'});
-                    } else if (metrics) target=aim(metrics.active);
-                    needsMeasure=true;
-                    wake();
-                }
-                function updateTarget(event) {
-                    drag.clientX=event.clientX;drag.clientY=event.clientY;
-                    var dx=event.clientX-drag.startX,dy=event.clientY-drag.startY;
-                    var primary=drag.vertical?dy:dx,cross=drag.vertical?dx:dy;
-                    if (!drag.moved && Math.abs(cross)>10 && Math.abs(cross)>Math.abs(primary)*1.5) {
-                        drag.cancelled=true;
-                        finish(false,event);
-                        return;
                     }
-                    if (!drag.moved && Math.abs(primary)>=7 && Math.abs(primary)>=Math.abs(cross)*.85) drag.moved=true;
-                    updateLight(event.clientX,event.clientY);
-                    if (!drag.moved) {wake();return;}
-                    var coordinate=drag.vertical?event.clientY:event.clientX;
-                    var elapsed=Math.max(8,event.timeStamp-drag.lastTime);
-                    if (coordinate!==drag.lastCoordinate) {
-                        drag.speed=clamp((coordinate-drag.lastCoordinate)/elapsed*1000,-1200,1200);
-                        drag.lastCoordinate=coordinate;drag.lastTime=event.timeStamp;
-                    } else if (elapsed>80) drag.speed=0;
-                    var first=metrics.tabs[0],last=metrics.tabs[metrics.tabs.length-1];
-                    var size=drag.vertical?target.h:target.w;
-                    var lower=drag.vertical?first.y:first.x;
-                    var upper=(drag.vertical?last.y+last.height:last.x+last.width)-size;
-                    var raw=coordinate-(drag.vertical?metrics.barRect.top:metrics.barRect.left)-drag.grab-size/2;
-                    var bounded=clamp(raw,lower,upper);
-                    var position=bounded+clamp((raw-bounded)*.16,-7,7);
-                    var stretch=quiet()?0:clamp(Math.abs(drag.speed)/22000,0,.048);
-                    if (drag.vertical) {
-                        target.y=position;target.x=metrics.active.x+clamp(cross*.1,-2,2);
-                        target.sy=1+stretch;target.sx=1-stretch*.55;
-                    } else {
-                        target.x=position;target.y=metrics.active.y+clamp(cross*.1,-2,2);
-                        target.sx=1+stretch;target.sy=1-stretch*.55;
-                    }
-                    wake();
+                    requestAnimationFrame(syncDockIndicator);
                 }
-                function move(event) {
-                    if (!drag || event.pointerId !== drag.id) return;
-                    updateTarget(event);
-                    if (drag && drag.moved && event.cancelable) event.preventDefault();
-                }
-                function up(event) { finish(true,event); }
-                function cancel(event) {
-                    if(drag && (!event || event.pointerId===drag.id))drag.cancelled=true;
-                    finish(false,event);
-                }
-                bar.addEventListener('pointerdown',function(event) {
-                    if (drag || event.isPrimary===false || event.button!==0) return;
-                    var button=event.target.closest && event.target.closest('.dock-tab');
-                    if (!button || button.disabled) return;
-                    metrics=getDockIndicatorMetrics();
-                    if (!metrics) return;
-                    needsMeasure=false;suppressClick=null;
-                    if (!pose) pose=aim(metrics.active);
-                    target=Object.assign({},pose,{sx:1,sy:1});
-                    var vertical=getComputedStyle(bar).flexDirection==='column';
-                    var pressed=metrics.tabs.find(function(item){return item.button===button;});
-                    var coordinate=vertical?event.clientY:event.clientX;
-                    drag={id:event.pointerId,button:button,vertical:vertical,startX:event.clientX,startY:event.clientY,clientX:event.clientX,clientY:event.clientY,
-                        grab:coordinate-(vertical?metrics.barRect.top+pressed.y+pressed.height/2:metrics.barRect.left+pressed.x+pressed.width/2),
-                        lastCoordinate:coordinate,lastTime:event.timeStamp,speed:0,moved:false};
-                    updateLight(event.clientX,event.clientY);
-                    try {button.setPointerCapture(event.pointerId);} catch (_) {}
-                    document.addEventListener('pointermove',move,{passive:false});
-                    document.addEventListener('pointerup',up);
-                    document.addEventListener('pointercancel',cancel);
-                    wake();
-                });
-                bar.addEventListener('lostpointercapture',cancel);
-                bar.addEventListener('click',function(event) {
-                    var button=event.target.closest && event.target.closest('.dock-tab');
-                    if (!button) return;
-                    if (suppressClick && event.detail!==0 && performance.now()<suppressClick.until &&
-                        (event.pointerId===undefined || event.pointerId===suppressClick.id)) {
-                        suppressClick=null;event.preventDefault();event.stopImmediatePropagation();return;
-                    }
-                    switchDockTab(button.dataset.tab,false,{animate:true,source:'dock-click'});
-                });
-                function reset() {
-                    if(drag){drag.cancelled=true;finish(false);}
-                    pose=null;previousTime=0;
-                    Object.keys(velocity).forEach(function(key){velocity[key]=0;});
-                    sync();
-                }
-                function suspend() {
-                    suspended=true;
-                    if(drag){drag.cancelled=true;finish(false);}
-                    if(frame)cancelAnimationFrame(frame);
-                    frame=0;previousTime=0;
-                    glass.classList.remove('is-moving');bar.classList.remove('is-dragging');
-                }
-                function resume(){suspended=false;sync();}
-                window.addEventListener('resize',reset,{passive:true});
-                window.addEventListener('blur',reset);
-                window.addEventListener('pagehide',suspend);
-                window.addEventListener('pageshow',resume);
-                document.addEventListener('visibilitychange',function(){if(document.hidden)suspend();else resume();});
-                motion.addEventListener('change',reset);transparency.addEventListener('change',reset);
-                if(typeof ResizeObserver==='function') {
-                    var observer=new ResizeObserver(reset);
-                    observer.observe(bar);
-                    bar.querySelectorAll('.dock-tab').forEach(function(button){observer.observe(button);});
-                }
-                var wasQuiet=quiet();
-                var preferenceObserver=new MutationObserver(function(){
-                    var nowQuiet=quiet();
-                    if(nowQuiet!==wasQuiet){wasQuiet=nowQuiet;reset();}
-                });
-                preferenceObserver.observe(document.documentElement,{attributes:true,attributeFilter:['data-xtj-motion','class']});
-                bar.__xtjDockGlass={sync:sync};
 
-                // A tiny static normal map bends only this capsule in Chromium.
-                // Safari/Firefox use the CSS lens: no turbulence or per-frame bitmap work.
-                if (/\b(?:HeadlessChrome|Chrome|Chromium|Edg)\//.test(navigator.userAgent) && !/iPhone|iPad|iPod/.test(navigator.userAgent)) {
-                    try {
-                        var image=document.getElementById('xtj-dock-lens-map');
-                        if(image) {
-                            var canvas=document.createElement('canvas');canvas.width=canvas.height=64;
-                            var ctx=canvas.getContext('2d'),pixels=ctx.createImageData(64,64);
-                            for(var y=0;y<64;y++)for(var x=0;x<64;x++) {
-                                var nx=(x+.5)/32-1,ny=(y+.5)/32-1,r=Math.sqrt(nx*nx+ny*ny);
-                                var edge=r<1?Math.pow(clamp((r-.45)/.55,0,1),2):0;
-                                var i=(y*64+x)*4;
-                                pixels.data[i]=128-(r?nx/r:0)*edge*110;
-                                pixels.data[i+1]=128-(r?ny/r:0)*edge*110;
-                                pixels.data[i+2]=128;pixels.data[i+3]=255;
-                            }
-                            ctx.putImageData(pixels,0,0);
-                            var url=canvas.toDataURL();
-                            var ready=new Image();
-                            ready.onload=function(){image.setAttribute('href',url);mapReady=true;wake();};
-                            ready.src=url;
-                        }
-                    } catch (_) {mapReady=false;}
+                function onDragCancel(e) {
+                    if (!drag) { cleanupDrag(); return; }
+                    if (e.pointerId !== drag.id) return;
+                    drag = null;
+                    cleanupDrag();
+                    requestAnimationFrame(syncDockIndicator);
                 }
-                sync();
+
+                // 按钮点击：事件委托在 dockBar 上统一处理
+                dockBar.addEventListener('click', function(e) {
+                    var tabBtn = e.target.closest('.dock-tab');
+                    if (!tabBtn) return;
+                    if (Date.now() - dragHandledTs < 350) return;
+                    switchDockTab(tabBtn.dataset.tab, false, { animate: true, source: 'dock-click' });
+                });
             }
 
             var dockPanelTransitionTimer = null;
