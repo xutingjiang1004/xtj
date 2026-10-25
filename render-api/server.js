@@ -9098,10 +9098,6 @@ async function callDeepSeekViaResponses(messages, options) {
   try {
     var workingInput = inputItems.slice();
     var workingInstructions = instructions;
-    // ★ 2026-09-22：按工具轮次记录的「400 安全重试」账本。
-    //   每个轮次独立一次机会，长工具链每轮都能自救（旧的全局一次性开关做不到）。
-    var _safe400RetryDone = {};
-
     for (var round = 0; round < maxToolRounds; round++) {
       onProgress();
       // ★ 修复（run_code 连续调用"没有返回结果"）：
@@ -9217,71 +9213,9 @@ async function callDeepSeekViaResponses(messages, options) {
           } catch (e) {}
         }
         console.error('[RESPONSES] API error', resp.status, errTxt, 'round', round, 'code=' + errCode);
-        // ★★★ 2026-09-22 加固（用户报障："用着用着调工具就突然 AI 调用失败"）：
-        //   旧的 tools+thinking 降级有两个致命漏洞：
-        //   ① 触发条件要求 errTxt 命中正则，但上游 400 经常**只回空 message**
-        //      （日志里 errTxt 恒为空串），正则落空 → 永不降级 → 用户直接看到失败；
-        //   ② __toolsThinkingFallbackDone 是"整条链路一次性"的全局闸，
-        //      多轮工具链里第 3、4 轮再犯同样错误就彻底没救。
-        //   新策略：**任何 400 都做一次安全重试**，且按轮次记账（每轮都有一次自救机会）：
-        //     - 剥离 input 中全部 reasoning 项（Reasoning 回传格式是最常见的 400 源）；
-        //     - 关闭 reasoning（effort:none），保留 tools —— 宁可少思考也不能没工具；
-        //     - 把空的 assistant 文本补成占位，避免空 content 被拒。
-        //   重试仍失败才把真实原因抛出，由上层文案层给出可执行提示。
-        if (resp.status === 400 && !_safe400RetryDone['r' + round]) {
-          _safe400RetryDone['r' + round] = true;
-          console.error('[RESPONSES] 400 on round ' + round + ', safe-retry with reasoning stripped (tools kept)');
-          options.__toolsThinkingFallbackDone = true;
-          // ★ 降级重试不能只改 effort —— input 里回传的 reasoning 项
-          //   若正是被拒对象（"reasoning is required"/"invalid reasoning item"），
-          //   effort:none 重试同样 400。这里同时剥离 input 中全部 reasoning 项，
-          //   牺牲推理上下文换取链路跑通（宁可少思考不能没工具）。
-          var _strippedInput = Array.isArray(apiBody.input)
-            ? apiBody.input.filter(function(_it) { return !_it || _it.type !== 'reasoning'; })
-            : apiBody.input;
-          // 顺带补齐空 assistant 文本（上游拒绝空串 content）
-          if (Array.isArray(_strippedInput)) {
-            for (var _sii = 0; _sii < _strippedInput.length; _sii++) {
-              var _sit = _strippedInput[_sii];
-              if (_sit && _sit.type === 'message' && _sit.role === 'assistant' && !String(_sit.content || '').trim()) {
-                _strippedInput[_sii] = Object.assign({}, _sit, { content: '（继续）' });
-              }
-            }
-          }
-          var retryBody = Object.assign({}, apiBody, { reasoning: { effort: 'none' }, input: _strippedInput });
-          var retryResp = await fetch(DEEPSEEK_RESPONSES_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + DEEPSEEK_API_KEY },
-            body: JSON.stringify(retryBody),
-            signal: controller.signal
-          });
-          if (retryResp.ok) {
-            resp = retryResp;
-            useThinking = false;
-          } else {
-            var _retryErrTxt = '';
-            try {
-              var _rj = await retryResp.json().catch(function() { return {}; });
-              _retryErrTxt = (_rj && _rj.error && _rj.error.message) ? String(_rj.error.message).slice(0, 500) : '';
-              if (_rj && _rj.error && _rj.error.code) errCode = String(_rj.error.code);
-              // ★ 遗留 2：降级重试仍失败时，也要记录重试那次的错误体与状态码，
-              //   否则最终 400 只反映首次尝试的原因（常常被 errTxt 覆盖成空串）。
-              if (DEBUG_PROVIDER || DEBUG_PROVIDER_ALWAYS) {
-                logProviderErrorDetail('RESPONSES-RETRY', retryResp.status, {
-                  code: (_rj && _rj.error && _rj.error.code) ? String(_rj.error.code) : '',
-                  type: (_rj && _rj.error && _rj.error.type) ? String(_rj.error.type) : '',
-                  message: _retryErrTxt,
-                  request_id: (_rj && _rj.request_id) ? String(_rj.request_id) : '',
-                  model: apiBody.model, round: round,
-                  tools_count: apiBody.tools ? apiBody.tools.length : 0,
-                  input_items: (apiBody.input && apiBody.input.length) ? apiBody.input.length : 0,
-                  reasoning_effort: 'none'
-                });
-              }
-            } catch (e) {}
-            if (_retryErrTxt) errTxt = _retryErrTxt;
-          }
-        }
+        // A deterministic 400 is not a transport failure. Preserve the user's
+        // reasoning mode and surface the real protocol/parameter error; retrying
+        // the same turn with effort:none silently discarded its reasoning.
       }
       if (!resp.ok) {
         var apiErr = new Error('AI 调用失败（HTTP ' + resp.status + '）');
@@ -9312,6 +9246,19 @@ async function callDeepSeekViaResponses(messages, options) {
       //   这里收集本轮 reasoning 项（含 id），下一轮回填到 workingInput。
       var roundReasoningCollector = responsesContext.createReasoningCollector();
       var roundReasoningItems = roundReasoningCollector.items;
+      var roundOutputCollector = responsesContext.createOutputCollector();
+      function upsertResponseFunctionCall(item, index) {
+        var entry = functionCalls.find(function(call) {
+          return item.call_id && call.id === item.call_id || item.id && call.itemId === item.id || index != null && call.outputIndex === index;
+        });
+        if (!entry) { entry = {id:'',itemId:'',name:'',arguments:''}; functionCalls.push(entry); }
+        if (item.call_id) entry.id = item.call_id;
+        else if (!entry.id && item.id) entry.id = item.id;
+        if (item.id) entry.itemId = item.id;
+        if (index != null) entry.outputIndex = index;
+        if (item.name) entry.name = item.name;
+        if (typeof item.arguments === 'string' && item.arguments) entry.arguments = item.arguments;
+      }
 
       if (useStream) {
         // ===== 流式解析 Responses API SSE =====
@@ -9349,6 +9296,7 @@ async function callDeepSeekViaResponses(messages, options) {
             if (!sJson) continue;
 
             var evtType = sJson.type || currentEventType || '';
+            if ((evtType === 'response.output_item.added' || evtType === 'response.output_item.done') && sJson.item) roundOutputCollector.add(sJson.item, sJson.output_index);
             if (typeof options.onSources === 'function') {
               var responseCitations=[];
               if(evtType==='response.output_text.annotation.added' && sJson.annotation)responseCitations.push(sJson.annotation);
@@ -9367,11 +9315,17 @@ async function callDeepSeekViaResponses(messages, options) {
             }
             // 推理增量
             if (evtType === 'response.reasoning_text.delta' || evtType === 'reasoning_text.delta') {
-              roundReasoningCollector.delta(sJson);
+              var reasoningDeltaItem = roundReasoningCollector.delta(sJson);
+              roundOutputCollector.add(Object.assign({type:'reasoning'},reasoningDeltaItem.id?{id:reasoningDeltaItem.id}:{}), sJson.output_index);
               var rDelta = sJson.delta || '';
               roundReasoning += rDelta;
               onProgress();
               try { if (hasThinkCb) options.onThinkingChunk(String(rDelta)); } catch (e) {}
+            }
+            if (evtType === 'response.reasoning_text.done' || evtType === 'reasoning_text.done' || evtType === 'response.content_part.done' && sJson.part && sJson.part.type === 'reasoning_text') {
+              var reasoningDoneItem = roundReasoningCollector.complete(Object.assign({},sJson,{text:typeof sJson.text==='string'?sJson.text:sJson.part&&sJson.part.text}));
+              roundOutputCollector.add(reasoningDoneItem,sJson.output_index);
+              onProgress();
             }
             if ((evtType === 'response.output_item.added' || evtType === 'response.output_item.done') && sJson.item && sJson.item.type === 'reasoning') {
               roundReasoningCollector.add(sJson.item, sJson.output_index);
@@ -9388,19 +9342,7 @@ async function callDeepSeekViaResponses(messages, options) {
             }
             // 函数调用开始
             if (evtType === 'response.output_item.added' && sJson.item && sJson.item.type === 'function_call') {
-              functionCalls.push({
-                // ★ 2026-09-22 修复：Responses API 的 function_call 项同时携带
-                //   `id`（输出项 id）与 `call_id`（调用标识）。回传时
-                //   function_call_output.call_id 必须与 **call_id** 配对，
-                //   旧实现只取 id，若两者不同（上游实现差异）回传即 400，
-                //   用户看到「思考完 → 调工具 → 突然 AI 调用失败」。
-                //   这里两个字段都记录，回传时优先用 call_id。
-                id: sJson.item.call_id || sJson.item.id || '',
-                itemId: sJson.item.id || '',
-                outputIndex: sJson.output_index,
-                name: sJson.item.name || '',
-                arguments: sJson.item.arguments || ''
-              });
+              upsertResponseFunctionCall(sJson.item, sJson.output_index);
             }
             // 函数调用参数增量
             if (evtType === 'response.function_call_arguments.delta') {
@@ -9408,30 +9350,8 @@ async function callDeepSeekViaResponses(messages, options) {
               if (!deltaCall && sJson.item_id == null && sJson.output_index == null) deltaCall = functionCalls[functionCalls.length - 1];
               if (deltaCall) deltaCall.arguments += (sJson.delta || '');
             }
-            // ★ 修复（工具轮第 2 轮 400 嫌疑）：output_item.added 时 item.id 在部分
-            //   实现中为空，真正的 id/完整 arguments 在 output_item.done 才下发。
-            //   若不归并，回传的 function_call.id 与 function_call_output.call_id
-            //   都是空串 —— 上游要求两者配对且非空，直接 400，用户看到
-            //   「思考完 → 调工具 → 突然 AI 调用失败」。这里按序号归并补全。
             if (evtType === 'response.output_item.done' && sJson.item && sJson.item.type === 'function_call') {
-              var _fcDone = sJson.item;
-              // 按 added 顺序找到对应条目：优先匹配名字，其次取第一个 id 为空的
-              var _fcIdx = -1;
-              for (var _fci = 0; _fci < functionCalls.length; _fci++) {
-                if ((_fcDone.call_id && functionCalls[_fci].id === _fcDone.call_id) || (_fcDone.id && functionCalls[_fci].itemId === _fcDone.id) || (sJson.output_index != null && functionCalls[_fci].outputIndex === sJson.output_index)) { _fcIdx = _fci; break; }
-              }
-              if (_fcIdx < 0) {
-                for (var _fcj = 0; _fcj < functionCalls.length; _fcj++) {
-                  if (!functionCalls[_fcj].id) { _fcIdx = _fcj; break; }
-                }
-              }
-              if (_fcIdx >= 0) {
-                // ★ 2026-09-22：done 事件同样优先取 call_id（详见 added 分支说明）
-                var _fcDoneId = _fcDone.call_id || _fcDone.id || '';
-                if (_fcDoneId && !functionCalls[_fcIdx].id) functionCalls[_fcIdx].id = _fcDoneId;
-                if (_fcDone.id && !functionCalls[_fcIdx].itemId) functionCalls[_fcIdx].itemId = _fcDone.id;
-                if (typeof _fcDone.arguments === 'string' && _fcDone.arguments) functionCalls[_fcIdx].arguments = _fcDone.arguments;
-              }
+              upsertResponseFunctionCall(sJson.item, sJson.output_index);
             }
             // 完成事件
             // ★ 修复（"思考后调工具突然报 AI 调用失败"诊断黑洞）：
@@ -9463,7 +9383,20 @@ async function callDeepSeekViaResponses(messages, options) {
             }
             if (evtType === 'response.completed') {
               if (sJson.response && Array.isArray(sJson.response.output)) {
-                sJson.response.output.forEach(function(item, index) { if (item && item.type === 'reasoning') roundReasoningCollector.add(item, index); });
+                sJson.response.output.forEach(function(item, index) {
+                  roundOutputCollector.add(item, index);
+                  if (item && item.type === 'reasoning') roundReasoningCollector.add(item, index);
+                  if (item && item.type === 'function_call') upsertResponseFunctionCall(item, index);
+                });
+                var completedContent = sJson.response.output.filter(function(item) { return item && item.type === 'message' && item.role === 'assistant'; }).map(function(item) {
+                  return Array.isArray(item.content) ? item.content.filter(function(part) { return part && part.type === 'output_text'; }).map(function(part) { return part.text || ''; }).join('') : typeof item.content === 'string' ? item.content : '';
+                }).join('');
+                if (completedContent) {
+                  if (completedContent.indexOf(content) === 0 && completedContent.length > content.length) {
+                    try { if (hasContentCb) options.onContentChunk(completedContent.slice(content.length)); } catch (_) {}
+                  }
+                  content = completedContent;
+                }
               }
               if (sJson.response && sJson.response.usage) {
                 lastUsage = responsesUsageToInternal(sJson.response.usage);
@@ -9487,11 +9420,11 @@ async function callDeepSeekViaResponses(messages, options) {
           if (rd.done) break;
         }
         try { reader.cancel(); } catch (e) {}
-        if (!roundReasoning) {
-          roundReasoning = roundReasoningItems.map(responsesContext.reasoningText).join('');
-          try { if (hasThinkCb && roundReasoning) options.onThinkingChunk(roundReasoning); } catch (e) {}
+        var completedReasoning = roundReasoningItems.map(responsesContext.reasoningText).join('');
+        if (completedReasoning && completedReasoning.indexOf(roundReasoning) === 0 && completedReasoning.length > roundReasoning.length) {
+          try { if (hasThinkCb) options.onThinkingChunk(completedReasoning.slice(roundReasoning.length)); } catch (_) {}
         }
-        finalReasoning = roundReasoning;
+        if (completedReasoning) roundReasoning = completedReasoning;
       } else {
         // ===== 非流式 =====
         var data = await resp.json().catch(function() { return {}; });
@@ -9506,6 +9439,7 @@ async function callDeepSeekViaResponses(messages, options) {
         if (data.output && Array.isArray(data.output)) {
           for (var oi = 0; oi < data.output.length; oi++) {
             var item = data.output[oi];
+            roundOutputCollector.add(item, oi);
             if (item.type === 'message' && item.role === 'assistant') {
               if (item.content && Array.isArray(item.content)) {
                 for (var ci = 0; ci < item.content.length; ci++) {
@@ -9532,9 +9466,9 @@ async function callDeepSeekViaResponses(messages, options) {
         //   一旦上层关闭流式（或为往返省时走非流式），内容就只留在 finalContent，
         //   前端全程空白。这里统一补齐回调，保证「有内容必达前端」。
         try { if (hasContentCb && content) options.onContentChunk(String(content)); } catch (e) {}
-        try { if (hasThinkCb && roundReasoning) options.onThinkingChunk(String(roundReasoning).slice(0, 4000)); } catch (e) {}
-        finalReasoning = roundReasoning;
+        try { if (hasThinkCb && roundReasoning) options.onThinkingChunk(String(roundReasoning)); } catch (e) {}
       }
+      finalReasoning += roundReasoning;
 
       // 没 function_calls：最终回复
       if (!functionCalls || functionCalls.length === 0) {
@@ -9551,38 +9485,13 @@ async function callDeepSeekViaResponses(messages, options) {
         break;
       }
 
-      // 有 function_calls：执行工具调用
-      // 添加 assistant 消息到 input
-      // ★ 2026-09-22 修复：content 为空串时部分上游实现会直接 400
-      //   （"messages/content must not be empty"）。工具轮里模型只调工具、不说话
-      //   是常态，此时必须回传一个明确的占位而不是空串。
-      var assistantInput = { type: 'message', role: 'assistant', content: (content && String(content).trim()) ? String(content) : '（正在调用工具）' };
-      workingInput.push(assistantInput);
-
-      // ★★ 修复（"AI 调用失败（HTTP 400）" 根因）：
-      //   DeepSeek 规则（见 Thinking Mode 文档「Tool Calls」节）：
-      //     请求带 tools 时，模型产出的 reasoning 必须在**后续每次请求**中
-      //     完整回传，否则 API 返回 400。
-      //   而 deepseek-flash 默认开启思考（effort 默认 high），所以「工作模式 +
-      //   工具」一旦进入第 2 轮，若不回传 reasoning 就会 400 —— 表现为用户
-      //   看到的"AI 调用失败"，且开关工作模式都一样（因为两条路径都挂工具）。
-      //   修复：把本轮收集到的 reasoning 项按 Responses 协议原样回填。
-      // ★ 2026-09-22 修复（反向约束）：上面只保证了"要回传"，但反过来
-      //   —— 本轮若已把 reasoning 关掉（effort:none，例如上一步的 tools+thinking
-      //   冲突降级），再回传 reasoning 项同样是 400（"reasoning 与 effort:none 冲突"）。
-      //   因此这里加一道闸门：思考已关闭时**不再**回填 reasoning，只保留工具上下文。
-      if (useThinking) {
-        if (roundReasoningItems.length) {
-          for (var _rri = 0; _rri < roundReasoningItems.length; _rri++) {
-            var _rItem = roundReasoningItems[_rri];
-            workingInput.push(_rItem);
-          }
-        } else if (roundReasoning) {
-          // 兜底：未能拿到结构化 reasoning 项，但确实有推理文本时，
-          // 以纯文本 reasoning 项回填（协议允许 reasoning 项携带 content）。
-          workingInput.push({ type: 'reasoning', content: [{ type: 'reasoning_text', text: String(roundReasoning) }] });
-        }
-      }
+      // Keep the provider's reasoning, messages and calls in their original
+      // order. A tool-only turn does not need a fabricated assistant message.
+      functionCalls.forEach(function(call,index) {
+        if (!call.id) call.id = 'call_r' + round + '_' + index + '_' + String(call.name || 'tool').replace(/[^a-zA-Z0-9_]/g, '');
+      });
+      var replayItems = responsesContext.replayOutput(roundOutputCollector.values(), roundReasoningItems, functionCalls, content, useThinking);
+      workingInput.push.apply(workingInput, replayItems);
 
       // ★ 修复（"明明在使用工具，却变成了回复内容" / 工具轮间前端空白）：
       //   模型在工具轮次里可能同时产出「说明性叙述」（如"我先算一下…"），
@@ -9660,7 +9569,6 @@ async function callDeepSeekViaResponses(messages, options) {
         var _pairCallId = r.fcId || r.fallbackId;
         // ★ 2026-09-22：同时写 id 与 call_id（值相同），兼容两种上游配对校验实现，
         //   消除"id/call_id 不一致导致回传 400"的间歇性失败。
-        workingInput.push({ type: 'function_call', id: r.fcItemId || _pairCallId, call_id: _pairCallId, name: r.fcName, arguments: r.fcArgs || '{}' });
         workingInput.push({ type: 'function_call_output', call_id: _pairCallId, output: toolContent });
       });
     }
@@ -10505,7 +10413,7 @@ async function runDeepThinkWorker(opts) {
   }
 
   var searchHint = needSearch
-    ? '**本任务需要搜索**: 请调用 search_web 工具获取最新/具体数据 (1-3 次足够, 别刷屏)'
+    ? '**本任务需要搜索**: 调用 search_web 获取具体证据，按关键事实、原始出处和分歧继续核实，证据充分后停止。'
     : '**本任务不需要搜索**: 直接基于你的知识回答, 别调用 search_web 浪费 token';
 
   var workerSystemPrompt = sharedPrefix + '\n\n---\n\n你是 XTJ 深度研究模式下的 [' + agent.role + '] 专家.\n' +
@@ -10517,7 +10425,7 @@ async function runDeepThinkWorker(opts) {
     (workerHistoryContext || '') + '\n\n' +
     searchHint + '\n\n' +
     '执行规则 (务必精炼, 不要废话):\n' +
-    '1. ' + (needSearch ? '最多搜 2 次, 关键词要不同角度, 别反复搜同样的' : '**不调用** search_web, 直接基于知识回答') + '\n' +
+    '1. ' + (needSearch ? '按证据缺口改进关键词、读取原文或寻找独立来源；遵守本轮共享检索预算，禁止重复无效查询' : '**不调用** search_web, 直接基于知识回答') + '\n' +
     '2. 产出 200-800 字的本方面深入分析 (深度挖掘, 充分展开)\n' +
     '3. 输出结构: 【结论】→【关键依据】→【深入分析】→【不确定点】\n' +
     '4. 只关注本方面 (' + agent.role + '), 不要涉及其他 agent 的领域\n' +
@@ -23786,8 +23694,8 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, rateLimit
           // 已关闭思考时不要再提示「请关闭思考」
           // ★ 遗留 2：优先用 provider 的具体错误说明判定原因，比猜状态码准得多。
           var _pm = String((e && e.providerMessage) || '');
-          if (/tool|function/i.test(_pm) && /reason|think/i.test(_pm)) {
-            _friendly = '工具与思考模式冲突，已自动降级重试仍失败，请关闭思考模式后重试';
+          if (/reasoning_text|passed back/i.test(_pm) || /tool|function/i.test(_pm) && /reason|think/i.test(_pm)) {
+            _friendly = '模型的工具续写请求被拒绝，请重试；若持续出现请联系管理员';
           } else if (/token|length|context/i.test(_pm)) {
             _friendly = '对话内容超过模型上限，请缩短问题或新开对话后重试';
           } else {

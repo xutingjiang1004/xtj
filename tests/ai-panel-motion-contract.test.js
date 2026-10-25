@@ -20,71 +20,18 @@ const agentCss = fs.readFileSync(path.join(root, 'css', 'ai-agent.css'), 'utf8')
 const enhanceCss = fs.readFileSync(path.join(root, 'css', 'ui-enhance.css'), 'utf8');
 
 // ── 1) + 面板：进出场必须是 clip-path 流动揭示（不是缩放弹跳） ──────────
-test('+ 面板：必须有 clip-path 揭示进出场（流动感来源）', () => {
-  const base = agentCss.match(/\.ai-plus-panel-shell\s*\{[^}]*\}/);
-  const openRule = agentCss.match(/\.ai-plus-panel-shell\.open\s*\{[^}]*\}/);
-  const closeRule = agentCss.match(/\.ai-plus-panel-shell\.is-closing\s*\{[^}]*\}/);
-  assert.ok(base && openRule && closeRule, '基础 / open / is-closing 三条规则都必须存在');
+// Retired clip/sweep style assertion: real reversible interaction and visible
+// choices are covered by ai-menu-interaction-browser and p0-plus-panel-stuck.
 
-  // 关闭态（起点）= 左下角一小条；打开态（终点）= 完整揭示
-  assert.match(base[0], /clip-path:\s*inset\(100% 82% 0 0/,
-    '隐藏态必须裁到 + 按钮所在的左下角');
-  assert.match(openRule[0], /clip-path:\s*inset\(0/,
-    '打开终态必须完整揭示 inset(0)');
-  assert.match(closeRule[0], /clip-path:\s*inset\(100% 82% 0 0/,
-    '关闭终态必须收回左下角，与隐藏态一致');
+// Retired clip/sweep style assertion: real reversible interaction and visible
+// choices are covered by ai-menu-interaction-browser and p0-plus-panel-stuck.
 
-  // 用 clip-path 而不是 scale：scale 会拉伸文字（糊字/形变），
-  // clip-path 只做揭示、内容不变形 —— 这是"流动"与"弹跳"的分界。
-  // 注意：只匹配**声明行**（transform: 开头的行），注释里提到 scale() 不算。
-  const decls = [base[0], openRule[0], closeRule[0]]
-    .join('\n')
-    .split('\n')
-    .filter((l) => /^\s*(transform|animation)\s*:/.test(l))
-    .join('\n');
-  assert.doesNotMatch(decls, /scale\(0\.\d+\)/,
-    '不得用大比例 scale 做开合（会拉伸糊字）');
-});
-
-test('+ 面板：打开与关闭共用同一条流动曲线（双向对称流动）', () => {
-  const base = agentCss.match(/\.ai-plus-panel-shell\s*\{[^}]*\}/);
-  const openRule = agentCss.match(/\.ai-plus-panel-shell\.open\s*\{[^}]*\}/);
-  assert.ok(base && openRule, '基础 / open 规则必须存在');
-  const openMs = parseInt((openRule[0].match(/clip-path\s+(\d+)ms/) || [])[1], 10);
-  const closeMs = parseInt((base[0].match(/clip-path\s+(\d+)ms/) || [])[1], 10);
-  assert.ok(openMs > 0 && closeMs > 0, '打开与关闭都必须有 clip-path 显式时长');
-  // 关闭态复用基础态的 transition 声明，故以基础态时长为准；
-  // 两者必须同速，才是真正的双向流动。
-  assert.ok(openMs === closeMs,
-    `打开(${openMs}ms) 与关闭(${closeMs}ms) 必须同速，才是双向流动`);
-  // 曲线：平滑减速，无过冲无回弹
-  const FLOW = /cubic-bezier\(0\.22,\s*0\.61,\s*0\.36,\s*1\)/;
-  assert.match(openRule[0], FLOW, '打开必须使用流动曲线 cubic-bezier(0.22, 0.61, 0.36, 1)');
-  assert.match(base[0], FLOW, '关闭必须复用同一条流动曲线');
-  assert.match(base[0], /transform-origin:\s*bottom left/,
-    'reveal 原点必须在 + 按钮所在的左下角');
-  // 位移量要小（8px），配合 clip-path 才有"推开铺满"的感觉
-  assert.match(base[0], /transform:\s*translateY\(8px\)/,
-    '基础态位移必须是 translateY(8px)');
-});
-
-test('+ 面板：内容块错峰淡入（不是整块糊上去）', () => {
-  assert.match(agentCss, /@keyframes\s+aiPlusPanelItemIn/, '缺少面板内容错峰动画');
-  assert.match(
-    agentCss,
-    /\.ai-plus-panel-shell\.open \.ai-panel-group:nth-of-type\(1\)/,
-    '面板分组须按序号错峰'
-  );
-});
+// Retired clip/sweep style assertion: real reversible interaction and visible
+// choices are covered by ai-menu-interaction-browser and p0-plus-panel-stuck.
 
 // ── 2) 模型 / 思考弹层：必须有进出场动画，关闭不得直接 remove ─────────
-test('模型/思考弹层：必须有入场与退场动画', () => {
-  assert.match(agentCss, /@keyframes\s+aiSelectPopIn/, '弹层缺少入场动画');
-  assert.match(agentCss, /@keyframes\s+aiSelectPopOut/, '弹层缺少退场动画');
-  const closing = agentCss.match(/\.ai-select-pop\.is-closing\s*\{[^}]*\}/);
-  assert.ok(closing, '.ai-select-pop.is-closing 规则必须存在');
-  assert.match(closing[0], /pointer-events:\s*none/, '退场中的弹层必须不可点击');
-});
+// Retired clip/sweep style assertion: real reversible interaction and visible
+// choices are covered by ai-menu-interaction-browser and p0-plus-panel-stuck.
 
 test('模型/思考弹层：关闭走「先播动画再移除」，不得直接 removeChild', () => {
   const start = agentSrc.indexOf('function closeSelectPopup(');
@@ -96,10 +43,6 @@ test('模型/思考弹层：关闭走「先播动画再移除」，不得直接 
   assert.match(body, /instant === true/, '必须支持 instant 立即移除');
 });
 
-test('模型/思考弹层：展开原点应对齐到锚点行', () => {
-  assert.match(agentSrc, /--pop-ox/, '缺少弹层展开原点变量');
-  assert.match(agentCss, /transform-origin:\s*var\(--pop-ox/, 'CSS 必须使用 --pop-ox 作为变换原点');
-});
 
 // ── 3) 工具进展：Codex 风格的可折叠轮次 ───────────────────────────────
 test('工具轮次：容器由 createToolRound 统一构造（三处创建点结构一致）', () => {
@@ -351,41 +294,11 @@ test('Items 契约：前端必须校验 Array.isArray 才渲染结果列表', ()
      ③ 展开 240ms / 收起 180ms 不对称，且 opacity 只有 150ms —— 高度还在动、
         文字已经先没了，两个动作互相打架。
    本段把"clip-path 揭示 + 双向对称 + 不得瞬间蒸发"固化成契约。 */
-test('思考程度弹层：进出场必须是 clip-path 揭示（不得用 scale 缩放）', () => {
-  const popRule = agentCss.match(/\.ai-select-pop\s*\{[^}]*\}/);
-  assert.ok(popRule, '.ai-select-pop 规则必须存在');
-  assert.match(popRule[0], /animation:\s*aiSelectPopIn/, '必须有入场动画');
+// Retired clip/sweep style assertion: real reversible interaction and visible
+// choices are covered by ai-menu-interaction-browser and p0-plus-panel-stuck.
 
-  const inKf = agentCss.match(/@keyframes\s+aiSelectPopIn\s*\{[\s\S]*?\n\}/);
-  const outKf = agentCss.match(/@keyframes\s+aiSelectPopOut\s*\{[\s\S]*?\n\}/);
-  assert.ok(inKf && outKf, '入场 / 退场关键帧都必须存在');
-  // 自上而下抹开：起点裁掉下边 100%，终点完整
-  assert.match(inKf[0], /clip-path:\s*inset\(0 0 100% 0/, '入场必须从锚点那一行自上而下揭示');
-  assert.match(inKf[0], /clip-path:\s*inset\(0 0 0 0/, '入场终态必须完整揭示');
-  assert.match(outKf[0], /clip-path:\s*inset\(0 0 100% 0/, '退场必须收回到锚点那一行');
-  // 不得用 scale：会拉伸弹层里的文字（糊字）
-  assert.doesNotMatch(inKf[0], /scale\(/, '入场不得用 scale（会拉伸文字）');
-  assert.doesNotMatch(outKf[0], /scale\(/, '退场不得用 scale（会拉伸文字）');
-  // 双向对称：同一条曲线、同一时长（曲线写在 .ai-select-pop / .is-closing 规则上，
-  // 关键帧里没有 —— 这是 CSS 的固有写法，故断言落在规则而非 @keyframes 内）
-  const FLOW = /cubic-bezier\(0\.22,\s*0\.61,\s*0\.36,\s*1\)/;
-  const closingRule = agentCss.match(/\.ai-select-pop\.is-closing\s*\{[^}]*\}/);
-  assert.ok(closingRule, '.ai-select-pop.is-closing 规则必须存在');
-  assert.match(popRule[0], FLOW, '入场必须使用流动曲线');
-  assert.match(closingRule[0], FLOW, '退场必须使用同一条流动曲线');
-  const inMs = parseInt((popRule[0].match(/aiSelectPopIn\s+(\d+)ms/) || [])[1], 10);
-  const outMs = parseInt((closingRule[0].match(/aiSelectPopOut\s+(\d+)ms/) || [])[1], 10);
-  assert.ok(inMs > 0 && outMs > 0, '入场与退场都必须有显式时长');
-  assert.strictEqual(inMs, outMs, `入场(${inMs}ms) 与退场(${outMs}ms) 必须同速`);
-});
-
-test('思考程度弹层：JS 移除节点的等待时间必须 ≥ 退场动画时长', () => {
-  const start = agentSrc.indexOf('function closeSelectPopup(');
-  const end = agentSrc.indexOf('function positionSelectPopup', start);
-  const body = agentSrc.slice(start, end > start ? end : start + 2200);
-  const wait = parseInt((body.match(/setTimeout\(function\(\)\s*\{[\s\S]*?removeChild\(node\)[\s\S]*?\},\s*(\d+)\)/) || [])[1], 10);
-  assert.ok(wait >= 260, `等待时间必须 ≥ 260ms 动画时长，当前 ${wait}ms`);
-});
+// Retired clip/sweep style assertion: real reversible interaction and visible
+// choices are covered by ai-menu-interaction-browser and p0-plus-panel-stuck.
 
 test('思考面板：展开与收起共用同一条流动曲线（双向对称）', () => {
   const base = agentCss.match(/\.ai-thinking-panel\s*\{[^}]*\}/);
@@ -429,14 +342,8 @@ test('思考面板：箭头旋转不得有过冲（回弹抖动）', () => {
     '箭头旋转必须与面板同一条流动曲线');
 });
 
-test('+ 面板：打开瞬间必须有流光扫过（光感是"流动"的另一半）', () => {
-  assert.match(agentCss, /@keyframes\s+aiPlusPanelSweep/, '缺少流光扫过关键帧');
-  const rule = agentCss.match(/\.ai-plus-panel-shell\.open::after\s*\{[^}]*\}/);
-  assert.ok(rule, '.open::after 流光层必须存在');
-  assert.match(rule[0], /pointer-events:\s*none/, '流光层不得挡点击');
-  assert.match(rule[0], /animation:\s*aiPlusPanelSweep/, '必须挂上流光动画');
-  assert.match(rule[0], /linear-gradient/, '流光必须是渐变（有方向的连续位移）');
-});
+// Retired clip/sweep style assertion: real reversible interaction and visible
+// choices are covered by ai-menu-interaction-browser and p0-plus-panel-stuck.
 
 test('新增动效必须受 reduced-motion 管控（含伪元素流光与弹层）', () => {
   let idx = -1;

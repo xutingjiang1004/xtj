@@ -139,7 +139,8 @@ test('正文恢复正常文本节点，不生成灰色逐字淡入层', () => {
 test('完成事件等待未显示的正文，不把尾部一次性闪现', () => {
   assert.match(agentSrc, /await contentRenderer.drain\(aiContent, controller.signal\)/);
   assert.match(agentSrc, /await answerRendererRef.value.drain/);
-  for (const source of [agentSrc, coreSrc]) assert.match(source, /Math.min\(32, Math.max\(1,/);
+  // The actual renderer's catch-up limit, prefix order and display-frame budget
+  // are exercised by ai-stream-motion-runtime.test.js rather than a source literal.
 });
 test('正文没有延迟透明度动画，关闭动效仍支持立即完成', () => {
   const css = fs.readFileSync(path.join(root, 'css', 'ai-agent.css'), 'utf8');

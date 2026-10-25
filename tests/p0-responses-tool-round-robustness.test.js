@@ -29,65 +29,24 @@ test('P0：function_call 必须归并 output_item.done 的 id（空 id 回传会
   );
 });
 
-test('P0：function_call_output 回传时空 id 必须有确定性占位兜底', () => {
-  assert.match(
-    body,
-    /var _pairCallId = r\.fcId \|\| r\.fallbackId/,
-    'id 缺失时回落到确定性占位，保证 function_call 与 function_call_output 配对非空'
-  );
-  // ★ 2026-09-22：占位 id 必须在 map 内部生成（旧实现在 forEach 里引用 map 的形参 fi，
-  //   作用域外不存在 → 空 id 时抛 ReferenceError，整轮工具被吞成「AI 调用失败」）
-  assert.match(
-    body,
-    /var fallbackId = 'call_r'/,
-    'fallbackId 必须在 Promise.all 的 map 回调内生成并随结果返回'
-  );
-  assert.doesNotMatch(
-    body,
-    /r\.fcId \|\| \('call_r' \+ round \+ '_' \+ r\.fcName \+ '_' \+ fi\)/,
-    '不得在 forEach 作用域内引用 map 的形参 fi（ReferenceError 隐患）'
-  );
-  // ★ 2026-09-22：function_call 回传必须同时写 id 与 call_id，兼容两种上游配对校验
-  assert.match(
-    body,
-    /type: 'function_call', id: r\.fcItemId \|\| _pairCallId, call_id: _pairCallId/,
-    'function_call 项必须同时携带 id 与 call_id（值相同），消除 id/call_id 不一致的 400'
-  );
-});
 
-test('P0：工具轮回填 assistant 消息时不得写入空 content（上游 400）', () => {
-  assert.match(
-    body,
-    /content: \(content && String\(content\)\.trim\(\)\) \? String\(content\) : '（正在调用工具）'/,
-    '模型"只调工具不说话"时必须回传明确占位，而不是空串'
-  );
-});
 
 test('P0：思考已关闭时不得再回填 reasoning 项（effort:none 与 reasoning 冲突会 400）', () => {
-  assert.match(
-    body,
-    /if \(useThinking\) \{\s*\n\s*if \(roundReasoningItems\.length\)/,
-    'reasoning 回填必须受 useThinking 闸门保护'
-  );
+  const {replayOutput}=require('../render-api/responses-context');
+  const reasoning={type:'reasoning',id:'r',content:[{type:'reasoning_text',text:'原始推理'}]};
+  const call={id:'call-one',itemId:'item-one',name:'lookup',arguments:'{}'};
+  const input=replayOutput([reasoning,{type:'function_call',id:'item-one',call_id:'call-one'}],[reasoning],[call],'',false);
+  assert.deepEqual(input.map(item=>item.type),['function_call']);assert.equal(input[0].call_id,'call-one');
 });
 
-test('P0：任何 400 都要按轮次做一次安全重试（剥离 reasoning + 补齐空 content）', () => {
-  assert.match(
-    body,
-    /resp\.status === 400 && !_safe400RetryDone\['r' \+ round\]/,
-    '400 重试必须按轮次记账，长工具链每轮都有自救机会'
-  );
-  const seg = body.slice(body.indexOf("resp.status === 400 && !_safe400RetryDone"), body.indexOf("resp.status === 400 && !_safe400RetryDone") + 1600);
-  assert.match(seg, /_strippedInput/, '安全重试必须剥离 input 中的 reasoning 项');
-  assert.match(seg, /effort: 'none'/, '安全重试必须关闭 reasoning');
-});
-
-test('P0：tools+thinking 被上游 400 拒绝时，降级重试必须同时剥离 reasoning 项', () => {
-  const retryIdx = body.indexOf('__toolsThinkingFallbackDone = true');
-  assert.ok(retryIdx > 0, '必须存在降级重试逻辑');
-  const retrySeg = body.slice(retryIdx, retryIdx + 800);
-  assert.match(retrySeg, /_strippedInput/, '重试请求必须剥离 input 中的 reasoning 项');
-  assert.match(retrySeg, /effort: 'none'/, '重试必须关闭 reasoning');
+test('P0：工具轮回传保持推理与调用顺序，不插入虚构的助手正文', () => {
+  const {replayOutput}=require('../render-api/responses-context');
+  const raw={type:'reasoning',id:'r',content:[{type:'reasoning_text',text:'完整原文'}],encrypted_content:'opaque'};
+  const call={id:'c',itemId:'i',name:'lookup',arguments:'{}'};
+  const input=replayOutput([raw,{type:'function_call',id:'i',call_id:'c'}],[raw],[call],'',true);
+  assert.deepEqual(input.map(item=>item.type),['reasoning','function_call']);assert.deepEqual(input[0],raw);
+  // Actual HTTP 400 behavior, including exact request and execution counts,
+  // is covered by ai-responses-context.test.js with the real tool-loop function.
 });
 
 test('P0：HTTP 5xx 与网络异常必须有一次自动重试', () => {
