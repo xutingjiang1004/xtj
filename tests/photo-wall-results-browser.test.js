@@ -8,7 +8,8 @@ async function wall(f,read=()=>[]){
  await f.page.locator('[data-desktop-tab="ai"], [data-tab="ai"]').filter({visible:true}).first().click();
  await f.page.waitForFunction(()=>typeof window.triggerPhotoWallUpload==='function'&&typeof window.renderPhotoWallWithoutReload==='function'&&!document.querySelector('#photoGrid .pw-wall-loading'));
  // The fixture bypasses the native file chooser; let the existing navigation transition finish first.
- await f.page.waitForTimeout(350);
+ await f.page.waitForFunction(()=>{const panel=document.getElementById('panelAi');return panel&&!panel.getAnimations().some(animation=>animation.pending||animation.playState==='running');});
+ await f.page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
 }
 for(const stage of ['request','body','malformed','missing_data'])test('create '+stage+' failure stays confirmable and retains the original for status retry',async t=>{
  const f=await postBrowserFixture({counts:[1]});t.after(()=>f.close());const p=f.page;await wall(f);

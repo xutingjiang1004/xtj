@@ -255,6 +255,9 @@ test('terminal reasoning after tools and its real duration survive completion an
  const f=await fixture(t),p=f.page;await send(p,'核对福州的天气');
  await emit(p,0,{type:'reasoning_start'});await emit(p,0,{type:'tool_calls',tools:[{id:'weather-final',name:'get_weather',args:{location:'福州'}}]});await emit(p,0,{type:'tool_result',call_id:'weather-final',tool_name:'get_weather',success:true,summary:'已取得天气'});
  await finish(p,0,'## 天气核对\n\n已核对地点与数据时间。',{reasoning:'我先核对地点，再检查天气数据的更新时间。',thinking_mode:'low',thinking_elapsed_ms:4200});
+ // Enqueuing done does not complete the queued body animation. Assert the
+ // terminal message only after the real send lifecycle has finalized it.
+ await p.waitForFunction(()=>{const n=document.querySelector('.ai-msg.assistant');return n&&!n.classList.contains('generating')&&n._msgRef;});
  await p.getByRole('button',{name:'思考过程',exact:true}).click();assert.match(await p.locator('.ai-thinking-body').textContent(),/我先核对地点/);assert.equal(await p.locator('.ai-thinking-label').textContent(),'已思考 4s');
  await capture(p,'phone-terminal-thinking-restored','#aiChatRoot');
  await p.evaluate(()=>{const saved=JSON.parse(JSON.stringify(document.querySelector('.ai-msg.assistant')._msgRef));__xtjAiAgent.close();const base=fetch;window.fetch=(url,opts)=>new URL(url,location.href).pathname==='/api/agent/chat/history'?Promise.resolve(new Response(JSON.stringify({ok:true,conversation_id:'POLISH01',messages:[saved],has_more:false}),{headers:{'Content-Type':'application/json'}})):base(url,opts);__xtjAiAgent.open();});
