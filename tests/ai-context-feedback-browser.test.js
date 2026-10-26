@@ -35,10 +35,36 @@ test('a delayed optional quota refresh cannot delay dispatch or the first real r
  try{
   await p.evaluate(()=>{const previous=fetch,realNow=Date.now;Date.now=()=>realNow()+121000;window.fetch=(url,opts)=>new URL(url,location.href).pathname.endsWith('/quota')?new Promise(resolve=>{window.releaseDelayedQuota=()=>resolve(new Response(JSON.stringify({ok:true,quota:{can_chat:true,tokens_remaining:100000,can_search:true,search_remaining:10}}),{headers:{'Content-Type':'application/json'}}));}):previous(url,opts);document.getElementById('aiChatMsgInput').value='直接显示收到的思考';document.getElementById('aiChatSendBtn').click();});
   await p.waitForFunction(()=>aiPolish.streams.length===1);assert.equal(await p.evaluate(()=>typeof releaseDelayedQuota),'function');
-  await frames(p);const label=p.locator('.ai-msg.assistant .ai-thinking-label');assert.match(await label.textContent(),/等待模型/);assert.equal(await label.isVisible(),true);
-  await emit(p,{type:'reasoning_start',early:true,phase:'preparing'});assert.equal(await p.locator('.ai-msg.assistant .ai-thinking.is-thinking').count(),0);
+  await frames(p);const label=p.locator('.ai-msg.assistant .ai-thinking-label');assert.equal(await label.textContent(),'正在思考中');assert.equal(await label.isVisible(),true);
+  await emit(p,{type:'reasoning_start',early:true,phase:'preparing'});assert.equal(await p.locator('.ai-msg.assistant .ai-thinking.is-thinking').count(),1);
+  assert.equal(await label.textContent(),'正在思考中');
   await emit(p,{type:'reasoning',text:'真实思考首段。'});await frames(p);assert.equal(await p.locator('.ai-reasoning-segment').textContent(),'真实思考首段。');assert.match(await label.textContent(),/正在思考/);
   await p.evaluate(()=>releaseDelayedQuota());await emit(p,{type:'done',content:'实际回复。',reasoning:'真实思考首段。',thinking_elapsed_ms:10,thinking_mode:'max',complete:true,saved:true});assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
+
+test('low thinking shows its original immediate feedback through slow auth and stops cleanly before reasoning',{timeout:30000},async()=>{
+ const f=await aiPolishFixture(),p=f.page;
+ try{
+  await p.locator('#aiPlusBtn').click();await p.locator('[data-action="open-think"]').click();
+  await p.locator('#aiSelectPopup [role="option"][data-value="low"]').click();
+  await p.locator('#aiSelectPopup').waitFor({state:'detached'});
+  await p.evaluate(()=>{
+   const original=window.ensureUserToken;
+   window.ensureUserToken=()=>new Promise(resolve=>{window.releaseThinkingAuth=()=>original().then(resolve);});
+   document.getElementById('aiChatMsgInput').value='检查即时思考反馈';document.getElementById('aiChatSendBtn').click();
+  });
+  const label=p.locator('.ai-msg.assistant .ai-thinking-label');await label.waitFor({state:'visible'});
+  assert.equal(await label.textContent(),'正在思考中');
+  assert.equal(await p.locator('.ai-msg.assistant .ai-thinking.is-thinking').count(),1);
+  assert.equal(await p.locator('.ai-msg.assistant .ai-thinking-body').textContent(),'');
+  assert.equal(await p.evaluate(()=>aiPolish.streams.length),0);
+  assert.equal(await p.evaluate(()=>typeof releaseThinkingAuth),'function');
+  await p.locator('#aiChatPauseBtn').click();
+  await p.evaluate(()=>releaseThinkingAuth());await frames(p);
+  assert.equal(await p.evaluate(()=>aiPolish.streams.length),0);
+  assert.equal(await p.locator('.ai-msg.assistant .ai-thinking.is-thinking').count(),0);
+  assert.deepEqual(f.errors,[]);
  }finally{await f.close();}
 });
 for(const touch of [false,true])test((touch?'touch':'pointer')+' thinking detents preview horizontally and apply one model-native effort at release',{timeout:30000},async()=>{

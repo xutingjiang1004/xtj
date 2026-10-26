@@ -9512,9 +9512,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         // 发送后立刻展示思考节点，并默认展开，保证流式思考过程可见
         var earlyRn = buildReasoningNode('', messagesEl);
         var earlyLabel = earlyRn.querySelector('.ai-thinking-label');
-        if (earlyLabel) earlyLabel.textContent = '准备发送…';
+        if (earlyLabel) earlyLabel.textContent = '正在思考中';
         earlyRn.dataset.phase = 'preparing';
-        earlyRn.classList.add('is-preparing');
+        earlyRn.classList.add('is-thinking');
         setThinkingExpanded(earlyRn, true, messagesEl);
         assistantNode.insertBefore(earlyRn, assistantNode.firstChild);
         _earlyThinkingShown = true;
@@ -9669,7 +9669,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     if ((sendToken !== S.sendSeq || !customModelIdentityCurrent(sendIdentity)) || (S._currentReqId !== reqId || !customModelIdentityCurrent(sendIdentity)) || !S.active || controller.signal.aborted) return;
     var headers = auth.headers || {};
     var waitingThinking = assistantNode.querySelector('.ai-thinking[data-phase]');
-    if (waitingThinking) { waitingThinking.dataset.phase = 'waiting'; setThinkingStatus(waitingThinking,'等待模型思考…'); }
+    if (waitingThinking) { waitingThinking.dataset.phase = 'waiting'; setThinkingStatus(waitingThinking,'正在思考中'); }
     var fetchBody;
     if (isCustomModel && customCfg) {
       // ★ 思考Max 上下文拼装：开启时尽量保留全部上下文不压缩（榨干性能）；
@@ -11334,7 +11334,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           
           if (evt.type === 'reasoning_start' && (evt.early || evt.phase === 'preparing' || evt.phase === 'waiting')) {
             var waitingNode = assistantNode.querySelector('.ai-thinking[data-phase]');
-            if (waitingNode && !aiContent) { waitingNode.dataset.phase = 'waiting'; setThinkingStatus(waitingNode,'等待模型思考…'); }
+            if (waitingNode && !aiContent) { waitingNode.dataset.phase = 'waiting'; setThinkingStatus(waitingNode,'正在思考中'); }
             continue;
           }
           if (evt.type === 'reasoning_start' && !reasoningStarted) {
