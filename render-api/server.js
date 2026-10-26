@@ -19259,6 +19259,13 @@ async function guestAiAuth(req, res, next) {
   req.accountId = '';
   return next();
 }
+// ★ 2026-10-27 限时公开：OpenRouter 免费模型在公开期内对未登录游客开放。
+//   仅当请求明确指向该托管模型（X-XTJ-Model-Uid 头）时才允许匿名放行；
+//   其他第三方（BYOK）模型仍必须登录，避免本站变成任意地址的开放代理。
+//   到期后 openRouter.publicWindowOpen() 变 false，此中间件自动回落到 authenticateUser。
+const guestOpenRouterAuth = openRouter.createGuestOpenRouterAuth({ authenticateUser });
+// 模型目录只读接口：公开期内允许匿名读取（目录本身不含任何密钥，过期后自动回落登录）。
+const guestOpenRouterCatalogAuth = openRouter.createGuestOpenRouterAuth({ authenticateUser, allowAnonymous: true });
 const guestAiHourlyLimiter = rateLimit(3600000, GUEST_AI_HOURLY_LIMIT);
 var guestAiDayCounter = { key: '', count: 0 };
 function guestAiAdmission(req, res, next) {
@@ -21712,7 +21719,7 @@ app.post('/api/agent/chat', authenticateUser, aiChatConcurrencyGate, rateLimit(3
 //     后服务端执行并把结果回喂模型继续推理（多轮，最多 CUSTOM_TOOL_MAX_ROUNDS 轮），
 //     同时推送 tool_calls/tool_pending/tool_result/tool_error SSE 供前端展示时间线。
 //     上游不支持 function calling（400/404/422）时自动回退为不带工具重试。
-app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGate, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), express.json({ limit: '80mb' }), aiRequestMiddleware, resolveAiModelReference, async (req, res) => {
+app.post('/api/agent/custom-chat/stream', guestOpenRouterAuth, aiChatConcurrencyGate, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), express.json({ limit: '80mb' }), aiRequestMiddleware, resolveAiModelReference, async (req, res) => {
   var customStartedAt = Date.now(), customTurnFinished = false;
   var aborted = false;
   var _heartbeatTimer = null;
@@ -21777,7 +21784,10 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
   var _customUpstreamUsed = false;
   var finalAssistantContent = '';
   var customUsage = {prompt_tokens:0,completion_tokens:0,total_tokens:0},customUsageReported=false;
-  if (req.userName && req.userName !== ADMIN_USERNAME) {
+  // ★ 2026-10-27 限时公开 + 无限免费：站长公开的 OpenRouter 免费模型对所有用户
+  //   （含未登录游客）完全免费 —— 不走 token 日额度门禁、也不落账扣 token。
+  //   免费模型走 freeOnly 路径（禁用全部付费搜索 provider），仅使用免费搜索源。
+  if (req.userName && req.userName !== ADMIN_USERNAME && provider !== 'openrouter') {
     var customGate = await enforceAiChatAccess(req.userName, { needSearch: false });
     if (!customGate.allowed) {
       writeSse(res, { type: 'error', error: getAiQuotaErrorMessage(customGate.reason || 'rate_limited'), code: customGate.reason || 'rate_limited' });
@@ -22297,7 +22307,8 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
     // ★ S6 审计修复：正常完成 / 中断 / 失败路径统一记账。
     //   search_count 取自 toolContext.searchConsumed —— 与门禁 measureSearchQuota
     //   同一计数源，因此落账后 search_used 才会真正增长，第三方搜索额度才有效。
-    if ((_customGatePassed || _customUpstreamUsed) && req.userName) {
+    // ★ 2026-10-27 限时公开：OpenRouter 免费模型不落账（无限免费）。
+    if ((_customGatePassed || _customUpstreamUsed) && req.userName && provider !== 'openrouter') {
       try {
         await recordAiTurnUsage(req.userName, Object.assign({model:chosenModel},customUsage), {
           model: chosenModel,
@@ -22327,7 +22338,7 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
 //   meta / deep_think_init / deep_think_stage / deep_think_planned / deep_think_tool /
 //   thinking_chunk{agent_role} / answer_chunk / content / done{agent_count,sources,search_count} / error
 // ─────────────────────────────────────────────────────────────
-app.post('/api/agent/custom-chat/deep-stream', authenticateUser, aiChatConcurrencyGate, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), express.json({ limit: '80mb' }), aiRequestMiddleware, resolveAiModelReference, async (req, res) => {
+app.post('/api/agent/custom-chat/deep-stream', guestOpenRouterAuth, aiChatConcurrencyGate, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), express.json({ limit: '80mb' }), aiRequestMiddleware, resolveAiModelReference, async (req, res) => {
   var aborted = false;
   var _heartbeatTimer = null;
   function clearHeartbeat() { if (_heartbeatTimer) { try { clearInterval(_heartbeatTimer); } catch (_) {} _heartbeatTimer = null; } }
@@ -22549,7 +22560,7 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, aiChatConcurren
     //   「任何一次 callCustomChat 已发生」的情况。这里补一个独立的产出标志，
     //   与 gate 标志取或，确保只要产生了内容就一定记账。
     var _customDeepUpstreamUsed = false;
-    if (req.userName && req.userName !== ADMIN_USERNAME) {
+    if (req.userName && req.userName !== ADMIN_USERNAME && provider !== 'openrouter') {
       var customDeepGate = await enforceAiChatAccess(req.userName, { needSearch: false });
       if (!customDeepGate.allowed) {
         sseSend({ type: 'error', error: getAiQuotaErrorMessage(customDeepGate.reason || 'rate_limited'), code: customDeepGate.reason || 'rate_limited' });
@@ -22691,7 +22702,7 @@ app.post('/api/agent/custom-chat/deep-stream', authenticateUser, aiChatConcurren
       marker:AI_AGENT_MESSAGE_MARKER,buildMeta:buildMsgMeta,requestId:body.client_request_id,visionUrls:customDeepUserExtra.vision_urls,attachmentContext:customDeepUserExtra.attachment_context});
     // ★ S6 审计修复：结束时统一记账（正常完成/中断/失败路径都覆盖），
     //   把本请求实际发起的搜索次数与估算 token 落入 ai 配额，杜绝"断开免单/永不落账"
-    if ((_customDeepGatePassed || _customDeepUpstreamUsed) && req.userName) {
+    if ((_customDeepGatePassed || _customDeepUpstreamUsed) && req.userName && provider !== 'openrouter') {
       try {
         await recordAiTurnUsage(req.userName, { model: chosenModel }, {
           model: chosenModel,
@@ -22815,9 +22826,15 @@ function cleanDeletedUidList(input) {
   return out;
 }
 // GET /api/agent/custom-models - 读取当前账号的自定义模型（只返回无密钥引用）
-app.get('/api/agent/custom-models', authenticateUser, rateLimit(60000, 60), async (req, res) => {
+// ★ 2026-10-27 限时公开：公开期内允许未登录游客读取目录（仅含 OpenRouter 托管模型，
+//   不含任何个人模型与密钥）；到期后自动回落到 authenticateUser。
+app.get('/api/agent/custom-models', guestOpenRouterCatalogAuth, rateLimit(60000, 60), async (req, res) => {
   res.setHeader('Cache-Control','no-store');
   var serverModels = openRouter.catalog(req.userName, ADMIN_USERNAME);
+  // 游客没有账号快照：只返回托管目录，个人模型一律为空。
+  if (!req.userName) {
+    return res.json({ ok: true, models: [], server_models: serverModels, deleted_uids: [], ai_prefs: {} });
+  }
   try {
     // ★ 2026-09-24 修复（课题②「删除的模型自动复活」）：
     //   原实现拉取最近 20 行快照并按 uid 逐行合并，最新行里没有的 uid 只要在任意旧行存在
@@ -25987,7 +26004,9 @@ async function runSelfResearchFlow(opts) {
   } finally { if (researchCustomModel && researchCustomModel.provider === 'openrouter') flowAbortCtrl.abort(); clearFlowWallTimer(); if (checkpointHeartbeat) clearInterval(checkpointHeartbeat); if (cancelToken._onSubCancel === flowCancelHandler) delete cancelToken._onSubCancel; }
 }
 
-require('./ai-model-capabilities').installModelCapabilities(app, {resolveReference:resolveAiModelReference,ownerName:ADMIN_USERNAME,authenticateUser:authenticateUser,rateLimit:rateLimit,gate:enforceAiChatAccess,record:recordAiTurnUsage});
+// ★ 2026-10-27 限时公开：能力检测接口在公开期内允许游客检测 OpenRouter 托管免费模型
+//   （其他第三方 BYOK 模型仍要求登录）。
+require('./ai-model-capabilities').installModelCapabilities(app, {resolveReference:resolveAiModelReference,ownerName:ADMIN_USERNAME,authenticateUser:guestOpenRouterAuth,rateLimit:rateLimit,gate:enforceAiChatAccess,record:recordAiTurnUsage});
 var researchCheckpoints = require('./research-checkpoints').installResearchCheckpoints(app, { db: supabase, authenticateUser: authenticateUser, rateLimit: rateLimit });
 require('./ai-report-export').installReportExport(app,{authenticateUser:authenticateUser,rateLimit:rateLimit,jsonMiddleware:express.json({limit:'6mb'})});
 require('./ai-tool-retry').installToolRetry(app,{authenticateUser:authenticateUser,rateLimit:rateLimit,execute:executeToolCall,gate:enforceAiChatAccess,record:recordAiTurnUsage,feedback:toolFeedback,normalize:normalizeToolResultItems,store:require('./ai-tool-retry-store').createToolRetryStore(supabase)});
