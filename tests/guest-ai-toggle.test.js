@@ -32,6 +32,9 @@ function serverGuestRuntime(config, options) {
       return res.status(401).json({ ok: false, error: '请先登录' });
     },
     rateLimit: function() { return function(req, res, next) { next(); }; },
+    // ★ 2026-10-27 限时公开：访客 AI 开关代码段内还定义了 OpenRouter 公开期鉴权中间件，
+    //   它依赖 openRouter 模块，vm 上下文必须提供，否则整段代码求值即抛 ReferenceError。
+    openRouter: require('../render-api/openrouter'),
     console: console,
     Date: Date
   };

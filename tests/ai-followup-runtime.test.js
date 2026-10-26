@@ -223,6 +223,8 @@ function customResearchRoute({ saveError = null, incomplete = false, cancelled =
   const res = new EventEmitter();
   Object.assign(res, { writableEnded: false, setHeader() {}, flushHeaders() {}, end() { this.writableEnded = true; } });
   const c = { app: { post(_path, ...handlers) { handler = handlers.at(-1); } }, authenticateUser() {}, aiChatConcurrencyGate() {}, aiRequestMiddleware() {}, resolveAiModelReference() {},
+    // ★ 2026-10-27 限时公开：路由片段内引用了 OpenRouter 公开期鉴权中间件，vm 上下文必须提供。
+    guestOpenRouterAuth: require('../render-api/openrouter').createGuestOpenRouterAuth({ authenticateUser() {}, now: () => Date.now() }),
     rateLimit() {}, AI_CHAT_HOURLY_IP_LIMIT: 10, AI_CHAT_MESSAGE_MAX_LEN: 50000, ADMIN_USERNAME: 'admin',
     express: { json() {} }, AbortController, URL, TextDecoder, setTimeout, clearTimeout, setInterval, clearInterval,
     validateString: value => value, genConvId: () => 'GENERATED1', extractVisionImageUrls: () => [],

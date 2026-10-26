@@ -14,6 +14,16 @@ function configure(t) {
   process.env.OPENROUTER_API_KEY = TEST_KEY;
   t.after(() => { if (old === undefined) delete process.env.OPENROUTER_API_KEY; else process.env.OPENROUTER_API_KEY = old; });
 }
+// ★ 2026-10-27 限时公开：公开期截止用绝对时间戳。测试必须显式指定，
+//   否则会随真实时间漂移（当前真实时间仍在默认窗口内，会让「过期」用例假通过）。
+const PUBLIC_UNTIL = '2026-10-28T00:40:00+08:00';
+const EXPIRED_UNTIL = '2026-10-01T00:00:00+08:00';
+const expiredEnv=()=>({OPENROUTER_API_KEY:TEST_KEY,OPENROUTER_PUBLIC_UNTIL:EXPIRED_UNTIL});
+function withPublicUntil(t, value) {
+  const old = process.env.OPENROUTER_PUBLIC_UNTIL;
+  process.env.OPENROUTER_PUBLIC_UNTIL = value;
+  t.after(() => { if (old === undefined) delete process.env.OPENROUTER_PUBLIC_UNTIL; else process.env.OPENROUTER_PUBLIC_UNTIL = old; });
+}
 const body = () => ({provider:'openrouter',model:openRouter.MODEL,model_uid:openRouter.MODEL_UID,base_url:openRouter.BASE_URL,
   message:'原始问题',conversation_id:'OPENROUTER01',client_request_id:'test-request',thinking_mode:'off',web_search:false,messages_include_current:false});
 function freeRequest(payload) {
@@ -31,7 +41,10 @@ function routeFixture(options={}) {
   const req=new EventEmitter(),res=new EventEmitter(); req.userName=options.userName===undefined?'xxz':options.userName; req.body={...body(),...options.body};
   Object.assign(res,{writableEnded:false,headers:{},setHeader(k,v){this.headers[k]=v;},flushHeaders(){},end(){this.writableEnded=true;}});
   const c={app:{post(_path,...handlers){handler=handlers.at(-1);}},express:{json(){}},authenticateUser(){},aiChatConcurrencyGate(){},aiRequestMiddleware(){},resolveAiModelReference(){},rateLimit(){},
-    openRouter,ADMIN_USERNAME:'xxz',AI_CHAT_HOURLY_IP_LIMIT:10,AI_CHAT_MESSAGE_MAX_LEN:60000,AI_AGENT_MESSAGE_MARKER:'__ai_agent_msg__',
+    openRouter,ADMIN_USERNAME:'xxz',
+    guestOpenRouterAuth:openRouter.createGuestOpenRouterAuth({authenticateUser(){},now:()=>Date.now()}),
+    guestOpenRouterCatalogAuth:openRouter.createGuestOpenRouterAuth({authenticateUser(){},now:()=>Date.now(),allowAnonymous:true}),
+    AI_CHAT_HOURLY_IP_LIMIT:10,AI_CHAT_MESSAGE_MAX_LEN:60000,AI_AGENT_MESSAGE_MARKER:'__ai_agent_msg__',
     URL,TextDecoder,AbortController,Date,console:{log(){},warn(){},error(){}},require:n=>require('../render-api/'+n.slice(2)),
     setTimeout(fn,ms){const t={fn,ms};timers.push(t);return t;},clearTimeout(t){if(t)t.cleared=true;},setInterval(){return 1;},clearInterval(){},
     validateString:x=>x,genConvId:()=> 'NEWCONV01',getAiConfig:async()=>({}),buildAiCorePrompt:()=> '真实系统提示',
@@ -59,20 +72,47 @@ function routeFixture(options={}) {
   const a=server.indexOf(start),b=server.indexOf(end,a);assert.ok(a>=0&&b>a);vm.runInNewContext(server.slice(a,b),c);
   return {req,res,events,calls,rows,toolContexts,usage,timers,run:()=>handler(req,res)};
 }
-test('managed credentials are owner-only, origin/model fixed, and nonserializable',()=>{
-  const env={OPENROUTER_API_KEY:TEST_KEY};
-  for(const user of ['',undefined,'alice'])assert.throws(()=>openRouter.resolveConfig(user,'xxz',{},env),{code:'OPENROUTER_OWNER_ONLY'});
+test('managed credentials stay origin/model fixed and nonserializable, and the public window gates access',()=>{
+  const env={OPENROUTER_API_KEY:TEST_KEY,OPENROUTER_PUBLIC_UNTIL:PUBLIC_UNTIL};
+  // ★ 公开期内所有用户（含未登录游客）都能使用同一个免费模型。
+  for(const user of ['',undefined,'alice','xxz']){
+    const cfg=openRouter.resolveConfig(user,'xxz',body(),env);
+    assert.equal(cfg.api_key,TEST_KEY);
+    assert.doesNotMatch(JSON.stringify(cfg),/api_key|isolated-openrouter/);
+  }
+  // 过期后站长依然可用（公开期只是放宽限制，不是收回站长权限）。
+  assert.equal(openRouter.resolveConfig('xxz','xxz',body(),expiredEnv()).api_key,TEST_KEY);
   assert.throws(()=>openRouter.resolveConfig('xxz','xxz',{},{}),{code:'OPENROUTER_NOT_CONFIGURED'});
+  // 过期后回退为「仅站长」：非站长一律 403，且不再暴露任何模型。
+  const expired=expiredEnv();
+  for(const user of ['',undefined,'alice'])assert.throws(()=>openRouter.resolveConfig(user,'xxz',body(),expired),{code:'OPENROUTER_PUBLIC_ENDED'});
+  assert.equal(openRouter.catalog('alice','xxz',expired).length,0);
+  assert.equal(openRouter.catalog('xxz','xxz',expired).length,1);
+  // 公开期内目录对所有人可见，且不含任何密钥。
+  assert.equal(openRouter.catalog('alice','xxz',env).length,1);
+  assert.equal(openRouter.catalog('alice','xxz',env)[0].public_access,true);
   for(const override of [{model:'minimax/minimax-m3.1-flash'},{model:'openrouter/free'},{base_url:'https://evil.example/v1'},{model_uid:'other'},{api_key:'browser-key'}])
     assert.throws(()=>openRouter.resolveConfig('xxz','xxz',override,env),{code:'OPENROUTER_FIXED_FREE_MODEL'});
   const config=openRouter.resolveConfig('xxz','xxz',body(),env);assert.equal(config.api_key,TEST_KEY);
-  assert.doesNotMatch(JSON.stringify(config),/api_key|isolated-openrouter/);assert.equal(openRouter.catalog('alice','xxz',env).length,0);
+  assert.doesNotMatch(JSON.stringify(config),/api_key|isolated-openrouter/);
   assert.equal(openRouter.catalog('xxz','xxz',env)[0].model,openRouter.MODEL);
   assert.doesNotMatch(JSON.stringify(openRouter.catalog('xxz','xxz',env)),/api_key|isolated-openrouter/);
   freeRequest(openRouter.freePayload({models:['paid'],route:'fallback',plugins:[{id:'web'}],model:'paid',provider:{allow_fallbacks:true}}));
 });
-for(const deep of [false,true])for(const userName of ['', 'alice'])test('existing '+(deep?'research':'chat')+' route refuses shared credentials for '+(userName||'anonymous'),async t=>{
-  configure(t);const f=routeFixture({deep,userName});await f.run();assert.equal(f.calls.length,0);assert.equal(f.events.at(-1).code,'OPENROUTER_OWNER_ONLY');assert.equal(f.rows.length,0);
+// ★ 2026-10-27 限时公开：公开期内游客与普通用户都能用同一个免费模型；
+//   过期后非站长一律被拒（且不会产生任何上游调用或落库）。
+// deep 路线的 Planner 阶段需要 JSON（不是 SSE），因此单独给一份真实形状的响应。
+function deepRespond(payload,n){
+  if(payload.stream)return stream(frame({choices:[{delta:{content:'真实研究结果'},finish_reason:'stop'}]}));
+  return new Response(JSON.stringify({choices:[{message:{content:n===1?JSON.stringify({agents:[{role:'研究员',task_description:'核对资料',need_search:false}]}):'资料分析'}}]}));
+}
+for(const deep of [false,true])for(const userName of ['', 'alice'])test('existing '+(deep?'research':'chat')+' route serves the free model for '+(userName||'anonymous')+' during the public window',async t=>{
+  configure(t);withPublicUntil(t,PUBLIC_UNTIL);const f=routeFixture({deep,userName,respond:deep?deepRespond:undefined});await f.run();
+  assert.ok(f.calls.length>0);assert.equal(f.events.at(-1).code,undefined);assert.doesNotMatch(JSON.stringify(f.events),new RegExp(TEST_KEY));
+});
+for(const deep of [false,true])for(const userName of ['', 'alice'])test('existing '+(deep?'research':'chat')+' route refuses non-owners once the public window ends',async t=>{
+  configure(t);withPublicUntil(t,EXPIRED_UNTIL);const f=routeFixture({deep,userName});await f.run();
+  assert.equal(f.calls.length,0);assert.equal(f.events.at(-1).code,'OPENROUTER_PUBLIC_ENDED');assert.equal(f.rows.length,0);
 });
 test('existing chat forwards context, parsed files, native images and persists streamed history without Key',async t=>{
   configure(t);const f=routeFixture({body:{messages:[{role:'user',content:'先前问题'},{role:'assistant',content:'先前回答'}],attachments:[{type:'image/png',data_url:'data:image/png;base64,AA=='}]}});await f.run();
@@ -125,14 +165,24 @@ test('capability checks verify actual protocol results and reject in-band SSE er
   const result=await probeCapabilities(config,deps);assert.equal(calls.length,5);assert.equal(result.results.filter(r=>r.status==='passed').length,4);assert.equal(result.results.find(r=>r.name==='streaming').category,'OPENROUTER_FREE_LIMIT');
   assert.doesNotMatch(JSON.stringify(result),new RegExp(TEST_KEY));
 });
-test('capability API authenticates before resolving the owner-only backend key',async t=>{
-  configure(t);let probes=0;const source=fs.readFileSync('render-api/ai-model-capabilities.js','utf8');const a=source.indexOf('function installModelCapabilities('),b=source.indexOf('\nmodule.exports',a);
+test('capability API authenticates before resolving the backend key and never exposes it',async t=>{
+  configure(t);withPublicUntil(t,PUBLIC_UNTIL);let probes=0,records=0;const source=fs.readFileSync('render-api/ai-model-capabilities.js','utf8');const a=source.indexOf('function installModelCapabilities('),b=source.indexOf('\nmodule.exports',a);
   const install=vm.runInNewContext('('+source.slice(a,b).trim()+')',{openRouter,ENDPOINTS:{},AbortController,setTimeout,clearTimeout,
     probeCapabilities:async config=>{probes++;assert.equal(config.api_key,TEST_KEY);return{results:[],usage:{total_tokens:1}};}});
-  const app=express();app.use(express.json());install(app,{ownerName:'xxz',authenticateUser(req,res,next){const user=req.headers['x-test-auth'];if(!user)return res.status(401).json({ok:false});req.userName=user;next();},rateLimit:()=> (_req,_res,next)=>next(),gate:async()=>({allowed:true}),record:async()=>{}});
-  await request(app).post('/api/agent/models/check').send(body()).expect(401);
-  const denied=await request(app).post('/api/agent/models/check').set('X-Test-Auth','alice').send({...body(),userName:'xxz'}).expect(403);assert.equal(denied.body.code,'OPENROUTER_OWNER_ONLY');assert.equal(probes,0);
-  const allowed=await request(app).post('/api/agent/models/check').set('X-Test-Auth','xxz').send(body()).expect(200);assert.equal(probes,1);assert.doesNotMatch(JSON.stringify(allowed.body),new RegExp(TEST_KEY));
+  const realAuth=(req,res,next)=>{const user=req.headers['x-test-auth'];if(!user)return res.status(401).json({ok:false});req.userName=user;next();};
+  const app=express();app.use(express.json());install(app,{ownerName:'xxz',authenticateUser:openRouter.createGuestOpenRouterAuth({authenticateUser:realAuth}),rateLimit:()=> (_req,_res,next)=>next(),gate:async()=>({allowed:true}),record:async()=>{records++;}});
+  // ★ 公开期内：普通用户与站长都能检测该免费模型，且一律不落账（无限免费）。
+  const anonymous=await request(app).post('/api/agent/models/check').send(body()).expect(200);assert.equal(probes,1);
+  assert.equal(anonymous.body.ok,true);assert.equal(records,0);assert.doesNotMatch(JSON.stringify(anonymous.body),new RegExp(TEST_KEY));
+  const allowed=await request(app).post('/api/agent/models/check').set('X-Test-Auth','xxz').send(body()).expect(200);assert.equal(probes,2);assert.equal(records,0);assert.doesNotMatch(JSON.stringify(allowed.body),new RegExp(TEST_KEY));
+});
+test('capability API rejects non-owners once the public window ends',async t=>{
+  configure(t);withPublicUntil(t,EXPIRED_UNTIL);let probes=0;const source=fs.readFileSync('render-api/ai-model-capabilities.js','utf8');const a=source.indexOf('function installModelCapabilities('),b=source.indexOf('\nmodule.exports',a);
+  const install=vm.runInNewContext('('+source.slice(a,b).trim()+')',{openRouter,ENDPOINTS:{},AbortController,setTimeout,clearTimeout,
+    probeCapabilities:async()=>{probes++;return{results:[],usage:{total_tokens:1}};}});
+  const realAuth=(req,res,next)=>{const user=req.headers['x-test-auth'];if(!user)return res.status(401).json({ok:false});req.userName=user;next();};
+  const app=express();app.use(express.json());install(app,{ownerName:'xxz',authenticateUser:openRouter.createGuestOpenRouterAuth({authenticateUser:realAuth}),rateLimit:()=> (_req,_res,next)=>next(),gate:async()=>({allowed:true}),record:async()=>{}});
+  const denied=await request(app).post('/api/agent/models/check').set('X-Test-Auth','alice').send(body()).expect(403);assert.equal(denied.body.code,'OPENROUTER_PUBLIC_ENDED');assert.equal(probes,0);
 });
 test('managed research reference cannot fall back to built-in DeepSeek when its backend key is missing',async()=>{
   const a=server.indexOf('  var researchModelSpec ='),b=server.indexOf('  // 统一取模型标识',a);let lookups=0;
@@ -145,15 +195,32 @@ test('saved free model history retains the exact model identifier even when Deep
   assert.equal(normalize(openRouter.MODEL),openRouter.MODEL);assert.equal(fallback,0);
 });
 test('model catalog API never decrypts managed keys or caches any secret response',async t=>{
-  configure(t);let handler,decrypts=0;
+  configure(t);withPublicUntil(t,PUBLIC_UNTIL);let handler,decrypts=0;
   const a=server.indexOf("app.get('/api/agent/custom-models'"),b=server.indexOf('// PUT /api/agent/custom-models',a);
   vm.runInNewContext(server.slice(a,b),{app:{get(_path,...h){handler=h.at(-1);}},authenticateUser(){},rateLimit(){},openRouter,ADMIN_USERNAME:'xxz',
+    guestOpenRouterCatalogAuth:openRouter.createGuestOpenRouterAuth({authenticateUser(){},now:()=>Date.now(),allowAnonymous:true}),
     fetchLatestAiModelsSnapshot:async()=>({models:[{uid:'old',provider:'openrouter',api_key_enc:'legacy-cipher'},{uid:'personal',provider:'qwen',api_key_enc:'personal-cipher'}],deletedUids:[]}),
     publicAiModel:vm.runInNewContext('('+server.slice(server.indexOf('function publicAiModel('),server.indexOf('async function resolveAiModelReference(')).trim()+')'),
     decryptAiModelSecret(){decrypts++;return'personal-test-only-key';},console:{error(){}}});
   const res={headers:{},setHeader(k,v){this.headers[k]=v;},json(value){this.body=value;return this;}};await handler({userName:'xxz'},res);
   assert.equal(decrypts,0);assert.equal(res.body.models[0].api_key,undefined);assert.equal(res.body.models[0].api_key_enc,undefined);assert.equal(res.body.models[0].stored_reference,true);assert.equal(res.headers['Cache-Control'],'no-store');assert.equal(res.body.models.length,1);assert.equal(res.body.server_models[0].uid,openRouter.MODEL_UID);assert.equal(res.body.server_models[0].api_key,undefined);assert.doesNotMatch(JSON.stringify(res.body),new RegExp(TEST_KEY));
-  await handler({userName:'alice'},res);assert.equal(res.body.server_models.length,0);
+  // ★ 公开期内：普通用户与游客都能看到托管目录（目录不含任何密钥）。
+  await handler({userName:'alice'},res);assert.equal(res.body.server_models.length,1);assert.equal(res.body.server_models[0].api_key,undefined);
+  await handler({userName:''},res);assert.equal(res.body.server_models.length,1);assert.equal(res.body.models.length,0);assert.doesNotMatch(JSON.stringify(res.body),new RegExp(TEST_KEY));
+});
+test('the model catalog route lets anonymous visitors read the public directory but never personal models',async t=>{
+  configure(t);withPublicUntil(t,PUBLIC_UNTIL);let handler,authChain=[];
+  const a=server.indexOf("app.get('/api/agent/custom-models'"),b=server.indexOf('// PUT /api/agent/custom-models',a);
+  vm.runInNewContext(server.slice(a,b),{app:{get(_path,...h){handler=h.at(-1);authChain=h.slice(0,-1);}},authenticateUser(){},rateLimit(){},openRouter,ADMIN_USERNAME:'xxz',
+    guestOpenRouterCatalogAuth:openRouter.createGuestOpenRouterAuth({authenticateUser(){},now:()=>Date.now(),allowAnonymous:true}),
+    fetchLatestAiModelsSnapshot:async()=>({models:[{uid:'personal',provider:'qwen',api_key_enc:'cipher'}],deletedUids:[]}),
+    publicAiModel:m=>({uid:m.uid,provider:m.provider}),decryptAiModelSecret(){throw Error('must not decrypt');},console:{error(){}}});
+  const res={headers:{},setHeader(k,v){this.headers[k]=v;},json(value){this.body=value;return this;}};
+  // 匿名游客：直接进入处理器（公开期目录接口允许匿名），只拿到托管目录，没有个人模型。
+  await handler({userName:'',accountId:''},res);
+  assert.equal(res.body.server_models.length,1);assert.equal(res.body.server_models[0].uid,openRouter.MODEL_UID);
+  assert.equal(res.body.server_models[0].api_key,undefined);assert.equal(res.body.models.length,0);
+  assert.doesNotMatch(JSON.stringify(res.body),new RegExp(TEST_KEY));
 });
 test('the free search path skips paid providers even when their keys are configured',async t=>{
   const providers=require('../render-api/search-providers');const names=['DEEPSEEK_API_KEY','TAVILY_API_KEY','BRAVE_SEARCH_API_KEY','SERPER_API_KEY','SEARCH_API_URL'];const old=names.map(name=>[name,process.env[name]]);

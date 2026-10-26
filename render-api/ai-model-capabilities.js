@@ -95,15 +95,21 @@ function installModelCapabilities(app, deps) {
     req.on('aborted',cancel); res.on('close',cancel);
     const timer = setTimeout(() => {controller.abort();if(!res.headersSent&&!res.destroyed&&!res.writableEnded)res.status(504).json({ok:false,error:'模型能力检测超时，请稍后重试'});},65000);
     let report;
+    // ★ 2026-10-27 限时公开：OpenRouter 托管免费模型在公开期内无限免费 ——
+    //   不消耗本站 AI token 额度，因此不走 token 日额度门禁，也不落账。
+    const isFreeManaged = provider === 'openrouter';
     try {
-      const gate = await deps.gate(req.userName,{needSearch:false});
-      if (!gate.allowed) return res.status(429).json({ok:false,error:'当前 AI 额度或请求次数已达上限'});
+      if (!isFreeManaged) {
+        const gate = await deps.gate(req.userName,{needSearch:false});
+        if (!gate.allowed) return res.status(429).json({ok:false,error:'当前 AI 额度或请求次数已达上限'});
+      }
       report = await probeCapabilities(config || {provider,model:body.model.trim(),api_key:body.api_key,base_url:String(body.base_url || '').slice(0,2048)},{signal:controller.signal});
       if (!controller.signal.aborted) res.json({ok:true,...report,usage:undefined});
     } catch (_) { if (!controller.signal.aborted) res.status(400).json({ok:false,error:'测试无法完成，请检查 HTTPS 地址、网络和模型配置'}); }
     finally {
       clearTimeout(timer); req.removeListener('aborted',cancel); res.removeListener('close',cancel);
-      if (report) await deps.record(req.userName,report.usage,{model:body.model,source:'model_capability_check',message:'模型能力检测',content:'',search_count:0}).catch(() => {});
+      // 游客（无 userName）与无限免费模型一律不落账，避免消耗 token 额度。
+      if (report && req.userName && !isFreeManaged) await deps.record(req.userName,report.usage,{model:body.model,source:'model_capability_check',message:'模型能力检测',content:'',search_count:0}).catch(() => {});
     }
   });
 }

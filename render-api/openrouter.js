@@ -4,6 +4,13 @@
 const MODEL = 'minimax/minimax-m3.1-flash:free';
 const BASE_URL = 'https://openrouter.ai/api/v1';
 const MODEL_UID = 'or_minimax_m31_free';
+// ★ 2026-10-27 限时公开体验：站长决定把这个免费模型开放给所有用户（含未登录游客）24 小时。
+//   用**绝对截止时间戳**而非「服务启动后 24 小时」——后者在 Render 重启/重新部署后会被重置，
+//   变相变成无限期开放。截止时间到点后自动回退为「仅站长」，无需改代码、无需重新部署。
+//   可用环境变量 OPENROUTER_PUBLIC_UNTIL 覆盖（ISO 字符串或毫秒时间戳）。
+const PUBLIC_UNTIL_DEFAULT = '2026-10-28T00:40:00+08:00';
+const PUBLIC_CODE = 'OPENROUTER_PUBLIC_WINDOW';
+const PUBLIC_ENDED_CODE = 'OPENROUTER_PUBLIC_ENDED';
 function failure(code, message, status = 502, retryAfter) {
   const error = new Error(message);
   error.code = code;
@@ -11,8 +18,34 @@ function failure(code, message, status = 502, retryAfter) {
   if (retryAfter != null && /^\d{1,6}$/.test(String(retryAfter))) error.retry_after = Number(retryAfter);
   return error;
 }
+// 解析公开期截止时间。非法值一律回退到默认绝对时间戳，避免因配置写错而永久开放。
+function publicUntil(env = process.env) {
+  const raw = String(env.OPENROUTER_PUBLIC_UNTIL || PUBLIC_UNTIL_DEFAULT).trim();
+  if (/^\d{10,13}$/.test(raw)) {
+    const ms = Number(raw);
+    return ms < 1e12 ? ms * 1000 : ms;
+  }
+  const parsed = Date.parse(raw);
+  return Number.isFinite(parsed) ? parsed : Date.parse(PUBLIC_UNTIL_DEFAULT);
+}
+// 公开期是否仍然有效。过期后立即关闭，无需重新部署。
+function publicWindowOpen(env = process.env, now = Date.now()) {
+  return now < publicUntil(env);
+}
+function publicRemainingMs(env = process.env, now = Date.now()) {
+  return Math.max(0, publicUntil(env) - now);
+}
+// 公开期内的访问者（含未登录游客）是否放行。站长永远放行。
+function publicAllowed(userName, ownerName) {
+  return !!userName && userName === ownerName;
+}
 function resolveConfig(userName, ownerName, input = {}, env = process.env) {
-  if (!userName || userName !== ownerName) throw failure('OPENROUTER_OWNER_ONLY', '此 OpenRouter 模型仅授权站长使用', 403);
+  // ★ 2026-10-27 限时公开：公开期内所有用户（含未登录游客）都可使用同一个免费模型。
+  //   公开期结束后自动回退为仅站长。模型、地址、Key 仍然全部锁定，浏览器无法替换。
+  const owner = publicAllowed(userName, ownerName);
+  if (!owner && !publicWindowOpen(env)) {
+    throw failure(PUBLIC_ENDED_CODE, '站长开放的 24 小时限时体验已结束，该模型恢复为仅站长可用', 403);
+  }
   if (input.provider && input.provider !== 'openrouter' || input.model && input.model !== MODEL ||
       input.model_uid && input.model_uid !== MODEL_UID || input.base_url && (typeof input.base_url !== 'string' || input.base_url.replace(/\/+$/, '') !== BASE_URL) || input.api_key) {
     throw failure('OPENROUTER_FIXED_FREE_MODEL', '仅允许站长后端配置的 MiniMax M3.1 Flash 免费模型，不能替换 Key、地址或模型', 400);
@@ -25,9 +58,12 @@ function resolveConfig(userName, ownerName, input = {}, env = process.env) {
   return config;
 }
 function catalog(userName, ownerName, env = process.env) {
-  if (!userName || userName !== ownerName || !String(env.OPENROUTER_API_KEY || '').trim()) return [];
+  if (!String(env.OPENROUTER_API_KEY || '').trim()) return [];
+  // 公开期内所有用户都能看到该模型；到期后只有站长能看到。
+  if (!publicAllowed(userName, ownerName) && !publicWindowOpen(env)) return [];
+  const open = !publicAllowed(userName, ownerName);
   return [{uid:MODEL_UID,provider:'openrouter',provider_label:'OpenRouter',label:'MiniMax M3.1 Flash 免费版',
-    model:MODEL,base_url:BASE_URL,server_managed:true}];
+    model:MODEL,base_url:BASE_URL,server_managed:true,public_access:open,public_until:publicUntil(env)}];
 }
 function freePayload(payload) {
   // Never accept routing aliases, :online, plugins, or a paid provider fallback.
@@ -36,6 +72,49 @@ function freePayload(payload) {
   delete out.models;
   delete out.route;
   return out;
+}
+// ★ 2026-10-27 限时公开：判断一个尚未解析 body 的请求是否「只想使用 OpenRouter 免费模型」。
+//   路由层的 body 解析上限是 80mb，若先解析再鉴权，未登录请求可直接让服务器分配 80MB 内存
+//   （项目既有注释明确禁止这种顺序）。因此这里只依据**客户端可控但语义明确**的提示做预判：
+//   浏览器发送 openrouter 模型时必然带上 model_uid=or_minimax_m31_free。
+//   真正的权威校验仍在 resolveConfig：模型、地址、Key 一旦被改写立即 400 拒绝。
+//   其他第三方（BYOK）模型一律仍然要求登录，游客不得借用本站服务器代理任意地址。
+function requestsOpenRouter(req) {
+  try {
+    const uid = String(req.headers['x-xtj-model-uid'] || '').trim().toLowerCase();
+    if (uid === MODEL_UID) return true;
+    // body 已在部分路由被解析（小体积接口），此时也能判断；大体积路由 body 尚未解析，
+    // 依赖上面的请求头预判，不会因为读 body 而提前分配内存。
+    const body = req.body;
+    if (body && typeof body === 'object' && String(body.provider || '').trim().toLowerCase() === 'openrouter') return true;
+  } catch (_) {}
+  return false;
+}
+// 请求是否携带了 Bearer 凭证。带了凭证的请求必须走完整认证（否则已登录用户
+// 会被降级成游客：个人自定义模型失效、额度不记账、封禁状态被绕过）。
+function hasCredentials(req) {
+  try {
+    const auth = String(req.headers && req.headers.authorization || '');
+    return auth.startsWith('Bearer ') && auth.slice(7).trim().length > 0;
+  } catch (_) {}
+  return false;
+}
+// 游客鉴权：仅在公开期开放，且请求明确指向 OpenRouter 时放行匿名用户。
+// 其他情况一律回落到 authenticateUser（登录）。
+// allowAnonymous=true 时（例如「模型目录」这类不含任何密钥的只读接口），
+// 公开期内直接放行匿名，不需要 X-XTJ-Model-Uid 头。
+function createGuestOpenRouterAuth({ authenticateUser, env = process.env, now = () => Date.now(), allowAnonymous = false }) {
+  return async function guestOpenRouterAuth(req, res, next) {
+    if (!publicWindowOpen(env, now())) return authenticateUser(req, res, next);
+    // 已登录（携带凭证）的请求一律走真实认证，保留封禁/账号状态等全部校验。
+    if (hasCredentials(req)) return authenticateUser(req, res, next);
+    if (!allowAnonymous && !requestsOpenRouter(req)) return authenticateUser(req, res, next);
+    req.guestAi = true;
+    req.userName = '';
+    req.accountId = '';
+    req.openRouterGuest = true;
+    return next();
+  };
 }
 function upstreamError(status, retryAfter) {
   status = Number(status) || 502;
@@ -70,4 +149,6 @@ function event(error) {
   return {type:'error',code:error.code,error:error.message,http_status:error.http_status,retry_after:error.retry_after};
 }
 function isError(error) { return !!(error && /^OPENROUTER_/.test(error.code || '')); }
-module.exports = {MODEL,BASE_URL,MODEL_UID,resolveConfig,catalog,freePayload,upstreamError,checkPacket,appendReasoning,event,isError};
+module.exports = {MODEL,BASE_URL,MODEL_UID,resolveConfig,catalog,freePayload,upstreamError,checkPacket,appendReasoning,event,isError,
+  publicWindowOpen,publicUntil,publicRemainingMs,publicAllowed,requestsOpenRouter,createGuestOpenRouterAuth,
+  PUBLIC_UNTIL_DEFAULT,PUBLIC_CODE,PUBLIC_ENDED_CODE};
