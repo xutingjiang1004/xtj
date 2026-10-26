@@ -176,3 +176,63 @@ test('filter continuation can be activated with the keyboard without resetting t
     assert.equal(await page.evaluate(() => continued), 1); assert.equal(await page.evaluate(() => feedNextCursor.id), 'saved-cursor'); assert.equal(await page.evaluate(() => _feedCoverageLastFetchAt), 0);
   } finally { await browser.close(); }
 });
+
+test('load-more failure retries with Enter and Space and preserves the current cursor', async () => {
+  const browser=await chromium.launch(browserOptions);
+  try {
+    const page=await browser.newPage();await page.setContent('<div id="feed"></div>');
+    await page.evaluate(()=>{
+      Object.assign(window,{feedPageFetchPending:false,feedLoadMoreFailed:false,feedLoadRequestId:1,feedEndReached:false,feedNextCursor:{id:'unchanged-cursor'},feedAllPosts:[],feedAllComments:[],feedAllLikes:[],FEED_PAGE_SIZE:20,feedPage:1,attempts:0});
+      window.getFeedRenderedSliceStart=()=>0;window.getFilteredPosts=()=>[];window.writeFeedCacheSnapshot=()=>{};
+      window.ensureFeedCoverageForVisibleSlice=async()=>{attempts++;throw Error('isolated page failure');};
+    });
+    await page.addScriptTag({content:between('            loadMoreFeedPosts = async function()', '            appendMorePosts = function')});
+    await page.evaluate(()=>loadMoreFeedPosts());
+    for(const [i,key] of ['Enter','Space'].entries()){
+      await page.getByRole('button',{name:'加载更多失败，点击重试'}).focus();await page.keyboard.press(key);
+      await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));
+      assert.equal(await page.evaluate(()=>attempts),i+2);assert.equal(await page.evaluate(()=>feedNextCursor.id),'unchanged-cursor');
+      assert.equal(await page.getByRole('button',{name:'加载更多失败，点击重试'}).count(),1);
+    }
+  }finally{await browser.close();}
+});
+
+for(const filtered of [false,true])test((filtered?'filtered':'ordinary')+' feed handles a new page target during the coverage cooldown',async()=>{
+  const browser=await chromium.launch(browserOptions);
+  try{
+    const page=await browser.newPage();await page.setContent('<div></div>');
+    await page.evaluate(filtered=>{
+      Object.assign(window,{feedAllPosts:Array.from({length:20},(_,id)=>({id})),feedAllComments:[],feedNextOffset:20,feedEndReached:false,_feedCoverageLastFetchAt:Date.now()-100,FEED_PAGE_SIZE:20,FEED_COVERAGE_THROTTLE_MS:2000,FEED_COVERAGE_MAX_PAGES_PER_RUN:4,pageReads:0});
+      window.getFilteredPosts=posts=>posts;window.hasActiveFeedFilters=()=>filtered;
+      window.fetchFeedPageChunk=async()=>{pageReads++;return{posts:Array.from({length:20},(_,id)=>({id:id+20}))};};
+      window.mergeFeedPageIntoState=chunk=>{feedAllPosts.push(...chunk.posts);};window.writeFeedCacheSnapshot=()=>{};
+    },filtered);
+    await page.addScriptTag({content:between('            async function ensureFeedCoverageForVisibleSlice(', '            function syncPinnedPostIntoFeedState')});
+    await page.evaluate(()=>ensureFeedCoverageForVisibleSlice(40,1));assert.equal(await page.evaluate(()=>pageReads),filtered?0:1);
+    assert.equal(await page.evaluate(()=>feedAllPosts.length),filtered?20:40);
+  }finally{await browser.close();}
+});
+
+async function settleCommentReveal(page){
+  await page.waitForFunction(()=>document.querySelector('.inline-comment-box')?.style.gridTemplateRows==='1fr');
+  await page.locator('.inline-comment-box').evaluate(node=>Promise.all(node.getAnimations().map(animation=>animation.finished.catch(()=>{}))));
+  await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));
+}
+test('a revealed phone comment and its send button remain above the Dock and receive the click',{timeout:30000},async()=>{
+  const {postBrowserFixture}=require('./helpers/post-browser-fixture'),f=await postBrowserFixture({counts:[1,3]}),p=f.page;
+  try{
+    await p.locator('#feed .post').first().getByRole('button',{name:'评论',exact:true}).click();await settleCommentReveal(p);
+    await p.locator('.inline-comment-inp').fill('完整评论按钮点击验证');
+    const geometry=await p.locator('.inline-comment-box button').evaluate(button=>{const r=button.getBoundingClientRect(),dock=document.getElementById('dockBar').getBoundingClientRect(),range=document.createRange();range.selectNodeContents(button);return{bottom:r.bottom,height:r.height,dockTop:dock.top,lines:range.getClientRects().length,hit:button.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))};});
+    assert.ok(geometry.bottom<=geometry.dockTop-4,JSON.stringify(geometry));assert.equal(geometry.hit,true);
+    assert.equal(geometry.lines,1);assert.ok(geometry.height>=44);assert.ok((await p.locator('.inline-comment-inp').boundingBox()).height>=44);
+    await p.locator('.inline-comment-box button').click();assert.equal(f.calls.filter(call=>call.path==='/api/post/comment').length,1);assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+test('comment reveal never steals focus back from a newer post draft',{timeout:30000},async()=>{
+  const {postBrowserFixture}=require('./helpers/post-browser-fixture'),f=await postBrowserFixture({counts:[1,3]}),p=f.page;
+  try{
+    await p.locator('#feed .post').first().getByRole('button',{name:'评论',exact:true}).click();await p.locator('#postInp').fill('我正在编辑新的帖子');await settleCommentReveal(p);
+    assert.equal(await p.evaluate(()=>document.activeElement.id),'postInp');assert.equal(await p.locator('#postInp').inputValue(),'我正在编辑新的帖子');assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});

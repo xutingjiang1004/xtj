@@ -1349,6 +1349,15 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     return '';
   }
 
+  function aiAttachmentBytes(file) {
+    if (file && typeof file.size === 'number' && Number.isFinite(file.size) && file.size >= 0) return file.size;
+    var data = String(file && file.dataUrl || ''), comma = data.indexOf(',');
+    if (comma >= 0 && /;base64$/i.test(data.slice(0, comma))) {
+      return Math.max(0, Math.floor((data.length - comma - 1) * 3 / 4) - (data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0));
+    }
+    return Math.ceil(data.length * 3 / 4);
+  }
+
   function normalizeAiAttachmentFile(file) {
     if (!file) return null;
     var type = String(file.type || '');
@@ -1372,28 +1381,30 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     return file;
   }
 
-  function pickFirstAiAttachment(fileList) {
-    if (!fileList || !fileList.length) return null;
+  function collectAiAttachmentFiles(fileList) {
+    var files = [];
+    if (!fileList || !fileList.length) return files;
     for (var i = 0; i < fileList.length; i++) {
-      if (isSupportedAiFile(fileList[i])) return fileList[i];
+      if (isSupportedAiFile(fileList[i])) files.push(fileList[i]);
     }
-    return null;
+    return files;
   }
 
-  function extractClipboardAiFile(clipboardData) {
-    if (!clipboardData) return null;
+  function extractClipboardAiFiles(clipboardData) {
+    if (!clipboardData) return [];
+    var files = [];
     var items = clipboardData.items;
     if (items && items.length) {
       for (var i = 0; i < items.length; i++) {
         var item = items[i];
         if (!item || item.kind !== 'file') continue;
         var asFile = item.getAsFile && item.getAsFile();
-        if (asFile && isSupportedAiFile(asFile)) return asFile;
         // Clipboard screenshots often only advertise image/* on the item.
-        if (asFile && String(item.type || '').indexOf('image/') === 0) return asFile;
+        if (asFile && (isSupportedAiFile(asFile) || String(item.type || '').indexOf('image/') === 0)) files.push(asFile);
       }
     }
-    return pickFirstAiAttachment(clipboardData.files);
+    // Items and files describe the same clipboard payload; do not add it twice.
+    return files.length ? files : collectAiAttachmentFiles(clipboardData.files);
   }
 
   function dataTransferHasFiles(e) {
@@ -1443,9 +1454,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var thumb = String(fileData.type || '').indexOf('image/') === 0
       ? el('img', { src: fileData.dataUrl, alt: '', class: 'ai-file-thumb' })
       : el('div', { class: 'ai-file-icon' }, '📄');
-    var sizeLabel = fileData.size
-      ? Math.round(fileData.size / 1024)
-      : Math.round(((fileData.dataUrl || '').length * 3 / 4) / 1024);
+    var sizeLabel = Math.ceil(aiAttachmentBytes(fileData) / 1024);
     var info = el('span', { class: 'ai-file-info', text: fileData.name + ' (' + sizeLabel + 'KB)' });
     var removeBtn = el('button', { type: 'button', class: 'ai-file-remove', 'aria-label': '移除附件 ' + fileData.name }, '×');
     removeBtn.addEventListener('click', function() {
@@ -1457,8 +1466,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     filePreview.style.display = 'flex';
   }
 
-  function bindAiComposerPasteDrop(targets, onFile) {
+  function bindAiComposerPasteDrop(targets, onFiles) {
     var list = (Array.isArray(targets) ? targets : [targets]).filter(Boolean);
+    var handledPasteEvents = new WeakSet();
     var dragDepth = 0;
     var dropHost = null;
     var cleanups = [];
@@ -1486,10 +1496,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }
 
     function onPaste(e) {
-      var media = extractClipboardAiFile(e.clipboardData || window.clipboardData);
-      if (!media) return;
+      if (e.defaultPrevented || handledPasteEvents.has(e)) return;
+      var files = extractClipboardAiFiles(e.clipboardData || window.clipboardData);
+      if (!files.length) return;
+      handledPasteEvents.add(e);
       e.preventDefault();
-      onFile(media);
+      onFiles(files);
     }
 
     function onDragEnter(e) {
@@ -1514,8 +1526,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       e.preventDefault();
       dragDepth = 0;
       setDropActive(false);
-      var media = pickFirstAiAttachment(e.dataTransfer && e.dataTransfer.files);
-      if (media) onFile(media);
+      var files = collectAiAttachmentFiles(e.dataTransfer && e.dataTransfer.files);
+      if (files.length) onFiles(files);
       else notify('请拖入图片或支持的文件');
     }
     function onDragEnd() {
@@ -8445,7 +8457,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     function renderDtFiles(){
       if(!filePreview)return;filePreview.replaceChildren();var files=Array.isArray(_dtFileData)?_dtFileData:(_dtFileData?[_dtFileData]:[]);
       filePreview.style.display=files.length?'flex':'none';filePreview.style.flexWrap='wrap';
-      files.forEach(function(file,index){var chip=el('div',{class:'ai-file-chip'});if(String(file.type||'').startsWith('image/'))chip.appendChild(el('img',{class:'ai-file-thumb',src:file.dataUrl,alt:''}));chip.appendChild(el('span',{class:'ai-file-info',text:file.name+' · '+Math.round((file.size||file.dataUrl.length*3/4)/1024)+'KB'}));var remove=el('button',{type:'button',class:'ai-file-remove','aria-label':'移除 '+file.name,text:'×'});remove.addEventListener('click',function(){_dtFileSelectionSeq++;_dtFilesLoading=false;var next=files.filter(function(_,i){return i!==index;});_dtFileData=next.length?next:null;renderDtFiles();});chip.appendChild(remove);filePreview.appendChild(chip);});
+      files.forEach(function(file,index){var chip=el('div',{class:'ai-file-chip'});if(String(file.type||'').startsWith('image/'))chip.appendChild(el('img',{class:'ai-file-thumb',src:file.dataUrl,alt:''}));chip.appendChild(el('span',{class:'ai-file-info',text:file.name+' · '+Math.ceil(aiAttachmentBytes(file)/1024)+'KB'}));var remove=el('button',{type:'button',class:'ai-file-remove','aria-label':'移除 '+file.name,text:'×'});remove.addEventListener('click',function(){_dtFileSelectionSeq++;_dtFilesLoading=false;var next=files.filter(function(_,i){return i!==index;});_dtFileData=next.length?next:null;renderDtFiles();});chip.appendChild(remove);filePreview.appendChild(chip);});
     }
     function acceptDtFiles(rawFiles){
       var fileSeq=++_dtFileSelectionSeq,fileLife=S.dtLifecycleId,fileOwner=window.currentUser||'',fileAuthEpoch=readAiAuthEpoch();
@@ -8457,7 +8469,6 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         var accepted=readAiAttachmentFile(file,function(data){if(!currentFile())return;files.push(data);_dtFileData=files.slice();renderDtFiles();next(index+1);},{isCurrent:currentFile,onError:function(){skipped++;next(index+1);}});if(!accepted){skipped++;next(index+1);}
       }next(0);
     }
-    function acceptDtFile(rawFile){acceptDtFiles([rawFile]);}
     if (fileBtn && fileInput) {
       addDtListener(fileBtn, 'click', function() { fileInput.click(); });
       addDtListener(fileInput, 'change', function() {
@@ -8468,7 +8479,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var dtInputArea = document.querySelector('#panelDeepThink .dt-input-bar') || (input && input.parentElement);
     var researchMessages=document.getElementById('dtMessages');if(researchMessages){researchMessages._aiFollow=true;var researchNew=el('button',{type:'button',class:'ai-new-content dt-new-content',text:'有新内容 ↓','aria-label':'查看最新报告内容'});researchNew.hidden=true;var oldNew=document.querySelector('#panelDeepThink .dt-new-content');if(oldNew)oldNew.remove();document.getElementById('panelDeepThink').appendChild(researchNew);researchMessages._newContentButton=researchNew;updateResearchPromptPosition(researchMessages);addDtListener(researchMessages,'scroll',function(){updateResearchPromptPosition(researchMessages);researchMessages._aiFollow=isNearBottom(researchMessages,100);if(researchMessages._aiFollow)researchNew.hidden=true;});addDtListener(researchNew,'click',function(){researchMessages._aiFollow=true;researchNew.hidden=true;scrollToBottom(researchMessages,true);});}
     if (dtInputArea || input) {
-      var unbindPasteDrop = bindAiComposerPasteDrop([dtInputArea, input].filter(Boolean), acceptDtFile);
+      var unbindPasteDrop = bindAiComposerPasteDrop([dtInputArea, input].filter(Boolean), acceptDtFiles);
       if (typeof unbindPasteDrop === 'function') _dtListeners.push(unbindPasteDrop);
     }
 
@@ -9364,7 +9375,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         var safeName = String(oneFile.name || 'file').replace(/[^a-zA-Z0-9._\-\u4e00-\u9fa5\u3040-\u30ff]/g, '_').slice(0, 80);
         var isImage = String(oneFile.type || '').indexOf('image/') === 0;
         // 估算文件大小（data URL 约 4/3 倍原始大小）
-        var sizeKB = Math.round((oneFile.dataUrl.length * 3 / 4) / 1024);
+        var sizeKB = Math.ceil(aiAttachmentBytes(oneFile) / 1024);
         // UI 显示：首图为内联缩略，其余为文件条目
         uiLines.push(isImage ? '![' + safeName + '](' + oneFile.dataUrl + ')' : '[📄 ' + safeName + ' · ' + sizeKB + 'KB]');
         serverTags.push(isImage ? '[图片: ' + safeName + ' · ' + sizeKB + 'KB]' : '[文件: ' + safeName + ' · ' + sizeKB + 'KB]');
@@ -14318,10 +14329,11 @@ function showChatMessages() {
       var thumb = String(first.type || '').indexOf('image/') === 0
         ? el('img', { src: first.dataUrl, class: 'ai-file-thumb', alt: '' })
         : el('div', { class: 'ai-file-icon' }, '📄');
-      var totalKB = 0;
-      for (var fi = 0; fi < files.length; fi++) totalKB += Math.round(((files[fi].dataUrl || '').length * 3 / 4) / 1024);
+      var totalBytes = 0;
+      for (var fi = 0; fi < files.length; fi++) totalBytes += aiAttachmentBytes(files[fi]);
+      var totalKB = Math.ceil(totalBytes / 1024);
       var label = files.length === 1
-        ? (first.name + ' (' + Math.max(1, Math.round((first.size || totalKB) / 1024)) + 'KB)')
+        ? (first.name + ' (' + totalKB + 'KB)')
         : (first.name + ' 等 ' + files.length + ' 个文件（约 ' + totalKB + 'KB）');
       var info = el('span', { class: 'ai-file-info', text: label });
       var removeBtn = el('button', { type: 'button', class: 'ai-file-remove', 'aria-label': '移除所选附件' }, '×');
@@ -14388,7 +14400,7 @@ function showChatMessages() {
       acceptAiChatFiles(Array.prototype.slice.call(fs));
       this.value = '';
     });
-    bindAiComposerPasteDrop([inputBar, input], function(rawFile) { acceptAiChatFiles([rawFile]); });
+    bindAiComposerPasteDrop([inputBar, input], acceptAiChatFiles);
 
     inputBar.appendChild(plusWrap);
     inputBar.appendChild(panelShell);

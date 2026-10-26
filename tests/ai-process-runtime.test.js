@@ -284,7 +284,7 @@ test('a sanitized final answer keeps the existing prefix and reveals new text in
 test('plus menu removes quick commands and both model/effort popups provide a close button without changing the choice',async t=>{
  const page=await fixture(t);await page.locator('#aiPlusBtn').click();assert.equal(await page.locator('#aiQuickGrid,.ai-panel-group--quick').count(),0);assert.doesNotMatch(await page.locator('.ai-plus-panel-content').textContent(),/快捷指令/);
  for(const action of ['open-model','open-think']){
-  const row=page.locator('[data-action="'+action+'"]');const before=await row.textContent();await row.click();const popup=page.locator('.ai-select-pop:not(.is-closing)');await popup.waitFor();const close=popup.getByRole('button',{name:'关闭',exact:true});assert.equal(await close.isVisible(),true);const size=await close.boundingBox();assert.ok(size.width>=44&&size.height>=44);
+  const row=page.locator('[data-action="'+action+'"]');const before=await row.textContent();await row.click();const popup=page.locator('.ai-select-pop:not(.is-closing)');await popup.waitFor();await popup.evaluate(node=>Promise.all(node.getAnimations({subtree:true}).filter(animation=>animation.effect.getTiming().iterations!==Infinity).map(animation=>animation.finished.catch(()=>{}))));const close=popup.getByRole('button',{name:'关闭',exact:true});assert.equal(await close.isVisible(),true);const size=await close.boundingBox();assert.ok(size.width>=44&&size.height>=44);
   await close.click();await popup.waitFor({state:'detached'});assert.equal(await row.textContent(),before);assert.equal(await row.evaluate(el=>el===document.activeElement),true);
  }
 });
