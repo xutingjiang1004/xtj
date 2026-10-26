@@ -22,6 +22,7 @@ test('游客 AI 开关：开启可聊天且不请求历史，关闭后下一条�
       const json = (data, status) => new Response(JSON.stringify(data), { status: status || 200, headers: { 'Content-Type': 'application/json' } });
       if (path.endsWith('/guest-mode')) return json({ ok: true, enabled: window.__guestMode === true });
       if (path.endsWith('/config')) return json({ ok: true, config: { name: '小猫', deep_think: { enabled: true } } });
+      if (path.endsWith('/custom-models')) return json({ ok: true, models: [], server_models: [] });
       if (path.endsWith('/chat/history')) return json({ ok: false, error: 'login required' }, 401);
       if (path.endsWith('/chat/stream')) {
         return new Response(new ReadableStream({ start(controller) { window.guestStream = controller; } }), {
@@ -46,7 +47,11 @@ test('游客 AI 开关：开启可聊天且不请求历史，关闭后下一条�
     stream: window.guestCalls.find(c => c.path.endsWith('/chat/stream'))
   }));
   assert.equal(first.calls.some(c => c.path.endsWith('/chat/history')), false, '游客不应请求账号历史');
-  assert.equal(first.calls.some(c => c.path.endsWith('/custom-models')), false, '游客不应请求账号模型');
+  // The public managed-model catalog was opened by the concurrent update.
+  // Guests can read its sanitized metadata while account history stays private.
+  const catalogCalls = first.calls.filter(c => c.path.endsWith('/custom-models'));
+  assert.ok(catalogCalls.length > 0, '游客可读取已公开的托管模型目录');
+  assert.ok(catalogCalls.every(c => c.method === 'GET' && c.headers.Authorization === undefined), '匿名目录仅做无凭证读取');
   assert.ok(first.stream, '游客应当能发起聊天流');
   assert.equal(first.stream.body.message, '游客第一次提问');
   assert.equal(first.stream.headers.Authorization, undefined, '游客请求不应携带旧凭证');
