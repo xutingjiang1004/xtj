@@ -73,7 +73,7 @@ function createDmPrivateStorage(supabase, options = {}) {
     return body;
   }
   function middleware(req, res, next) {
-    if (!/^\/api\/(dm\/(list|messages|send)|chat\/history\/(search|context))\/?$/.test(req.path)) return next();
+    if (!/^\/api\/(dm\/(list|messages(?:\/loaded)?|send)|chat\/history\/(search|context))\/?$/.test(req.path)) return next();
     const json = res.json.bind(res);
     res.json = function(body) {
       void hydrateBody(body).then(json).catch(() => { if (!res.headersSent) { res.status(503); json({ ok: false, code: 'private_media_unavailable', retryable: true, error: '附件暂时不可用，请重试' }); } });

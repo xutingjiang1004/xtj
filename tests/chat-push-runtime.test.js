@@ -22,6 +22,12 @@ test('notifications hide content, honor mute and delete state, and remove expire
  f.setState({status:'ok',deleted:true});await f.push.notify('actor','peer','message');assert.equal(f.deliveries.length,1);
  f.setState({status:'ok'});f.setFailure(410);await f.push.notify('actor','peer','message');assert.equal(f.rows.length,0);
 });
+test('permanent conversation mute suppresses pushes, while unmute and expired mute restore delivery',async()=>{
+ const f=fixture();await request(f.app).post('/push/subscribe').set('Authorization','actor').send({subscription:subscription()});
+ f.setState({status:'ok',muted_until:'infinity'});await f.push.notify('actor','peer','muted-message');assert.equal(f.deliveries.length,0);
+ f.setState({status:'ok',muted_until:null});await f.push.notify('actor','peer','unmuted-message');assert.equal(f.deliveries.length,1);
+ f.setState({status:'ok',muted_until:new Date(Date.now()-60000).toISOString()});await f.push.notify('actor','peer','expired-mute-message');assert.equal(f.deliveries.length,2);
+});
 test('VAPID keys are stable and library produces an encrypted authenticated Web Push request',()=>{
  const webPush=require('web-push'),vapid=deriveVapid('test secret');assert.equal(vapid.publicKey,deriveVapid('test secret').publicKey);assert.notEqual(vapid.publicKey,deriveVapid('different').publicKey);
  const details=webPush.generateRequestDetails(subscription(),'private message',{vapidDetails:vapid});assert.match(details.headers.Authorization,/vapid/);assert.equal(details.body.includes(Buffer.from('private message')),false);

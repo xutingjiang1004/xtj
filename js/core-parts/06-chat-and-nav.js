@@ -406,7 +406,7 @@
                 if (_dockChatDraftTimer) clearTimeout(_dockChatDraftTimer);
                 _dockChatDraftTimer=null;_dockChatDraftLoadSeq++;
                 _dockChatLocalDrafts={};_dockChatDraftWrites={};_dockChatDraftConflicts={};
-                _dockChatConversationStates={};_dockChatConversationOwner='';
+                _dockChatConversationStates=Object.create(null);_dockChatConversationOwner='';
                 cancelChatFlashSend();
                 cancelDmAiAsk();
                 if(_chatSendFlight){_chatSendFlight.controller.abort();_chatSendFlight=null;}
@@ -455,7 +455,7 @@
                     var relationNotice = document.getElementById('dockChatRelationshipNotice');
                     if (relationNotice) relationNotice.hidden = true;
                     _dockChatListRenderSignature = '';
-                    _chatRenderSignature = {};
+                    _chatRenderSignature = Object.create(null);
                 } catch (e) {}
             };
 
@@ -538,7 +538,7 @@
             //   于是列表是空白的，要等 20s 或手动下拉才会加载。
             //   这里用一个显式标记记录"列表从未成功渲染过"，返回列表时据此强制加载一次。
             var _dockChatListEverLoaded = false;
-            var _dockChatConversationStates = {};
+            var _dockChatConversationStates = Object.create(null);
             var _dockChatConversationOwner = '';
             var _dockChatDraftTimer = null;
             var _dockChatDraftLoadSeq = 0;
@@ -563,7 +563,7 @@
                 if (!Array.isArray(states) || !window.currentUser || currentDockTab !== 'chat') return;
                 if (_dockChatConversationOwner && _dockChatConversationOwner !== window.currentUser) return;
                 _dockChatConversationOwner = window.currentUser;
-                _dockChatConversationStates = {};
+                _dockChatConversationStates = Object.create(null);
                 states.forEach(function(state) {
                     if (state && state.peer_name) _dockChatConversationStates[state.peer_name] = state;
                 });
@@ -860,8 +860,8 @@
             // ★ 2026-09-27 新增（审计 C8）：把"按会话分组 + 预热缓存"的逻辑抽成可复用函数，
             //   供首屏渲染与"截断补拉"两条路径共用，避免两处口径分叉。
             function buildDockChatConversations(allMsgs) {
-                var convMap = {};
-                var preheatMap = {};
+                var convMap = Object.create(null);
+                var preheatMap = Object.create(null);
                 (Array.isArray(allMsgs) ? allMsgs : []).forEach(function(m) {
                     var other = m.user_name === window.currentUser ? m.media_url : m.user_name;
                     if (!other) return;
@@ -977,9 +977,9 @@
                 //   只要对不上就整段丢弃（不 toast、不重试，由新账号自己的请求接管）。
                 var listOwner = window.currentUser || '', listAuthEpoch = window._authStateEpoch || 0;
                 if (_dockChatConversationOwner !== listOwner) {
-                    _dockChatConversationStates = {};
+                    _dockChatConversationStates = Object.create(null);
                     _dockChatConversationOwner = listOwner;
-                    window.__xtjMutedChatPeers = {};
+                    window.__xtjMutedChatPeers = Object.create(null);
                 }
                 if (el.getAttribute('data-list-owner') !== listOwner) {
                     el.replaceChildren();
@@ -1017,7 +1017,7 @@
                     var allMsgs = mergeDockChatRowsById(rawRows, false, 180);
                     var authoritative = Array.isArray(dmResult.conversations);
                     if (authoritative) {
-                        _dockChatConversationStates = {};
+                        _dockChatConversationStates = Object.create(null);
                         dmResult.conversations.forEach(function(state) {
                             if (state && state.peer_name) _dockChatConversationStates[state.peer_name] = state;
                         });
@@ -1221,7 +1221,7 @@
             var _chatCache = {};
             var _chatPagination = {};
             var _chatCommittedRevision = 0;
-            var _chatRenderSignature = {};
+            var _chatRenderSignature = Object.create(null);
             var _dockChatLoadSeq = 0;
             var _dockChatMessageLoad = null;
             var _dockChatListLoadSeq = 0;
@@ -1330,7 +1330,7 @@
                 if (_dockChatListRenderSignature === nextListSignature && existingRows.length === convs.length && !el.querySelector('.chat-list-skeleton')) {
                     return nextListSignature;
                 }
-                var existingMap = {};
+                var existingMap = Object.create(null);
                 Array.prototype.forEach.call(el.querySelectorAll('.chat-list-item[data-chat-user]'), function(node) {
                     existingMap[node.getAttribute('data-chat-user')] = node;
                 });
@@ -3136,6 +3136,8 @@
             function pushDmDeletedToServer(ids) {
                 var list = (Array.isArray(ids) ? ids : []).filter(Boolean);
                 if (!list.length) return Promise.resolve(true);
+                var owner = currentUser, epoch = _authStateEpoch;
+                function current() { return owner === currentUser && epoch === _authStateEpoch; }
                 // ★ 2026-09-27（C12）：入队/提交都绑定"入队时的账号"，切号后不会用新账号提交旧数据。
                 if (typeof window.xtjProtectedFetch !== 'function') {
                     enqueueDmDeletedPending(list);
@@ -3145,12 +3147,14 @@
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ ids: list }),
-                    timeoutMs: 15000
+                    timeoutMs: 15000, authOwner: owner, authEpoch: epoch
                 }).then(function(resp) {
+                    if (!current()) return false;
                     if (!resp || !resp.ok) throw new Error('dm_deleted_sync_failed');
                     clearDmDeletedPendingForCurrentAccount(list);
                     return true;
                 }).catch(function(err) {
+                    if (!current()) return false;
                     console.warn('[DM] 删除记录同步失败，已排队待补传:', err && err.message);
                     enqueueDmDeletedPending(list);
                     return false;
@@ -3168,21 +3172,21 @@
                 if (_dmDeletedSyncedUsers[syncKey] && !force) return Promise.resolve(false);
                 _dmDeletedSyncedUsers[syncKey] = 1;
                 // 同步发起时的账号快照：回调里核对，账号变了就整段放弃（不写缓存、不补传）。
-                var syncOwner = currentUser || '';
+                var syncOwner = currentUser || '', syncEpoch = _authStateEpoch;
                 // 撤销标记：失败（网络/非 ok）时允许下次重试，否则本次生命周期内永不重试。
                 var releaseMarker = function() { delete _dmDeletedSyncedUsers[syncKey]; };
                 if (typeof window.xtjProtectedFetch !== 'function') { releaseMarker(); return Promise.resolve(false); }
                 var localIds = getDmDeletedIds();
                 // 只取**当前账号**的待补传批次（跨账号批次原样留在队列里）。
                 var pending = takeDmDeletedPendingForCurrentAccount();
-                return window.xtjProtectedFetch('/api/dm/deleted', { method: 'GET', timeoutMs: 15000 })
+                return window.xtjProtectedFetch('/api/dm/deleted', { method: 'GET', timeoutMs: 15000, authOwner: syncOwner, authEpoch: syncEpoch })
                     .then(function(resp) {
                         if (!resp || !resp.ok) throw new Error('dm_deleted_fetch_failed');
                         return resp.json();
                     })
                     .then(function(data) {
                         // 回调期间账号已变（登出/切号）→ 丢弃结果，不污染新账号的墓碑，也不补传。
-                        if (!currentUser || (currentUser || '') !== syncOwner) return false;
+                        if (!currentUser || (currentUser || '') !== syncOwner || _authStateEpoch !== syncEpoch) return false;
                         var serverIds = (data && Array.isArray(data.ids)) ? data.ids : [];
                         var merged = serverIds.slice();
                         localIds.forEach(function(id) { if (merged.indexOf(id) < 0) merged.push(id); });
@@ -4953,9 +4957,11 @@
             function requestDockChatSocial(path, options) {
                 if (!window.currentUser) return Promise.reject(new Error('请先登录'));
                 var reqOptions = Object.assign({ timeoutMs: 12000, background: true }, options || {});
+                var fence = captureAuthRequestFence(reqOptions);
                 reqOptions.headers = Object.assign({ 'Content-Type': 'application/json' }, reqOptions.headers || {});
                 return window.xtjProtectedFetch('/api/chat' + path, reqOptions).then(function(resp) {
                     return resp.json().catch(function() { return {}; }).then(function(data) {
+                        fence.check();
                         if (!resp.ok || !data || !data.ok) {
                             var error = new Error(data && data.error || '好友操作失败，请稍后重试');
                             error.code = data && data.code || 'chat_social_failed';
@@ -5154,7 +5160,8 @@
                         if (data.state.muted_until || data.state.deleted) window.__xtjMutedChatPeers[peer] = true;
                         else delete window.__xtjMutedChatPeers[peer];
                     }
-                    closeDockChatConversationMenu();
+                    var menu = document.getElementById('dockChatConversationMenu');
+                    if (menu && menu.getAttribute('data-peer') === peer) closeDockChatConversationMenu();
                     if (action === 'clear' || action === 'delete') {
                         forgetDockChatConversationMessages(peer);
                         if (dockChatActiveUser === peer) {

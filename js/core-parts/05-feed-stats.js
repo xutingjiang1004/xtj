@@ -666,7 +666,7 @@
             //   聚合，条数上限还不一样（180 vs 200），切换 tab 时数字会跳动。
             //   规则：只统计"发给我的且未读"的消息，按发件人（会话）分组，每个会话封顶 99，再求和。
             function aggregateDmUnread(rows) {
-                var bySender = {};
+                var bySender = Object.create(null);
                 (Array.isArray(rows) ? rows : []).forEach(function(m) {
                     if (!m || m.media_url !== window.currentUser) return;
                     if (window.isMsgReadByMe(m)) return;
@@ -1223,11 +1223,11 @@
                 _dmListShared.inflight = null;
                 _dmUnreadFetchedAt = 0;
             };
-            window.__xtjMutedChatPeers = {};
+            window.__xtjMutedChatPeers = Object.create(null);
             window.__xtjDmMuteReady = false;
             function authoritativeDmUnread(conversations) {
                 var total = 0;
-                var muted = {};
+                var muted = Object.create(null);
                 (conversations || []).forEach(function(c) {
                     if (!c || c.deleted) return;
                     var isMuted = !!c.muted_until && (c.muted_until === 'infinity' || Date.parse(c.muted_until) > Date.now());
@@ -1247,7 +1247,7 @@
                     window.__xtjInvalidateDmListShared();
                     _dmListShared.owner = owner;
                     _dmListShared.authEpoch = identityEpoch;
-                    window.__xtjMutedChatPeers = {};
+                    window.__xtjMutedChatPeers = Object.create(null);
                     window.__xtjDmMuteReady = false;
                     setUnreadBadgeCount(0);
                 }
