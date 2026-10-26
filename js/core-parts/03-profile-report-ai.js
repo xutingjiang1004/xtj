@@ -1386,6 +1386,7 @@ function renderProfileActivityList(kind) {
                         if (detailComment) targetPostId = detailComment.post_id;
                     }
                     window.__xtjApplyCommentDeletion(commentId, result, targetPostId);
+                    if (window.XTJHaptics) window.XTJHaptics.play('success');
                     if (typeof writeFeedCacheSnapshot === 'function') writeFeedCacheSnapshot();
                     if (targetPostId && typeof window.__xtjSchedulePostCardPatch === 'function') {
                         window.__xtjSchedulePostCardPatch(targetPostId);

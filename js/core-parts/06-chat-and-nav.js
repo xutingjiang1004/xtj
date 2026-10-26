@@ -7,6 +7,10 @@
             window.switchDockTab = function(tab, skipReturn, options) {
                 if (tab !== 'chat') _chatContextSeq++;
                 options = options || {};
+                // Restoring saved tabs and background state must stay silent.
+                if (tab !== currentDockTab && /^(dock-click|dock-drag|desktop-sidebar)$/.test(options.source || '') && window.XTJHaptics) {
+                    window.XTJHaptics.play('selection');
+                }
                 // ★ 小猫AI dock 中间 tab：打开独立二级浮层(panelAiChat)，不走 dock-panel 显隐
                 if (tab === 'ai-chat') {
                     document.querySelectorAll('.dock-tab').forEach(function(t) { t.classList.remove('active'); });
@@ -4592,7 +4596,7 @@
                     cancelPress();
                     pressTimer = setTimeout(function() {
                         pressTimer = null;
-                        try { if (navigator.vibrate) navigator.vibrate(12); } catch (eVib) {}
+                        if (window.XTJHaptics) window.XTJHaptics.play('impact');
                         openDockMessageActions(row);
                         suppressedBubble = row; suppressUntil = Date.now() + 900;
                     }, 450);

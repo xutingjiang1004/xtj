@@ -6983,6 +6983,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if(result&&result.board){progressCard._researchBoard=result.board;var finalFeatures=assistantFeatures();if(finalFeatures)finalFeatures.renderBoard(progressCard,result.board);}
       progressCard._researchMessageId=result&&result.message_id;progressCard._researchDocuments=result&&result.documents||[];consumeAiAttachment(fileData);
       renderResearchResult();
+      if (answer.trim() && progressCard.isConnected && !controller.signal.aborted && window.XTJHaptics) window.XTJHaptics.play('success');
       if (result && result.quota) applyQuota(result.quota);
       if (result && result.conversation_id && !S.dtConversationId) { S.dtConversationId = result.conversation_id; saveDtConvId(); }
       if (result && result.saved === false) markResearchCardOutcome(progressCard, 'interrupted', '报告已生成，但聊天记录未保存，请复制保留后重试');
@@ -7405,6 +7406,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             if (!deepDrained || S._dtCurrentReqId !== reqId || controller.signal.aborted || aiNodeRef.value.isConnected === false) return;
           }
           finishThinkCard(aiNodeRef.value, aiContentRef.value, evt);
+          if (evt.complete === true && String(evt.sanitized_content || evt.content || '').trim() && window.XTJHaptics) window.XTJHaptics.play('success');
           if (evt.saved === false && aiNodeRef.value) {
             var unsavedNote = el('div', { class: 'ai-error-note', text: '回答已生成，但聊天记录未保存，请复制保留后重试' });
             aiNodeRef.value.appendChild(unsavedNote);
@@ -11515,6 +11517,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               if ((S._currentReqId !== reqId || !customModelIdentityCurrent(sendIdentity)) || assistantNode.isConnected === false) return;
               if (!drained || controller.signal.aborted) throw new DOMException('Reply cancelled', 'AbortError');
               finishAiMessage(assistantNode, aiContent, aiReasoning, evt);
+              if (streamComplete && aiContent.trim() && window.XTJHaptics) window.XTJHaptics.play('success');
             }
             S.sending = false;
             if(S._updateContextCapacity)S._updateContextCapacity();
@@ -13049,6 +13052,7 @@ function showChatMessages() {
         notify('当前搜索额度不可用，可以使用自动判断或仅当前资料');
         return;
       }
+      if (next !== networkSettings().networkMode && window.XTJHaptics) window.XTJHaptics.play('selection');
       S.networkMode = next; S.webSearchEnabled = next === 'required';
       try { localStorage.setItem('xtj_ai_network_mode', next); localStorage.setItem('xtj_ai_web_search', S.webSearchEnabled ? 'true' : 'false'); } catch (_) {}
       updateSearchStatus();
@@ -13363,6 +13367,7 @@ function showChatMessages() {
         if (value === '__add_custom__') { showCustomModelModal(); return; }
         if (value && value !== S.selectedModel) {
           S.selectedModel = value;
+          if (window.XTJHaptics) window.XTJHaptics.play('selection');
           S._userPickedModel = true;
           try { localStorage.setItem('xtj_ai_model', value); } catch (err) {}
           notify('模型：' + (isCustomModelId(value) ? customModelDisplayName(value) : (modelLabels[value] || value)));
@@ -13371,6 +13376,7 @@ function showChatMessages() {
       } else {
         if (value && value !== S.thinkingMode) {
           S.thinkingMode = value;
+          if (window.XTJHaptics) window.XTJHaptics.play('selection');
           S._userPickedThinkingMode = true;
           try { localStorage.setItem('xtj_ai_thinking_mode', value); } catch (err) {}
           notify('思考程度：' + (thinkLabels[value] || value));

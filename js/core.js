@@ -4647,6 +4647,7 @@ function renderProfileActivityList(kind) {
                         if (detailComment) targetPostId = detailComment.post_id;
                     }
                     window.__xtjApplyCommentDeletion(commentId, result, targetPostId);
+                    if (window.XTJHaptics) window.XTJHaptics.play('success');
                     if (typeof writeFeedCacheSnapshot === 'function') writeFeedCacheSnapshot();
                     if (targetPostId && typeof window.__xtjSchedulePostCardPatch === 'function') {
                         window.__xtjSchedulePostCardPatch(targetPostId);
@@ -5745,6 +5746,7 @@ function renderProfileActivityList(kind) {
                 operation.desired = nextLiked;
                 setPostLikePending(pid, true);
                 applyPostLikeIntent(pid, nextLiked, btn);
+                if (window.XTJHaptics) window.XTJHaptics.play('impact');
                 if (!operation.running) operation.promise = flushPostLikeOperation(pid, operation);
                 return operation.promise;
             };
@@ -6491,6 +6493,7 @@ function renderProfileActivityList(kind) {
                 if (typeof updateFeedStats === 'function') { try { updateFeedStats(); } catch (e) {} }
                 cleanupDeleteSession({ restoreVisual: false, hideModal: true, resetTarget: true });
                 showToast("帖子已删除");
+                if (window.XTJHaptics) window.XTJHaptics.play('success');
                 // 不再调用 loadFeed(true)，避免整页重建和闪白
             }
             window.openDelete = function (postId, ownerKey) {
@@ -10475,6 +10478,7 @@ function renderProfileActivityList(kind) {
                     // Only the submitted media snapshot is cleared above.
                     // Failed submissions retain their preview and retry files.
                     showToast(insertRes.fallback ? "发布成功，已兼容旧数据结构" : "发布成功");
+                    if (window.XTJHaptics) window.XTJHaptics.play('success');
                     if (!insertPublishedPostIntoFeed(insertRes.data, !!publishMotion)) {
                         clearFeedCache();
                         await loadFeed(true);
@@ -12581,6 +12585,10 @@ function renderProfileActivityList(kind) {
             window.switchDockTab = function(tab, skipReturn, options) {
                 if (tab !== 'chat') _chatContextSeq++;
                 options = options || {};
+                // Restoring saved tabs and background state must stay silent.
+                if (tab !== currentDockTab && /^(dock-click|dock-drag|desktop-sidebar)$/.test(options.source || '') && window.XTJHaptics) {
+                    window.XTJHaptics.play('selection');
+                }
                 // ★ 小猫AI dock 中间 tab：打开独立二级浮层(panelAiChat)，不走 dock-panel 显隐
                 if (tab === 'ai-chat') {
                     document.querySelectorAll('.dock-tab').forEach(function(t) { t.classList.remove('active'); });
@@ -17166,7 +17174,7 @@ function renderProfileActivityList(kind) {
                     cancelPress();
                     pressTimer = setTimeout(function() {
                         pressTimer = null;
-                        try { if (navigator.vibrate) navigator.vibrate(12); } catch (eVib) {}
+                        if (window.XTJHaptics) window.XTJHaptics.play('impact');
                         openDockMessageActions(row);
                         suppressedBubble = row; suppressUntil = Date.now() + 900;
                     }, 450);
