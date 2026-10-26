@@ -1,9 +1,27 @@
 'use strict';
 
 // This integration deliberately has no BYOK, arbitrary model or paid fallback.
-const MODEL = 'minimax/minimax-m3.1-flash:free';
+// ★ 2026-10-27：原模型 minimax/minimax-m3.1-flash:free 已被 OpenRouter 下架（免费池里
+//   已不存在该 :free 变体，只剩付费版），而本集成强制 max_price=0，因此必然 404。
+//   现默认改用 nvidia/nemotron-3.5-lightning:free（100 万上下文、免费）。
+//   模型标识做成**可配置**，免费模型下架时不必再改代码发版：设环境变量
+//   OPENROUTER_MODEL=<openrouter 模型 id> 即可切换，前端目录随之后端返回。
+// 免费池中参数量最大、综合能力最强的通用模型：550B MoE（55B 激活），100 万上下文。
+const MODEL_DEFAULT = 'nvidia/nemotron-3-ultra-550b-a55b:free';
+const LABEL_DEFAULT = 'Nemotron 3 Ultra 550B 免费版';
 const BASE_URL = 'https://openrouter.ai/api/v1';
+// 兼容旧标识：前端与历史数据仍以 or_minimax_m31_free 作为托管模型 uid，
+// 改模型不影响前端选择逻辑与已保存的引用。
 const MODEL_UID = 'or_minimax_m31_free';
+function modelId(env = process.env) {
+  const raw = String(env.OPENROUTER_MODEL || '').trim();
+  // 只接受 OpenRouter 风格的 model id，杜绝注入任意地址或付费别名。
+  return /^[a-z0-9._-]+\/[a-z0-9._:-]+$/i.test(raw) && raw.endsWith(':free') ? raw : MODEL_DEFAULT;
+}
+function modelLabel(env = process.env) {
+  const raw = String(env.OPENROUTER_MODEL_LABEL || '').trim();
+  return raw ? raw.slice(0, 80) : LABEL_DEFAULT;
+}
 // ★ 2026-10-27 限时公开体验：站长决定把这个免费模型开放给所有用户（含未登录游客）24 小时。
 //   用**绝对截止时间戳**而非「服务启动后 24 小时」——后者在 Render 重启/重新部署后会被重置，
 //   变相变成无限期开放。截止时间到点后自动回退为「仅站长」，无需改代码、无需重新部署。
@@ -46,13 +64,14 @@ function resolveConfig(userName, ownerName, input = {}, env = process.env) {
   if (!owner && !publicWindowOpen(env)) {
     throw failure(PUBLIC_ENDED_CODE, '站长开放的 24 小时限时体验已结束，该模型恢复为仅站长可用', 403);
   }
-  if (input.provider && input.provider !== 'openrouter' || input.model && input.model !== MODEL ||
+  const model = modelId(env);
+  if (input.provider && input.provider !== 'openrouter' || input.model && input.model !== model ||
       input.model_uid && input.model_uid !== MODEL_UID || input.base_url && (typeof input.base_url !== 'string' || input.base_url.replace(/\/+$/, '') !== BASE_URL) || input.api_key) {
-    throw failure('OPENROUTER_FIXED_FREE_MODEL', '仅允许站长后端配置的 MiniMax M3.1 Flash 免费模型，不能替换 Key、地址或模型', 400);
+    throw failure('OPENROUTER_FIXED_FREE_MODEL', '仅允许站长后端配置的免费模型，不能替换 Key、地址或模型', 400);
   }
   const key = String(env.OPENROUTER_API_KEY || '').trim();
   if (!key) throw failure('OPENROUTER_NOT_CONFIGURED', '请在后端配置 OPENROUTER_API_KEY 后重新部署服务', 503);
-  const config = {provider:'openrouter',model:MODEL,base_url:BASE_URL,uid:MODEL_UID,model_uid:MODEL_UID,server_managed:true};
+  const config = {provider:'openrouter',model:model,base_url:BASE_URL,uid:MODEL_UID,model_uid:MODEL_UID,server_managed:true};
   // Do not serialize credentials into checkpoints, histories or diagnostics.
   Object.defineProperty(config, 'api_key', {value:key,enumerable:false});
   return config;
@@ -62,12 +81,12 @@ function catalog(userName, ownerName, env = process.env) {
   // 公开期内所有用户都能看到该模型；到期后只有站长能看到。
   if (!publicAllowed(userName, ownerName) && !publicWindowOpen(env)) return [];
   const open = !publicAllowed(userName, ownerName);
-  return [{uid:MODEL_UID,provider:'openrouter',provider_label:'OpenRouter',label:'MiniMax M3.1 Flash 免费版',
-    model:MODEL,base_url:BASE_URL,server_managed:true,public_access:open,public_until:publicUntil(env)}];
+  return [{uid:MODEL_UID,provider:'openrouter',provider_label:'OpenRouter',label:modelLabel(env),
+    model:modelId(env),base_url:BASE_URL,server_managed:true,public_access:open,public_until:publicUntil(env)}];
 }
-function freePayload(payload) {
+function freePayload(payload, env = process.env) {
   // Never accept routing aliases, :online, plugins, or a paid provider fallback.
-  const out = {...payload,model:MODEL,plugins:['web','file-parser','response-healing','fusion','pareto-router'].map(id => ({id,enabled:false})),provider:{allow_fallbacks:false,require_parameters:true,
+  const out = {...payload,model:modelId(env),plugins:['web','file-parser','response-healing','fusion','pareto-router'].map(id => ({id,enabled:false})),provider:{allow_fallbacks:false,require_parameters:true,
     max_price:{prompt:0,completion:0,request:0,image:0}}};
   delete out.models;
   delete out.route;
@@ -149,6 +168,6 @@ function event(error) {
   return {type:'error',code:error.code,error:error.message,http_status:error.http_status,retry_after:error.retry_after};
 }
 function isError(error) { return !!(error && /^OPENROUTER_/.test(error.code || '')); }
-module.exports = {MODEL,BASE_URL,MODEL_UID,resolveConfig,catalog,freePayload,upstreamError,checkPacket,appendReasoning,event,isError,
+module.exports = {MODEL:MODEL_DEFAULT,BASE_URL,MODEL_UID,MODEL_DEFAULT,modelId,modelLabel,resolveConfig,catalog,freePayload,upstreamError,checkPacket,appendReasoning,event,isError,
   publicWindowOpen,publicUntil,publicRemainingMs,publicAllowed,requestsOpenRouter,createGuestOpenRouterAuth,
   PUBLIC_UNTIL_DEFAULT,PUBLIC_CODE,PUBLIC_ENDED_CODE};

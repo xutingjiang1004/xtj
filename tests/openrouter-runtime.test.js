@@ -91,7 +91,7 @@ test('managed credentials stay origin/model fixed and nonserializable, and the p
   // 公开期内目录对所有人可见，且不含任何密钥。
   assert.equal(openRouter.catalog('alice','xxz',env).length,1);
   assert.equal(openRouter.catalog('alice','xxz',env)[0].public_access,true);
-  for(const override of [{model:'minimax/minimax-m3.1-flash'},{model:'openrouter/free'},{base_url:'https://evil.example/v1'},{model_uid:'other'},{api_key:'browser-key'}])
+  for(const override of [{model:'nvidia/nemotron-3-ultra-550b-a55b'},{model:'openrouter/free'},{model:'minimax/minimax-m3.1-flash:free'},{base_url:'https://evil.example/v1'},{model_uid:'other'},{api_key:'browser-key'}])
     assert.throws(()=>openRouter.resolveConfig('xxz','xxz',override,env),{code:'OPENROUTER_FIXED_FREE_MODEL'});
   const config=openRouter.resolveConfig('xxz','xxz',body(),env);assert.equal(config.api_key,TEST_KEY);
   assert.doesNotMatch(JSON.stringify(config),/api_key|isolated-openrouter/);
