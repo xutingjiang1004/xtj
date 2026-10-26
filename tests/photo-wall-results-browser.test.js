@@ -6,8 +6,10 @@ const row=f=>({id,user_name:'alice',media_type:'__photo_wall__',media_url:f.orig
 async function wall(f,read=()=>[]){
  await f.page.route('**/api/photos/public?*',r=>r.fulfill({json:{ok:true,data:read(),sort:'date_desc',has_more:false,next_cursor:null}}));
  await f.page.locator('[data-desktop-tab="ai"], [data-tab="ai"]').filter({visible:true}).first().click();
- await f.page.waitForFunction(()=>typeof window.triggerPhotoWallUpload==='function'&&typeof window.renderPhotoWallWithoutReload==='function'&&!document.querySelector('#photoGrid .pw-wall-loading'));
- // The fixture bypasses the native file chooser; let the existing navigation transition finish first.
+ // Lazy entry-point functions can exist before the upload component binds its
+ // input. This fixture bypasses the chooser, so wait for that binding as well.
+ await f.page.waitForFunction(()=>typeof window.triggerPhotoWallUpload==='function'&&typeof window.renderPhotoWallWithoutReload==='function'&&document.getElementById('photoFileInput')?.__xtjUploadBound===true&&!document.querySelector('#photoGrid .pw-wall-loading'));
+ // Let the existing navigation transition finish before injecting file events.
  await f.page.waitForFunction(()=>{const panel=document.getElementById('panelAi');return panel&&!panel.getAnimations().some(animation=>animation.pending||animation.playState==='running');});
  await f.page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
 }

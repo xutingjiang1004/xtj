@@ -5925,10 +5925,41 @@ function renderProfileActivityList(kind) {
                 box.style.opacity = '0';
                 box.style.marginTop = '0px';
                 box.style.transition = 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)';
+                var openingFocus = document.activeElement;
+                function revealFocusedComment() {
+                    if (!box.isConnected || box.__xtjClosing || document.activeElement !== inp) return;
+                    if (document.documentElement.classList.contains('xtj-ios-viewport') && window.__xtjRefreshIOSChatViewport) {
+                        window.__xtjRefreshIOSChatViewport({ fitFocus: true });
+                        return;
+                    }
+                    // Native focus cannot see a fixed Dock. Adjust only the local
+                    // scroll panel, preserving the surrounding page and modal.
+                    var owner = box.parentElement;
+                    while (owner && owner !== document.body && !/(auto|scroll)/.test(getComputedStyle(owner).overflowY)) owner = owner.parentElement;
+                    if (!owner || owner === document.body) return;
+                    var bounds = owner.getBoundingClientRect(), viewport = window.visualViewport;
+                    var top = Math.max(bounds.top, viewport ? viewport.offsetTop : 0) + 8;
+                    var bottom = Math.min(bounds.bottom, viewport ? viewport.offsetTop + viewport.height : window.innerHeight) - 8;
+                    var dock = document.getElementById('dockBar');
+                    if (dock && box.closest('.dock-panel') && dock.getClientRects().length) {
+                        var dockBounds = dock.getBoundingClientRect(), dockStyle = getComputedStyle(dock);
+                        if (dockStyle.visibility !== 'hidden' && Number(dockStyle.opacity) > 0 && dockBounds.top < bottom && dockBounds.bottom > top) bottom = dockBounds.top - 8;
+                    }
+                    var row = innerWrap.getBoundingClientRect();
+                    if (row.bottom > bottom) owner.scrollTop += row.bottom - bottom;
+                    else if (row.top < top) owner.scrollTop -= top - row.top;
+                }
+                function focusRevealedComment() {
+                    if (!box.isConnected || box.__xtjClosing) return;
+                    var active = document.activeElement;
+                    if (active !== openingFocus && active !== document.body && active !== inp) return;
+                    try { inp.focus({ preventScroll: true }); } catch (_) { inp.focus(); }
+                    revealFocusedComment();
+                }
                 box.addEventListener('transitionend', function(event) {
                     if (event.target === box && event.propertyName === 'grid-template-rows' &&
-                        document.activeElement === inp && window.__xtjRefreshIOSChatViewport) {
-                        window.__xtjRefreshIOSChatViewport({ fitFocus: true });
+                        document.activeElement === inp) {
+                        revealFocusedComment();
                     }
                 });
                 box.style.background = 'transparent'; // 修复底色不统一的问题
@@ -5949,12 +5980,16 @@ function renderProfileActivityList(kind) {
                 inp.className = 'inline-comment-inp';
                 inp.placeholder = '写下你的想法...';
                 inp.style.flex = '1';
+                inp.style.minWidth = '0';
+                inp.style.minHeight = '44px';
+                inp.style.boxSizing = 'border-box';
                 inp.style.padding = '8px 12px';
                 inp.style.border = '1px solid var(--border)';
                 inp.style.borderRadius = '20px';
                 inp.style.background = 'var(--bg-secondary)';
                 inp.style.outline = 'none';
                 inp.style.fontSize = '14px';
+                inp.addEventListener('focus', revealFocusedComment);
                 
                 // ★ @ mention autocomplete
                 var mentionDropdown = null;
@@ -6139,6 +6174,9 @@ function renderProfileActivityList(kind) {
                 var btn = document.createElement('button');
                 btn.className = 'btn-sm btn-primary';
                 btn.textContent = '发送';
+                btn.style.flexShrink = '0';
+                btn.style.whiteSpace = 'nowrap';
+                btn.style.minHeight = '44px';
                 btn.style.borderRadius = '20px';
                 btn.style.padding = '6px 14px';
                 // The key belongs to a logical submit, including retries after an
@@ -6277,10 +6315,13 @@ function renderProfileActivityList(kind) {
                         box.style.gridTemplateRows = '1fr';
                         box.style.opacity = '1';
                         box.style.marginTop = '8px';
+                        if (typeof box.getAnimations === 'function') {
+                            Promise.all(box.getAnimations().map(function(animation) { return animation.finished.catch(function() {}); })).then(focusRevealedComment);
+                        } else {
+                            setTimeout(focusRevealedComment, 300);
+                        }
                     });
                 });
-                
-                setTimeout(() => inp.focus(), 300); // 动画结束后再 focus
             };
 
             // ===================== 删除帖子 =====================
@@ -9589,7 +9630,7 @@ function renderProfileActivityList(kind) {
                 var filteredPosts = getFilteredPosts(feedAllPosts || [], feedAllComments || []);
                 if (filteredPosts.length >= target) return true;
                 var now = Date.now();
-                if (_feedCoverageLastFetchAt && now - _feedCoverageLastFetchAt < FEED_COVERAGE_THROTTLE_MS) return true;
+                if (hasActiveFeedFilters() && _feedCoverageLastFetchAt && now - _feedCoverageLastFetchAt < FEED_COVERAGE_THROTTLE_MS) return true;
                 var guard = 0;
                 while (!feedEndReached && guard < FEED_COVERAGE_MAX_PAGES_PER_RUN) {
                     filteredPosts = getFilteredPosts(feedAllPosts || [], feedAllComments || []);
@@ -10768,14 +10809,14 @@ function renderProfileActivityList(kind) {
                     feedLoadMoreFailed = true;
                     var failEl = document.getElementById('feedLoadMoreError');
                     if (!failEl) {
-                        failEl = document.createElement('div');
+                        failEl = document.createElement('button');
                         failEl.id = 'feedLoadMoreError';
+                        failEl.type = 'button';
                         failEl.className = 'loading feed-load-more-error';
-                        failEl.setAttribute('role', 'button');
-                        failEl.setAttribute('tabindex', '0');
                         failEl.textContent = '加载更多失败，点击重试';
                         failEl.addEventListener('click', function() {
                             feedLoadMoreFailed = false;
+                            _feedCoverageLastFetchAt = 0;
                             var errEl = document.getElementById('feedLoadMoreError');
                             if (errEl && errEl.parentNode) errEl.parentNode.removeChild(errEl);
                             loadMoreFeedPosts();
