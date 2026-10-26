@@ -23,7 +23,7 @@ async function aiPolishFixture(options = {}) {
       }
       if(path.endsWith('/chat/metadata/read'))return json({ok:true,records:(body.conversation_ids||[]).map(cid=>aiPolish.historyTitles[cid]).filter(Boolean)});
       if(path.endsWith('/chat/metadata')){const old=aiPolish.historyTitles[body.conversation_id]||{revision:0};const record={conversation_id:body.conversation_id,title:body.title,revision:old.revision+1};aiPolish.historyTitles[body.conversation_id]=record;return json({ok:true,record});}
-      if (path.endsWith('/chat/history')) return json({ ok: true, conversation_id: u.searchParams.get('conversation_id') || 'POLISH01', messages: [], has_more: false });
+      if (path.endsWith('/chat/history')) return json({ ok: true, conversation_id: u.searchParams.get('conversation_id') || 'POLISH01', messages: options.history || [], has_more: false });
       if (path.endsWith('/chat/conversations')) return json({ ok: true, conversations: [{ conversation_id: 'POLISH01', title: '本地测试对话', preview: '模拟历史内容', message_count: 4, updated_at: '2026-10-13T08:00:00Z' }], has_more: false });
       if (path.endsWith('/research/history')) return json({ ok: true, items: [], has_more: false });
       if (path.endsWith('/research/checkpoints')) return json({ok:true,records:aiPolish.checkpoints});

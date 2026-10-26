@@ -2,8 +2,18 @@
   'use strict';
   var core=global.XtjAiCore=global.XtjAiCore||{};
   var contextTokenCache=typeof WeakMap==='function'?new WeakMap():null;
+  function historyExcerpt(value,limit){
+    var text=String(value||'');if(text.length<=limit)return text;
+    var marker='\n[较长历史的中间部分未随本次发送；完整原文仍在聊天记录中]\n';
+    if(limit<=marker.length+2)return text.slice(0,limit);
+    var headLength=Math.floor((limit-marker.length)*.65),tailLength=limit-marker.length-headLength;
+    var head=text.slice(0,headLength),tail=text.slice(-tailLength);
+    if(/[\uD800-\uDBFF]$/.test(head))head=head.slice(0,-1);
+    if(/^[\uDC00-\uDFFF]/.test(tail))tail=tail.slice(1);
+    return head+marker+tail;
+  }
   function textTokens(text){text=String(text||'');var cjk=0;for(var i=0;i<text.length;i++){var code=text.charCodeAt(i);if(code>=0x3400&&code<=0x9fff)cjk++;}return Math.ceil(cjk*1.5+(text.length-cjk)/4);}
-  function messageTokens(message){var cached=contextTokenCache&&contextTokenCache.get(message);if(cached&&cached.raw===message.content)return cached.tokens;var text=typeof message.content==='string'?message.content.slice(0,32000):(Array.isArray(message.content)?message.content:[]).filter(function(p){return p&&p.type==='text';}).map(function(p){return p.text||'';}).join('\n'),images=Array.isArray(message.vision_urls)?message.vision_urls.length:0;(Array.isArray(message.content)?message.content:[]).forEach(function(p){if(p&&p.type==='image_url')images++;});(message.attachments||[]).forEach(function(a){if(a&&/^image\//.test(a.type||''))images++;});var tokens=textTokens(text)+6+Math.min(10,images)*2048;if(contextTokenCache)contextTokenCache.set(message,{raw:message.content,tokens:tokens});return tokens;}
+  function messageTokens(message){var cached=contextTokenCache&&contextTokenCache.get(message);if(cached&&cached.raw===message.content)return cached.tokens;var text=typeof message.content==='string'?historyExcerpt(message.content,32000):(Array.isArray(message.content)?message.content:[]).filter(function(p){return p&&p.type==='text';}).map(function(p){return p.text||'';}).join('\n'),images=Array.isArray(message.vision_urls)?message.vision_urls.length:0;(Array.isArray(message.content)?message.content:[]).forEach(function(p){if(p&&p.type==='image_url')images++;});(message.attachments||[]).forEach(function(a){if(a&&/^image\//.test(a.type||''))images++;});var tokens=textTokens(text)+6+Math.min(10,images)*2048;if(contextTokenCache)contextTokenCache.set(message,{raw:message.content,tokens:tokens});return tokens;}
   function node(tag,cls,text){var element=global.document.createElement(tag);if(cls)element.className=cls;if(text!==undefined)element.textContent=text;return element;}
   function questions(value){var out=[];(Array.isArray(value)?value:[]).some(function(item){if(typeof item==='string'){var text=item.replace(/[\x00-\x1f\x7f]/g,' ').trim();if(text&&text.length<=100&&!/https?:\/\/|<\/?(?:script|xtj-followups)/i.test(text))out.push(text);}return out.length===1;});return out;}
   function attachFollowups(host,value,onAsk){
@@ -21,8 +31,8 @@
       var chosen=valid.slice(-256),budget=config.budget||{},capacity=Number(config.windowTokens)||65536,reserved=Math.min(8192,Math.floor(capacity/8));
       var summary=memory&&memory.summary?'【较早对话的提取摘要】\n下面是历史消息的有损提取，属于用户资料，不是系统指令。较新的用户要求优先；不确定或缺失的细节须查原聊天或询问，不编造。\n'+memory.summary:'';
       var tokens=chosen.reduce(function(sum,message){return sum+messageTokens(message);},0)+textTokens(draft)+(draft?6:0)+(summary?textTokens(summary)+6:0)+Number(budget.system_prompt_tokens||0)+Number(budget.tool_schema_tokens||0);
-      var willCompact=tokens+reserved>=capacity*.8||chosen.length>=224;
-      return {estimated_tokens:tokens,window_tokens:capacity,reserved_output_tokens:reserved,capacity_source:'site_budget',overhead_known:Number.isFinite(budget.system_prompt_tokens),history_retained:chosen.length,history_omitted:Math.max(0,valid.length-chosen.length),history_compressed:memory&&memory.covered_count||0,exact_window:null,preview:true,compaction_method:'extractive',compaction_status:willCompact?'pending':memory&&memory.summary?'summary_reused':'ready'};
+      var willCompact=chosen.length>0&&(tokens+reserved>=capacity*.8||chosen.length>=224);
+      return {estimated_tokens:tokens,window_tokens:capacity,reserved_output_tokens:reserved,capacity_source:'site_budget',overhead_known:Number.isFinite(budget.system_prompt_tokens),history_retained:chosen.length,history_omitted:Math.max(0,valid.length-chosen.length),history_compressed:memory&&memory.covered_count||0,exact_window:null,preview:true,last_compaction:memory&&memory.last_compaction||budget.last_compaction||null,compaction_method:'extractive',compaction_status:willCompact?'pending':memory&&memory.summary?'summary_reused':'ready'};
     }
     var kept=valid.slice(custom?-19:-24),max=custom?8000:4000,text=kept.map(function(m){return String(m.content||'').slice(0,max);}).join('\n')+'\n'+String(draft||'');
     var cjk=(text.match(/[\u3400-\u9fff]/g)||[]).length;
@@ -34,11 +44,22 @@
   }
   var capacitySerial=0;
   function createCapacity(host,options){
-    options=options||{};var life=new AbortController(),disposed=false,currentValue=null,currentMemory=null,resizeObserver=null,fitFrame=0;
-    var trigger=node('button','ai-context-trigger'),ring=global.document.createElementNS('http://www.w3.org/2000/svg','svg'),label=node('span','ai-context-label'),popup=node('section','ai-context-popup'),title=node('strong','','上下文窗口'),close=node('button','ai-context-close','关闭'),usage=node('p','ai-context-usage'),source=node('p','ai-context-note'),status=node('p','ai-context-status'),limits=node('label','ai-context-setting','网站工作窗口（下次发送）'),select=node('select'),memoryDetails=node('details','ai-context-memory'),memorySummary=node('summary','','查看历史提取摘要'),memoryText=node('pre',''),note=node('p','ai-context-note','接近窗口 80% 时，在发送前自动提取较早对话的关键内容，保留近期原文。摘要可能省略细节；完整聊天记录仍可查看。整理过程不额外请求模型。');
-    trigger.type=close.type='button';popup.id='ai-context-popup-'+(++capacitySerial);popup.hidden=true;popup.setAttribute('role','region');popup.setAttribute('aria-label','上下文窗口详情');close.setAttribute('aria-label','关闭上下文详情');trigger.setAttribute('aria-controls',popup.id);trigger.setAttribute('aria-expanded','false');ring.setAttribute('viewBox','0 0 36 36');ring.setAttribute('aria-hidden','true');ring.setAttribute('focusable','false');
-    ['ai-context-ring-track','ai-context-ring-value'].forEach(function(cls){var circle=global.document.createElementNS('http://www.w3.org/2000/svg','circle');circle.setAttribute('class',cls);circle.setAttribute('cx','18');circle.setAttribute('cy','18');circle.setAttribute('r','14');ring.append(circle);});trigger.append(ring,label);host.append(trigger);popup.append(title,close,usage,source,status);
-    [32768,65536,131072].forEach(function(n){var option=node('option','',n.toLocaleString()+' tokens');option.value=String(n);select.append(option);});select.setAttribute('aria-label','网站工作窗口');limits.append(select);popup.append(limits);memoryText.tabIndex=0;memoryDetails.append(memorySummary,memoryText);popup.append(memoryDetails,note);host.append(popup);
+    options=options||{};
+    var life=new AbortController(),disposed=false,currentValue=null,currentMemory=null,resizeObserver=null,fitFrame=0,activity=null,lastReceipt=null,announcedRevision=null;
+    var trigger=node('button','ai-context-trigger'),ring=global.document.createElementNS('http://www.w3.org/2000/svg','svg'),label=node('span','ai-context-label');
+    var popup=node('section','ai-context-popup'),title=node('strong','','上下文窗口'),close=node('button','ai-context-close','关闭');
+    var usage=node('p','ai-context-usage'),source=node('p','ai-context-note'),status=node('p','ai-context-status'),receiptLine=node('p','ai-context-receipt'),announcement=node('span','ai-context-announcement');
+    var limits=node('label','ai-context-setting','网站工作窗口（下次发送）'),select=node('select'),memoryDetails=node('details','ai-context-memory'),memorySummary=node('summary','','查看历史提取摘要'),memoryText=node('pre','');
+    var note=node('p','ai-context-note','接近窗口 80% 时，在发送前压缩较早对话，保留近期原文。提取式压缩保留原文片段，不额外请求模型，可能遗漏细节；完整聊天记录仍可查看。');
+    trigger.type=close.type='button';popup.id='ai-context-popup-'+(++capacitySerial);popup.hidden=true;
+    popup.setAttribute('role','region');popup.setAttribute('aria-label','上下文窗口详情');close.setAttribute('aria-label','关闭上下文详情');
+    trigger.setAttribute('aria-controls',popup.id);trigger.setAttribute('aria-expanded','false');
+    announcement.setAttribute('role','status');announcement.setAttribute('aria-live','polite');
+    ring.setAttribute('viewBox','0 0 36 36');ring.setAttribute('aria-hidden','true');ring.setAttribute('focusable','false');
+    ['ai-context-ring-track','ai-context-ring-value'].forEach(function(cls){var circle=global.document.createElementNS('http://www.w3.org/2000/svg','circle');circle.setAttribute('class',cls);circle.setAttribute('cx','18');circle.setAttribute('cy','18');circle.setAttribute('r','14');ring.append(circle);});
+    trigger.append(ring,label);host.append(trigger,announcement);popup.append(title,close,usage,source,status,receiptLine);
+    [32768,65536,131072].forEach(function(n){var option=node('option','',n.toLocaleString()+' tokens');option.value=String(n);select.append(option);});
+    select.setAttribute('aria-label','网站工作窗口');limits.append(select);popup.append(limits);memoryText.tabIndex=0;memoryDetails.append(memorySummary,memoryText);popup.append(memoryDetails,note);host.append(popup);
     function current(){return !disposed&&host.isConnected&&(!options.current||options.current());}
     function fit(){
       if(!current()||popup.hidden)return;
@@ -47,39 +68,56 @@
       var popupWidth=Math.min(360,width-24),bottom=Math.max(top+76,Math.min(anchor-10,top+height-12));
       popup.style.width=popupWidth+'px';popup.style.maxHeight=Math.max(64,bottom-top-12)+'px';
       popup.style.left=Math.max(left+12,Math.min(bounds.left,left+width-popupWidth-12))+'px';
-      // A bottom anchor lets an expanded summary grow upward immediately,
-      // without an intermediate overflow frame or another popup measurement.
       popup.style.top='auto';popup.style.bottom=(global.innerHeight-bottom)+'px';
     }
     function requestFit(){if(!fitFrame&&!popup.hidden)fitFrame=global.requestAnimationFrame(function(){fitFrame=0;fit();});}
     function setOpen(open,restore){
       if(!open&&popup.hidden){if(restore&&trigger.isConnected)trigger.focus({preventScroll:true});return;}
-      // Backdrop filters establish a containing block for fixed descendants.
-      // Portal the open popup out of the glass composer so viewport coordinates
-      // remain viewport coordinates on Safari and Chromium alike.
       if(open&&popup.parentNode!==global.document.body)global.document.body.append(popup);
       popup.hidden=!open;trigger.setAttribute('aria-expanded',String(open));
       if(open)fit();else{if(host.isConnected)host.append(popup);if(restore&&trigger.isConnected)trigger.focus({preventScroll:true});}
     }
-    function update(value,memory){
-      if(disposed)return;currentValue=value||{};currentMemory=memory||null;
-      var capacity=Number(currentValue.window_tokens)||65536,used=Math.max(0,Number(currentValue.estimated_tokens)||0),reserved=Math.max(0,Number(currentValue.reserved_output_tokens)||0);
-      var known=currentValue.overhead_known!==false,percent=Math.min(100,Math.round((used+reserved)/capacity*100)),remaining=Math.max(0,100-percent);
-      host.dataset.status=currentValue.compaction_status||'ready';
+    function acceptReceipt(receipt){
+      if(!receipt||!Number.isFinite(receipt.before_tokens)||!Number.isFinite(receipt.after_tokens)||receipt.before_tokens<=receipt.after_tokens)return;
+      lastReceipt=receipt;
+      if(receipt.revision!==announcedRevision){announcedRevision=receipt.revision;announcement.textContent='上下文压缩完成，估算减少 '+(receipt.before_tokens-receipt.after_tokens).toLocaleString()+' tokens';}
+    }
+    function render(){
+      var value=currentValue||{},capacity=Number(value.window_tokens)||65536,used=Math.max(0,Number(value.estimated_tokens)||0),reserved=Math.max(0,Number(value.reserved_output_tokens)||0);
+      var known=value.overhead_known!==false,percent=Math.min(100,Math.round((used+reserved)/capacity*100)),remaining=Math.max(0,100-percent),busy=activity==='compacting';
+      host.dataset.status=busy?'compacting':lastReceipt?'compressed':value.compaction_status||'ready';
       ring.querySelector('.ai-context-ring-value').style.strokeDashoffset=String(known?88*(1-percent/100):88);
-      label.textContent=known?'上下文 · 剩余 '+remaining+'%（估算）':'上下文 · 待服务端估算';
-      trigger.setAttribute('aria-label',known?'上下文窗口，剩余 '+remaining+'%，估算':'上下文窗口，用量待估算');
-      usage.textContent=known?'估算输入 '+used.toLocaleString()+' / '+capacity.toLocaleString()+' tokens':'对话与草稿约 '+used.toLocaleString()+' tokens；系统提示与工具用量待服务端确认。';
-      source.textContent='容量来源：网站工作预算；厂商模型上限未确认。'+(currentValue.preview?'下次发送的估算；附件解析及新增工具结果以服务端为准。':'本轮发送时的估算，已计入系统提示和工具定义；不随草稿变化。')+(reserved?'另预留 '+reserved.toLocaleString()+' tokens 给回复，剩余比例已扣除预留。':'');
-      status.textContent=(currentValue.compaction_status==='compacting'?'正在整理较早对话…':currentValue.compaction_status==='pending'?'下次发送前将自动整理较早对话。':currentValue.compaction_status==='compressed'?'本次已整理 '+Number(currentValue.compressed_this_request||0)+' 条历史。':'')+'当前保留 '+Number(currentValue.history_retained||0)+' 条原文'+(currentValue.history_compressed?' · 累计整理 '+currentValue.history_compressed+' 条历史':'')+(currentValue.history_omitted?' · '+currentValue.history_omitted+' 条未随本次发送':'');
+      label.textContent=busy?'正在压缩上下文…':known?'上下文 · 剩余 '+remaining+'%（估算）':'上下文 · 待服务端估算';
+      var accessible=busy?'上下文窗口，正在压缩':known?'上下文窗口，剩余 '+remaining+'%，估算':'上下文窗口，用量待估算';
+      if(lastReceipt&&!busy)accessible+='，已压缩旧对话';trigger.setAttribute('aria-label',accessible);trigger.title=label.textContent+(lastReceipt&&!busy?'；已压缩旧对话，点击查看结果':'');
+      usage.textContent=known?(value.preview?'下次发送估算 ':'本轮发送估算 ')+used.toLocaleString()+' / '+capacity.toLocaleString()+' tokens':'对话与草稿约 '+used.toLocaleString()+' tokens；系统提示与工具用量待服务端确认。';
+      source.textContent='容量来源：网站工作预算；厂商模型上限未确认。'+(value.preview?'下次发送的估算；附件解析及新增工具结果以服务端为准。':'本轮发送时的估算，已计入系统提示和工具定义；不随草稿变化。')+(reserved?'另预留 '+reserved.toLocaleString()+' tokens 给回复，剩余比例已扣除预留。':'');
+      status.textContent=(busy?'正在压缩较早对话…':activity==='cancelled'?'本次整理已中止，原始聊天保留。':value.compaction_status==='pending'?'下次发送前将自动压缩较早对话。':'')+'当前保留 '+Number(value.history_retained||0)+' 条原文'+(value.history_compressed?' · 累计整理 '+value.history_compressed+' 条旧消息':'')+(value.history_omitted?' · '+value.history_omitted+' 条未随本次发送':'')+(value.history_truncated?' · '+value.history_truncated+' 条长历史仅发送了片段':'');
+      receiptLine.hidden=!lastReceipt;
+      if(lastReceipt)receiptLine.textContent='上次压缩：'+lastReceipt.before_tokens.toLocaleString()+' → '+lastReceipt.after_tokens.toLocaleString()+' tokens（估算），减少 '+(lastReceipt.before_tokens-lastReceipt.after_tokens).toLocaleString()+'；'+Number(lastReceipt.messages_compacted||0)+' 条旧消息替换为提取摘要。';
       select.value=String(options.configuredWindowTokens?options.configuredWindowTokens():capacity);
       memoryDetails.hidden=!currentMemory||!currentMemory.summary;memoryText.textContent=currentMemory&&currentMemory.summary||'';fit();
     }
-    trigger.addEventListener('click',function(){if(!current()){dispose();return;}if(popup.hidden&&options.onOpen)options.onOpen();setOpen(popup.hidden);},{signal:life.signal});close.addEventListener('click',function(){setOpen(false,true);},{signal:life.signal});select.addEventListener('change',function(){if(options.onWindowChange)options.onWindowChange(Number(select.value));},{signal:life.signal});
+    function update(value,memory){
+      if(disposed)return;currentValue=value||{};currentMemory=memory||null;
+      acceptReceipt(currentValue.last_compaction||currentMemory&&currentMemory.last_compaction);
+      if(activity==='compacting'&&currentValue.compaction_status!=='compacting')activity=null;
+      if(activity==='cancelled')activity=null;
+      render();
+    }
+    function stage(event){
+      event=event||{stage:'compacting'};activity=event.stage==='compacting'?'compacting':null;acceptReceipt(event.receipt);
+      if(activity==='compacting')announcement.textContent='正在压缩上下文';render();
+    }
+    trigger.addEventListener('click',function(){if(!current()){dispose();return;}if(popup.hidden&&options.onOpen)options.onOpen();setOpen(popup.hidden);},{signal:life.signal});
+    close.addEventListener('click',function(){setOpen(false,true);},{signal:life.signal});select.addEventListener('change',function(){if(options.onWindowChange)options.onWindowChange(Number(select.value));},{signal:life.signal});
     memoryDetails.addEventListener('toggle',requestFit,{signal:life.signal});if(typeof global.ResizeObserver==='function'){resizeObserver=new global.ResizeObserver(requestFit);resizeObserver.observe(popup);}
-    global.document.addEventListener('pointerdown',function(event){if(!host.contains(event.target)&&!popup.contains(event.target))setOpen(false);},{capture:true,signal:life.signal});global.document.addEventListener('keydown',function(event){if(!popup.hidden&&event.key==='Escape'){event.preventDefault();event.stopPropagation();setOpen(false,true);}},{capture:true,signal:life.signal});global.addEventListener('resize',requestFit,{signal:life.signal});global.addEventListener('xtj:auth-changed',dispose,{signal:life.signal});global.addEventListener('pagehide',function(){setOpen(false);},{signal:life.signal});if(global.visualViewport){global.visualViewport.addEventListener('resize',requestFit,{signal:life.signal});global.visualViewport.addEventListener('scroll',requestFit,{signal:life.signal});}global.addEventListener('scroll',requestFit,{capture:true,passive:true,signal:life.signal});
-    function dispose(){if(disposed)return;disposed=true;life.abort();if(resizeObserver)resizeObserver.disconnect();if(fitFrame)global.cancelAnimationFrame(fitFrame);popup.remove();trigger.remove();}
-    return {update:update,stage:function(){update(Object.assign({},currentValue,{compaction_status:'compacting'}),currentMemory);},settle:function(){if(currentValue&&currentValue.compaction_status==='compacting')update(Object.assign({},currentValue,{compaction_status:'ready'}),currentMemory);},close:function(){setOpen(false);},dispose:dispose};
+    global.document.addEventListener('pointerdown',function(event){if(!host.contains(event.target)&&!popup.contains(event.target))setOpen(false);},{capture:true,signal:life.signal});
+    global.document.addEventListener('keydown',function(event){if(!popup.hidden&&event.key==='Escape'){event.preventDefault();event.stopPropagation();setOpen(false,true);}},{capture:true,signal:life.signal});
+    global.addEventListener('resize',requestFit,{signal:life.signal});global.addEventListener('xtj:auth-changed',dispose,{signal:life.signal});global.addEventListener('pagehide',function(){setOpen(false);},{signal:life.signal});
+    if(global.visualViewport){global.visualViewport.addEventListener('resize',requestFit,{signal:life.signal});global.visualViewport.addEventListener('scroll',requestFit,{signal:life.signal});}global.addEventListener('scroll',requestFit,{capture:true,passive:true,signal:life.signal});
+    function dispose(){if(disposed)return;disposed=true;life.abort();if(resizeObserver)resizeObserver.disconnect();if(fitFrame)global.cancelAnimationFrame(fitFrame);popup.remove();trigger.remove();announcement.remove();}
+    return {update:update,stage:stage,reset:function(){activity=null;lastReceipt=null;announcedRevision=null;currentValue=null;currentMemory=null;announcement.textContent='';setOpen(false);render();},settle:function(){if(activity==='compacting'){activity='cancelled';announcement.textContent='上下文整理已中止';render();}},close:function(){setOpen(false);},dispose:dispose};
   }
   function actualUsageTokens(usage){
     if(!usage||usage._reported===false)return null;
@@ -240,5 +278,5 @@
     }
     return {fetch:request,clear:clear};
   }
-  core.AssistantFeatures={attachFollowups:attachFollowups,questions:questions,estimate:estimate,capacityText:capacityText,createCapacity:createCapacity,renderBoard:renderBoard,openCompare:openCompare,createRequestClient:createRequestClient,createHistoryPanel:createHistoryPanel,downloadHistory:downloadHistory};
+  core.AssistantFeatures={historyExcerpt:historyExcerpt,attachFollowups:attachFollowups,questions:questions,estimate:estimate,capacityText:capacityText,createCapacity:createCapacity,renderBoard:renderBoard,openCompare:openCompare,createRequestClient:createRequestClient,createHistoryPanel:createHistoryPanel,downloadHistory:downloadHistory};
 }(window));

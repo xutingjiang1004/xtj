@@ -246,12 +246,13 @@ test('★ 关键：Responses 路径收集并回传 reasoning 项', function() {
     '应构造 reasoning 类型的 input item 回传');
 });
 
-test('reasoning 回填发生在工具轮 assistant 消息之后', function() {
-  var assistantIdx = SERVER_SRC.indexOf('var assistantInput = { type: \'message\', role: \'assistant\'');
-  var reasoningPushIdx = SERVER_SRC.indexOf('if (roundReasoningItems.length) {');
-  assert.ok(assistantIdx > 0, '应存在 assistant 回填');
-  assert.ok(reasoningPushIdx > assistantIdx,
-    'reasoning 应在 assistant 消息之后回填（顺序需符合协议）');
+test('reasoning 与工具调用按厂家原始顺序回传，不插入占位 assistant', function() {
+  var replay = require('../render-api/responses-context').replayOutput;
+  var reasoning = { type:'reasoning', id:'rs_original', encrypted_content:'opaque', content:[{type:'reasoning_text',text:'核对资料'}] };
+  var call = { type:'function_call', id:'fc_original', call_id:'call_original', name:'search_web', arguments:'{"query":"福州"}' };
+  var result = replay([reasoning,call],[reasoning],[{itemId:call.id,id:call.call_id,name:call.name,arguments:call.arguments}],'',true);
+  assert.deepStrictEqual(result,[reasoning,call], '必须保留原始顺序、ID 和推理协议字段');
+  assert.strictEqual(result.some(function(item){return item.type==='message';}),false, '没有正文时不应虚构 assistant 消息');
 });
 
 // ══════════════════════════════════════════════════════════════════════════

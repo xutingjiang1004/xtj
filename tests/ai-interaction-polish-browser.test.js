@@ -13,9 +13,9 @@ test('model and thinking disclosures support native keys, named lists and focus 
     assert.ok(await p.locator('.ai-select-pop-list').getAttribute('aria-label'));
     assert.equal(await p.evaluate(() => document.activeElement.getAttribute('role')), 'option');
     await p.keyboard.press('End');
-    assert.equal(await p.evaluate(() => document.activeElement === document.querySelector('.ai-select-pop-list').lastChild), true);
+    assert.equal(await p.evaluate(() => document.activeElement === [...document.querySelectorAll('.ai-select-pop-list [role="option"]')].at(-1)), true);
     await p.keyboard.press('Home');
-    assert.equal(await p.evaluate(() => document.activeElement === document.querySelector('.ai-select-pop-list').firstChild), true);
+    assert.equal(await p.evaluate(() => document.activeElement === document.querySelector('.ai-select-pop-list [role="option"]')), true);
     await p.keyboard.press('Escape');
     assert.equal(await row.evaluate(n => document.activeElement === n), true);
     assert.equal(await row.getAttribute('aria-expanded'), 'false');

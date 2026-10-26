@@ -83,3 +83,12 @@ test('real browser touch events drag the iPad sidebar vertically and the network
   assert.deepEqual(f.errors,[]);await cdp.detach();
  }finally{await f.close();}
 });
+
+test('an initial resize observation cannot cancel an in-progress rail gesture, while a real resize does',{timeout:30000},async()=>{
+ const f=await postBrowserFixture({counts:[1]}),p=f.page;
+ try{
+  await p.evaluate(()=>{const original=ResizeObserver;window.ResizeObserver=class{constructor(callback){window.selectionResize=callback;}observe(){}disconnect(){}};const rail=document.createElement('div');rail.id='resizeGestureRail';rail.style.cssText='position:fixed;top:100px;left:10px;width:300px;height:50px;display:flex;z-index:99999;background:white';rail.innerHTML='<span style="position:absolute;pointer-events:none"></span><button style="width:100px;height:50px">一</button><button style="width:100px;height:50px">二</button><button style="width:100px;height:50px">三</button>';document.body.append(rail);window.selectionChanges=[];window.selectionApi=xtjInstallSelectionRail({rail,indicator:rail.firstChild,buttons:'button',selected:()=>rail.querySelector('button'),select:button=>selectionChanges.push(button.textContent)});window.ResizeObserver=original;});
+  await p.mouse.move(60,125);await p.mouse.down();await p.mouse.move(160,125);await p.evaluate(()=>selectionResize([{target:document.getElementById('resizeGestureRail')}]));await p.mouse.move(260,125);await p.mouse.up();assert.deepEqual(await p.evaluate(()=>selectionChanges),['三']);
+  await p.mouse.move(60,125);await p.mouse.down();await p.mouse.move(160,125);await p.evaluate(()=>{const rail=document.getElementById('resizeGestureRail');rail.style.width='280px';selectionResize([{target:rail}]);});await p.mouse.up();assert.deepEqual(await p.evaluate(()=>selectionChanges),['三']);await p.evaluate(()=>selectionApi.dispose());assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});

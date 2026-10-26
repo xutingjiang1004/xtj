@@ -12,9 +12,9 @@ assert.ok(helpersStart >= 0 && helpersEnd > helpersStart, 'server history attach
 const helpersSource = serverSource.slice(helpersStart, helpersEnd);
 
 function loadHistoryHelpers(extractVisionImageUrls, extractChatAttachments) {
-  return new Function('extractVisionImageUrls', 'extractChatAttachments',
+  return new Function('extractVisionImageUrls', 'extractChatAttachments', 'require',
     helpersSource + '\nreturn { createAiHistoryAttachmentBudget, prepareAiHistoryMessage };'
-  )(extractVisionImageUrls, extractChatAttachments);
+  )(extractVisionImageUrls, extractChatAttachments,require('node:module').createRequire(require.resolve('../render-api/server.js')));
 }
 
 test('builtin non-vision history OCRs prior vision_urls instead of dropping image context', async function() {
@@ -94,4 +94,10 @@ test('history attachment payloads over the remaining encoded-size budget are omi
 test('builtin history processing receives the selected model vision capability', function() {
   assert.match(serverSource, /allowVision:\s*_visionEligibleEarly/);
   assert.match(serverSource, /prepareAiHistoryMessage\([\s\S]*?historyOptions \? historyOptions\.allowVision : true/);
+});
+
+test('managed historical documents keep their final correction and explicitly report excerpting',async()=>{
+ const helpers=loadHistoryHelpers(()=>[],async()=>({text:'原始文档开头。'+'甲'.repeat(42000)+'最后更正：预算900元，必须保留原图。'}));
+ const entry=await helpers.prepareAiHistoryMessage({role:'user',content:'阅读之前的资料'},helpers.createAiHistoryAttachmentBudget([]),32000,false);
+ assert.equal(entry.context_truncated,true);assert.ok(entry.content.length<=32000);assert.match(entry.content,/预算900元/);assert.match(entry.content,/中间部分未随本次发送/);
 });

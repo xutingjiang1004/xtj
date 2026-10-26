@@ -46,7 +46,7 @@ test('the real prompt adapter preserves the fixed system, active question and re
  const manage=vm.runInNewContext('('+source.slice(a,b).trim()+')',c),history=longHistory(),current=fixed[1],search={role:'user',content:'已取得的真实检索正文'},messages=[fixed[0],...history,current,search],res={};
  const result=manage(messages,history.length,{body:{context_window_tokens:65536}},res,'CURRENT1',new AbortController().signal);
  assert.equal(messages[0].content,fixed[0].content);assert.equal(messages.at(-2).content,current.content);assert.equal(messages.at(-1).content,search.content);assert.equal(res._aiContextMemory.summary,result.memory.summary);
- assert.equal(frames[0].type,'context_status');assert.equal(frames.at(-1).context_budget.capacity_source,'site_budget');assert.equal(frames.at(-1).context_memory.conversation_id,'CURRENT1');
+ const receipt=frames.find(frame=>frame.context_budget);assert.equal(frames[0].type,'context_status');assert.equal(receipt.context_budget.capacity_source,'site_budget');assert.equal(receipt.context_memory.conversation_id,'CURRENT1');assert.equal(frames.at(-1).stage,'compressed');
 });
 test('native model prompt assembly keeps recent image context and reports history that was shortened before compaction',()=>{
  const source=fs.readFileSync('render-api/server.js','utf8'),route=source.indexOf("app.post('/api/agent/chat/stream'"),a=source.indexOf('    var requestedModel = req.body && req.body.model;',route),b=source.indexOf('    // 思考模式',a),history=longHistory(),frames=[];
@@ -56,7 +56,7 @@ test('native model prompt assembly keeps recent image context and reports histor
  const m=source.indexOf('function manageAiContextWindow('),n=source.indexOf('\nasync function loadAiContext',m);c.manageAiContextWindow=vm.runInNewContext('('+source.slice(m,n).trim()+')',c);
  vm.createContext(c);vm.runInContext(source.slice(a,b),c);c.messages.push(fixed[1]);
  const hook=source.slice(source.indexOf('    if(req.body.context_management===true){for(var managedIndex=',route)).split('\n')[0];vm.runInContext(hook,c);
- const meta=frames.at(-1);assert.equal(meta.context_budget.compaction_status,'compressed');assert.equal(meta.context_budget.history_truncated,1);assert.equal(meta.context_budget.image_count,1);
+ const meta=frames.find(frame=>frame.context_budget);assert.equal(meta.context_budget.compaction_status,'compressed');assert.equal(meta.context_budget.history_truncated,1);assert.equal(meta.context_budget.image_count,1);
  assert.match(c.messages[1].content,/必须保留原图/);assert.equal(c.messages.at(-1).content,fixed[1].content);assert.equal(c.messages.at(-2).content[1].image_url.url,'data:image/png;base64,YQ==');assert.equal(meta.context_memory.conversation_id,'CURRENT1');
 });
 test('saved assistant metadata carries the same bounded memory and budget while user originals remain intact',async()=>{
@@ -88,4 +88,31 @@ test('browser previews and server use the same history, summary, system, tools a
  const reused=window.XtjAiCore.AssistantFeatures.estimate(retained,fixed[1].content,false,{managed:true,memory:prepared.memory,budget:next.budget});
  assert.equal(reused.estimated_tokens,next.budget.estimated_tokens);
  const unknown=window.XtjAiCore.AssistantFeatures.estimate([],question,false,{managed:true});assert.equal(unknown.overhead_known,false);
+});
+
+test('compaction receipts match the actual prompt reduction and survive reuse without claiming another compaction',()=>{
+ const rows=longHistory(),first=context.prepareContext({history:rows,fixed,conversationId:'CURRENT1',tools:[]});
+ const actual=context.estimateMessages([fixed[0],...first.messages,...fixed.slice(1)]).tokens+context.estimateText('[]');
+ assert.equal(first.budget.estimated_tokens,actual);assert.ok(first.memory.last_compaction.saved_tokens>0);
+ assert.equal(first.memory.last_compaction.before_tokens-first.memory.last_compaction.after_tokens,first.budget.saved_tokens);
+ const next=context.prepareContext({history:rows,fixed,conversationId:'CURRENT1',memory:first.memory,tools:[]});
+ assert.equal(next.budget.compressed_this_request,0);assert.equal(next.budget.saved_tokens,0);assert.deepEqual(next.budget.last_compaction,first.budget.last_compaction);
+ assert.deepEqual(context.validMemory(first.memory,'CURRENT1').last_compaction,first.memory.last_compaction);
+});
+test('many short turns reduce the real input rather than creating a longer summary and a fake success',()=>{
+ const rows=Array.from({length:224},(_,i)=>({role:i%2?'assistant':'user',context_id:'small-'+i,content:'很短消息 '+i}));
+ const result=context.prepareContext({history:rows,fixed,conversationId:'CURRENT1'});
+ assert.equal(result.budget.compaction_status,'compressed');assert.ok(result.budget.saved_tokens>0);assert.ok(result.budget.estimated_tokens<result.budget.previous_estimated_tokens);
+});
+test('long history preserves late corrections in browser requests and in the server summary instead of silently taking only its beginning',()=>{
+ const window={XtjAiCore:{}};vm.runInNewContext(fs.readFileSync('js/ai-core/assistant-features.js','utf8'),{window,URL,URLSearchParams,AbortController,TextEncoder,TextDecoder,Blob});
+ const original='保留原始空白。\n  const x=1;\n'+'甲'.repeat(42000)+'\n最新更正：必须保留原图，预算900元。';
+ const fromBrowser=window.XtjAiCore.AssistantFeatures.historyExcerpt(original,32000);assert.equal(fromBrowser,context.historyExcerpt(original,32000));assert.ok(fromBrowser.length<=32000);assert.match(fromBrowser,/预算900元/);assert.match(fromBrowser,/const x=1/);
+ const prepared=context.prepareContext({history:[{role:'user',context_id:'long-correction',content:fromBrowser,context_truncated:true}],fixed,conversationId:'CURRENT1',windowTokens:32768});assert.equal(prepared.budget.history_truncated,1);assert.match(prepared.memory.summary,/预算900元/);
+ assert.equal(window.XtjAiCore.AssistantFeatures.historyExcerpt(' a\n  b ',32000),' a\n  b ');
+});
+
+test('a long current question with no older turns never promises to compact nonexistent history',()=>{
+ const window={XtjAiCore:{}};vm.runInNewContext(fs.readFileSync('js/ai-core/assistant-features.js','utf8'),{window,URL,URLSearchParams,AbortController,TextEncoder,TextDecoder,Blob});
+ const preview=window.XtjAiCore.AssistantFeatures.estimate([],'甲'.repeat(25000),false,{managed:true,windowTokens:32768,budget:{system_prompt_tokens:1000,tool_schema_tokens:1000}});assert.equal(preview.history_retained,0);assert.notEqual(preview.compaction_status,'pending');
 });

@@ -4,7 +4,7 @@
 const MAX_EVENTS = 128;
 const MAX_TEXT = 64000;
 function appendProcessEvent(res, event) {
-  if (event && ['reasoning_start', 'reasoning', 'tool_calls'].includes(event.type)) {
+  if (event && ['reasoning_start', 'reasoning', 'tool_calls'].includes(event.type) && !event.early && event.phase !== 'preparing' && event.phase !== 'waiting') {
     if (res._aiThinkingStartedAt == null) res._aiThinkingStartedAt = Date.now();
     if (res._aiThinkingActiveAt == null) res._aiThinkingActiveAt = Date.now();
   }

@@ -19,3 +19,7 @@ test('zero thinking duration stays measured zero after later body packets',()=>{
  const realNow=Date.now;let now=1000;Date.now=()=>now;
  try{const res={};appendProcessEvent(res,{type:'reasoning_start'});appendProcessEvent(res,{type:'content',text:'回答'});now=5000;appendProcessEvent(res,{type:'content',text:'继续'});assert.equal(res._aiThinkingElapsedMs,0);}finally{Date.now=realNow;}
 });
+test('local preparation and upstream waiting are never counted as model thinking',()=>{
+ const realNow=Date.now;let now=1000;Date.now=()=>now;
+ try{const res={};appendProcessEvent(res,{type:'reasoning_start',early:true,phase:'preparing'});now=3000;appendProcessEvent(res,{type:'reasoning_start',phase:'waiting'});assert.equal(res._aiThinkingStartedAt,undefined);now=4000;appendProcessEvent(res,{type:'reasoning',text:'实际思考'});now=4500;appendProcessEvent(res,{type:'content',text:'正文'});assert.equal(res._aiThinkingElapsedMs,500);}finally{Date.now=realNow;}
+});
