@@ -330,6 +330,27 @@
     target.insertBefore(cacheRow,about);
     target.insertBefore(exportRow,about);
     target.insertBefore(saveDataRow,about);
+    var hapticsRow = row('操作震动', '<button type="button" class="btn btn-ghost profile-mini-btn" id="xtjHapticsBtn" aria-label="操作震动" aria-pressed="false">暂不支持</button>');
+    target.insertBefore(hapticsRow,about);
+    var hapticsBtn = document.getElementById('xtjHapticsBtn');
+    function syncHaptics() {
+      var haptics = window.XTJHaptics, supported = !!(haptics && haptics.supported()), enabled = supported && haptics.enabled();
+      hapticsBtn.disabled = !supported;
+      hapticsBtn.setAttribute('aria-pressed', String(enabled));
+      hapticsBtn.textContent = supported ? (enabled ? '已开启' : '已关闭') : '暂不支持';
+      hapticsBtn.setAttribute('aria-label', supported ? '操作震动' : '操作震动，当前浏览器不支持');
+      hapticsBtn.title = supported ? '仅当前设备生效；默认遵循减少动态效果设置，可手动开启。系统设置可能抑制震动。' : 'iPhone Safari 暂不支持普通网页按钮震动，保留原有按压动画。';
+    }
+    syncHaptics();
+    hapticsBtn.addEventListener('click', function() {
+      var haptics = window.XTJHaptics;
+      if (!haptics || !haptics.supported()) return;
+      haptics.setEnabled(!haptics.enabled());
+      if (haptics.enabled()) haptics.play('selection');
+    });
+    window.addEventListener('xtj-haptics-change', syncHaptics);
+    var hapticsMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
+    if (hapticsMotion && hapticsMotion.addEventListener) hapticsMotion.addEventListener('change', syncHaptics);
     var saveDataBtn = document.getElementById('xtjMediaSaveDataBtn');
     function syncSaveData() {
       var enabled = window.xtjMediaSaveData ? window.xtjMediaSaveData() : true;

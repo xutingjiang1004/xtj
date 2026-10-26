@@ -369,9 +369,7 @@
         }
     }
     function Y(e) {
-        if (navigator.vibrate) try {
-            navigator.vibrate(e);
-        } catch (e) {}
+        if (window.XTJHaptics) window.XTJHaptics.play('impact');
     }
     function V(immediate) {
         cancelTrackAnimation();
@@ -1156,7 +1154,6 @@
                 !(window.currentUser === 'xxz' && typeof window.isAdmin === 'function' && window.isAdmin()))) {
                 window.showToast('无权删除这张照片'); return;
             }
-            Y(10);
             var deleteButton = document.getElementById("ppDeleteBtn"), o = deleteButton ? deleteButton.getBoundingClientRect() : null;
             if (o) {
                 var a = o.left + o.width / 2, r = o.top + o.height / 2;
@@ -1214,9 +1211,7 @@
                         } catch (e) {
                             console.error("Error showing download overlay:", e);
                         }
-                    }(), ee(10, "正在下载..."), "vibrate" in navigator && "function" == typeof navigator.vibrate) try {
-                        navigator.vibrate(10);
-                    } catch (e) {}
+                    }(), ee(10, "正在下载..."), window.XTJHaptics) window.XTJHaptics.play('impact');
                     var o = setInterval(function() {
                         var e = document.getElementById("ppDownloadProgressBar");
                         if (e) {

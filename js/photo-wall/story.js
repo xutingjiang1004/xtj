@@ -250,6 +250,7 @@
     var key=owner+':'+id,entry=likeStates.get(key);
     if(!entry){entry={confirmed:!!(social&&social.liked),desired:!!(social&&social.liked),count:(social&&social.like_count)||0,pending:false,authEpoch:storyAuthEpoch};likeStates.set(key,entry);}
     entry.desired=!entry.desired;invalidateSocial();mutationVersion++;showLikeState(entry,owner,id);animateHeart();el('ppSocialStatus').textContent='';
+    if(window.XTJHaptics)window.XTJHaptics.play('impact');
     if(!entry.pending)saveLike(entry,owner,id);
   }
   async function saveLike(entry,owner,id){

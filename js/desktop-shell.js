@@ -11,6 +11,7 @@
   function openTab(tab) {
     var aiPanel = document.getElementById('panelAiChat');
     var aiVisible = !!(aiPanel && aiPanel.classList.contains('active') && !aiPanel.classList.contains('hidden'));
+    if (aiVisible && window.XTJHaptics) window.XTJHaptics.play('selection');
     if ((window.__xtjAiChatActive || aiVisible) && typeof window.__xtjCloseAiChat === 'function') {
       window.__xtjCloseAiChat();
     }
@@ -21,6 +22,8 @@
   }
 
   function openAiChat() {
+    var aiPanel = document.getElementById('panelAiChat');
+    if (!(aiPanel && aiPanel.classList.contains('active') && !aiPanel.classList.contains('hidden')) && window.XTJHaptics) window.XTJHaptics.play('selection');
     if (typeof window.__xtjOpenAiChat === 'function') {
       var result = window.__xtjOpenAiChat();
       syncActiveTab();

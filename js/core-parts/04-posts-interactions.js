@@ -362,6 +362,7 @@
                 operation.desired = nextLiked;
                 setPostLikePending(pid, true);
                 applyPostLikeIntent(pid, nextLiked, btn);
+                if (window.XTJHaptics) window.XTJHaptics.play('impact');
                 if (!operation.running) operation.promise = flushPostLikeOperation(pid, operation);
                 return operation.promise;
             };
@@ -1108,6 +1109,7 @@
                 if (typeof updateFeedStats === 'function') { try { updateFeedStats(); } catch (e) {} }
                 cleanupDeleteSession({ restoreVisual: false, hideModal: true, resetTarget: true });
                 showToast("帖子已删除");
+                if (window.XTJHaptics) window.XTJHaptics.play('success');
                 // 不再调用 loadFeed(true)，避免整页重建和闪白
             }
             window.openDelete = function (postId, ownerKey) {
@@ -5092,6 +5094,7 @@
                     // Only the submitted media snapshot is cleared above.
                     // Failed submissions retain their preview and retry files.
                     showToast(insertRes.fallback ? "发布成功，已兼容旧数据结构" : "发布成功");
+                    if (window.XTJHaptics) window.XTJHaptics.play('success');
                     if (!insertPublishedPostIntoFeed(insertRes.data, !!publishMotion)) {
                         clearFeedCache();
                         await loadFeed(true);

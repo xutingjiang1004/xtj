@@ -799,6 +799,7 @@
     removePendingDeletedPhotoId(item.id);
     removePendingDeletedPhotoId(item.cloudId);
     addDeletedPhotoId(id);
+    if (window.XTJHaptics) window.XTJHaptics.play('success');
     broadcastSync('photo_deleted', { photoId: id });
     // The delete response is authoritative. A slow wall refresh must not keep
     // the preview's delete button locked after the photo is already removed.

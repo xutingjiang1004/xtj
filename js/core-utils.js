@@ -1,5 +1,60 @@
 /** Shared window utils — loaded before core.js */
 
+// Optional hardware feedback. Safari has no general web vibration API: keep the
+// existing visual interactions there instead of forwarding taps to hidden inputs.
+(function () {
+    if (window.XTJHaptics) return;
+    var key = 'xtj_haptics', preference = null, lastPulse = -Infinity, activeUntil = 0, suspended = false;
+    try { preference = localStorage.getItem(key); } catch (_) {}
+    function supported() { return typeof navigator.vibrate === 'function'; }
+    function enabled() {
+        if (!supported() || preference === 'off') return false;
+        if (preference === 'on') return true;
+        return document.documentElement.getAttribute('data-xtj-motion') !== 'off' &&
+            !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    }
+    function stop() {
+        if (activeUntil > performance.now() && supported()) {
+            try { navigator.vibrate(0); } catch (_) {}
+        }
+        activeUntil = 0;
+    }
+    function play(kind) {
+        if (!enabled() || suspended || document.hidden ||
+            navigator.userActivation && !navigator.userActivation.hasBeenActive) return false;
+        var pattern;
+        if (kind === 'selection') pattern = 6;
+        else if (kind === 'impact') pattern = 10;
+        else if (kind === 'success') pattern = [12, 35, 16];
+        else return false;
+        var now = performance.now();
+        // Never queue delayed pulses or restart the motor on every drag frame.
+        if (now - lastPulse < 80) return false;
+        try {
+            if (!navigator.vibrate(pattern)) return false;
+            lastPulse = now;
+            activeUntil = now + (Array.isArray(pattern) ? pattern.reduce(function(sum, ms) { return sum + ms; }, 0) : pattern);
+            return true;
+        } catch (_) { return false; }
+    }
+    function setEnabled(value) {
+        preference = value ? 'on' : 'off';
+        try { localStorage.setItem(key, preference); } catch (_) {}
+        if (!value) stop();
+        window.dispatchEvent(new Event('xtj-haptics-change'));
+    }
+    window.addEventListener('storage', function(event) {
+        if (event.key !== key && event.key !== null) return;
+        preference = event.key === null ? null : event.newValue;
+        if (!enabled()) stop();
+        window.dispatchEvent(new Event('xtj-haptics-change'));
+    });
+    window.addEventListener('pagehide', function() { suspended = true; stop(); });
+    window.addEventListener('pageshow', function() { suspended = false; });
+    document.addEventListener('visibilitychange', function() { if (document.hidden) stop(); });
+    window.XTJHaptics = { supported: supported, enabled: enabled, setEnabled: setEnabled, play: play, stop: stop };
+}());
+
 window.safeStorage = {
     set: function(key, value) {
         try { localStorage.setItem(key, String(value)); } catch(e) { console.warn('Storage set failed', e); }

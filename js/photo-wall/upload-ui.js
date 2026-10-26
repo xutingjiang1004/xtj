@@ -1332,6 +1332,7 @@
     // 单次渲染：setUploadResult 内部统一处理 dataset/title/detail/庆祝，
     // 避免旧写法(setUploadResult + setUploadResultState 连续调用)二次写入、成功庆祝触发两次。
     setUploadResult(summary, resultState, fullMsg);
+    if (resultState === 'success' && ok > 0 && window.XTJHaptics) window.XTJHaptics.play('success');
 
     // Committed rows are rendered immediately; reconcile the wall in the background.
     if (ok && typeof window.loadPhotoWallData === 'function') {
