@@ -3733,20 +3733,17 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     if (!container) return;
     var follows=container.id==='dtMessages'?container._aiFollow!==false:S.autoScrollPinned;
     if (!force && !follows) return;
-    var now = Date.now();
-    if (!force && container._dtLastScrollTs && (now - container._dtLastScrollTs) < 80) return;
     if (container._dtScrollRaf) return;
     container._dtScrollRaf = true;
     try {
       requestAnimationFrame(function() {
         container._dtScrollRaf = false;
-        container._dtLastScrollTs = Date.now();
+        if (container.isConnected === false) return;
         if(!force && (container.id==='dtMessages'?container._aiFollow===false:!S.autoScrollPinned))return;
         try { container.scrollTop = container.scrollHeight; } catch (e) {}
       });
     } catch (e2) {
       container._dtScrollRaf = false;
-      container._dtLastScrollTs = Date.now();
       try { container.scrollTop = container.scrollHeight; } catch (e3) {}
     }
   }
@@ -4640,14 +4637,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         return el && el.contains(range.commonAncestorContainer);
       } catch (e) { return false; }
     }
-    // V6: 流水跟包 — 高吞吐 + 积压追赶，避免打字机一顿一顿
-    var lastFrameTime = 0;
-    var pendingDeadline = 0;
-    // 以网络到达为准：最大程度跟上 DeepSeek 输出节奏；积压追赶与 50ms markdown 门限仍防卡顿
-    var charsPerMs = options.charsPerMs != null
-      ? options.charsPerMs
-      : 0.14;
-    if (charsPerMs > 1) charsPerMs /= 1000;
+    // Coalesce received packets into one display-frame patch. The network
+    // supplies the stream's pace; a second character queue only adds latency.
     // plainStream 模式：单文本节点复用，避免每帧 createTextNode 触发 reflow
     var plainTextNode = null;
     var plainTextBuffer = '';
@@ -4691,36 +4682,23 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       return plainTextNode;
     }
 
-    function emitText(forceAll, budget) {
+    function emitText() {
       if (cancelled || !targetEl) return;
       if (!pending) {
         if (streamClass) targetEl.classList.remove(streamClass);
         return;
       }
       if (streamClass) targetEl.classList.add(streamClass);
-      var next = '';
-      if (reducedMotion || forceAll) {
-        next = pending;
-        pending = '';
-      } else {
-        // Keep catch-up bounded so a large packet does not appear in one jump.
-        var frameBudget = Math.min(128, Math.max(1, Math.floor(budget || 4)));
-        var maxChunkOpt = options.maxChunk || 48;
-        while (pending && next.length < frameBudget) {
-          var chunk = takeSmoothTextChunk(pending, Object.assign({}, options, { maxChunk: Math.min(maxChunkOpt, frameBudget - next.length) }));
-          if (!chunk) break;
-          next += chunk;
-          pending = pending.slice(chunk.length);
-        }
-      }
+      var next = pending;
+      pending = '';
       if (!next) return;
       rendered += next;
       if (options.plainStream) {
         // 流水模式：累积到 plainTextBuffer，一次写入单文本节点（不每帧建节点）
         plainTextBuffer += next;
         var node = ensurePlainTextNode();
-        // 用 data 设置文本，高效
-        try { node.data = plainTextBuffer; } catch (e) { node.textContent = plainTextBuffer; }
+        // Append only the received suffix, retaining the existing text node.
+        try { node.appendData(next); } catch (e) { node.textContent = plainTextBuffer; }
       } else {
         // The display scheduler already bounds patches to a frame. Wall-clock
         // precision or clock corrections must not suppress an accepted frame.
@@ -4740,17 +4718,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       }
     }
 
-    function tick(timestamp) {
+    function tick() {
       rafId = 0;
       if (cancelled || paused) return;
-      if (!lastFrameTime) lastFrameTime = timestamp;
-      var elapsed = timestamp - lastFrameTime;
-      lastFrameTime = timestamp;
-      // 下限提高：慢帧也至少吐一批，保证「流水」感
-      var budget = Math.max(1, Math.floor(Math.min(40, elapsed || 16) * charsPerMs));
-      if (!pendingDeadline) pendingDeadline = timestamp + 180;
-      var catchUpBudget = Math.ceil(pending.length * Math.min(24, elapsed || 16) / Math.max(16, pendingDeadline - timestamp));
-      emitText(false, Math.max(budget, catchUpBudget));
+      emitText();
       if (pending) schedule();
       else if (drainState) api.finish(drainState.finalText);
     }
@@ -4771,7 +4742,6 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       isCancelled: false,
       append: function(text) {
         if (cancelled || !targetEl || !text || finished) return;
-        if (!pending) { lastFrameTime = 0; pendingDeadline = 0; }
         pending += String(text);
         if (S.activeRenderers.indexOf(api) === -1) S.activeRenderers.push(api);
         if (!paused) schedule();
@@ -4799,8 +4769,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         var final = typeof finalText === 'string' && finalText.length ? finalText : rendered + pending;
         // A sanitized replacement must take effect immediately. Only an unseen
         // suffix can follow the existing stream without replaying old text.
-        // A complete very large terminal packet must not spend minutes in the
-        // small live-stream frame budget after the model has already finished.
+        // Large authoritative terminal snapshots can settle directly.
         if (final.indexOf(rendered) !== 0 || reducedMotion || !final || final.length-rendered.length>8192) {
           api.finish(final); return Promise.resolve(true);
         }
@@ -4836,7 +4805,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         try { if (AI_DEBUG) console.log('[AI-RENDER] finish len:', rendered.length, 'el:', targetEl.tagName, targetEl.className); } catch(_) {}
         if (options.plainStream) {
           plainTextBuffer = rendered;
-          ensurePlainTextNode().data = rendered;
+          var plainNode = ensurePlainTextNode();
+          if (plainNode.data !== rendered) plainNode.data = rendered;
         } else patchInnerHTML(targetEl, renderMarkdown(rendered));
         targetEl.classList.remove(streamClass);
         if (typeof options.onRender === 'function') {
@@ -10406,24 +10376,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           assistantBubble.classList.add('ai-typing');
         }
         if (!contentRenderer) {
-          // ★ 2026-09-17：正文渲染期的滚动节流时间戳（每轮回复独立，重进函数即重置）
-          var _lastContentScroll = 0;
           contentRenderer = createSmoothTextRenderer(assistantBubble, {
-            minChunk: 8,
-            maxChunk: 64,
-            // ★ 2026-09-17 正文流优化：charsPerMs 100 → 130，配合预算算法提速，
-            //   减少"字一个个蹦"的延迟感；上限仍受 maxChunk 约束不会暴冲。
-            charsPerMs: 260,
             streamClass: 'ai-streaming-soft',
-            onRender: function() {
-              // ★ 2026-09-17 滚动节流：原实现每帧都调 scrollToBottom，
-              //   流式高频期间每帧一次布局计算，反而拖慢渲染帧率（越写越卡）。
-              //   改为最多 100ms 一次——跟随依然实时，但不再与渲染抢主线程。
-              var _nowScroll = Date.now();
-              if (_nowScroll - _lastContentScroll < 100) return;
-              _lastContentScroll = _nowScroll;
-              scrollToBottom(messagesEl, false);
-            }
+            onRender: function() { scrollToBottom(messagesEl, false); }
           });
           // P4 修复: 设置复制事件监听器
           setupBubbleCopy(assistantBubble, messagesEl);
@@ -11336,7 +11291,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           
           if (evt.type === 'reasoning_start' && (evt.early || evt.phase === 'preparing' || evt.phase === 'waiting')) {
             var waitingNode = assistantNode.querySelector('.ai-thinking[data-phase]');
-            if (waitingNode && !aiContent) { waitingNode.dataset.phase = 'waiting'; setThinkingStatus(waitingNode,'正在思考中'); }
+            if (waitingNode && !aiContent.trim()) { waitingNode.dataset.phase = 'waiting'; setThinkingStatus(waitingNode,'正在思考中'); }
             continue;
           }
           if (evt.type === 'reasoning_start' && !reasoningStarted) {
@@ -11344,7 +11299,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             // C 修复：用户关闭思考时，仅记录状态、不创建/渲染思考节点
             if (_sendThinkingMode === 'off') continue;
             var rnStart = ensureReasoningNode();
-            if (rnStart && !aiContent) setThinkingExpanded(rnStart, true, messagesEl);
+            if (rnStart && !aiContent.trim() && rnStart.__userCollapsed !== true) setThinkingExpanded(rnStart, true, messagesEl);
             ensureThinkingTimer();
             continue;
           }
@@ -11353,6 +11308,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             // ★ 修复 M8：思考文本无限累积会导致内存膨胀与收尾一次性渲染卡顿。
             // 设 200k 字符上限（深页已有 4000/次切片与上限，普通聊天此前无上限）。
             var chunkText = String(evt.text || '');
+            if (!chunkText) continue;
             if (aiReasoning.length < 200000) {
               var room = 200000 - aiReasoning.length;
               chunkText = room > 0 ? chunkText.slice(0, room) : '';
@@ -11369,31 +11325,16 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             }
             var rn = ensureReasoningNode();
             // 流式思考过程中强制展开，避免「只见标题、要等回复结束才能看内容」
-            if (rn && !aiContent && !rn.classList.contains('expanded')) {
+            if (rn && !aiContent.trim() && rn.__userCollapsed !== true && !rn.classList.contains('expanded')) {
               setThinkingExpanded(rn, true, messagesEl);
             }
             var body = reasoningSegment();
             if (body) {
               if (!reasoningRenderer) {
                 body.textContent = '';
-                // ★ 2026-09-17 思考流优化：
-                //   ① maxChunk 48 → 64、charsPerMs 100 → 140：思考文本往往比正文更
-                //      密集（长推理段落），沿用正文节奏会显得慢半拍；
-                //   ② 新增 onRender 节流：原实现每帧都调 scrollToBottom，
-                //      reasoning 高频到达时每帧触发一次滚动计算，反过来拖慢渲染帧率
-                //      （越滚越卡）。改为最多 120ms 一次，滚动跟随依然及时。
-                var _lastReasonScroll = 0;
                 reasoningRenderer = createSmoothTextRenderer(body, {
-                  minChunk: 6,
-                  maxChunk: 64,
-                  charsPerMs: 320,
                   plainStream: true,
-                  onRender: function() {
-                    var _now2 = Date.now();
-                    if (_now2 - _lastReasonScroll < 120) return;
-                    _lastReasonScroll = _now2;
-                    scrollToBottom(messagesEl, false);
-                  }
+                  onRender: function() { scrollToBottom(messagesEl, false); }
                 });
               }
               // ★ 修复：渲染器按剩余配额接收（200k 上限此前只截累积字符串，渲染器无界增长）
@@ -11403,6 +11344,20 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           }
           
           if (evt.type === 'content') {
+            var contentChunk = typeof evt.text === 'string' ? evt.text : '';
+            if (!contentChunk) continue;
+            // ★ 内容长度上限：防止超长回复/异常流无限累积
+            if (!contentTruncated && aiContent.length >= AI_CONTENT_MAX_LEN) {
+              contentTruncated = true;
+              notify('回复过长，已截断');
+            }
+            var room = AI_CONTENT_MAX_LEN - aiContent.length;
+            var accepted = room > 0 ? String(contentChunk).slice(0, room) : '';
+            aiContent += accepted;
+            // Empty packets and a leading blank line are not an answer phase.
+            // Keep the thinking panel alive and retain whitespace for code.
+            if (!accepted || !aiContent.trim()) continue;
+            var hadBodyRenderer = !!contentRenderer;
             if (!reasoningStarted) settleUnusedEarlyThinkingNode(assistantNode);
             if(S._newContentPrompt)S._newContentPrompt();
             if (S.responseProfile === 'enhanced') {
@@ -11435,23 +11390,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
                   setThinkingActive(_tn, false);
                   // 收尾思考渲染器：把缓冲里剩余字符一次性落定，避免尾部丢字
                   if (reasoningRenderer) { try { reasoningRenderer.flush(); } catch (eRF) {} }
-                  setThinkingExpanded(_tn, !!_tn.querySelector('.ai-tool-step.is-error') && _tn.__userCollapsed !== true, messagesEl);
+                  setThinkingExpanded(_tn, _tn.__userCollapsed === false || !!_tn.querySelector('.ai-tool-step.is-error') && _tn.__userCollapsed !== true, messagesEl);
                 }
               } catch (eThinkSettle) {}
             }
-            var contentChunk = evt.text || '';
-            if (!contentChunk) continue;
-            // ★ 内容长度上限：防止超长回复/异常流无限累积
-            if (!contentTruncated && aiContent.length >= AI_CONTENT_MAX_LEN) {
-              contentTruncated = true;
-              notify('回复过长，已截断');
-            }
-            var room = AI_CONTENT_MAX_LEN - aiContent.length;
-            var accepted = room > 0 ? String(contentChunk).slice(0, room) : '';
-            aiContent += accepted;
             if (accepted) {
               ensureAssistantBubbleReady();
-              if (contentRenderer) contentRenderer.append(accepted);
+              if (contentRenderer) contentRenderer.append(hadBodyRenderer ? accepted : aiContent);
             }
             continue;
           }

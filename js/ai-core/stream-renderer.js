@@ -105,12 +105,6 @@
     var streamClass = options.streamClass || 'ai-streaming-soft';
     var requestFrame = window.requestAnimationFrame ? window.requestAnimationFrame.bind(window) : function (cb) { return setTimeout(cb, 16); };
     var cancelFrame = window.cancelAnimationFrame ? window.cancelAnimationFrame.bind(window) : clearTimeout;
-    var lastFrameTime = 0;
-    var pendingDeadline = 0;
-    var charsPerMs = options.charsPerMs != null
-      ? options.charsPerMs
-      : 0.14;
-    if (charsPerMs > 1) charsPerMs /= 1000;
     // plainStream mode: reuse single text node to avoid per-frame reflow
     var plainTextNode = null;
     var plainTextBuffer = '';
@@ -169,34 +163,23 @@
       return chunk;
     }
 
-    function emitText(forceAll, budget) {
+    function emitText() {
       if (cancelled || !targetEl) return;
       if (!pending) {
         if (streamClass) targetEl.classList.remove(streamClass);
         return;
       }
       if (streamClass) targetEl.classList.add(streamClass);
-      var next = '';
-      if (reducedMotion || forceAll) {
-        next = pending;
-        pending = '';
-      } else {
-        // Keep catch-up bounded so a large packet does not appear in one jump.
-        var frameBudget = Math.min(128, Math.max(1, Math.floor(budget || 4)));
-        var maxChunkOpt = options.maxChunk || 48;
-        while (pending && next.length < frameBudget) {
-          var chunk = takeSmoothChunk(pending, Object.assign({}, options, { maxChunk: Math.min(maxChunkOpt, frameBudget - next.length) }));
-          if (!chunk) break;
-          next += chunk;
-          pending = pending.slice(chunk.length);
-        }
-      }
+      // Coalesce arrivals into one DOM patch per display frame. The network,
+      // rather than an additional typing timer, determines the display pace.
+      var next = pending;
+      pending = '';
       if (!next) return;
       rendered += next;
       if (options.plainStream) {
         plainTextBuffer += next;
         var node = ensurePlainTextNode();
-        try { node.data = plainTextBuffer; } catch (e) { node.textContent = plainTextBuffer; }
+        try { node.appendData(next); } catch (e) { node.textContent = plainTextBuffer; }
       } else {
         // The display scheduler already bounds patches to a frame. Wall-clock
         // precision or clock corrections must not suppress an accepted frame.
@@ -214,16 +197,10 @@
       }
     }
 
-    function tick(timestamp) {
+    function tick() {
       rafId = 0;
       if (cancelled || paused) return;
-      if (!lastFrameTime) lastFrameTime = timestamp;
-      var elapsed = timestamp - lastFrameTime;
-      lastFrameTime = timestamp;
-      var budget = Math.max(1, Math.floor(Math.min(40, elapsed || 16) * charsPerMs));
-      if (!pendingDeadline) pendingDeadline = timestamp + 180;
-      var catchUpBudget = Math.ceil(pending.length * Math.min(24, elapsed || 16) / Math.max(16, pendingDeadline - timestamp));
-      emitText(false, Math.max(budget, catchUpBudget));
+      emitText();
       if (pending) schedule();
       else if (drainState) api.finish(drainState.finalText);
     }
@@ -240,7 +217,6 @@
     var api = {
       append: function (text) {
         if (cancelled || !targetEl || !text || finished) return;
-        if (!pending) { lastFrameTime = 0; pendingDeadline = 0; }
         pending += String(text);
         if (!paused) schedule();
       },
@@ -306,7 +282,7 @@
         // 导致 XSS 面扩大与样式跳变
         if (options.plainStream) {
           var pNode = ensurePlainTextNode();
-          try { pNode.data = rendered; } catch (e3) { pNode.textContent = rendered; }
+          try { if (pNode.data !== rendered) pNode.data = rendered; } catch (e3) { pNode.textContent = rendered; }
         } else {
           patchInnerHTML(targetEl, renderRich(rendered));
         }
@@ -353,8 +329,6 @@
         pending = '';
         rendered = '';
         plainTextBuffer = '';
-        lastFrameTime = 0;
-        pendingDeadline = 0;
         removeCursor();
         if (targetEl) targetEl.replaceChildren();
         plainTextNode = null;
