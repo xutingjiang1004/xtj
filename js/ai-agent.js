@@ -134,7 +134,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     { key: 'kimi',    label: 'Kimi 月之暗面',    base: 'https://api.moonshot.cn/v1',                         defaultModel: 'moonshot-v1-8k', models: ['moonshot-v1-8k', 'moonshot-v1-32k', 'moonshot-v1-128k'] },
     { key: 'zhipu',   label: '智谱 GLM',        base: 'https://open.bigmodel.cn/api/paas/v4',               defaultModel: 'glm-4-flash', models: ['glm-4-flash', 'glm-4-air', 'glm-4', 'glm-4-plus'] },
     { key: 'openai',  label: 'OpenAI',          base: 'https://api.openai.com/v1',                          defaultModel: 'gpt-4o-mini', models: ['gpt-4o-mini', 'gpt-4o', 'gpt-4.1-mini'] },
-    { key: 'openrouter', label: 'OpenRouter · 限时免费体验', base: 'https://openrouter.ai/api/v1', defaultModel: 'minimax/minimax-m3.1-flash:free', models: ['minimax/minimax-m3.1-flash:free'] },
+    // ★ 托管免费模型的具体标识与展示名由服务端 /custom-models 下发（后端 OPENROUTER_MODEL 可切换），
+    //   前端不硬编码 —— 免费模型在 OpenRouter 下架/替换时无需改前端。
+    { key: 'openrouter', label: 'OpenRouter · 限时免费体验', base: 'https://openrouter.ai/api/v1', defaultModel: '', models: [] },
     { key: 'custom',  label: '自定义(OpenAI兼容)', base: '',                                                 defaultModel: '', models: [] }
   ];
   // 统一服务商显示字段：本地惯用驼峰 providerLabel，服务端存储用下划线 provider_label
@@ -351,7 +353,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (!customModelIdentityCurrent(owner) || seq !== customModelMutationSeq) return null;
       if (data && Array.isArray(data.server_models)) {
         serverModelIdentity = owner;
-        serverModelCatalog = data.server_models.filter(function(m) { return m && m.uid === OPENROUTER_MODEL_UID && m.provider === 'openrouter' && m.server_managed === true && m.model === 'minimax/minimax-m3.1-flash:free' && m.base_url === 'https://openrouter.ai/api/v1'; }).map(function(m) { return normalizeCustomModelRecord({uid:m.uid,provider:m.provider,model:m.model,base_url:m.base_url,label:'MiniMax M3.1 Flash 免费版',provider_label:'OpenRouter',server_managed:true}); });
+        // 模型标识与展示名一律采用服务端下发的值。
+        serverModelCatalog = data.server_models.filter(function(m) { return m && m.uid === OPENROUTER_MODEL_UID && m.provider === 'openrouter' && m.server_managed === true && m.base_url === 'https://openrouter.ai/api/v1'; }).map(function(m) { return normalizeCustomModelRecord({uid:m.uid,provider:m.provider,model:m.model,base_url:m.base_url,label:m.label||'OpenRouter 免费模型',provider_label:'OpenRouter',server_managed:true}); });
       }
       if (data && data.ok && Array.isArray(data.models)) {
         // ★ 2026-09-24：同步服务端墓碑到本地，保证「已删 uid 不再复活」双端一致
@@ -425,6 +428,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   function genCustomModelUid() {
     return 'cm_' + Date.now().toString(36) + '_' + Math.floor(Math.random() * 1e6).toString(36);
   }
+  // 服务端下发的托管模型标识（游客与已登录用户都可用，来源 /api/agent/custom-models）。
+  function managedCatalogModel() {
+    for (var i = 0; i < serverModelCatalog.length; i++) {
+      if (serverModelCatalog[i] && serverModelCatalog[i].uid === OPENROUTER_MODEL_UID) return serverModelCatalog[i].model || '';
+    }
+    return '';
+  }
   function findCustomModel(uid) {
     var list = loadCustomModels();
     for (var i = 0; i < list.length; i++) { if (list[i].uid === uid) return list[i]; }
@@ -459,7 +469,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     if (!isCustomModelId(mid)) return '';
     var uid = mid.slice(CUSTOM_MODEL_PREFIX.length);
     var m = findCustomModel(uid);
-    if (!m) return uid === OPENROUTER_MODEL_UID ? 'MiniMax M3.1 Flash 免费版 · 暂不可用' : '自定义模型';
+    if (!m) return uid === OPENROUTER_MODEL_UID ? 'OpenRouter 免费模型 · 暂不可用' : '自定义模型';
     return (m.label || m.model || '自定义模型') + (m.providerLabel ? ' · ' + m.providerLabel : '');
   }
   // 解析自定义模型的选项值 → 配置对象（含 provider/base/api_key/model）
@@ -472,7 +482,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     if (!isCustomModelId(mid)) return null;
     var uid = mid.slice(CUSTOM_MODEL_PREFIX.length);
     var m = findCustomModel(uid);
-    if (!m && uid === OPENROUTER_MODEL_UID) m = {uid:uid,provider:'openrouter',model:'minimax/minimax-m3.1-flash:free',base_url:'https://openrouter.ai/api/v1',server_managed:true};
+    // 兜底：模型标识取服务端下发的目录（fetchServerCustomModels 已填充），未就绪时留空，
+    // 由后端 resolveConfig 以自身 OPENROUTER_MODEL 为准补齐。
+    if (!m && uid === OPENROUTER_MODEL_UID) m = {uid:uid,provider:'openrouter',model:(serverModelCatalog[0]&&serverModelCatalog[0].model)||'',base_url:'https://openrouter.ai/api/v1',server_managed:true,label:(serverModelCatalog[0]&&serverModelCatalog[0].label)||'OpenRouter 免费模型'};
     if (!m) return null;
     var p = null;
     for (var i = 0; i < CUSTOM_MODEL_PROVIDERS.length; i++) { if (CUSTOM_MODEL_PROVIDERS[i].key === m.provider) p = CUSTOM_MODEL_PROVIDERS[i]; }
@@ -6286,7 +6298,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // 回填当前值；若已不存在则回落到 pro
     var valid = false;
     for (var i = 0; i < sel.options.length; i++) { if (sel.options[i].value === prev) { valid = true; break; } }
-    if (!valid && prev === CUSTOM_MODEL_PREFIX + OPENROUTER_MODEL_UID) { sel.appendChild(el('option',{value:prev,text:'MiniMax M3.1 Flash 免费版 · 暂不可用'})); valid = true; }
+    if (!valid && prev === CUSTOM_MODEL_PREFIX + OPENROUTER_MODEL_UID) { sel.appendChild(el('option',{value:prev,text:'OpenRouter 免费模型 · 暂不可用'})); valid = true; }
     sel.value = valid ? prev : 'pro';
     S.dtResearchModel = sel.value;
     syncResearchModelUi(panel);
@@ -13727,8 +13739,14 @@ function showChatMessages() {
         apiKeyInput.disabled = managed; modelInput.readOnly = managed; baseInput.readOnly = managed; labelInput.disabled = managed;
         var providerNote = modal.querySelector('#aiCmProviderNote');
         providerNote.hidden = !managed;
-        providerNote.textContent = '限时免费开放中，Key 由后端环境变量保管，浏览器不保存密钥。免费请求有每日及频率限制，能力需手动实测。停止会断开网站接收，MiniMax 服务端可能继续生成，已发出的免费请求不会保证退还。此模式仅使用免费网页搜索，不自动调用付费搜索接口。';
-        if (managed) { apiKeyInput.value = ''; modelInput.value = p.defaultModel; baseInput.value = p.base; modelInput.dataset.auto = '1'; baseInput.dataset.auto = '1'; }
+        providerNote.textContent = '限时免费开放中，Key 由后端环境变量保管，浏览器不保存密钥。免费额度与频率由 OpenRouter 侧限制，能力需手动实测。停止会断开网站接收，模型服务端可能继续生成，已发出的免费请求不会保证退还。此模式仅使用免费网页搜索，不自动调用付费搜索接口。';
+        // 托管模型的标识以服务端下发为准（后端 OPENROUTER_MODEL 可切换免费模型）。
+        if (managed) {
+          var managedCfg = findCustomModel(OPENROUTER_MODEL_UID);
+          apiKeyInput.value = '';
+          modelInput.value = (managedCfg && managedCfg.model) || managedCatalogModel() || '';
+          baseInput.value = p.base; modelInput.dataset.auto = '1'; baseInput.dataset.auto = '1';
+        }
         // 接口地址始终可查看/修改；预置服务商默认填官方地址，自定义服务商必填
         baseInput.placeholder = (p && p.base) ? p.base : 'https://…/v1';
         if (!isCustom && p) {

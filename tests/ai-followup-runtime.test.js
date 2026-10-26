@@ -299,5 +299,5 @@ for (const interrupted of [false,true]) test('deep research turn persistence kee
 test('native free research saves and returns its exact model in history without credentials',async t=>{
  const old=process.env.OPENROUTER_API_KEY;process.env.OPENROUTER_API_KEY='isolated-native-research-key';t.after(()=>{if(old===undefined)delete process.env.OPENROUTER_API_KEY;else process.env.OPENROUTER_API_KEY=old;});
  const f=cachedResearchRoute([],false,'saved-free-report',false,[],'custom:or_minimax_m31_free');const events=await f.run();
- assert.equal(f.persistedArgs[6].model,'minimax/minimax-m3.1-flash:free');assert.equal(events.find(e=>e.type==='research_done').model,'minimax/minimax-m3.1-flash:free');assert.doesNotMatch(JSON.stringify(f.persistedArgs),/isolated-native-research-key|api_key/);
+ assert.equal(f.persistedArgs[6].model,require('../render-api/openrouter').modelId());assert.equal(events.find(e=>e.type==='research_done').model,require('../render-api/openrouter').modelId());assert.doesNotMatch(JSON.stringify(f.persistedArgs),/isolated-native-research-key|api_key/);
 });

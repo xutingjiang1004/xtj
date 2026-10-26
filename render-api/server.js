@@ -340,7 +340,9 @@ function getPreferredDeepSeekModel(model) {
   return normalized;
 }
 function normalizeDeepSeekUsageModel(model, fallbackModel) {
-  if (model === 'minimax/minimax-m3.1-flash:free') return model;
+  // ★ 托管的 OpenRouter 免费模型标识可配置（OPENROUTER_MODEL），这里必须跟着后端当前模型走，
+  //   否则落账时会被误判成 DeepSeek 模型并改写成默认模型名。
+  if (model && String(model).indexOf(':free') > 0 && /\//.test(String(model))) return model;
   var preferred = normalizeDeepSeekModelName(model);
   if (preferred) return getPreferredDeepSeekModel(preferred);
   return getPreferredDeepSeekModel(fallbackModel || DEEPSEEK_MODEL_FLASH);
@@ -26133,7 +26135,7 @@ app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, 
     var researchModel = String(req.body && req.body.research_model || 'pro').trim().slice(0, 80);
     var _rmValid = (researchModel === 'pro' || researchModel === 'flash' || /^custom:[A-Za-z0-9_\-]{1,64}$/.test(researchModel));
     if (!_rmValid) researchModel = 'pro';
-    var managedResearchModel = researchModel === 'custom:or_minimax_m31_free' ? 'minimax/minimax-m3.1-flash:free' : '';
+    var managedResearchModel = researchModel === 'custom:or_minimax_m31_free' ? openRouter.modelId() : '';
     if (researchModel === 'custom:or_minimax_m31_free') openRouter.resolveConfig(userName,ADMIN_USERNAME,{model_uid:'or_minimax_m31_free'});
     // mode：仅用于缓存 key 兼容（历史沿用 hybrid），当前已不再驱动 Tavily 分支
     var mode = String(req.body && req.body.mode || 'hybrid').trim();
