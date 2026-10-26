@@ -3,7 +3,26 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createDmPrivateStorage, dmStorageBucket } = require('../render-api/dm-private-storage');
 const { verifyStorageObject } = require('../render-api/dm-media');
+const express = require('express'), request = require('supertest');
 const path = 'chat/abcdef123456_private_12345_voice.webm';
+test('loaded historical message synchronization renews authorized private attachments without signing failed responses', async () => {
+  const signed = [], media = createDmPrivateStorage({ storage: { from(bucket) {
+    return { async createSignedUrl(storagePath) { signed.push({ bucket, storagePath }); return { data: { signedUrl: 'https://storage.example/renewed-history' } }; } };
+  } } });
+  const app = express(); app.use(express.json()); app.use(media.middleware);
+  app.post('/api/dm/messages/loaded', (req, res) => {
+    if (req.headers.authorization !== 'Bearer isolated-test') return res.status(401).json({ ok: false });
+    res.json({ ok: true, data: [{ id: 'history-message', content: JSON.stringify({ text: '历史语音', transcript: '保留的转写',
+      media: { kind: 'audio', bucket: 'dm-private', storage_path: path, url: 'https://storage.example/expired' } }) }] });
+  });
+  await request(app).post('/api/dm/messages/loaded').send({ ids: ['history-message'] }).expect(401);
+  assert.equal(signed.length, 0);
+  const response = await request(app).post('/api/dm/messages/loaded').set('Authorization', 'Bearer isolated-test').send({ ids: ['history-message'] }).expect(200);
+  const payload = JSON.parse(response.body.data[0].content);
+  assert.equal(payload.media.url, 'https://storage.example/renewed-history');
+  assert.equal(payload.transcript, '保留的转写');
+  assert.deepEqual(signed, [{ bucket: 'dm-private', storagePath: path }]);
+});
 test('private attachment signing refreshes only authorized response rows and coalesces repeated paths', async () => {
   let calls = 0;
   const media = createDmPrivateStorage({ storage: { from(bucket) { assert.equal(bucket, 'dm-private'); return { async createSignedUrl(p, ttl) { calls++; assert.equal(p,path); assert.equal(ttl,3600); return {data:{signedUrl:'https://example.com/signed'}}; } }; } } });

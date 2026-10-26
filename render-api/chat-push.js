@@ -45,7 +45,7 @@ function createChatPush({express,supabase,authenticateUser,rateLimit,secret,tran
   async function notify(owner,peer,messageId){
     try {
       const state=await result(supabase.rpc('chat_get_conversation_state',{p_actor_name:owner,p_peer_name:peer}));
-      if(!state || state.status!=='ok' || state.deleted || (state.muted_until && Date.parse(state.muted_until)>Date.now()))return;
+      if(!state || state.status!=='ok' || state.deleted || (state.muted_until && (state.muted_until==='infinity' || Date.parse(state.muted_until)>Date.now())))return;
       const rows=await result(supabase.from(table).select('endpoint_hash,subscription').eq('owner_name',owner).limit(6));
       const payload=JSON.stringify({type:'chat-message',owner,peer,id:messageId,title:'XTJ · 新消息',body:'打开聊天查看',url:'/?chat_peer='+encodeURIComponent(peer)+'&chat_owner='+encodeURIComponent(owner)});
       await Promise.allSettled(rows.map(async(row)=>{
