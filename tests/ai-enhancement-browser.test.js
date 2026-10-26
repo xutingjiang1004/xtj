@@ -207,9 +207,13 @@ test('a done-only compatible reply keeps the old reading position and offers a w
   const content='只有 done 包返回的真实终稿。\n\n'+Array.from({length:10},(_,i)=>'终稿段落 '+i+'。').join('\n\n');
   await emit(p,1,{type:'done',content,conversation_id:'POLISH01',complete:true,saved:true});
   const prompt=p.getByRole('button',{name:'查看最新回复',exact:true});await prompt.waitFor();
-  await p.waitForFunction(()=>Array.from(document.querySelectorAll('#aiChatMessagesArea .ai-msg.assistant:not(.generating) .ai-msg-bubble')).some(node=>node.textContent.includes('终稿段落 9。')));
+  // Fast completion may virtualize this reply while the user reads older
+  // messages. Check its full body after the explicit jump mounts it.
+  await p.waitForFunction(()=>!document.querySelector('#aiChatMessagesArea .ai-msg.generating'));
   const after=await messages.evaluate(node=>node.scrollTop);assert.ok(Math.abs(after-before)<6,'done-only reply moved reading position from '+before+' to '+after);await assertPromptGeometry(prompt);
-  await prompt.click();await p.waitForFunction(()=>{const node=document.querySelector('#aiChatMessagesArea');return node.scrollHeight-node.clientHeight-node.scrollTop<12;});assert.equal(await prompt.isVisible(),false);assert.deepEqual(f.errors,[]);
+  await prompt.click();
+  await p.waitForFunction(()=>Array.from(document.querySelectorAll('#aiChatMessagesArea .ai-msg.assistant:not(.generating) .ai-msg-bubble')).some(node=>node.textContent.includes('终稿段落 9。')));
+  await p.waitForFunction(()=>{const node=document.querySelector('#aiChatMessagesArea');return node.scrollHeight-node.clientHeight-node.scrollTop<12;});assert.equal(await prompt.isVisible(),false);assert.deepEqual(f.errors,[]);
 });
 test('one client request keeps its reading anchor after cloud history adds a database ID',{timeout:60000},async t=>{
   const f=await fixture(t),p=f.page;const result=await p.evaluate(async()=>{
