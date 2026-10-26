@@ -13,6 +13,46 @@ async function wall(f,read=()=>[]){
  await f.page.waitForFunction(()=>{const panel=document.getElementById('panelAi');return panel&&!panel.getAnimations().some(animation=>animation.pending||animation.playState==='running');});
  await f.page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
 }
+
+test('the empty-wall upload action supports Tab, Enter and Space without duplicate choosers', async t => {
+ const f=await postBrowserFixture({counts:[1]});t.after(()=>f.close());const p=f.page;
+ await wall(f);
+ const action=p.locator('#photoGrid [data-xtj-trigger-upload]');
+ await p.locator('#photoUploadBtn').focus();
+ await p.keyboard.press('Tab');
+ assert.equal(await action.evaluate(node=>document.activeElement===node),true);
+ let choosers=0;p.on('filechooser',()=>{choosers++;});
+ for(const key of ['Enter',' ']){
+  const chooser=p.waitForEvent('filechooser');
+  await action.press(key);
+  const opened=await chooser;
+  await opened.setFiles([]);
+ }
+ const chooser=p.waitForEvent('filechooser');await action.click();await(await chooser).setFiles([]);
+ assert.equal(choosers,3);
+ assert.equal(await p.locator('#pwUploadSheet').evaluate(node=>node.classList.contains('active')),false);
+ assert.deepEqual(f.errors,[]);
+});
+
+test('keyboard activation retries a failed wall image before opening its preview', async t => {
+ const f=await postBrowserFixture({counts:[1]});t.after(()=>f.close());const p=f.page;
+ let reads=0;
+ await p.route('**/test-image/99-0.png',r=>r.fulfill(++reads===1?{status:503,body:'temporary failure'}:{contentType:'image/png',body:f.png}));
+ await wall(f,()=>[{...row(f),media_url:f.origin+'/test-image/99-0.png'}]);
+ const card=p.locator('#photoGrid .photo-wall-item'),image=card.locator('img');
+ await p.waitForFunction(()=>document.querySelector('#photoGrid .photo-wall-item img')?._pwLoadFailed===true);
+ await card.focus();await card.press('Enter');
+ await p.waitForFunction(()=>{
+  const image=document.querySelector('#photoGrid .photo-wall-item img');
+  return image?._pwLoadFailed===false&&!image.hasAttribute('data-src')&&image.naturalWidth>0;
+ },null,{timeout:5000});
+ assert.equal(await image.evaluate(node=>node.naturalWidth>0&&!node.classList.contains('pw-load-error')),true);
+ assert.equal(await p.locator('#photoPreviewOverlay').evaluate(node=>node.classList.contains('active')),false);
+ assert.equal(reads,2);
+ await card.press('Enter');
+ await p.waitForFunction(()=>document.getElementById('photoPreviewOverlay')?.classList.contains('active'));
+ assert.deepEqual(f.errors,[]);
+});
 for(const stage of ['request','body','malformed','missing_data'])test('create '+stage+' failure stays confirmable and retains the original for status retry',async t=>{
  const f=await postBrowserFixture({counts:[1]});t.after(()=>f.close());const p=f.page;await wall(f);
  await p.route('**/api/photo/upload?*',r=>r.fulfill({json:{ok:true,public_url:f.origin+'/test-image/0-0.png'}}));

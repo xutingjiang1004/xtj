@@ -2358,7 +2358,7 @@
                     if (!authRes.ok) throw new Error('authors_query_failed');
                     var authorPayload = await authRes.json();
                     if (!authorPayload || !authorPayload.ok) throw new Error('authors_query_failed');
-                    var seen = {};
+                    var seen = Object.create(null);
                     postFilterUsers = (authorPayload.authors || []).map(function(name) {
                         return String(name || "").trim();
                     }).filter(function(name) {
@@ -2378,7 +2378,7 @@
                 } catch (e) {
                     console.error("[post-filter-users] load failed", e);
                     if (!postFilterUsers.length) {
-                        var fallbackSeen = {};
+                        var fallbackSeen = Object.create(null);
                         postFilterUsers = (feedAllPosts || []).map(function(post) {
                             return post && post.user_name ? String(post.user_name).trim() : "";
                         }).filter(function(name) {
