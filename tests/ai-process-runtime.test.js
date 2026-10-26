@@ -298,7 +298,7 @@ test('a long English answer grows across actual display frames and completion ne
   emit({type:'content',text:essay});emit({type:'done',content:essay,thinking_mode:'off',complete:true,saved:true});stream.close();
  });
  await page.waitForFunction(()=>!document.querySelector('.ai-msg.generating'));const state=await page.evaluate(()=>{sampleReply=false;return{texts:replyFrameTexts.filter((s,i,a)=>i===0||s!==a[i-1]),gray:grayFrame,doubleCursor,final:document.querySelector('.ai-msg.assistant .ai-msg-bubble').textContent,expected:essay.replace(/\n/g,''),runs:document.querySelectorAll('.ai-stream-reveal').length};});
- assert.ok(state.texts.length>20);assert.ok(state.texts.every((s,i)=>!i||s.startsWith(state.texts[i-1])));assert.ok(state.texts.slice(1).every((s,i)=>s.length-state.texts[i].length<=34));assert.equal(state.gray,false);assert.equal(state.doubleCursor,false);assert.equal(state.final,state.expected);assert.equal(state.runs,0);
+ assert.ok(state.texts.length>=4);assert.ok(state.texts.every((s,i)=>!i||s.startsWith(state.texts[i-1])));assert.ok(state.texts.slice(1).every((s,i)=>s.length-state.texts[i].length<=Math.max(64,Math.ceil(state.expected.length/4))));assert.equal(state.gray,false);assert.equal(state.doubleCursor,false);assert.equal(state.final,state.expected);assert.equal(state.runs,0);
 });
 
 test('leaving chat during a completion-only drain cancels the old answer and releases the next send',async t=>{

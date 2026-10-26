@@ -175,9 +175,11 @@ test('遗留2：非 JSON / 空错误体也要留证据', () => {
   assert.match(serverSrc, /\(non-json or empty body\)/, '空错误体未被显式标记');
 });
 
-test('遗留2：降级重试（reasoning off）失败时记录重试那次的错误体', () => {
-  const idx = serverSrc.indexOf("logProviderErrorDetail('RESPONSES-RETRY'");
-  assert.ok(idx > -1, '降级重试失败未记录错误详情');
+test('遗留2：协议错误保留原始诊断，不静默关闭用户思考档位', () => {
+  const fn = extractFn(serverSrc, 'async function callDeepSeekViaResponses(messages, options) {');
+  assert.match(fn, /apiErr\.providerMessage = errTxt/, '协议错误必须携带厂家的真实说明');
+  assert.doesNotMatch(fn, /logProviderErrorDetail\('RESPONSES-RETRY'/, '不能恢复关闭思考后静默重试的旧路径');
+  assert.doesNotMatch(fn, /reasoning\s*:\s*\{\s*effort\s*:\s*['"]none['"]/, '不能把所选思考档位降为 none');
 });
 
 test('遗留2：错误对象携带 provider 详情且不携带请求正文', () => {
@@ -205,6 +207,6 @@ test('遗留2：面向用户的文案依据 provider 具体原因分档（不再
   assert.ok(idx > -1, '未找到 HTTP 4xx 文案分支');
   const seg = serverSrc.slice(idx, idx + 1100);
   assert.match(seg, /providerMessage/, '文案未参考 provider 具体错误说明');
-  assert.match(seg, /工具与思考模式冲突/, '未区分「工具 vs 思考」冲突');
+  assert.match(seg, /模型的工具续写请求被拒绝/, '未区分「工具续写协议」错误');
   assert.match(seg, /超过模型上限/, '未区分「上下文超长」');
 });

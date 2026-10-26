@@ -126,11 +126,13 @@ window.xtjInstallSelectionRail = function(options) {
     function measure() {
         var rect = rail.getBoundingClientRect();
         if (!rect.width || !rect.height) return null;
+        var sizes = new Map([[rail,{w:rail.offsetWidth,h:rail.offsetHeight}]]);
         var buttons = Array.from(rail.querySelectorAll(options.buttons)).map(function(button) {
             var bounds = button.getBoundingClientRect();
+            sizes.set(button,{w:button.offsetWidth,h:button.offsetHeight});
             return { button: button, x: bounds.left - rect.left, y: bounds.top - rect.top, w: bounds.width, h: bounds.height };
         }).filter(function(item) { return item.w > 0 && item.h > 0; });
-        return buttons.length ? { rect: rect, buttons: buttons, axis: axis() } : null;
+        return buttons.length ? { rect: rect, buttons: buttons, axis: axis(), sizes:sizes } : null;
     }
     function selected(metrics) {
         var button = options.selected();
@@ -243,7 +245,13 @@ window.xtjInstallSelectionRail = function(options) {
     window.addEventListener('pageshow', function() { suspended = false; sync(); }, { signal: lifetime.signal });
     document.addEventListener('visibilitychange', function() { if (document.hidden) cancel(); else sync(); }, { signal: lifetime.signal });
     window.addEventListener('resize', cancel, { passive: true, signal: lifetime.signal });
-    var observer = typeof ResizeObserver === 'function' ? new ResizeObserver(function() { if (gesture) cancel(); else sync(); }) : null;
+    var observer = typeof ResizeObserver === 'function' ? new ResizeObserver(function(entries) {
+        if (!gesture) { sync(); return; }
+        // The first observation is delivered even when no resize occurred.
+        // Opening a menu and touching it before that delivery must not cancel
+        // an otherwise valid drag. Offset sizes ignore compositor transforms.
+        if (entries.some(function(entry) { var size=gesture.metrics.sizes.get(entry.target); return size&&(entry.target.offsetWidth!==size.w||entry.target.offsetHeight!==size.h); })) cancel();
+    }) : null;
     if (observer) { observer.observe(rail); rail.querySelectorAll(options.buttons).forEach(function(button) { observer.observe(button); }); }
     var api = { sync: sync, dispose: function() { cancel(); if (frame) cancelAnimationFrame(frame); lifetime.abort(); if (observer) observer.disconnect(); delete rail.__xtjSelectionRail; } };
     rail.__xtjSelectionRail = api; sync(); return api;

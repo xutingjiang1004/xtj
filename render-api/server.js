@@ -20526,13 +20526,15 @@ async function prepareAiHistoryMessage(message, budget, maxChars, allowVision) {
   var historyText = extracted && typeof extracted.text === 'string' && extracted.text.trim()
     ? extracted.text
     : content;
+  var historyWasTruncated = historyText.length > maxChars;
   if (omitted.length) {
     var note = '\n\n[此前附件未随本次请求发送：' + omitted.join('、') + ']';
-    historyText = historyText.slice(0, Math.max(0, maxChars - note.length)) + note.slice(0, maxChars);
+    historyText = (maxChars>=32000?require('./ai-context-window').historyExcerpt(historyText,Math.max(0,maxChars-note.length)):historyText.slice(0,Math.max(0,maxChars-note.length))) + note.slice(0,maxChars);
   } else {
-    historyText = historyText.slice(0, maxChars);
+    historyText = maxChars>=32000?require('./ai-context-window').historyExcerpt(historyText,maxChars):historyText.slice(0,maxChars);
   }
   var entry = { role: role, content: historyText };
+  if (historyWasTruncated) entry.context_truncated = true;
   if (role === 'user' && canForwardVision && visionUrls.length) entry.vision_urls = visionUrls.slice(0, 10);
   return entry;
 }
@@ -20547,6 +20549,7 @@ function manageAiContextWindow(messages,historyCount,req,res,convId,signal){
   messages.splice(1,historyCount,...result.messages);
   res._aiContextMemory=result.memory;res._aiContextBudget=result.budget;
   writeSse(res,{type:'meta',conversation_id:convId,context_budget:result.budget,context_memory:result.memory});
+  writeSse(res,{type:'context_status',stage:result.budget.compaction_status==='compressed'?'compressed':'ready',receipt:result.budget.last_compaction});
   return result;
 }
 
@@ -20596,7 +20599,7 @@ async function loadAiContext(userName, convId, clientHistory, historyOptions) {
           historyOptions && historyOptions.contextManagement ? 32000 : AI_CHAT_HISTORY_MSG_MAX_CHARS,
           historyOptions ? historyOptions.allowVision : true
         );
-        if(historyOptions&&historyOptions.contextManagement){prepared.context_id=String(ch.context_id||ch.client_request_id||ch.id||'');prepared.context_truncated=ch.context_truncated===true||chContent.length>32000;}
+        if(historyOptions&&historyOptions.contextManagement){prepared.context_id=String(ch.context_id||ch.client_request_id||ch.id||'');prepared.context_truncated=prepared.context_truncated===true||ch.context_truncated===true||chContent.length>32000;}
         if (prepared.content.trim() || prepared.vision_urls) preparedHistory.push(prepared);
       }
       ctx.history = preparedHistory.reverse();
@@ -20663,7 +20666,7 @@ async function loadAiContext(userName, convId, clientHistory, historyOptions) {
         }
         // ★ 缓存优化：标准化空白字符，确保历史消息在重新加载时字符串完全一致
         // 否则 unicode 空白/换行差异会导致缓存前缀不匹配
-        var normalized = historyOptions&&historyOptions.contextManagement?content.slice(0,32000):content.replace(/\r\n/g, '\n').replace(/[\u00A0\u2003\u2002]/g, ' ').replace(/[ \t]+/g, ' ').slice(0, AI_CHAT_HISTORY_MSG_MAX_CHARS);
+        var normalized = historyOptions&&historyOptions.contextManagement?require('./ai-context-window').historyExcerpt(content,32000):content.replace(/\r\n/g, '\n').replace(/[\u00A0\u2003\u2002]/g, ' ').replace(/[ \t]+/g, ' ').slice(0, AI_CHAT_HISTORY_MSG_MAX_CHARS);
         var entry = { role: meta.role || 'user', content: normalized };
         if(historyOptions&&historyOptions.contextManagement){entry.context_id=String(meta.client_request_id||r.id||'');entry.context_truncated=content.length>32000;}
         // ★ 多模态连续追问：把历史里保存的图片 data URL 一并带回，
@@ -21885,8 +21888,8 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
       if (!_m || _mi === currentUserIdx || typeof _m.content !== 'string') continue;
       var _role = String(_m.role || '');
       if (_role !== 'user' && _role !== 'assistant') continue;
-      var _c = _m.content.trim();
-      if (!_c && !(_role === 'user' && Array.isArray(_m.attachments) && _m.attachments.length)) continue;
+      var _c = body.context_management===true?_m.content:_m.content.trim();
+      if (!_c.trim() && !(_role === 'user' && Array.isArray(_m.attachments) && _m.attachments.length)) continue;
       var _historyEntry = await prepareAiHistoryMessage({ role: _role, content: _c, attachments: _m.attachments, vision_urls: _m.vision_urls }, historyAttachmentBudget, body.context_management===true?32000:8000, true);
       var _historyContent = _historyEntry.content;
       if (_role === 'user' && Array.isArray(_historyEntry.vision_urls) && _historyEntry.vision_urls.length) {
@@ -21897,7 +21900,7 @@ app.post('/api/agent/custom-chat/stream', authenticateUser, aiChatConcurrencyGat
         _historyContent = _historyParts;
       }
       preparedCustomHistory[_mi] = { role: _role, content: _historyContent };
-      if(body.context_management===true){preparedCustomHistory[_mi].context_id=String(_m.context_id||_m.client_request_id||_m.id||'');preparedCustomHistory[_mi].context_truncated=_m.context_truncated===true||_c.length>32000;}
+      if(body.context_management===true){preparedCustomHistory[_mi].context_id=String(_m.context_id||_m.client_request_id||_m.id||'');preparedCustomHistory[_mi].context_truncated=_historyEntry.context_truncated===true||_m.context_truncated===true||_c.length>32000;}
     }
     var built = [];
     for (var _oi = 0; _oi < srcMsgs.length; _oi++) {
@@ -23172,7 +23175,7 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, rateLimit
     var _reqThinkingHint = (req.body && req.body.thinking_mode) || '';
     if (['low', 'medium', 'high', 'max'].indexOf(_reqThinkingHint) >= 0) {
       try {
-        writeSse(res, { type: 'reasoning_start', message: '正在分析问题...', start_time: Date.now(), early: true });
+        writeSse(res, { type: 'reasoning_start', message: '正在准备请求…', start_time: Date.now(), early: true, phase: 'preparing' });
       } catch (_) {}
     }
 
@@ -23326,7 +23329,7 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, rateLimit
     // 未 early 发过且需要思考时，在此补发正式信号。
     if (useThinking) {
       if (['low', 'medium', 'high', 'max'].indexOf(_reqThinkingHint) < 0) {
-        writeSse(res, { type: 'reasoning_start', message: '正在分析问题...', start_time: Date.now() });
+        writeSse(res, { type: 'reasoning_start', message: '等待模型思考…', start_time: Date.now(), phase: 'waiting' });
       }
       if (aborted) return safeEnd();
     }
