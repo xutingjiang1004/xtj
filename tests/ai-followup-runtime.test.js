@@ -223,6 +223,8 @@ function customResearchRoute({ saveError = null, incomplete = false, cancelled =
   const res = new EventEmitter();
   Object.assign(res, { writableEnded: false, setHeader() {}, flushHeaders() {}, end() { this.writableEnded = true; } });
   const c = { app: { post(_path, ...handlers) { handler = handlers.at(-1); } }, authenticateUser() {}, aiChatConcurrencyGate() {}, aiRequestMiddleware() {}, resolveAiModelReference() {},
+    // ★ 2026-10-27 限时公开：路由片段内引用了 OpenRouter 公开期鉴权中间件，vm 上下文必须提供。
+    guestOpenRouterAuth: require('../render-api/openrouter').createGuestOpenRouterAuth({ authenticateUser() {}, now: () => Date.now() }),
     rateLimit() {}, AI_CHAT_HOURLY_IP_LIMIT: 10, AI_CHAT_MESSAGE_MAX_LEN: 50000, ADMIN_USERNAME: 'admin',
     express: { json() {} }, AbortController, URL, TextDecoder, setTimeout, clearTimeout, setInterval, clearInterval,
     validateString: value => value, genConvId: () => 'GENERATED1', extractVisionImageUrls: () => [],
@@ -297,5 +299,5 @@ for (const interrupted of [false,true]) test('deep research turn persistence kee
 test('native free research saves and returns its exact model in history without credentials',async t=>{
  const old=process.env.OPENROUTER_API_KEY;process.env.OPENROUTER_API_KEY='isolated-native-research-key';t.after(()=>{if(old===undefined)delete process.env.OPENROUTER_API_KEY;else process.env.OPENROUTER_API_KEY=old;});
  const f=cachedResearchRoute([],false,'saved-free-report',false,[],'custom:or_minimax_m31_free');const events=await f.run();
- assert.equal(f.persistedArgs[6].model,'minimax/minimax-m3.1-flash:free');assert.equal(events.find(e=>e.type==='research_done').model,'minimax/minimax-m3.1-flash:free');assert.doesNotMatch(JSON.stringify(f.persistedArgs),/isolated-native-research-key|api_key/);
+ assert.equal(f.persistedArgs[6].model,require('../render-api/openrouter').modelId());assert.equal(events.find(e=>e.type==='research_done').model,require('../render-api/openrouter').modelId());assert.doesNotMatch(JSON.stringify(f.persistedArgs),/isolated-native-research-key|api_key/);
 });
