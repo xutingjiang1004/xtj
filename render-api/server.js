@@ -7723,7 +7723,7 @@ async function callDeepSeek(messages, options) {
       if (!t) return false;
       if (_DSML_PROBE.test(t)) return true;
       // 半截标记：出现尖括号 + 竖线组合，或 DSML/tool_calls/invoke 等关键字
-      if (/<\s*[|\uff5c]/.test(t)) return true;
+      if (/<\/?\s*[|\uff5c]/.test(t)) return true;
       if (/[|\uff5c]\s*DSML/i.test(t)) return true;
       if (/DSML\s*[|\uff5c]/i.test(t)) return true;
       return false;
@@ -8158,10 +8158,24 @@ async function callDeepSeek(messages, options) {
       // DSML tool frames can be split across SSE chunks. Never stream a
       // tool-enabled round until the complete content has been classified.
       var deferToolRoundContent = useTools && hasContentCb;
-      // ★ 思考通道延迟推送标记：工具轮次（或思考内容含协议痕迹）时先缓冲，
-      //   等本轮分类完成后再决定是否补推，避免 DSML 原文泄漏给用户。
-      var deferredThinking = false;
-      var thinkingFlushed = false;
+      // Publish genuine reasoning immediately, including tool rounds. Retain
+      // only a possible split protocol prefix; never expose DSML wire payloads.
+      var pendingThinking = '';
+      var thinkingBlocked = false;
+      function relayThinking(chunk, final) {
+        if (!hasThinkCb || thinkingBlocked) return;
+        pendingThinking += chunk;
+        if (hasThinkingProtocolRisk(pendingThinking)) {
+          thinkingBlocked = true;
+          pendingThinking = '';
+          return;
+        }
+        var prefix = !final && pendingThinking.match(/(?:<\/?\s*|[|\uff5c]\s*(?:D(?:S(?:ML?)?)?)?|D(?:S(?:ML?)?)?)$/i);
+        var end = prefix ? prefix.index : pendingThinking.length;
+        var safe = pendingThinking.slice(0, end);
+        pendingThinking = pendingThinking.slice(end);
+        try { if (safe) options.onThinkingChunk(safe); } catch (_) {}
+      }
 
       if (useStream && !resp.body) {
         // ★ 防御：请求声称流式但响应无 body（部分网关/代理降级为普通 JSON）。
@@ -8224,21 +8238,10 @@ async function callDeepSeek(messages, options) {
             var sChoice = sJson.choices[0];
             var sDelta = sChoice.delta || {};
 
-            // reasoning_content chunk → 推给回调
-            // ★ 修复：思考通道同样属于「内部协议可能泄漏面」。
-            //   实测存在网关把 DSML 工具调用写进 reasoning_content 的情况，
-            //   旧逻辑无条件推给前端 → 用户直接看到一堆 <| | DSML | | ...> 原文。
-            //   策略：只要本轮挂了工具（useTools），就先累积不推；本轮结束时若确认
-            //   不是工具调用轮次，再补推完整思考过程。含协议片段的思考内容一律不推。
             if (typeof sDelta.reasoning_content === 'string' && sDelta.reasoning_content) {
               roundReasoning += sDelta.reasoning_content;
               onProgress();
-              if (useTools || hasThinkingProtocolRisk(sDelta.reasoning_content)) {
-                // 延迟推送：等本轮分类完成（见下方 flushThinkingIfSafe）
-                deferredThinking = true;
-              } else {
-                try { options.onThinkingChunk(String(sDelta.reasoning_content).slice(0, 4000)); } catch (e) {}
-              }
+              relayThinking(sDelta.reasoning_content, false);
             }
             // content chunk → 累积 + V2: 推给 onContentChunk 回调(流式答案)
             if (typeof sDelta.content === 'string' && sDelta.content) {
@@ -8278,6 +8281,7 @@ async function callDeepSeek(messages, options) {
         }
         toolCalls = normalizeToolCalls(toolCalls, round);
         // reasoning_content 既要实时推送，也要随 assistant tool-call 消息续传。
+        relayThinking('', true);
         finalReasoning = roundReasoning;
       } else {
         // ===== 非流式 (standard) =====
@@ -8302,6 +8306,7 @@ async function callDeepSeek(messages, options) {
           var r = message.reasoning_content;
           if (typeof r === 'string' && r) {
             roundReasoning = r;
+            relayThinking(r, true);
             finalReasoning = r;
           }
         }
@@ -8324,12 +8329,6 @@ async function callDeepSeek(messages, options) {
 
       // 没 tool_calls：最终回复
       if (!toolCalls || toolCalls.length === 0) {
-        // ★ 思考通道补推：本轮确认不是工具轮次，若之前被延迟，现在安全补推。
-        //   含协议痕迹（可能是被截断的 DSML）的思考内容一律不推给前端。
-        if (deferredThinking && !thinkingFlushed && useThinking && roundReasoning && !hasThinkingProtocolRisk(roundReasoning)) {
-          try { options.onThinkingChunk(String(roundReasoning).slice(0, 4000)); } catch (e) {}
-          thinkingFlushed = true;
-        }
         if (finalReplyContainsInternalProtocol(content)) {
           console.error('[DEEPSEEK] suppressed internal tool protocol from final reply', 'round', round);
           finalContent = '（工具调用解析失败，请重试。）';
@@ -8341,15 +8340,6 @@ async function callDeepSeek(messages, options) {
           try { if (deferToolRoundContent && hasContentCb && content) options.onContentChunk(content); } catch (e) {}
         }
         break;
-      }
-
-      // ★ 工具轮次：思考内容不推给前端（可能含 DSML 协议痕迹）。
-      //   确认本轮为工具调用后，标记为已处理，避免后续轮次误补推。
-      if (deferredThinking) {
-        if (hasThinkingProtocolRisk(roundReasoning)) {
-          console.error('[DEEPSEEK] suppressed internal tool protocol from thinking channel', 'round', round);
-        }
-        thinkingFlushed = true;
       }
 
       // 有 tool_calls：追加 assistant 消息 → 执行 tool → 进入下一轮
@@ -9260,6 +9250,15 @@ async function callDeepSeekViaResponses(messages, options) {
         if (typeof item.arguments === 'string' && item.arguments) entry.arguments = item.arguments;
       }
 
+      function publishReasoningSnapshot() {
+        var text = roundReasoningItems.map(responsesContext.reasoningText).join('');
+        if (text.indexOf(roundReasoning) === 0 && text.length > roundReasoning.length) {
+          var suffix = text.slice(roundReasoning.length);
+          roundReasoning = text;
+          try { if (hasThinkCb) options.onThinkingChunk(suffix); } catch (_) {}
+        }
+      }
+
       if (useStream) {
         // ===== 流式解析 Responses API SSE =====
         var reader = resp.body.getReader();
@@ -9267,7 +9266,9 @@ async function callDeepSeekViaResponses(messages, options) {
         var sBuffer = '';
         var streamDone = false;
         var currentEventType = '';
+        var incompleteReason = '';
 
+        try {
         while (!streamDone) {
           var rd;
           try { rd = await reader.read(); } catch (e) { throw e; }
@@ -9284,12 +9285,12 @@ async function callDeepSeekViaResponses(messages, options) {
           for (var sl = 0; sl < sLines.length; sl++) {
             var sLine = sLines[sl].trim();
             if (!sLine) { currentEventType = ''; continue; }
-            if (sLine.indexOf('event: ') === 0) {
-              currentEventType = sLine.slice(7).trim();
+            if (sLine.indexOf('event:') === 0) {
+              currentEventType = sLine.slice(6).trim();
               continue;
             }
-            if (sLine.indexOf('data: ') !== 0) continue;
-            var sData = sLine.slice(6);
+            if (sLine.indexOf('data:') !== 0) continue;
+            var sData = sLine.slice(5).trimStart();
             if (sData === '[DONE]') { streamDone = true; break; }
             var sJson;
             try { sJson = JSON.parse(sData); } catch (e) { continue; }
@@ -9317,18 +9318,18 @@ async function callDeepSeekViaResponses(messages, options) {
             if (evtType === 'response.reasoning_text.delta' || evtType === 'reasoning_text.delta') {
               var reasoningDeltaItem = roundReasoningCollector.delta(sJson);
               roundOutputCollector.add(Object.assign({type:'reasoning'},reasoningDeltaItem.id?{id:reasoningDeltaItem.id}:{}), sJson.output_index);
-              var rDelta = sJson.delta || '';
-              roundReasoning += rDelta;
               onProgress();
-              try { if (hasThinkCb) options.onThinkingChunk(String(rDelta)); } catch (e) {}
+              publishReasoningSnapshot();
             }
             if (evtType === 'response.reasoning_text.done' || evtType === 'reasoning_text.done' || evtType === 'response.content_part.done' && sJson.part && sJson.part.type === 'reasoning_text') {
               var reasoningDoneItem = roundReasoningCollector.complete(Object.assign({},sJson,{text:typeof sJson.text==='string'?sJson.text:sJson.part&&sJson.part.text}));
               roundOutputCollector.add(reasoningDoneItem,sJson.output_index);
+              publishReasoningSnapshot();
               onProgress();
             }
             if ((evtType === 'response.output_item.added' || evtType === 'response.output_item.done') && sJson.item && sJson.item.type === 'reasoning') {
               roundReasoningCollector.add(sJson.item, sJson.output_index);
+              publishReasoningSnapshot();
             }
             // 内置 web_search 状态透传（黑盒：搜索结果由服务端注入上下文，不外吐，
             // 仅告知前端"正在联网搜索 / 已联网"，避免用户混淆数据来源）
@@ -9376,18 +9377,17 @@ async function callDeepSeekViaResponses(messages, options) {
               _streamErr.input_items = (apiBody.input && apiBody.input.length) || 0;
               throw _streamErr;
             }
-            if (evtType === 'response.incomplete') {
-              console.error('[RESPONSES] stream incomplete (round ' + round + '), reason=',
-                String((sJson.response && sJson.response.incomplete_details && sJson.response.incomplete_details.reason) || 'unknown'));
-              // 截断类：内容照常使用（max_tokens 截断优于空回复），仅记录
-            }
-            if (evtType === 'response.completed') {
+            if (evtType === 'response.completed' || evtType === 'response.incomplete') {
+              // Responses terminates with a semantic event, not TCP EOF or [DONE].
+              streamDone = true;
+              if (evtType === 'response.incomplete') incompleteReason = String(sJson.response && sJson.response.incomplete_details && sJson.response.incomplete_details.reason || 'unknown');
               if (sJson.response && Array.isArray(sJson.response.output)) {
                 sJson.response.output.forEach(function(item, index) {
                   roundOutputCollector.add(item, index);
                   if (item && item.type === 'reasoning') roundReasoningCollector.add(item, index);
                   if (item && item.type === 'function_call') upsertResponseFunctionCall(item, index);
                 });
+                publishReasoningSnapshot();
                 var completedContent = sJson.response.output.filter(function(item) { return item && item.type === 'message' && item.role === 'assistant'; }).map(function(item) {
                   return Array.isArray(item.content) ? item.content.filter(function(part) { return part && part.type === 'output_text'; }).map(function(part) { return part.text || ''; }).join('') : typeof item.content === 'string' ? item.content : '';
                 }).join('');
@@ -9416,10 +9416,24 @@ async function callDeepSeekViaResponses(messages, options) {
               totalUsage.reasoning_tokens += lastUsage.reasoning_tokens || 0;
               totalUsage.prompt_cache_hit_tokens += lastUsage.prompt_cache_hit_tokens || 0;
             }
+            if (streamDone) break;
           }
           if (rd.done) break;
         }
-        try { reader.cancel(); } catch (e) {}
+        } finally {
+          // Do not wait for a remote transport to close after a terminal event.
+          // Always release it on provider failure and cancellation as well.
+          try { var cancellation = reader.cancel(); if (cancellation && cancellation.catch) cancellation.catch(function() {}); } catch (_) {}
+          try { reader.releaseLock(); } catch (_) {}
+        }
+        if (!streamDone || incompleteReason) {
+          var incompleteError = new Error('AI 回复未完成，请重试');
+          incompleteError.code = 'PROVIDER_STREAM_INCOMPLETE';
+          incompleteError.providerStatus = 200;
+          incompleteError.providerCode = incompleteReason || 'missing_terminal_event';
+          incompleteError.round = round;
+          throw incompleteError;
+        }
         var completedReasoning = roundReasoningItems.map(responsesContext.reasoningText).join('');
         if (completedReasoning && completedReasoning.indexOf(roundReasoning) === 0 && completedReasoning.length > roundReasoning.length) {
           try { if (hasThinkCb) options.onThinkingChunk(completedReasoning.slice(roundReasoning.length)); } catch (_) {}
@@ -9465,8 +9479,8 @@ async function callDeepSeekViaResponses(messages, options) {
         // ★ 修复：非流式分支此前从不回调 onContentChunk/onThinkingChunk，
         //   一旦上层关闭流式（或为往返省时走非流式），内容就只留在 finalContent，
         //   前端全程空白。这里统一补齐回调，保证「有内容必达前端」。
-        try { if (hasContentCb && content) options.onContentChunk(String(content)); } catch (e) {}
         try { if (hasThinkCb && roundReasoning) options.onThinkingChunk(String(roundReasoning)); } catch (e) {}
+        try { if (hasContentCb && content) options.onContentChunk(String(content)); } catch (e) {}
       }
       finalReasoning += roundReasoning;
 
@@ -10191,13 +10205,25 @@ async function runDeepThinkAgent(opts) {
     if (_thinkingChunkTimer) { clearTimeout(_thinkingChunkTimer); _thinkingChunkTimer = null; }
     var flushed = _thinkingChunkBuf;
     _thinkingChunkBuf = '';
-    if (flushed && !_agentGuard()) sseSend({ type: 'thinking_chunk', agent_role: 'AI 智能体', chunk: flushed.slice(0, 4000) });
+    for (var offset = 0; offset < flushed.length && !_agentGuard();) {
+      var end = Math.min(offset + 4000, flushed.length);
+      if (end < flushed.length && /[\uD800-\uDBFF]/.test(flushed.charAt(end - 1))) end--;
+      var chunk = flushed.slice(offset, end);
+      offset = end;
+      sseSend({ type: 'thinking_chunk', agent_role: 'AI 智能体', chunk: chunk });
+    }
   }
   function _flushAnswerChunk() {
     if (_answerChunkTimer) { clearTimeout(_answerChunkTimer); _answerChunkTimer = null; }
     var flushed = _answerChunkBuf;
     _answerChunkBuf = '';
-    if (flushed && !_agentGuard()) sseSend({ type: 'answer_chunk', chunk: flushed.slice(0, 8000) });
+    for (var offset = 0; offset < flushed.length && !_agentGuard();) {
+      var end = Math.min(offset + 8000, flushed.length);
+      if (end < flushed.length && /[\uD800-\uDBFF]/.test(flushed.charAt(end - 1))) end--;
+      var chunk = flushed.slice(offset, end);
+      offset = end;
+      sseSend({ type: 'answer_chunk', chunk: chunk });
+    }
   }
 
   try {
@@ -23351,11 +23377,12 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, rateLimit
     // 第三方搜索日额度（免费默认 10 次）；用尽后仅保留模型内置 web_search
     var thirdPartySearchOkEarly = await canUseThirdPartySearch(userName);
 
-    // ★ P3: 思考态提前 fire 第三方搜索（与后续 DeepSeek 并行），不阻塞首包
+    // Legacy presearch is unnecessary when the streamed model already has
+    // autonomous tools. Required search is enforced separately below.
     var _preloadedSearchPromise = null;
     var _preloadedSearchResults = null;
     var _preloadedQuery = '';
-    if (thirdPartySearchOkEarly && useThinking && proactiveSearch && webSearchPref !== true && !aborted) {
+    if (!workModeEnabled && thirdPartySearchOkEarly && useThinking && proactiveSearch && webSearchPref !== true && !aborted) {
       var _quickSearchHint = explicitSearchIntent || liveInfoIntent || /搜索|查一下|搜一下|搜搜|最新|今天|现在|当前|实时|新闻|资讯|天气|温度|价格|多少钱|汇率|攻略|旅游|景点|推荐|百科|介绍|区别|对比|vs|排行|教程|方法|怎么办|如何|怎么|政策|公告|电影|电视剧|综艺|纪录片|动漫|动画|番剧|iPhone|iPad|Mac|安卓|苹果|三星|华为|小米|oppo|vivo|荣耀|百度|google|谷歌|查查|查资料/i.test(searchCleanMessage);
       if (_quickSearchHint && searchCleanMessage.length >= 2) {
         var _psQuery = searchCleanMessage.slice(0, 80);
@@ -23491,7 +23518,7 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, rateLimit
       var tavilyPromise = null;
       var tavilyResults = null;
       var presearchProvider = null;
-      var shouldServerSearch = webSearchPref !== true && thirdPartySearchOk && allowSearch && !blockAutoSearchForOcr && (
+      var shouldServerSearch = !workModeEnabled && webSearchPref !== true && thirdPartySearchOk && allowSearch && !blockAutoSearchForOcr && (
         (useTavilyCluster && !hasImageOcrMsg)
         || (useThinking && proactiveSearch)
         || (explicitSearchIntent || liveInfoIntent)
@@ -23533,7 +23560,7 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, rateLimit
         onThinkingChunk: function(chunk) {
           if (aborted) return;
           responsesReasoning += chunk;
-          try { writeSse(res, { type: 'reasoning', text: String(chunk).slice(0, 4000) }); } catch (e) {}
+          try { writeSse(res, { type: 'reasoning', text: String(chunk) }); } catch (e) {}
         },
         onContentChunk: function(chunk) {
           if (aborted) return;
@@ -23674,7 +23701,9 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, rateLimit
         var _thinkingOn = thinkingMode !== 'off';
         var _friendly = 'AI 调用失败，请稍后再试';
         // ★ 修复（诊断黑洞）：三类此前全落笼统兜底的错误，给出精准文案
-        if (_respErrCode === 'PROVIDER_STREAM_FAILED') {
+        if (_respErrCode === 'PROVIDER_STREAM_INCOMPLETE') {
+          _friendly = 'AI 回复中断，已保留收到的内容，请重试';
+        } else if (_respErrCode === 'PROVIDER_STREAM_FAILED') {
           // 流内失败（HTTP 200 但 response.failed）：message 已携带上游原因
           _friendly = _respErrMsg.indexOf('流内失败') >= 0 ? _respErrMsg : ('AI 调用失败（' + _respErrMsg.slice(0, 120) + '）');
         } else if (/HTTP 5\d\d/.test(_respErrMsg)) {
@@ -23877,7 +23906,7 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, rateLimit
     var fcQuickIntent = !isShortMsg && (explicitSearchIntent || liveInfoIntent || /搜索|查一下|搜一下|天气|温度|降雨|旅游|攻略|新闻|资讯|最新|多少钱|价格|汇率|股价|行情|比特币|股票|百科|介绍|路线|营业|开放时间|比赛|比分|iPhone|苹果|发布|地震|台风|公告|政策|区别|对比|vs|VS|哪个好|推荐|最佳|怎么[样做走]|如何|总结|阅读|打开这个链接|看看这个/i.test(message));
     var fcWeatherIntent = !weatherResult && /天气|温度|下雨|降雨|刮风|风速|湿度|气温|穿什么/i.test(message);
     var fcLocalToolIntent = /汇率|换算|美元|日元|欧元|港币|股价|行情|股票|比特币|以太坊|茅台|腾讯|特斯拉|上证|深证|几点|现在时间|今天几号|星期几|等于多少|算一下|计算|多少度|华氏|摄氏|公里|英里|公斤|磅|GB|MB/i.test(message);
-    var needsFcCheck = !useThinking && !aborted && (
+    var needsFcCheck = !workModeEnabled && !useThinking && !aborted && (
       (allowSearch && (fcQuickIntent || fcWeatherIntent || siteToolIntent || hasHttpsUrl)) ||
       hasHttpsUrl ||
       fcWeatherIntent ||
@@ -24134,7 +24163,7 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, rateLimit
     }
 
     // 如果 FC 没启用或没触发 tool_calls，回退旧正则搜索注入
-    if (!hasCalledTools && !aborted && allowSearch && !weatherResult && !useThinking) {
+    if (!workModeEnabled && !hasCalledTools && !aborted && allowSearch && !weatherResult && !useThinking) {
       var needsSearch = /最新|今天|现在|当前|刚刚|实时|新闻|资讯|天气|温度|价格|多少钱|汇率|政策|公告|开放时间|营业时间|百度|google|谷歌|iPhone|苹果发布|航班|地震|台风|比赛|比分|搜索|查一下|搜一下|查询|景点|旅游|攻略|推荐|怎么样|好不好|评价|评测|价格表/i.test(message);
 
       // 构建搜索关键词
@@ -24321,7 +24350,7 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, rateLimit
 
     // 搜索 → 思考 → 回复：先执行搜索（阻塞），再将搜索结果注入上下文，最后开始思考流
     // 使用 proactiveSearch：用户开网页搜索 或 消息有搜索/时效意图 时注入（不依赖面板关）
-    if (useThinking && proactiveSearch && !aborted && needsWebSearch(message)) {
+    if (!workModeEnabled && useThinking && proactiveSearch && !aborted && needsWebSearch(message)) {
       if (responseProfile === 'enhanced') writeSse(res, { type: 'enhanced_stage', stage: 'verify', message: '正在查证必要信息…' });
       var _psQuery = _preloadedQuery || message.slice(0, 80);
       if (!_preloadedSearchPromise) {
@@ -24440,6 +24469,7 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, rateLimit
     // 本轮开始前的 contentBuffer 长度：contentBuffer 跨轮累积，而 role:'assistant'
     // 工具消息只应包含本轮新增正文（否则第 2 轮起会把前几轮正文重复塞给模型）。
     var roundContentStart = contentBuffer.length;
+    var roundReasoningStart = persistentReasoning.length;
 
     // 清理上一轮的泄漏（var 提升导致旧 controller/reader 不会被 GC）
     if (typeof _reader !== 'undefined' && _reader) { try { _reader.cancel(); } catch (e) {} }
@@ -24696,6 +24726,7 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, rateLimit
         usageInStream = chunk.usage || usageInStream;
         
         if (delta.reasoning_content) {
+          if (!flushContentCoalesce()) { aborted = true; break; }
           if (!hasReasoningContent) reasoningStartedAt = Date.now();
           hasReasoningContent = true;
           reasoningBuffer += delta.reasoning_content;
@@ -24715,6 +24746,7 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, rateLimit
           }
         }
         if (delta.content) {
+          flushReasoningCoalesce();
           contentBuffer += delta.content;
           // ★ 2026-09-17：小包合并（40ms 窗口）。注意 contentBuffer（用于落库的
           //   完整正文）仍在逐片累积，合并只影响 SSE 推送粒度，不影响持久化内容。
@@ -24857,7 +24889,9 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, rateLimit
       // 携带 tool_calls 的 role:'assistant' 消息之后。此前先 push tool 结果、
       // 再 push assistant(tool_calls)，第二轮请求必然 400（消息序列非法）。
       // 先 push assistant(tool_calls)，再依次 push 各 tool 结果。
-      roundMessages.push({ role: 'assistant', content: contentBuffer.slice(roundContentStart) || '', tool_calls: toolCallsArr.map(function(t) { return { id: t.id, type: 'function', function: { name: t.name, arguments: t.args } }; }) });
+      var assistantToolRoundMessage = { role: 'assistant', content: contentBuffer.slice(roundContentStart) || '', tool_calls: toolCallsArr.map(function(t) { return { id: t.id, type: 'function', function: { name: t.name, arguments: t.args } }; }) };
+      if (useThinking) assistantToolRoundMessage.reasoning_content = persistentReasoning.slice(roundReasoningStart);
+      roundMessages.push(assistantToolRoundMessage);
       for (var ti = 0; ti < toolResults.length; ti++) {
         var toolResult = toolResults[ti].result;
         
@@ -24897,9 +24931,8 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, rateLimit
       }
       toolRound++;
        if (useThinking) {
-         // 思考模式多轮工具调用：freshMsgs 是 roundMessages 的快照（避免 apiBody.messages
-         // 与 roundMessages 共享引用被后续 push 干扰）。思考模式不带 tools（DeepSeek 限制），
-         // 非思考模式复用原 apiBody（含 AI_TOOLS，消息数组为同一引用自动同步）。
+         // Snapshot the updated messages, retaining this round's reasoning
+         // alongside its calls. Thinking and tools remain enabled next round.
          var freshMsgs = roundMessages.slice();
          apiBody = Object.assign({}, apiBody, { messages: freshMsgs });
        }
@@ -24932,7 +24965,9 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, rateLimit
       }));
       clearInterval(_dsmlToolProgress);
       // assistant(tool_calls) 必须先于 role:'tool' 结果入队，保证第二轮请求序列合法
-      roundMessages.push({ role: 'assistant', content: contentBuffer.slice(roundContentStart) || '', tool_calls: dsmlFallbackCalls });
+      var assistantToolRoundMessage = { role: 'assistant', content: contentBuffer.slice(roundContentStart) || '', tool_calls: dsmlFallbackCalls };
+      if (useThinking) assistantToolRoundMessage.reasoning_content = persistentReasoning.slice(roundReasoningStart);
+      roundMessages.push(assistantToolRoundMessage);
       for (var dti = 0; dti < dsmlToolResults.length; dti++) {
         var dTRes = dsmlToolResults[dti].result || {};
         // 捕获搜索结果元数据（与原生分支一致，多轮搜索按次累计）

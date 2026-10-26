@@ -172,7 +172,7 @@ test('shared: reset cancels the old drain and cannot modify the next answer', as
  }finally{await browser.close();}
 });
 
-for(const implementation of ['main','shared'])test(implementation+': a fast CJK burst catches up within 45 display frames without reordering or flashing the whole reply',async()=>{
+for(const implementation of ['main','shared'])test(implementation+': a received CJK burst renders on the next display frame and leaves no idle rendering loop',async()=>{
  const {browser,page}=await fixture();try{
   const result=await page.evaluate(async kind=>{
    const output=document.getElementById('output'),expected='收到的中文按原始顺序显示，保留标点与小猫🐈。'.repeat(120);
@@ -190,7 +190,7 @@ for(const implementation of ['main','shared'])test(implementation+': a fast CJK 
     const done=await completion;return{frames,ordered,firstLength,total:expected.length,stable,done,complete:output.textContent===expected,queued:callbacks.size};
    }finally{if(renderer)renderer.cancel();window.requestAnimationFrame=nativeRequest;window.cancelAnimationFrame=nativeCancel;}
   },implementation);
-  assert.ok(result.frames<=45,JSON.stringify(result));assert.ok(result.frames>=4);assert.ok(result.firstLength>0&&result.firstLength<result.total);
+  assert.equal(result.frames,1,JSON.stringify(result));assert.equal(result.firstLength,result.total);
   assert.equal(result.ordered,true);assert.equal(result.stable,true);assert.equal(result.complete,true);assert.equal(result.done,true);assert.equal(result.queued,0);
  }finally{await browser.close();}
 });
@@ -203,7 +203,7 @@ for(const implementation of ['main','shared'])test(implementation+': completion 
    function sample(){frames.push(output.textContent);if(running)requestAnimationFrame(sample);}requestAnimationFrame(sample);
    const drain=renderer.drain(final);const immediately=output.textContent;await drain;running=false;const paragraphs=Array.from(output.querySelectorAll('p'));
    return{immediately,stable:paragraphs[0]===first&&first.firstChild===text,frames,text:output.textContent,opacity:paragraphs.map(p=>getComputedStyle(p).opacity),runs:output.querySelectorAll('.ai-stream-reveal,.ai-stream-cursor').length};
-  },implementation);assert.equal(result.immediately,'第一段正文');assert.ok(result.frames.length>=4);assert.ok(result.frames.every((s,i)=>i===0||s.startsWith(result.frames[i-1])));assert.ok(result.frames.slice(1).every((s,i)=>s.length-result.frames[i].length<('第二段英文 English answer. '.repeat(30)).length/2));assert.equal(result.stable,true);assert.equal(result.text,'第一段正文'+('第二段英文 English answer. '.repeat(30)));assert.deepEqual(result.opacity,['1','1']);assert.equal(result.runs,0);
+  },implementation);assert.equal(result.immediately,'第一段正文');assert.ok(result.frames.length>=1&&result.frames.length<=2,JSON.stringify(result.frames.map(s=>s.length)));assert.ok(result.frames.every((s,i)=>i===0||s.startsWith(result.frames[i-1])));assert.equal(result.stable,true);assert.equal(result.text,'第一段正文'+('第二段英文 English answer. '.repeat(30)));assert.deepEqual(result.opacity,['1','1']);assert.equal(result.runs,0);
  }finally{await browser.close();}
 });
 for(const implementation of ['main','shared'])test(implementation+': a long stream keeps one text node and adds no glyph animation nodes',async()=>{
@@ -228,11 +228,11 @@ for(const implementation of ['main','shared'])for(const hz of [60,120])test(impl
  const {browser,page}=await fixture();try{
   const result=await page.evaluate(({kind,hz,sharedSource})=>{
    let sequence=0,time=1000;const frames=new Map();window.requestAnimationFrame=fn=>{frames.set(++sequence,fn);return sequence;};window.cancelAnimationFrame=id=>frames.delete(id);Date.now=()=>Math.floor(time);if(kind==='shared')window.eval(sharedSource);
-   const output=document.getElementById('output'),renderer=kind==='main'?createSmoothTextRenderer(output):XtjAiCore.StreamRenderer.create(output);renderer.append('正文'.repeat(700));let changed=0,before='';
+   const output=document.getElementById('output'),renderer=kind==='main'?createSmoothTextRenderer(output):XtjAiCore.StreamRenderer.create(output);let changed=0,before='';
    let scheduled=0;
-   for(let i=1;i<=24;i++){const entry=frames.entries().next().value;if(!entry)break;frames.delete(entry[0]);time=1000+i*1000/hz;entry[1](time);scheduled++;if(output.textContent!==before)changed++;before=output.textContent;}
+   for(let i=1;i<=24;i++){renderer.append('正文'.repeat(30));const entry=frames.entries().next().value;if(!entry)break;frames.delete(entry[0]);time=1000+i*1000/hz;entry[1](time);scheduled++;if(output.textContent!==before)changed++;before=output.textContent;}
    renderer.stop();return{changed,scheduled,text:before};
-  },{kind:implementation,hz,sharedSource:fs.readFileSync('js/ai-core/stream-renderer.js','utf8')});assert.equal(result.changed,result.scheduled);assert.ok(result.scheduled>0);assert.ok(result.text.length>24);assert.ok(result.scheduled===24||result.text==='正文'.repeat(700));
+  },{kind:implementation,hz,sharedSource:fs.readFileSync('js/ai-core/stream-renderer.js','utf8')});assert.equal(result.changed,result.scheduled);assert.ok(result.scheduled>0);assert.ok(result.text.length>24);assert.equal(result.scheduled,24);assert.equal(result.text,'正文'.repeat(720));
  }finally{await browser.close();}
 });
 
@@ -244,9 +244,10 @@ for(const implementation of ['main','shared'])test(implementation+': repeated or
    window.cancelAnimationFrame=id=>frames.delete(id);Date.now=()=>wall;
    if(kind==='shared')window.eval(sharedSource);
    const output=document.getElementById('output'),renderer=kind==='main'?createSmoothTextRenderer(output):XtjAiCore.StreamRenderer.create(output);
-   renderer.append('正文'.repeat(700));let changed=0,before='';
+   let changed=0,before='';
    for(let i=1;i<=24;i++){
     if(i===12)wall=900;
+    renderer.append('正文'.repeat(30));
     const entry=frames.entries().next().value;frames.delete(entry[0]);entry[1](1000+i*1000/120);
     if(output.textContent!==before)changed++;before=output.textContent;
    }

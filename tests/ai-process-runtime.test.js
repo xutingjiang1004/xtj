@@ -289,30 +289,27 @@ test('plus menu removes quick commands and both model/effort popups provide a cl
  }
 });
 
-test('a long English answer grows across actual display frames and completion never exposes a gray future paragraph',async t=>{
+test('network-delivered English packets appear on display frames and completion never exposes a gray future paragraph',async t=>{
  const page=await fixture(t,'off');await page.locator('#aiChatMsgInput').fill('English essay');await page.locator('#aiChatSendBtn').click();await page.waitForFunction(()=>window.stream);
- await page.evaluate(()=>{
+ await page.evaluate(async()=>{
   window.essay='The Impact of Short Videos on College Students\n\n'+('In recent years, short videos have swept across campuses like a storm. '.repeat(15))+'\n\nWe should control the screen, not be controlled by it.';
   window.replyFrameTexts=[];window.grayFrame=false;window.doubleCursor=false;window.sampleReply=true;
   function frame(){const bubble=document.querySelector('.ai-msg.assistant .ai-msg-bubble');if(bubble){replyFrameTexts.push(bubble.textContent);if(Array.from(bubble.querySelectorAll('p,span:not(.ai-stream-cursor),strong,em')).some(n=>Number(getComputedStyle(n).opacity)<1))grayFrame=true;const pseudo=getComputedStyle(bubble,'::after');if(bubble.querySelector('.ai-stream-cursor')&&pseudo.content!=='none'&&pseudo.content!=='normal'&&pseudo.display!=='none')doubleCursor=true;}if(sampleReply)requestAnimationFrame(frame);}requestAnimationFrame(frame);
-  emit({type:'content',text:essay});emit({type:'done',content:essay,thinking_mode:'off',complete:true,saved:true});stream.close();
+  for(let offset=0;offset<essay.length;offset+=120){emit({type:'content',text:essay.slice(offset,offset+120)});await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));}
+  emit({type:'done',content:essay,thinking_mode:'off',complete:true,saved:true});stream.close();
  });
  await page.waitForFunction(()=>!document.querySelector('.ai-msg.generating'));const state=await page.evaluate(()=>{sampleReply=false;return{texts:replyFrameTexts.filter((s,i,a)=>i===0||s!==a[i-1]),gray:grayFrame,doubleCursor,final:document.querySelector('.ai-msg.assistant .ai-msg-bubble').textContent,expected:essay.replace(/\n/g,''),runs:document.querySelectorAll('.ai-stream-reveal').length};});
  assert.ok(state.texts.length>=4);assert.ok(state.texts.every((s,i)=>!i||s.startsWith(state.texts[i-1])));assert.ok(state.texts.slice(1).every((s,i)=>s.length-state.texts[i].length<=Math.max(64,Math.ceil(state.expected.length/4))));assert.equal(state.gray,false);assert.equal(state.doubleCursor,false);assert.equal(state.final,state.expected);assert.equal(state.runs,0);
 });
 
-test('leaving chat during a completion-only drain cancels the old answer and releases the next send',async t=>{
+test('a completion-only answer finishes promptly and a new conversation cannot receive its late output',async t=>{
  const page=await fixture(t,'off');await page.locator('#aiChatMsgInput').fill('旧会话');await page.locator('#aiChatSendBtn').click();await page.waitForFunction(()=>window.stream);
- await page.evaluate(()=>{window.oldStream=stream;emit({type:'done',content:'旧回答'+('未显示的尾部'.repeat(250)),thinking_mode:'off',complete:true,saved:true});stream.close();});
- await page.waitForFunction(()=>document.querySelector('.ai-msg.assistant .ai-msg-bubble')?.textContent.includes('旧回答'));
- assert.equal(await page.locator('.ai-msg.generating').count(),1);
- await page.getByRole('button',{name:'新对话',exact:true}).click();assert.equal(await page.evaluate(()=>window.newCalls||0),0);
- await page.evaluate(()=>__xtjAiAgent.close());await page.evaluate(()=>__xtjAiAgent.open());
- await page.waitForFunction(()=>document.querySelector('.ai-msg.assistant:not(.generating)'));
+ await page.evaluate(()=>{window.oldStream=stream;emit({type:'done',content:'旧回答'+('已收到的尾部'.repeat(250)),thinking_mode:'off',complete:true,saved:true});stream.close();});
+ await page.waitForFunction(()=>document.querySelector('.ai-msg.assistant .ai-msg-bubble')?.textContent.includes('旧回答')&&!document.querySelector('.ai-msg.generating'));
  await page.getByRole('button',{name:'新对话',exact:true}).click();await page.waitForFunction(()=>window.newCalls===1&&document.querySelector('.ai-chat-empty'));
  await page.locator('#aiChatMsgInput').fill('新会话');await page.locator('#aiChatSendBtn').click();await page.waitForFunction(()=>stream!==oldStream);
- await page.evaluate(()=>{emit({type:'content',text:'新会话的回答。'});emit({type:'done',content:'新会话的回答。',thinking_mode:'off',complete:true,saved:true});stream.close();});
- await page.waitForFunction(()=>!document.querySelector('.ai-msg.generating'));await page.waitForTimeout(300);
+ await page.evaluate(()=>{try{oldStream.enqueue(new TextEncoder().encode('data: {"type":"content","text":"迟到的旧数据"}\n\n'));}catch(_){}emit({type:'content',text:'新会话的回答。'});emit({type:'done',content:'新会话的回答。',thinking_mode:'off',complete:true,saved:true});stream.close();});
+ await page.waitForFunction(()=>!document.querySelector('.ai-msg.generating'));
  assert.equal(await page.locator('.ai-msg.assistant').count(),1);assert.equal(await page.locator('.ai-msg.assistant .ai-msg-bubble').textContent(),'新会话的回答。');assert.equal(await page.locator('.ai-stream-cursor').count(),0);
 });
 
