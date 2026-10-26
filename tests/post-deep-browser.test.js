@@ -6,6 +6,33 @@ const { chromium } = require('playwright');
 const source = fs.readFileSync('js/core-parts/04-posts-interactions.js', 'utf8');
 const browserOptions = { executablePath: process.env.CHROMIUM_PATH || (fs.existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined), headless: true, args: ['--no-sandbox'] };
 const id = '8c1cb02d-74d0-4e45-9e15-17f5cf3aa812';
+const { postBrowserFixture } = require('./helpers/post-browser-fixture');
+
+for (const fallback of [false, true]) {
+  test(`author filters retain valid object-property names (${fallback ? 'feed fallback' : 'authors API'})`, { timeout: 40000 }, async t => {
+    const f = await postBrowserFixture({ counts: [1, 1, 1, 1] });
+    t.after(() => f.close());
+    const names = ['alice', 'constructor', '__proto__', 'toString'];
+    f.posts.forEach((post, i) => { post.user_name = names[i]; post.visibility = 'public'; });
+    await f.page.route('**/api/feed/authors', route => route.fulfill({
+      status: fallback ? 503 : 200,
+      json: fallback ? { ok: false, retryable: true } : { ok: true, authors: names.concat(names, ['', '  ']) }
+    }));
+    if (fallback) {
+      await f.page.evaluate(() => loadFeed(true));
+      await f.page.waitForFunction(() => document.querySelector('#feed [data-post-user="__proto__"]'));
+    }
+    await f.page.locator('#filterToggleBtn').click();
+    await f.page.waitForFunction(() => document.querySelector('#postUserQuickList .post-user-chip-name'));
+    const chips = await f.page.locator('#postUserQuickList .post-user-chip-name').allTextContents();
+    assert.deepEqual(chips.filter(name => name !== '全部用户').sort(), names.slice().sort());
+    for (const name of names) {
+      await f.page.locator('#postUserQuickList .post-user-chip').filter({ hasText: name }).click();
+      assert.equal(await f.page.locator('#postUserFilter').inputValue(), name);
+    }
+    assert.deepEqual(f.errors, []);
+  });
+}
 function between(start, end) { const a = source.indexOf(start), b = source.indexOf(end, a + start.length); assert.ok(a >= 0 && b > a); return source.slice(a, b); }
 test('detail dialog pin and tools clicks survive its bubbling guard and dispatch once', async () => {
   const browser = await chromium.launch(browserOptions);

@@ -98,7 +98,7 @@
   }
 
   function emptyHtml(){
-    return '<div class="photo-wall-empty"><div class="photo-wall-empty-icon">' + icon('empty', 'photo-wall-empty-svg') + '</div><div>还没有照片</div><div class="photo-wall-empty-cta" data-xtj-trigger-upload>' + icon('upload') + '<span>成为第一个分享照片的人</span></div></div>';
+    return '<div class="photo-wall-empty"><div class="photo-wall-empty-icon">' + icon('empty', 'photo-wall-empty-svg') + '</div><div>还没有照片</div><div class="photo-wall-empty-cta" role="button" tabindex="0" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();this.click();}" data-xtj-trigger-upload>' + icon('upload') + '<span>成为第一个分享照片的人</span></div></div>';
   }
 
   function applyPhotoWallAspect(img){
@@ -184,7 +184,7 @@
       var time = formatPhotoTime(p.timestamp);
       var index = base + i;
       var delay = Math.min(index * 30, 300);
-      html += '<div class="photo-wall-item pw-stagger-enter" role="button" tabindex="0" aria-label="' + esc(username + '的照片，' + time + (p.caption ? '，' + p.caption : '')) + '" data-photo-id="' + esc(String(p.id)) + '" style="animation-delay:' + delay + 'ms" onclick="openPhotoWallPreviewAt(' + index + ', this)" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();this.click();}">';
+      html += '<div class="photo-wall-item pw-stagger-enter" role="button" tabindex="0" aria-label="' + esc(username + '的照片，' + time + (p.caption ? '，' + p.caption : '')) + '" data-photo-id="' + esc(String(p.id)) + '" style="animation-delay:' + delay + 'ms" onclick="openPhotoWallPreviewAt(' + index + ', this)" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();(this.querySelector(\'img\')||this).click();}">';
       var recent=recentPhotos.get(String(p.id));
       html += recent ? '<img src="' + safeUrl(recent.url) + '" alt="photo" class="pw-blur-done" data-recent-upload-id="' + esc(String(p.id)) + '" loading="eager" decoding="async">' : '<img src="' + esc(FALLBACK_IMG) + '" alt="photo" class="pw-blur-in" data-src="' + safeUrl(realUrl) + '" loading="lazy" decoding="async">';
       html += '<div class="pw-item-info"><div class="pw-item-name">' + esc(username) + '</div><div class="pw-item-meta"><span>' + esc(time) + '</span><span>浏览 <b class="pw-view-count">' + esc(p.views || 0) + '</b></span></div></div></div>';
