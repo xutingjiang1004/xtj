@@ -9,36 +9,30 @@ const agentSrc = fs.readFileSync(path.join(root, 'js', 'ai-agent.js'), 'utf8');
 const coreSrc = fs.readFileSync(path.join(root, 'js', 'ai-core', 'stream-renderer.js'), 'utf8');
 const cssEnhance = fs.readFileSync(path.join(root, 'css', 'ui-enhance.css'), 'utf8');
 
-/* ── 背景（2026-09-22）────────────────────────────────────────────────
-   用户反馈：「小猫AI 正文回复的时候，那个动画感觉好卡顿」，希望改成
-   iOS 27 Siri 那种连续流淌的观感。
-   诊断（实测数据，勿凭直觉推翻）：
-     · renderMarkdown 12000 字符仅 0.33ms —— **不是**卡顿来源；
-     · 真正的开销是 `targetEl.innerHTML = html` 每帧销毁并重建整棵 DOM
-       子树、重算样式、重排。正文字数越多节点越多，每帧成本随长度线性
-       增长 —— 这就是"越回越卡、一块块跳"的成因。
-   修复：整体渲染保持不变（正确性 100%），但落地时走增量补丁 —— 只替换
-   真正变化的节点，未变节点浏览器完全不碰，每帧改动量 O(1)。
-   本段把「增量补丁存在」「两处渲染路径都走补丁」「门限已收紧」固化成契约。 */
+/* Stream rendering has two paths: ordinary unformatted prose appends bounded
+   text-node suffixes without reparsing the answer; rich/incomplete Markdown
+   keeps the parser and DOM diff for correctness. The DOM diff preserves stable
+   nodes but does not make rich Markdown parsing constant-time. Keep that limit
+   explicit so future performance claims remain tied to evidence. */
 
 test('正文流式渲染必须走增量补丁（不得每帧整段替换 innerHTML）', () => {
-  // ai-agent.js：正文路径必须调用 patchInnerHTML
+  // ai-agent.js: plain prose must bypass cumulative parsing; rich syntax keeps
+  // the safe parser + DOM diff fallback.
   assert.match(agentSrc, /function patchInnerHTML\s*\(/, 'ai-agent.js 必须提供 patchInnerHTML');
   const i = agentSrc.indexOf('function createSmoothTextRenderer');
   assert.ok(i > 0, '必须存在 createSmoothTextRenderer');
-  const body = agentSrc.slice(i, i + 12000);
-  // ★ 2026-09-22：调用签名增加 streaming 参数（软揭示标记），此处放宽匹配
-  assert.match(body, /patchInnerHTML\(targetEl, renderMarkdown\(rendered/,
-    '正文渲染必须通过 patchInnerHTML 落地，而不是整段 innerHTML 替换');
+  const body = agentSrc.slice(i, i + 15000);
+  assert.match(body, /appendPlainMarkdown\(next\)/, '普通正文必须有增量追加快路径');
+  assert.match(body, /patchInnerHTML\(targetEl,\s*renderStreamMarkdown\(rendered\),\s*ink\)/,
+    '富 Markdown 必须保留安全解析和节点补丁回退');
 
-  // stream-renderer.js：共享渲染器的缓存解析路径同样要走补丁
+  // The shared renderer must keep the same split fast/fallback paths.
   assert.match(coreSrc, /function patchInnerHTML\s*\(/, 'stream-renderer.js 必须提供 patchInnerHTML');
   const j = coreSrc.indexOf('function createStreamRenderer');
-  const coreBody = coreSrc.slice(j, j + 8000);
-  // The optional third argument supplies the reveal effect; rendering must
-  // still go through the same incremental DOM patch.
-  assert.match(coreBody, /patchInnerHTML\(targetEl,\s*renderStreamMarkdown\(rendered\)(?:,\s*ink)?\)/,
-    '共享渲染器同样必须走增量补丁');
+  const coreBody = coreSrc.slice(j, j + 18000);
+  assert.match(coreBody, /appendPlainMarkdown\(next\)/, '共享实现必须提供普通文本追加快路径');
+  assert.match(coreBody, /patchInnerHTML\(targetEl,\s*renderStreamMarkdown\(rendered\),\s*ink\)/,
+    '共享实现的富 Markdown 必须保留解析回退');
 });
 
 test('增量补丁必须保留未变化节点（这是性能保证的核心）', () => {
