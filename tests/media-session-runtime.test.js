@@ -6,7 +6,26 @@ test('media session renewals coalesce, cache per identity, and renew before cook
 test('guest wall access fails while public post and granted share media need no login refresh',async()=>{const r=runtime();r.switchUser('');assert.equal(await r.window.xtjEnsureMediaSession(url),false);assert.equal(await r.window.xtjEnsureMediaSession(url.replace('/photo/','/post/')+'/0'),true);assert.equal(await r.window.xtjEnsureMediaSession('https://foreign.test'+new URL(url).pathname),true);assert.equal(await r.window.xtjEnsureMediaSession('https://xtj.test/api/photo/shared/grant/photo/media'),true);assert.equal(r.calls,0);});
 test('late refresh cannot authenticate an A to B to A identity cycle',async()=>{const r=runtime();let release;r.window.refreshUserToken=()=>new Promise(resolve=>release=resolve);const task=r.window.xtjEnsureMediaSession(url);await Promise.resolve();r.switchUser('bob');r.switchUser('alice');release('access');assert.equal(await task,false);});
 test('image recovery is bounded and never puts login credentials in the URL',async()=>{const r=runtime();const img={isConnected:true,src:url,getAttribute(){return this.src;}};assert.equal(r.window.xtjRecoverMediaImage(img,url),true);assert.equal(r.window.xtjRecoverMediaImage(img,url),false);await new Promise(setImmediate);assert.match(img.src,/xtj_retry=/);assert.equal(new URL(img.src).pathname,new URL(url).pathname);assert.doesNotMatch(img.src,/access|token/);assert.equal(r.calls,1);});
-test('a later expiry can recover the same image without creating an immediate retry loop',async()=>{const r=runtime();const img={isConnected:true,src:url,getAttribute(){return this.src;}};r.window.xtjRecoverMediaImage(img,url);await new Promise(setImmediate);r.advance();assert.equal(r.window.xtjRecoverMediaImage(img,url),true);assert.equal(r.window.xtjRecoverMediaImage(img,url),false);await new Promise(setImmediate);assert.equal(r.calls,2);});
+test('a failed retry using the current image src cannot renew its own recovery budget',async()=>{
+ const r=runtime(),original=url+'?preview=1',img={isConnected:true,src:original,getAttribute(){return this.src;}};
+ assert.equal(r.window.xtjRecoverMediaImage(img,img.src),true);await new Promise(setImmediate);
+ const retried=img.src;
+ for(let n=0;n<6;n++){
+  assert.equal(r.window.xtjRecoverMediaImage(img,img.src),false,'the changing retry nonce still refers to the same failed image');
+  await new Promise(setImmediate);
+ }
+ assert.equal(img.src,retried);assert.equal(r.calls,1);
+ r.advance();assert.equal(r.window.xtjRecoverMediaImage(img,img.src),false,'a slow failed repair must also stay bounded after the cooldown');
+ // Preserve real resource distinctions: the original is independent of its display copy.
+ img.src=url;assert.equal(r.window.xtjRecoverMediaImage(img,img.src),true);await new Promise(setImmediate);
+});
+test('a later request after expiry can recover the same image without creating an immediate retry loop',async()=>{const r=runtime();const img={isConnected:true,src:url,getAttribute(){return this.src;}};r.window.xtjRecoverMediaImage(img,url);await new Promise(setImmediate);r.advance();img.src=url;assert.equal(r.window.xtjRecoverMediaImage(img,url),true);assert.equal(r.window.xtjRecoverMediaImage(img,url),false);await new Promise(setImmediate);assert.equal(r.calls,2);});
+test('a successful repair allows the loaded image to recover after a later cookie expiry',async()=>{
+ const r=runtime(),img=Object.assign(new EventTarget(),{isConnected:true,src:url,naturalWidth:0,getAttribute(){return this.src;}});
+ assert.equal(r.window.xtjRecoverMediaImage(img,url),true);await new Promise(setImmediate);
+ img.naturalWidth=100;img.dispatchEvent(new Event('load'));r.advance();img.naturalWidth=0;
+ assert.equal(r.window.xtjRecoverMediaImage(img,img.src),true);await new Promise(setImmediate);assert.equal(r.calls,2);
+});
 test('staggered failures reuse a successful repair instead of rotating a session per image',async()=>{const r=runtime();for(let n=0;n<12;n++){const img={isConnected:true,src:url,getAttribute(){return this.src;}};assert.equal(r.window.xtjRecoverMediaImage(img,url),true);await new Promise(setImmediate);assert.match(img.src,/xtj_retry=/);}assert.equal(r.calls,1);});
 test('recovery cannot restore an image after its owner, source, or connection changes',async()=>{for(const mutation of ['owner','source','connection']){const r=runtime();let release;r.window.refreshUserToken=()=>new Promise(resolve=>release=resolve);const img={isConnected:true,src:url,getAttribute(){return this.src;}};r.window.xtjRecoverMediaImage(img,url);await Promise.resolve();if(mutation==='owner')r.switchUser('bob');if(mutation==='source')img.src='replacement';if(mutation==='connection')img.isConnected=false;const before=img.src;release('access');await new Promise(setImmediate);assert.equal(img.src,before);}});
 test('failed renewal reports failure without publishing an authenticated URL',async()=>{const r=runtime();r.window.refreshUserToken=async()=>{throw Error('offline');};let failed=0;const img={isConnected:true,src:url,getAttribute(){return this.src;}};r.window.xtjRecoverMediaImage(img,url,()=>failed++);await new Promise(setImmediate);assert.equal(failed,1);assert.equal(img.src,url);});

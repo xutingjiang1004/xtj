@@ -47,15 +47,30 @@
   window.xtjRecoverMediaImage = function (img, value, failed) {
     var url = mediaUrl(value), owner = String(window.currentUser || ''), generation = epoch();
     if (!url || !owner || !img || !img.isConnected || window.__xtjLogoutPending) return false;
+    // A failed retry calls us with the current src, including our nonce. It is
+    // still the same resource, not another chance to renew and download it.
+    url.searchParams.delete('xtj_retry');
+    url.searchParams.sort();
     var key = owner + ':' + generation + ':' + url.pathname + url.search, source = img.getAttribute('src');
     if (window.__xtjServiceRestrictedUntil > Date.now()) return false;
-    if (img._xtjMediaAuthRetry === key && Date.now() - img._xtjMediaAuthRetryAt < 60000) return false;
+    if (img._xtjMediaAuthRetry === key && (img._xtjMediaAuthRetrySrc === source || Date.now() - img._xtjMediaAuthRetryAt < 60000)) return false;
     img._xtjMediaAuthRetry = key;
     img._xtjMediaAuthRetryAt = Date.now();
     window.xtjEnsureMediaSession(url.href, { force: true }).then(function (ready) {
       if (!current(owner, generation) || !img.isConnected || img.getAttribute('src') !== source) return;
       if (!ready) { if (failed) failed(); return; }
       url.searchParams.set('xtj_retry', Date.now().toString(36));
+      var retrySource = url.href;
+      img._xtjMediaAuthRetrySrc = retrySource;
+      if (typeof img.addEventListener === 'function') {
+        function finished(event) {
+          img.removeEventListener('load', finished); img.removeEventListener('error', finished);
+          // A successfully loaded image may need another repair after a later
+          // cookie expiry. A slow failed repair must never reset its own budget.
+          if (event.type === 'load' && img.getAttribute('src') === retrySource && img.naturalWidth > 0) img._xtjMediaAuthRetrySrc = '';
+        }
+        img.addEventListener('load', finished); img.addEventListener('error', finished);
+      }
       img.src = url.href;
     });
     return true;
