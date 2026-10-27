@@ -4552,19 +4552,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     return pending.slice(0, maxChunk);
   }
 
-  /* ── 流式落地的增量补丁（2026-09-22）──────────────────────────────────
-     诊断结论（实测，勿凭直觉改回）：
-       · renderMarkdown 本身极快 —— 12000 字符仅 0.33ms，**不是**卡顿来源；
-       · 真正的开销在 `targetEl.innerHTML = html`：浏览器要销毁并重建整棵
-         DOM 子树，再重算样式、重排。正文字数越多节点越多，每帧成本随长度
-         线性增长，于是"越回越卡、一块块跳"。
-     做法：
-       整体渲染结果（正确性 100% 与旧实现一致）先放进游离容器解析，
-       再与目标容器的现有子节点**逐位比对**，只替换真正变化的那部分：
-       前面所有节点若 outerHTML 相同就原样留着（浏览器完全不用碰它们），
-       只更新最后一个（正在增长的）节点、并在必要时追加新节点。
-       这样每帧真正改动的是 O(1) 个节点，与全文长度无关。
-     安全网：任何异常 / 结构异常（节点数骤减等）都回退整段替换，保证显示正确。 */
+  /* ── 流式 Markdown 补丁 ──────────────────────────────────────────────
+     Rich Markdown remains on the full parser + node diff path because an
+     unfinished link/emphasis/table can change meaning as more text arrives.
+     That path preserves stable DOM nodes, but parsing/traversing can still
+     scale with the open block. Plain prose uses the bounded direct-append
+     path below, so common answers do not repeatedly parse their whole body. */
   function patchInnerHTML(targetEl, html, ink) {
     if (!targetEl) return;
     function children(parent, wanted, depth) {
@@ -4633,13 +4626,51 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     };
   }
 
+  // Optional local-only stream timing probe. Enable from the browser console
+  // with sessionStorage.setItem('xtj-ai-stream-diagnostics', '1') and reload.
+  // It records parsed SSE receipt → DOM commit and the following frame window;
+  // nothing is sent to the server. Sampling is disabled by default.
+  function createAiStreamMetricsReporter(channel) {
+    var enabled = false;
+    try { enabled = window.sessionStorage && window.sessionStorage.getItem('xtj-ai-stream-diagnostics') === '1'; } catch (_) {}
+    if (!enabled) return null;
+    var samples = window.__xtjAiStreamTimings || (window.__xtjAiStreamTimings = []);
+    return function(metrics) {
+      var sample = {
+        channel: channel || 'chat',
+        receivedAt: metrics.receivedAt,
+        lastReceivedAt: metrics.lastReceivedAt,
+        renderedAt: metrics.renderedAt,
+        receiveToDomMs: Math.max(0, metrics.renderedAt - metrics.lastReceivedAt),
+        firstReceiveToDomMs: Math.max(0, metrics.renderedAt - metrics.receivedAt),
+        renderMs: metrics.renderMs,
+        packetChars: metrics.packetChars,
+        outputChars: metrics.outputChars
+      };
+      if (samples.length >= 500) samples.shift();
+      samples.push(sample);
+      if (window.requestAnimationFrame) {
+        window.requestAnimationFrame(function() {
+          sample.nextFrameAt = window.performance && performance.now ? performance.now() : Date.now();
+          sample.receiveToNextFrameMs = Math.max(0, sample.nextFrameAt - metrics.lastReceivedAt);
+        });
+      }
+    };
+  }
+
   function createSmoothTextRenderer(targetEl, options) {
     options = options || {};
     var ink = window.XtjAiCore && window.XtjAiCore.InkReveal && window.XtjAiCore.InkReveal.create(targetEl, options);
     var renderStreamMarkdown = createStreamingMarkdownCache(renderMarkdown);
     var reducedMotion = prefersReducedMotion();
     var pending = '';
+    var pendingFirstReceivedAt = 0, pendingLastReceivedAt = 0;
+    var measureStream = typeof options.onStreamMetrics === 'function';
     var rendered = '';
+    var lastParagraphBoundary = -1;
+    var plainMarkdownMode = !options.plainStream;
+    var plainMarkdownParagraph = null, plainMarkdownTextNode = null;
+    var plainMarkdownNodeLimit = 768;
     var rafId = 0;
     var cancelled = false;
     var finished = false;
@@ -4713,6 +4744,53 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       return plainTextNode;
     }
 
+    // Plain prose is the common streaming case. Append it directly in bounded
+    // text nodes instead of reparsing and diffing the accumulated answer on
+    // every frame. As soon as Markdown syntax appears, switch back to the
+    // established parser so links, code, lists and tables keep their behavior.
+    function appendPlainMarkdown(next) {
+      if (!plainMarkdownMode || /[\r\n`*_{}\[\]<>!|#\\+\-]/.test(next) || /\d+\./.test(next) ||
+          (/\.$/.test(plainMarkdownTextNode && plainMarkdownTextNode.data || '') && /^\s/.test(next))) {
+        plainMarkdownMode = false;
+        return false;
+      }
+      if (!plainMarkdownParagraph || plainMarkdownParagraph.parentNode !== targetEl) {
+        plainMarkdownParagraph = document.createElement('p');
+        targetEl.insertBefore(plainMarkdownParagraph, cursor || null);
+        plainMarkdownTextNode = null;
+      }
+      var rest = next;
+      while (rest) {
+        if (!plainMarkdownTextNode || plainMarkdownTextNode.length >= plainMarkdownNodeLimit) {
+          plainMarkdownTextNode = document.createTextNode('');
+          plainMarkdownParagraph.appendChild(plainMarkdownTextNode);
+        }
+        var count = Math.min(rest.length, plainMarkdownNodeLimit - plainMarkdownTextNode.length);
+        // Don't split a surrogate pair across text nodes.
+        if (count < rest.length && count > 0 && /[\uD800-\uDBFF]/.test(rest.charAt(count - 1)) && /[\uDC00-\uDFFF]/.test(rest.charAt(count))) count--;
+        if (!count && plainMarkdownTextNode.length) { plainMarkdownTextNode = null; continue; }
+        if (!count) count = Math.min(rest.length, 2);
+        var part = rest.slice(0, count), start = plainMarkdownTextNode.length;
+        plainMarkdownTextNode.appendData(part);
+        if (ink) ink.record(plainMarkdownTextNode, start, plainMarkdownTextNode.length);
+        rest = rest.slice(count);
+      }
+      return true;
+    }
+
+    function resumePlainMarkdownTail() {
+      if (options.plainStream) return;
+      var boundary = lastParagraphBoundary;
+      if (boundary < 0) return;
+      var tail = rendered.slice(boundary + 2);
+      if (!tail || tail !== tail.trim() || /[\r\n`*_{}\[\]<>!|#\\+\-]/.test(tail) || /\d+\./.test(tail)) return;
+      var paragraph = cursor && cursor.parentNode === targetEl ? cursor.previousElementSibling : targetEl.lastElementChild;
+      if (!paragraph || paragraph.tagName !== 'P' || paragraph.childNodes.length !== 1 || paragraph.firstChild.nodeType !== 3 || paragraph.textContent !== tail) return;
+      plainMarkdownParagraph = paragraph;
+      plainMarkdownTextNode = paragraph.firstChild;
+      plainMarkdownMode = true;
+    }
+
     function emitText() {
       if (cancelled || !targetEl) return;
       if (!pending) {
@@ -4720,10 +4798,17 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         return;
       }
       if (streamClass) targetEl.classList.add(streamClass);
+      var renderStartedAt = measureStream ? (window.performance && performance.now ? performance.now() : Date.now()) : 0;
       var next = pending;
       pending = '';
+      var firstReceivedAt = pendingFirstReceivedAt, lastReceivedAt = pendingLastReceivedAt;
+      pendingFirstReceivedAt = pendingLastReceivedAt = 0;
       if (!next) return;
+      var priorLength = rendered.length;
       rendered += next;
+      var nextBoundary = next.lastIndexOf('\n\n');
+      if (nextBoundary >= 0) lastParagraphBoundary = priorLength + nextBoundary;
+      else if (priorLength && next.charAt(0) === '\n' && rendered.charAt(priorLength - 1) === '\n') lastParagraphBoundary = priorLength - 1;
       if (ink) ink.begin();
       if (options.plainStream) {
         // 流水模式：累积到 plainTextBuffer，一次写入单文本节点（不每帧建节点）
@@ -4736,13 +4821,27 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         // The display scheduler already bounds patches to a frame. Wall-clock
         // precision or clock corrections must not suppress an accepted frame.
         if (!isSelectionInTarget(targetEl)) {
-          patchInnerHTML(targetEl, renderStreamMarkdown(rendered), ink);
+          if (!appendPlainMarkdown(next)) {
+            patchInnerHTML(targetEl, renderStreamMarkdown(rendered), ink);
+            resumePlainMarkdownTail();
+          }
         }
       }
       if (ink) ink.commit();
       ensureCursor();
       if (typeof options.onRender === 'function') {
         try { options.onRender(rendered); } catch (e2) {}
+      }
+      if (measureStream) {
+        var renderedAt = window.performance && performance.now ? performance.now() : Date.now();
+        try { options.onStreamMetrics({
+          receivedAt: firstReceivedAt,
+          lastReceivedAt: lastReceivedAt,
+          renderedAt: renderedAt,
+          renderMs: renderedAt - renderStartedAt,
+          packetChars: next.length,
+          outputChars: rendered.length
+        }); } catch (_) {}
       }
       if (!pending) {
         if (streamClass) targetEl.classList.remove(streamClass);
@@ -4774,8 +4873,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       channel: options.channel || 'chat',
       // ★ 是否会被取消：cancel() 会置位。收尾判定是否仍可安全对目标写内容。
       isCancelled: false,
-      append: function(text) {
+      append: function(text, receivedAt) {
         if (cancelled || !targetEl || !text || finished) return;
+        if (measureStream) {
+          var stamp = Number(receivedAt) || (window.performance && performance.now ? performance.now() : Date.now());
+          if (!pending) pendingFirstReceivedAt = stamp;
+          pendingLastReceivedAt = stamp;
+        }
         pending += String(text);
         if (S.activeRenderers.indexOf(api) === -1) S.activeRenderers.push(api);
         if (!paused) schedule();
@@ -5153,6 +5257,57 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     if (ink) { ink.begin(); ink.record(node, previous.length, node.length); ink.commit(); }
   }
 
+  // Live thinking_chunk events are deltas. Append them directly instead of
+  // reading chunk.textContent and rebuilding/cleaning the entire thought log
+  // for every packet. Bounded text nodes also keep each DOM append small.
+  function appendStreamThoughtDelta(chunk, text, receivedAt) {
+    if (!chunk || !text) return;
+    var remaining = String(text), node = chunk.__xtjThoughtTextNode;
+    if (!node || node.parentNode !== chunk || node.nodeType !== 3 || node.length >= 768) node = null;
+    if (typeof chunk.__xtjThoughtOutputChars !== 'number') chunk.__xtjThoughtOutputChars = chunk.textContent.length;
+    if (!chunk.__xtjThoughtMetrics) chunk.__xtjThoughtMetrics = createAiStreamMetricsReporter('thinking');
+    var measure = !!chunk.__xtjThoughtMetrics;
+    var renderStartedAt = measure ? (window.performance && performance.now ? performance.now() : Date.now()) : 0;
+    var ink = chunk.__xtjThoughtInk;
+    if (!ink && window.XtjAiCore && window.XtjAiCore.InkReveal) ink = chunk.__xtjThoughtInk = window.XtjAiCore.InkReveal.create(chunk, { inkReveal: true });
+    if (ink) ink.begin();
+    while (remaining) {
+      if (!node) {
+        node = document.createTextNode('');
+        chunk.appendChild(node);
+        chunk.__xtjThoughtTextNode = node;
+      }
+      var count = Math.min(remaining.length, 768 - node.length);
+      if (count < remaining.length && count > 0 && /[\uD800-\uDBFF]/.test(remaining.charAt(count - 1)) && /[\uDC00-\uDFFF]/.test(remaining.charAt(count))) count--;
+      if (!count && node.length) { node = null; continue; }
+      if (!count) count = Math.min(remaining.length, 2);
+      var part = remaining.slice(0, count), start = node.length;
+      node.appendData(part);
+      if (ink) ink.record(node, start, node.length);
+      remaining = remaining.slice(count);
+      if (node.length >= 768) node = null;
+    }
+    chunk.__xtjThoughtOutputChars += String(text).length;
+    if (ink) ink.commit();
+    if (measure) {
+      var renderedAt = window.performance && performance.now ? performance.now() : Date.now();
+      try { chunk.__xtjThoughtMetrics({ receivedAt: Number(receivedAt) || renderStartedAt, lastReceivedAt: Number(receivedAt) || renderStartedAt,
+        renderedAt: renderedAt, renderMs: renderedAt - renderStartedAt, packetChars: String(text).length, outputChars: chunk.__xtjThoughtOutputChars }); } catch (_) {}
+    }
+  }
+
+  // Scroll only once per display frame, even when a thinking stream emits many
+  // events in one task. This avoids repeated synchronous scrollHeight reads.
+  function scheduleThoughtScrollBottom(container) {
+    if (!container || container.__xtjThoughtScrollFrame) return;
+    var request = window.requestAnimationFrame ? window.requestAnimationFrame.bind(window) : function(fn) { return setTimeout(fn, 16); };
+    container.__xtjThoughtScrollFrame = request(function() {
+      container.__xtjThoughtScrollFrame = 0;
+      if (!container.isConnected) return;
+      try { container.scrollTop = container.scrollHeight; } catch (_) {}
+    });
+  }
+
   /**
    * 把深入研究阶段写入「查看思考过程」日志，并更新步数。
    * 之前只改了状态条文案，details 一直是 0 步，用户展开什么都没有。
@@ -5174,9 +5329,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     if (last && last._role === role && !options.forceNew) {
       var chunk = last.querySelector('.ai-thought-chunk');
       if (chunk) {
-        var prev = String(chunk.textContent || '');
-        var next = options.stream ? prev + msg : (prev && prev !== msg ? prev + '\n' + msg : msg);
-        if (options.stream) updateStreamThought(chunk, next); else chunk.textContent = next;
+        if (options.streamDelta) appendStreamThoughtDelta(chunk, msg, options.receivedAt);
+        else {
+          var prev = String(chunk.textContent || '');
+          var next = options.stream ? prev + msg : (prev && prev !== msg ? prev + '\n' + msg : msg);
+          if (options.stream) updateStreamThought(chunk, next);
+          else chunk.textContent = next;
+        }
       }
     } else {
       var entry = document.createElement('div');
@@ -5185,7 +5344,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       entry.innerHTML = '<div class="ai-thought-role"></div><div class="ai-thought-chunk"></div>';
       entry.querySelector('.ai-thought-role').textContent = role;
       body.appendChild(entry);
-      if (options.stream) updateStreamThought(entry.querySelector('.ai-thought-chunk'), msg);
+      if (options.streamDelta) appendStreamThoughtDelta(entry.querySelector('.ai-thought-chunk'), msg, options.receivedAt);
+      else if (options.stream) updateStreamThought(entry.querySelector('.ai-thought-chunk'), msg);
       else entry.querySelector('.ai-thought-chunk').textContent = msg;
     }
 
@@ -5818,7 +5978,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   }
 
   // 更新进度卡
-  function updateDeepThinkProgressCard(card, evt) {
+  function updateDeepThinkProgressCard(card, evt, receivedAt) {
     if (!card) return;
     if (isResearchCard(card)) {
       var research = card._researchState || {};
@@ -5896,16 +6056,16 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         // ★ U3: 同角色累积到最后一条条目(缓存 lastEntry 加速)
         if (cached.lastEntry && cached.lastEntry._role === roleLabel && cached.lastEntry.parentNode === logBox) {
           var lastChunk = cached.lastEntry.querySelector('.ai-thought-chunk');
-          if (lastChunk) updateStreamThought(lastChunk, cleanReasoningText((lastChunk.textContent || '') + String(evt.chunk).slice(0, 4000)));
+          if (lastChunk) appendStreamThoughtDelta(lastChunk, cleanReasoningText(String(evt.chunk).slice(0, 4000)), receivedAt);
         } else {
           var entry = el('div', { class: 'ai-thought-entry' });
           entry._role = roleLabel;
           entry.innerHTML = '<div class="ai-thought-role">' + escapeHtml(roleLabel) + '</div><div class="ai-thought-chunk"></div>';
           logBox.appendChild(entry);
-          updateStreamThought(entry.querySelector('.ai-thought-chunk'), cleanReasoningText(String(evt.chunk).slice(0, 4000)));
+          appendStreamThoughtDelta(entry.querySelector('.ai-thought-chunk'), cleanReasoningText(String(evt.chunk).slice(0, 4000)), receivedAt);
           cached.lastEntry = entry;
         }
-        try { logBox.scrollTop = logBox.scrollHeight; } catch (e) {}
+        scheduleThoughtScrollBottom(logBox);
         while (logBox.children.length > 50) logBox.removeChild(logBox.firstChild);
       }
     } else if (evt.type === 'heartbeat') {
@@ -6590,10 +6750,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       fail(ce2);
     });
 
-    function handleEvent(evt) {
+    function handleEvent(evt, receivedAt) {
       if (settled) return;
       if (!customModelIdentityCurrent(requestIdentity)) { fail(Object.assign(new Error('账号已切换'), { code: 'identity_changed', cancelled: true })); return; }
       if (!evt || !evt.type) return;
+      receivedAt = Number(receivedAt) || (typeof window !== 'undefined' && window.performance && performance.now ? performance.now() : Date.now());
       if (evt.type === 'research_step') {
         var stepN = Math.max(0, Math.min(3, Number(evt.step != null ? evt.step : evt.phase) || 0));
         var toolN = evt.tool != null ? String(evt.tool) : (evt.name != null ? String(evt.name) : '');
@@ -6612,11 +6773,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           var accepted = room > 0 ? chunk.slice(0, room) : '';
           if (accepted) {
             content += accepted;
-            if (onProgress) { try { onProgress({ content: accepted }); } catch (e) {} }
+            if (onProgress) { try { onProgress({ content: accepted, receivedAt: receivedAt }); } catch (e) {} }
           }
         }
       } else if (evt.type === 'research_thinking') {
-        if (onProgress && evt.chunk) onProgress({thinking:{role:evt.agent_role||'模型思考',chunk:String(evt.chunk)}});
+        if (onProgress && evt.chunk) onProgress({thinking:{role:evt.agent_role||'模型思考',chunk:String(evt.chunk)}, receivedAt:receivedAt});
       } else if (evt.type === 'research_sources') {
         var srcs = Array.isArray(evt.sources) ? evt.sources : (Array.isArray(evt.data) ? evt.data : []);
         if (srcs.length) sources = srcs;
@@ -6749,9 +6910,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
                   if (!eLine || eLine.startsWith(':') || !eLine.startsWith('data: ')) continue;
                   var eEventStr = eLine.slice(6);
                   if (eEventStr.length > MAX_EVENT_SIZE) continue;
+                  var eEvtReceivedAt = typeof window !== 'undefined' && window.performance && performance.now ? performance.now() : Date.now();
                   var eEvt;
                   try { eEvt = JSON.parse(eEventStr); } catch (ex) { continue; }
-                  if (eEvt) handleEvent(eEvt);
+                  if (eEvt) handleEvent(eEvt, eEvtReceivedAt);
                   if (settled) break;
                 }
               }
@@ -6778,10 +6940,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               if (!line.startsWith('data: ')) continue;
               var eventStr = line.slice(6);
               if (eventStr.length > MAX_EVENT_SIZE) continue;
+              var evtReceivedAt = typeof window !== 'undefined' && window.performance && performance.now ? performance.now() : Date.now();
               var evt;
               try { evt = JSON.parse(eventStr); } catch (e) { continue; }
               if (!evt) continue;
-              handleEvent(evt);
+              handleEvent(evt, evtReceivedAt);
               if (settled) break;
             }
             if (settled) break;
@@ -6823,9 +6986,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var sources = [];
     var responding = false;
     var researchModel = opts.model || 'pro';
-    var renderFrame = 0;
-    var answerInk = null;
-    var renderStreamMarkdown = createStreamingMarkdownCache(renderMarkdown);
+    var answerRenderer = null;
 
     function setStep(stepIdx) {
       if (!isResearchCard(progressCard)) return;
@@ -6840,6 +7001,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }
 
     function renderResearchResult() {
+      if (answerRenderer) {
+        try { answerRenderer.finish(answer); } catch (_) {}
+        answerRenderer = null;
+      }
       renderTavilyResearchReport(progressCard, answer, sources, startedAt, undefined, researchModel);
     }
 
@@ -6920,25 +7085,22 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
     // Network packets may arrive together. Format their combined content once
     // per display frame, preserving the completed prefix and live node identity.
-    function appendStreamChunk(chunk) {
+    function appendStreamChunk(chunk, receivedAt) {
       if(dtMessagesEl._newContentButton&&dtMessagesEl._aiFollow===false)dtMessagesEl._newContentButton.hidden=false;
-      if (!chunk || renderFrame || !isResearchCard(progressCard)) return;
-      renderFrame = requestAnimationFrame(function() {
-        renderFrame = 0;
-        if (S._dtCurrentReqId !== reqId || !customModelIdentityCurrent(flowIdentity) || !progressCard.isConnected) return;
-        var answerEl = progressCard.querySelector('.ai-think-answer');
-        if (!answerEl) return;
-        if (!answerInk && window.XtjAiCore && window.XtjAiCore.InkReveal) answerInk = window.XtjAiCore.InkReveal.create(answerEl);
-        if (answerInk) answerInk.begin();
-        patchInnerHTML(answerEl, renderStreamMarkdown(answer), answerInk);
-        if (answerInk) answerInk.commit();
-        scrollToBottom(dtMessagesEl, false);
+      if (!chunk || !isResearchCard(progressCard) || S._dtCurrentReqId !== reqId || !customModelIdentityCurrent(flowIdentity) || !progressCard.isConnected) return;
+      var answerEl = progressCard.querySelector('.ai-think-answer');
+      if (!answerEl) return;
+      if (!answerRenderer) answerRenderer = createSmoothTextRenderer(answerEl, {
+        channel: 'deep',
+        onStreamMetrics: createAiStreamMetricsReporter('research-answer'),
+        onRender: function() { scrollToBottom(dtMessagesEl, false); }
       });
+      answerRenderer.append(chunk, receivedAt);
     }
 
     function removeTavilyCard() {
       if (!progressCard) return;
-      if (answerInk) answerInk.clear();
+      if (answerRenderer) { try { answerRenderer.cancel(); } catch (_) {} answerRenderer = null; }
       try { if (progressCard._cleanupTimer) progressCard._cleanupTimer(); } catch (e) {}
       try { progressCard._done = true; } catch (e) {}
       try { progressCard.remove(); } catch (e) {}
@@ -6985,7 +7147,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if(prog.board){progressCard._researchBoard=prog.board;var features=assistantFeatures();if(features)features.renderBoard(progressCard,prog.board);if(progressCard._researchState)progressCard._researchState.searchCount=Number(prog.board.search_calls)||0;}
         if(prog.document)appendResearchThinkingEntry(progressCard,'资料提取','['+prog.document.id+'] '+prog.document.name+' · '+(prog.document.status==='read'?'已读取':'未读出')+(prog.document.limitation?'：'+prog.document.limitation:''),{forceNew:true});
         if (prog.checkpoint) { progressCard.dataset.checkpointId = prog.checkpoint; }
-        if (prog.thinking) appendResearchThinkingEntry(progressCard, prog.thinking.role, cleanReasoningText(prog.thinking.chunk), {stream:true});
+        if (prog.thinking) appendResearchThinkingEntry(progressCard, prog.thinking.role, cleanReasoningText(prog.thinking.chunk), {stream:true, streamDelta:true, receivedAt:prog.receivedAt});
         if (prog.stage) handleResearchStage(prog.stage, prog.message);
         if (typeof prog.step === 'number') {
           setStep(prog.step);
@@ -6993,7 +7155,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         }
         if (prog.content) {
           answer += String(prog.content);
-          appendStreamChunk(String(prog.content));
+          appendStreamChunk(String(prog.content), prog.receivedAt);
           if (!responding) {
             responding = true;
             if (isResearchCard(progressCard)) {
@@ -7064,8 +7226,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       removeTavilyCard();
       return 'fallback';
     } finally {
-      if (renderFrame) cancelAnimationFrame(renderFrame);
-      renderFrame = 0;
+      if (answerRenderer) {
+        if (progressCard && progressCard.isConnected) { try { answerRenderer.finish(answer); } catch (_) {} }
+        else { try { answerRenderer.cancel(); } catch (_) {} }
+        answerRenderer = null;
+      }
     }
   }
 
@@ -7200,7 +7365,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         } else {
           if (contentRendererRef.value) { try { contentRendererRef.value.stop(); } catch (e8) {} }
           answerEl.innerHTML = '';
-          contentRendererRef.value = createSmoothTextRenderer(answerEl, { channel: 'deep', minChunk: 8, maxChunk: 64, charsPerMs: 100, onDone: function() { finalizeAnswer(); } });
+          contentRendererRef.value = createSmoothTextRenderer(answerEl, { channel: 'deep', minChunk: 8, maxChunk: 64, charsPerMs: 100, onStreamMetrics: createAiStreamMetricsReporter('deep-answer'), onDone: function() { finalizeAnswer(); } });
           contentRendererRef.value.append(contentForRender);
           contentRendererRef.value.finish(contentForRender);
           contentRendererRef.value = null;
@@ -7304,13 +7469,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     function _resetIdle() { _lastDataTime = Date.now(); }
 
     // SSE 事件处理函数
-    async function _handleSseEvent(evt) {
+    async function _handleSseEvent(evt, receivedAt) {
       if (S._dtCurrentReqId !== reqId) { if (abortedRef) abortedRef.value = true; return; }
+        var eventReceivedAt = Number(receivedAt) || (typeof window !== 'undefined' && window.performance && performance.now ? performance.now() : Date.now());
 
         // Custom providers use the regular content/reasoning protocol. Route
         // it through the same live report renderer as native research.
-        if (evt.type === 'reasoning') return _handleSseEvent({type:'thinking_chunk', chunk:evt.text || evt.reasoning || '', agent_role:'模型思考'});
-        if (evt.type === 'content') return _handleSseEvent({type:'answer_chunk',chunk:evt.text || ''});
+        if (evt.type === 'reasoning') return _handleSseEvent({type:'thinking_chunk', chunk:evt.text || evt.reasoning || '', agent_role:'模型思考'}, eventReceivedAt);
+        if (evt.type === 'content') return _handleSseEvent({type:'answer_chunk',chunk:evt.text || ''}, eventReceivedAt);
         if (evt.type === 'meta') {
           if (streamConvIdRef) streamConvIdRef.value = evt.conversation_id;
           return;
@@ -7322,7 +7488,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (evt.type === 'thinking_chunk') {
           if (!aiNodeRef.value) ensureThinkCardNode();
           if (evt.chunk) {
-            updateDeepThinkProgressCard(progressCard, evt);
+            updateDeepThinkProgressCard(progressCard, evt, eventReceivedAt);
             var thinkBody = aiNodeRef.value.querySelector('.ai-think-thinking-body');
             var detailsEl = aiNodeRef.value.querySelector('.ai-think-thinking');
             var summaryEl = aiNodeRef.value.querySelector('.ai-thinking-summary-text') || aiNodeRef.value.querySelector('.ai-think-thinking summary span:last-child');
@@ -7332,15 +7498,15 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               var lastEntry = thinkBody.lastElementChild;
               if (lastEntry && lastEntry._role === roleLabel) {
                 var lc = lastEntry.querySelector('.ai-thought-chunk');
-                if (lc) updateStreamThought(lc, cleanReasoningText((lc.textContent || '') + chunkText));
+                if (lc) appendStreamThoughtDelta(lc, cleanReasoningText(chunkText), eventReceivedAt);
               } else {
                 var entry = document.createElement('div');
                 entry.className = 'ai-thought-entry'; entry._role = roleLabel;
                 entry.innerHTML = '<div class="ai-thought-role">' + escapeHtml(roleLabel) + '</div><div class="ai-thought-chunk"></div>';
                 thinkBody.appendChild(entry);
-                updateStreamThought(entry.querySelector('.ai-thought-chunk'), cleanReasoningText(chunkText));
+                appendStreamThoughtDelta(entry.querySelector('.ai-thought-chunk'), cleanReasoningText(chunkText), eventReceivedAt);
               }
-              try { thinkBody.scrollTop = thinkBody.scrollHeight; } catch (e) {}
+              scheduleThoughtScrollBottom(thinkBody);
               while (thinkBody.children.length > 80) thinkBody.removeChild(thinkBody.firstChild);
             }
             if (summaryEl) summaryEl.textContent = '查看思考过程 (' + (thinkBody ? thinkBody.children.length : 0) + ' 步)';
@@ -7368,7 +7534,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           var aEl = aiNodeRef.value.querySelector('.ai-think-answer');
           if (aEl && !answerRendererRef.value) {
             aEl.innerHTML = '';
-            answerRendererRef.value = createSmoothTextRenderer(aEl, { channel: 'deep', minChunk: 8, maxChunk: 64, charsPerMs: 0.14, plainStream: false });
+            answerRendererRef.value = createSmoothTextRenderer(aEl, { channel: 'deep', minChunk: 8, maxChunk: 64, charsPerMs: 0.14, plainStream: false, onStreamMetrics: createAiStreamMetricsReporter('deep-answer') });
           }
           if (!contentTruncated && aiContentRef.value.length >= AI_CONTENT_MAX_LEN) {
             contentTruncated = true;
@@ -7377,7 +7543,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           var room = AI_CONTENT_MAX_LEN - aiContentRef.value.length;
           var accepted = room > 0 ? String(evt.chunk).slice(0, room) : '';
           aiContentRef.value += accepted;
-          if (answerRendererRef.value && accepted) answerRendererRef.value.append(accepted);
+          if (answerRendererRef.value && accepted) answerRendererRef.value.append(accepted, eventReceivedAt);
           scrollToBottom(scrollEl, false);
           return;
         }
@@ -7429,7 +7595,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           // 已流式渲染的最终答案会被清空且不再重绘（答案区空白）。
           clearInterval(_idleCheckTimer);
           var answerTarget = aiNodeRef.value && aiNodeRef.value.querySelector('.ai-think-answer');
-          if (answerTarget && !answerRendererRef.value) answerRendererRef.value = createSmoothTextRenderer(answerTarget, { channel: 'deep' });
+          if (answerTarget && !answerRendererRef.value) answerRendererRef.value = createSmoothTextRenderer(answerTarget, { channel: 'deep', onStreamMetrics: createAiStreamMetricsReporter('deep-answer') });
           if (answerRendererRef.value) {
             var deepDrained = await answerRendererRef.value.drain(aiContentRef.value, controller.signal);
             if (!deepDrained || S._dtCurrentReqId !== reqId || controller.signal.aborted || aiNodeRef.value.isConnected === false) return;
@@ -7488,9 +7654,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             if (eLine.startsWith('data: ')) {
               var eEventStr = eLine.slice(6);
               if (eEventStr.length > MAX_EVENT_SIZE) continue;
+              var eEvtReceivedAt = typeof window !== 'undefined' && window.performance && performance.now ? performance.now() : Date.now();
               var eEvt;
               try { eEvt = JSON.parse(eEventStr); } catch (ex) { continue; }
-              if (eEvt) await _handleSseEvent(eEvt);
+              if (eEvt) await _handleSseEvent(eEvt, eEvtReceivedAt);
             }
           }
           buffer = '';
@@ -7519,13 +7686,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         var eventStr = line.slice(6);
         // 大小限制
         if (eventStr.length > MAX_EVENT_SIZE) continue;
+        var evtReceivedAt = typeof window !== 'undefined' && window.performance && performance.now ? performance.now() : Date.now();
         var evt;
         try { evt = JSON.parse(eventStr); } catch (e) {
           // Malformed JSON - 跳过，不阻塞其他事件
           continue;
         }
         if (!evt) continue;
-        await _handleSseEvent(evt);
+        await _handleSseEvent(evt, evtReceivedAt);
       }
 
       if (doneReceivedRef && doneReceivedRef.value) return;
@@ -10437,6 +10605,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (!contentRenderer) {
           contentRenderer = createSmoothTextRenderer(assistantBubble, {
             streamClass: 'ai-streaming-soft',
+            onStreamMetrics: createAiStreamMetricsReporter('answer'),
             onRender: function() { scrollToBottom(messagesEl, false); }
           });
           // P4 修复: 设置复制事件监听器
@@ -10514,6 +10683,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           var eventStr = line.slice(6);
           // ★ 修复：单行事件大小上限（深页循环有 512KB 上限，主循环此前没有）
           if (eventStr.length > 2 * 1024 * 1024) { console.warn('[AI] oversized SSE line dropped, length=' + eventStr.length); continue; }
+          var evtReceivedAt = typeof window !== 'undefined' && window.performance && performance.now ? performance.now() : Date.now();
           var evt;
           try { evt = JSON.parse(eventStr); } catch (e) { continue; }
           if (!evt) continue;
@@ -10558,7 +10728,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
                     maEntry.innerHTML = '<div class="ai-thought-role">🔍 多 Agent 拆解搜索词</div><div class="ai-thought-chunk"></div>';
                     maEntry.querySelector('.ai-thought-chunk').textContent = qs.map(function(q, qi) { return (qi + 1) + '. ' + q; }).join('\n');
                     maBody.appendChild(maEntry);
-                    try { maBody.scrollTop = maBody.scrollHeight; } catch (e) {}
+                    scheduleThoughtScrollBottom(maBody);
                   }
                   if (maThink) setThinkingExpanded(maThink, true, messagesEl);
                 }
@@ -11393,11 +11563,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
                 body.textContent = '';
                 reasoningRenderer = createSmoothTextRenderer(body, {
                   plainStream: true,
+                  onStreamMetrics: createAiStreamMetricsReporter('reasoning'),
                   onRender: function() { scrollToBottom(messagesEl, false); }
                 });
               }
               // ★ 修复：渲染器按剩余配额接收（200k 上限此前只截累积字符串，渲染器无界增长）
-              if (chunkText && aiReasoning.length <= 200000) reasoningRenderer.append(chunkText);
+              if (chunkText && aiReasoning.length <= 200000) reasoningRenderer.append(chunkText, evtReceivedAt);
             }
             continue;
           }
@@ -11455,7 +11626,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             }
             if (accepted) {
               ensureAssistantBubbleReady();
-              if (contentRenderer) contentRenderer.append(hadBodyRenderer ? accepted : aiContent);
+              if (contentRenderer) contentRenderer.append(hadBodyRenderer ? accepted : aiContent, evtReceivedAt);
             }
             continue;
           }

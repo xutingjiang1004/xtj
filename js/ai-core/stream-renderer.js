@@ -77,57 +77,45 @@
       if (!changes.length) return;
       if (motionOff()) { clear(); return; }
       if (!prepareInk()) return;
-      var graphemes = [];
+      // One bounded range per changed text node is enough to create a soft
+      // ink wash. Per-grapheme ranges multiply style and animation work for
+      // every packet without making text arrive any sooner.
+      var ranges = [];
       changes.forEach(function(change) {
         var node = change.node;
         if (!node.isConnected || !target.contains(node)) return;
-        // Limit work per frame for a large packet. Text itself is never delayed.
-        var start = Math.max(change.start, change.end - 128), text = node.data.slice(start, change.end);
-        if (start > change.start && /[\uDC00-\uDFFF]/.test(text.charAt(0))) { start++; text = text.slice(1); }
-        if (window.Intl && Intl.Segmenter) {
-          var segmenter = createInkReveal.segmenter || (createInkReveal.segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' }));
-          for (var item of segmenter.segment(text)) graphemes.push({ node: node, start: start + item.index, end: start + item.index + item.segment.length });
-        } else {
-          var offset = start;
-          Array.from(text).forEach(function(character) { graphemes.push({ node: node, start: offset, end: offset + character.length }); offset += character.length; });
-        }
+        // Cap paint work per text node and keep UTF-16 surrogate pairs intact.
+        var start = Math.max(change.start, change.end - 96);
+        if (start > change.start && /[\uDC00-\uDFFF]/.test(node.data.charAt(start))) start++;
+        try {
+          var range = document.createRange();
+          range.setStart(node, start); range.setEnd(node, change.end);
+          if (range.toString()) ranges.push(range);
+        } catch (_) {}
       });
-      var lite = liteDevice();
-      graphemes = graphemes.slice(lite ? -12 : -48);
-      if (!graphemes.length) return;
+      ranges = ranges.slice(liteDevice() ? -4 : -12);
+      if (!ranges.length) return;
       var currentTheme = document.documentElement.getAttribute('data-theme') || '';
       if (theme !== currentTheme) {
         theme = currentTheme;
         target.style.setProperty('--xtj-ai-ink-color', getComputedStyle(target).color);
       }
-      var free = inkSlots.filter(function(slot) { return !slot.owner; });
-      // Larger received groups ripple in two or four short cohorts. Small
-      // packets animate together as they arrive from the network.
-      var lanes = !lite && graphemes.length >= 8 && free.length >= 4 ? 4 : !lite && graphemes.length >= 4 && free.length >= 2 ? 2 : 1;
-      var selected = free.slice(0, lanes);
-      if (!selected.length) {
-        var active = inkSlots.find(function(slot) { return slot.owner === owner && slot.highlight && slot.highlight.size < 64; });
-        if (active) selected = [active];
-      }
-      if (!selected.length) return;
-      var fresh = [];
-      selected.forEach(function(slot) {
-        if (!slot.owner) { slot.owner = owner; slot.highlight = new Highlight(); fresh.push(slot); }
-      });
-      graphemes.forEach(function(part, index) {
-        var slot = selected[Math.min(selected.length - 1, Math.floor(index * selected.length / graphemes.length))];
-        if (slot.highlight.size >= 64) return;
-        try { var range = document.createRange(); range.setStart(part.node, part.start); range.setEnd(part.node, part.end); slot.highlight.add(range); } catch (_) {}
-      });
-      fresh.forEach(function(slot, index) {
-        try {
-          CSS.highlights.set(slot.name, slot.highlight);
-          var from = {}, to = {}; from[slot.prop] = '0'; to[slot.prop] = '1';
-          slot.animation = target.animate([from, to], { duration: 120, delay: index * 18, easing: 'cubic-bezier(.16,1,.3,1)', fill: 'both' });
-          slot.animation.onfinish = function() { releaseInkSlot(slot); };
-          slot.animation.oncancel = function() { releaseInkSlot(slot); };
-        } catch (_) { releaseInkSlot(slot); }
-      });
+      // Keep at most one short animation per renderer. A new packet replaces
+      // that renderer's previous transient highlight instead of stacking lanes.
+      var slot = inkSlots.find(function(item) { return item.owner === owner; });
+      if (slot) releaseInkSlot(slot);
+      slot = inkSlots.find(function(item) { return !item.owner; });
+      if (!slot) return;
+      slot.owner = owner; slot.highlight = new Highlight();
+      ranges.forEach(function(range) { try { if (slot.highlight.size < 12) slot.highlight.add(range); } catch (_) {} });
+      if (!slot.highlight.size) { releaseInkSlot(slot); return; }
+      try {
+        CSS.highlights.set(slot.name, slot.highlight);
+        var from = {}, to = {}; from[slot.prop] = '0'; to[slot.prop] = '1';
+        slot.animation = target.animate([from, to], { duration: 120, easing: 'cubic-bezier(.16,1,.3,1)', fill: 'both' });
+        slot.animation.onfinish = function() { releaseInkSlot(slot); };
+        slot.animation.oncancel = function() { releaseInkSlot(slot); };
+      } catch (_) { releaseInkSlot(slot); }
       } catch (_) { clear(); }
     }
     return { begin: function() { pending = []; }, record: record, inserted: inserted, commit: commit, clear: clear };
@@ -149,12 +137,10 @@
     return div.innerHTML;
   }
 
-  /* ── 流式落地的增量补丁（2026-09-22）──────────────────────────────────
-     卡顿根因不是 Markdown 解析（实测 12000 字符仅 0.33ms），而是
-     `innerHTML = html` 每帧重建整棵 DOM 子树 —— 正文越长节点越多，每帧
-     成本线性增长。这里把整体渲染结果放进游离容器解析，与现有子节点逐位
-     比对，只替换真正变化的部分，前面未变的节点浏览器完全不碰。
-     任何异常都回退整段替换，正确性优先。 */
+  /* Rich Markdown uses the parser + node diff path because unfinished inline
+     syntax can change meaning as the answer grows. It preserves stable nodes,
+     but parsing/traversal can still scale with the open block. Plain prose is
+     appended directly by the bounded fast path in createStreamRenderer. */
   function patchInnerHTML(targetEl, html, ink) {
     if (!targetEl) return;
     function children(parent, wanted, depth) {
@@ -223,7 +209,13 @@
       try { return document.documentElement.getAttribute('data-xtj-motion') === 'off' || window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; }
     })();
     var pending = '';
+    var pendingFirstReceivedAt = 0, pendingLastReceivedAt = 0;
+    var measureStream = typeof options.onStreamMetrics === 'function';
     var rendered = '';
+    var lastParagraphBoundary = -1;
+    var plainMarkdownMode = !options.plainStream;
+    var plainMarkdownParagraph = null, plainMarkdownTextNode = null;
+    var plainMarkdownNodeLimit = 768;
     var rafId = 0;
     var cancelled = false;
     var finished = false;
@@ -278,6 +270,48 @@
       return plainTextNode;
     }
 
+    function appendPlainMarkdown(next) {
+      if (!plainMarkdownMode || /[\r\n`*_{}\[\]<>!|#\\+\-]/.test(next) || /\d+\./.test(next) ||
+          (/\.$/.test(plainMarkdownTextNode && plainMarkdownTextNode.data || '') && /^\s/.test(next))) {
+        plainMarkdownMode = false;
+        return false;
+      }
+      if (!plainMarkdownParagraph || plainMarkdownParagraph.parentNode !== targetEl) {
+        plainMarkdownParagraph = document.createElement('p');
+        targetEl.insertBefore(plainMarkdownParagraph, cursor || null);
+        plainMarkdownTextNode = null;
+      }
+      var rest = next;
+      while (rest) {
+        if (!plainMarkdownTextNode || plainMarkdownTextNode.length >= plainMarkdownNodeLimit) {
+          plainMarkdownTextNode = document.createTextNode('');
+          plainMarkdownParagraph.appendChild(plainMarkdownTextNode);
+        }
+        var count = Math.min(rest.length, plainMarkdownNodeLimit - plainMarkdownTextNode.length);
+        if (count < rest.length && count > 0 && /[\uD800-\uDBFF]/.test(rest.charAt(count - 1)) && /[\uDC00-\uDFFF]/.test(rest.charAt(count))) count--;
+        if (!count && plainMarkdownTextNode.length) { plainMarkdownTextNode = null; continue; }
+        if (!count) count = Math.min(rest.length, 2);
+        var part = rest.slice(0, count), start = plainMarkdownTextNode.length;
+        plainMarkdownTextNode.appendData(part);
+        if (ink) ink.record(plainMarkdownTextNode, start, plainMarkdownTextNode.length);
+        rest = rest.slice(count);
+      }
+      return true;
+    }
+
+    function resumePlainMarkdownTail() {
+      if (options.plainStream) return;
+      var boundary = lastParagraphBoundary;
+      if (boundary < 0) return;
+      var tail = rendered.slice(boundary + 2);
+      if (!tail || tail !== tail.trim() || /[\r\n`*_{}\[\]<>!|#\\+\-]/.test(tail) || /\d+\./.test(tail)) return;
+      var paragraph = cursor && cursor.parentNode === targetEl ? cursor.previousElementSibling : targetEl.lastElementChild;
+      if (!paragraph || paragraph.tagName !== 'P' || paragraph.childNodes.length !== 1 || paragraph.firstChild.nodeType !== 3 || paragraph.textContent !== tail) return;
+      plainMarkdownParagraph = paragraph;
+      plainMarkdownTextNode = paragraph.firstChild;
+      plainMarkdownMode = true;
+    }
+
     function takeSmoothChunk(text, opts) {
       opts = opts || {};
       var maxChunk = opts.maxChunk || 16;
@@ -305,10 +339,17 @@
       if (streamClass) targetEl.classList.add(streamClass);
       // Coalesce arrivals into one DOM patch per display frame. The network,
       // rather than an additional typing timer, determines the display pace.
+      var renderStartedAt = measureStream ? (window.performance && performance.now ? performance.now() : Date.now()) : 0;
       var next = pending;
       pending = '';
+      var firstReceivedAt = pendingFirstReceivedAt, lastReceivedAt = pendingLastReceivedAt;
+      pendingFirstReceivedAt = pendingLastReceivedAt = 0;
       if (!next) return;
+      var priorLength = rendered.length;
       rendered += next;
+      var nextBoundary = next.lastIndexOf('\n\n');
+      if (nextBoundary >= 0) lastParagraphBoundary = priorLength + nextBoundary;
+      else if (priorLength && next.charAt(0) === '\n' && rendered.charAt(priorLength - 1) === '\n') lastParagraphBoundary = priorLength - 1;
       if (ink) ink.begin();
       if (options.plainStream) {
         plainTextBuffer += next;
@@ -318,12 +359,20 @@
       } else {
         // The display scheduler already bounds patches to a frame. Wall-clock
         // precision or clock corrections must not suppress an accepted frame.
-        patchInnerHTML(targetEl, renderStreamMarkdown(rendered), ink);
+        if (!appendPlainMarkdown(next)) {
+          patchInnerHTML(targetEl, renderStreamMarkdown(rendered), ink);
+          resumePlainMarkdownTail();
+        }
       }
       if (ink) ink.commit();
       ensureCursor();
       if (typeof options.onRender === 'function') {
         try { options.onRender(rendered); } catch (e2) {}
+      }
+      if (measureStream) {
+        var renderedAt = window.performance && performance.now ? performance.now() : Date.now();
+        try { options.onStreamMetrics({ receivedAt: firstReceivedAt, lastReceivedAt: lastReceivedAt, renderedAt: renderedAt,
+          renderMs: renderedAt - renderStartedAt, packetChars: next.length, outputChars: rendered.length }); } catch (_) {}
       }
       if (!pending) {
         if (streamClass) targetEl.classList.remove(streamClass);
@@ -351,8 +400,13 @@
     }
 
     var api = {
-      append: function (text) {
+      append: function (text, receivedAt) {
         if (cancelled || !targetEl || !text || finished) return;
+        if (measureStream) {
+          var stamp = Number(receivedAt) || (window.performance && performance.now ? performance.now() : Date.now());
+          if (!pending) pendingFirstReceivedAt = stamp;
+          pendingLastReceivedAt = stamp;
+        }
         pending += String(text);
         if (!paused) schedule();
       },
@@ -467,6 +521,10 @@
         paused = false;
         pending = '';
         rendered = '';
+        pendingFirstReceivedAt = pendingLastReceivedAt = 0;
+        lastParagraphBoundary = -1;
+        plainMarkdownMode = !options.plainStream;
+        plainMarkdownParagraph = plainMarkdownTextNode = null;
         plainTextBuffer = '';
         removeCursor();
         if (targetEl) targetEl.replaceChildren();

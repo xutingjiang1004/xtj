@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { chromium } = require('playwright');
 const agent = fs.readFileSync('js/ai-agent.js', 'utf8');
+const transport = fs.readFileSync('js/ai-core/transport.js', 'utf8');
 function section(start, end) {
   const offset = agent.indexOf(start);
   assert.ok(offset >= 0);
@@ -31,6 +32,8 @@ async function fixture() {
   await page.addStyleTag({ content: fs.readFileSync('css/ui-enhance.css', 'utf8') });
   await page.addStyleTag({ content: fs.readFileSync('css/ai-agent.css', 'utf8') });
   await page.addScriptTag({ content: fs.readFileSync('js/ai-core/stream-renderer.js', 'utf8') });
+  await page.evaluate(() => { window.XtjAiCore.Errors = {}; });
+  await page.addScriptTag({ content: transport });
   await page.evaluate(({ stream, tools }) => {
     window.S = { paused: false, activeRenderers: [] };
     window.AI_DEBUG = false;
@@ -51,6 +54,105 @@ async function fixture() {
   });
   return { browser, page };
 }
+for (const implementation of ['main', 'shared']) test(implementation + ': synthetic SSE receipt is compared with the next DOM frame while plain prose bypasses repeated Markdown parsing', async () => {
+  const { browser, page } = await fixture();
+  try {
+    const result = await page.evaluate(async kind => {
+      let markdownCalls = 0;
+      const render = text => { markdownCalls++; return '<p>' + text.replace(/[&<>]/g, ch => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;' }[ch])) + '</p>'; };
+      window.renderMarkdown = render; XtjAiCore.Markdown = { render };
+      const output = document.getElementById('output'), arrivals = [], samples = [];
+      const renderer = kind === 'main'
+        ? createSmoothTextRenderer(output, { onStreamMetrics: sample => { samples.push(sample); requestAnimationFrame(() => { sample.nextFrameAt = performance.now(); }); } })
+        : XtjAiCore.StreamRenderer.create(output, { onStreamMetrics: sample => { samples.push(sample); requestAnimationFrame(() => { sample.nextFrameAt = performance.now(); }); } });
+      const parts = ['先核对原始资料，', '再逐项比较时间，', '最后给出结论。'];
+      const payload = parts.map(text => 'data: ' + JSON.stringify({ type: 'content', text }) + '\n\n').join('');
+      const body = new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode(payload)); controller.close(); } });
+      await XtjAiCore.Transport.readSSEStream(new Response(body), evt => {
+        const receivedAt = performance.now(); arrivals.push(receivedAt); renderer.append(evt.text, receivedAt);
+      });
+      const callsDuringStream = markdownCalls;
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const sample = samples[0];
+      const beforeFinish = output.textContent;
+      renderer.finish();
+      return { callsDuringStream, callsAfterFinish: markdownCalls, beforeFinish, text: output.textContent,
+        receivedCount: arrivals.length, sampleCount: samples.length, firstReceivedAt: sample && sample.receivedAt,
+        lastReceivedAt: sample && sample.lastReceivedAt, firstArrival: arrivals[0], lastArrival: arrivals[arrivals.length - 1],
+        receiveToDomMs: sample && sample.renderedAt - sample.lastReceivedAt, nextFrameAt: sample && sample.nextFrameAt, renderedAt: sample && sample.renderedAt };
+    }, implementation);
+    assert.equal(result.callsDuringStream, 0, JSON.stringify(result));
+    assert.equal(result.callsAfterFinish, 1, JSON.stringify(result));
+    assert.equal(result.receivedCount, 3); assert.equal(result.sampleCount, 1);
+    assert.equal(result.firstReceivedAt, result.firstArrival); assert.equal(result.lastReceivedAt, result.lastArrival);
+    assert.ok(result.receiveToDomMs >= 0 && result.receiveToDomMs < 100, JSON.stringify(result));
+    assert.ok(result.nextFrameAt >= result.renderedAt, JSON.stringify(result));
+    assert.equal(result.beforeFinish, '先核对原始资料，再逐项比较时间，最后给出结论。');
+    assert.equal(result.text, result.beforeFinish);
+  } finally { await browser.close(); }
+});
+
+test('plain paragraphs resume direct appends after a split blank-line delimiter', async () => {
+  const { browser, page } = await fixture();
+  try {
+    const result = await page.evaluate(() => {
+      let calls = 0;
+      const render = text => { calls++; return text.split('\n\n').map(p => '<p>' + p.replace(/\n/g, '<br>') + '</p>').join(''); };
+      window.renderMarkdown = render; XtjAiCore.Markdown = { render };
+      const output = document.getElementById('output'), renderer = createSmoothTextRenderer(output);
+      renderer.append('第一段开头'); renderer.flush(); renderer.append('结束。\n'); renderer.flush();
+      renderer.append('\n第二段'); renderer.flush();
+      const callsAfterDelimiter = calls;
+      for (let i = 0; i < 100; i++) { renderer.append('继续写'); renderer.flush(); }
+      const callsAfterTail = calls;
+      const visible = output.textContent;
+      renderer.finish();
+      return { callsAfterDelimiter, callsAfterTail, callsAfterFinish: calls, visible, final: output.textContent };
+    });
+    assert.ok(result.callsAfterDelimiter > 0);
+    assert.equal(result.callsAfterTail, result.callsAfterDelimiter, JSON.stringify(result));
+    assert.equal(result.callsAfterFinish, result.callsAfterDelimiter + 1);
+    assert.equal(result.visible, '第一段开头结束。第二段' + '继续写'.repeat(100));
+    assert.equal(result.final, result.visible);
+  } finally { await browser.close(); }
+});
+
+test('live thought deltas avoid cumulative text reads and coalesce scroll measurement per frame', async () => {
+  const { browser, page } = await fixture();
+  try {
+    const result = await page.evaluate(({ appendSource, scrollSource }) => {
+      let textReads = 0, inkCreates = 0, rangeRecords = 0, queued = [];
+      window.createAiStreamMetricsReporter = () => null;
+      XtjAiCore.InkReveal = { create() { inkCreates++; return { begin(){}, record(){rangeRecords++;}, commit(){} }; } };
+      window.eval(appendSource + '\n' + scrollSource);
+      const chunk = document.createElement('div'), descriptor = Object.getOwnPropertyDescriptor(Node.prototype, 'textContent');
+      Object.defineProperty(chunk, 'textContent', { configurable: true, get() { textReads++; return descriptor.get.call(this); }, set(value) { descriptor.set.call(this, value); } });
+      for (let i = 0; i < 5000; i++) appendStreamThoughtDelta(chunk, 'x', 10);
+      const internalTextReads = textReads, finalText = chunk.textContent;
+      const thought = { length: finalText.length, nodes: chunk.childNodes.length, textReads: internalTextReads, inkCreates, rangeRecords };
+      const oldRaf = window.requestAnimationFrame;
+      window.requestAnimationFrame = callback => { queued.push(callback); return queued.length; };
+      const container = document.createElement('div'); document.body.appendChild(container); let heightReads = 0;
+      Object.defineProperty(container, 'scrollHeight', { get() { heightReads++; return 120; } });
+      let scrollTopValue = 0;
+      Object.defineProperty(container, 'scrollTop', { get() { return scrollTopValue; }, set(value) { scrollTopValue = value; } });
+      for (let i = 0; i < 12; i++) scheduleThoughtScrollBottom(container);
+      const queuedFrames = queued.length; queued.shift()();
+      window.requestAnimationFrame = oldRaf;
+      return { thought, queuedFrames, heightReads, scrollTop: container.scrollTop };
+    }, {
+      appendSource: section('  function appendStreamThoughtDelta(', '  // Scroll only once per display frame'),
+      scrollSource: section('  function scheduleThoughtScrollBottom(', '  /**\n   * 把深入研究阶段')
+    });
+    assert.equal(result.thought.length, 5000);
+    assert.equal(result.thought.nodes, 7);
+    assert.equal(result.thought.textReads, 1);
+    assert.equal(result.thought.inkCreates, 1);
+    assert.equal(result.queuedFrames, 1);
+    assert.equal(result.heightReads, 1);
+    assert.equal(result.scrollTop, 120);
+  } finally { await browser.close(); }
+});
 for (const implementation of ['main', 'shared']) {
   test(`${implementation}: growing text keeps existing elements, animation and code scroll`, async () => {
     const { browser, page } = await fixture();
@@ -166,7 +268,7 @@ for (const implementation of ['main', 'shared']) test(implementation + ': stream
  }finally{await browser.close();}
 });
 
-for (const implementation of ['main', 'shared']) test(implementation + ': new Chinese graphemes receive a bounded ink reveal without a typing queue', async () => {
+for (const implementation of ['main', 'shared']) test(implementation + ': a new text segment receives one bounded ink reveal without a typing queue', async () => {
  const {browser,page}=await fixture();try{
   const result=await page.evaluate(async kind=>{
    const output=document.getElementById('output');output.className='ai-msg-bubble';
@@ -176,7 +278,7 @@ for (const implementation of ['main', 'shared']) test(implementation + ': new Ch
    const node=output.firstChild;renderer.append(suffix);renderer.flush();
    const matching=Array.from(CSS.highlights.entries()).filter(([name])=>name.startsWith('xtj-ai-ink-'));
    const ranges=matching.flatMap(([,highlight])=>Array.from(highlight));
-   const expected=Array.from(new Intl.Segmenter(undefined,{granularity:'grapheme'}).segment(suffix)).length;
+   const expected=1;
    const animations=output.getAnimations().filter(a=>a.effect?.getKeyframes().some(k=>Object.keys(k).some(x=>x.startsWith('--xtj-ai-ink-phase-'))));
    animations.forEach(a=>{a.pause();a.currentTime=0;});
    const color=matching.length?getComputedStyle(output,'::highlight('+matching[0][0]+')').color:'';
@@ -222,7 +324,7 @@ test('lite devices still show a bounded effect and concurrent streams cannot cle
    a.stop();const other=groups().flatMap(([,h])=>Array.from(h)).filter(r=>second.contains(r.startContainer)).length;
    const complete=first.textContent===text;b.cancel();return{rangeCount,other,complete,remaining:groups().length};
   });
-  assert.equal(result.rangeCount,12);assert.ok(result.other>0);assert.equal(result.complete,true);assert.equal(result.remaining,0);
+  assert.equal(result.rangeCount,1);assert.ok(result.other>0);assert.equal(result.complete,true);assert.equal(result.remaining,0);
  }finally{await browser.close();}
 });
 test('shared: reset cancels the old drain and cannot modify the next answer', async () => {
