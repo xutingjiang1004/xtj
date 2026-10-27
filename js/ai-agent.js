@@ -4565,16 +4565,21 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
        只更新最后一个（正在增长的）节点、并在必要时追加新节点。
        这样每帧真正改动的是 O(1) 个节点，与全文长度无关。
      安全网：任何异常 / 结构异常（节点数骤减等）都回退整段替换，保证显示正确。 */
-  function patchInnerHTML(targetEl, html) {
+  function patchInnerHTML(targetEl, html, ink) {
     if (!targetEl) return;
     function children(parent, wanted, depth) {
       var old = Array.from(parent.childNodes).filter(function(n) { return !(n.nodeType === 1 && n.classList.contains('ai-stream-cursor')); });
       var pos = 0;
       Array.from(wanted.childNodes).forEach(function(want) {
         var have = old[pos++];
-        if (!have) { parent.insertBefore(want.cloneNode(true), parent.querySelector(':scope > .ai-stream-cursor')); return; }
+        if (!have) { var added = want.cloneNode(true); parent.insertBefore(added, parent.querySelector(':scope > .ai-stream-cursor')); if (ink) ink.inserted(added); return; }
         if (have.nodeType === want.nodeType && (want.nodeType === 3 ? have.data === want.data : have.isEqualNode(want))) return;
-        if (have.nodeType === 3 && want.nodeType === 3) { have.data = want.data; return; }
+        if (have.nodeType === 3 && want.nodeType === 3) {
+          var before = have.data;
+          if (want.data.indexOf(before) === 0) { have.appendData(want.data.slice(before.length)); if (ink) ink.record(have, before.length, have.length); }
+          else have.data = want.data;
+          return;
+        }
         var same = have.nodeType === 1 && want.nodeType === 1 && have.tagName === want.tagName && depth < 32 && have.attributes.length === want.attributes.length;
         if (same) same = Array.from(want.attributes).every(function(a) { return have.getAttribute(a.name) === a.value; });
         if (same) children(have, want, depth + 1);
@@ -4630,6 +4635,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
   function createSmoothTextRenderer(targetEl, options) {
     options = options || {};
+    var ink = window.XtjAiCore && window.XtjAiCore.InkReveal && window.XtjAiCore.InkReveal.create(targetEl, options);
     var renderStreamMarkdown = createStreamingMarkdownCache(renderMarkdown);
     var reducedMotion = prefersReducedMotion();
     var pending = '';
@@ -4718,19 +4724,22 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       pending = '';
       if (!next) return;
       rendered += next;
+      if (ink) ink.begin();
       if (options.plainStream) {
         // 流水模式：累积到 plainTextBuffer，一次写入单文本节点（不每帧建节点）
         plainTextBuffer += next;
         var node = ensurePlainTextNode();
         // Append only the received suffix, retaining the existing text node.
-        try { node.appendData(next); } catch (e) { node.textContent = plainTextBuffer; }
+        var oldLength = node.length;
+        try { node.appendData(next); if (ink) ink.record(node, oldLength, node.length); } catch (e) { node.textContent = plainTextBuffer; }
       } else {
         // The display scheduler already bounds patches to a frame. Wall-clock
         // precision or clock corrections must not suppress an accepted frame.
         if (!isSelectionInTarget(targetEl)) {
-          patchInnerHTML(targetEl, renderStreamMarkdown(rendered));
+          patchInnerHTML(targetEl, renderStreamMarkdown(rendered), ink);
         }
       }
+      if (ink) ink.commit();
       ensureCursor();
       if (typeof options.onRender === 'function') {
         try { options.onRender(rendered); } catch (e2) {}
@@ -4846,6 +4855,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (cancelled) return;
         clearFrame();
         if (pending) emitText(true);
+        if (ink) ink.clear();
         finished = true;
         removeCursor();
         if (streamClass && targetEl) targetEl.classList.remove(streamClass);
@@ -4858,6 +4868,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (idx2 !== -1) S.activeRenderers.splice(idx2, 1);
         if (cancelled) return;
         cancelled = true;
+        if (ink) ink.clear();
         settleDrain(false);
         api.isCancelled = true;
         clearFrame();
@@ -5126,6 +5137,22 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     syncResearchCardAnimatorState(card);
   }
 
+  function updateStreamThought(chunk, text) {
+    if (!chunk) return;
+    var next = String(text || ''), node = chunk.childNodes.length === 1 && chunk.firstChild.nodeType === 3 ? chunk.firstChild : null;
+    var previous = node ? node.data : '', priorText = chunk.textContent || '';
+    if (!node || next.indexOf(previous) !== 0) {
+      chunk.textContent = next;
+      if (priorText) return;
+      node = chunk.firstChild;
+      previous = '';
+    } else if (next.length > previous.length) node.appendData(next.slice(previous.length));
+    if (!node || next.length <= previous.length) return;
+    var ink = chunk.__xtjThoughtInk;
+    if (!ink && window.XtjAiCore && window.XtjAiCore.InkReveal) ink = chunk.__xtjThoughtInk = window.XtjAiCore.InkReveal.create(chunk, { inkReveal: true });
+    if (ink) { ink.begin(); ink.record(node, previous.length, node.length); ink.commit(); }
+  }
+
   /**
    * 把深入研究阶段写入「查看思考过程」日志，并更新步数。
    * 之前只改了状态条文案，details 一直是 0 步，用户展开什么都没有。
@@ -5148,7 +5175,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var chunk = last.querySelector('.ai-thought-chunk');
       if (chunk) {
         var prev = String(chunk.textContent || '');
-        chunk.textContent = options.stream ? prev + msg : (prev && prev !== msg ? prev + '\n' + msg : msg);
+        var next = options.stream ? prev + msg : (prev && prev !== msg ? prev + '\n' + msg : msg);
+        if (options.stream) updateStreamThought(chunk, next); else chunk.textContent = next;
       }
     } else {
       var entry = document.createElement('div');
@@ -5156,8 +5184,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       entry._role = role;
       entry.innerHTML = '<div class="ai-thought-role"></div><div class="ai-thought-chunk"></div>';
       entry.querySelector('.ai-thought-role').textContent = role;
-      entry.querySelector('.ai-thought-chunk').textContent = msg;
       body.appendChild(entry);
+      if (options.stream) updateStreamThought(entry.querySelector('.ai-thought-chunk'), msg);
+      else entry.querySelector('.ai-thought-chunk').textContent = msg;
     }
 
     var n = body.children.length;
@@ -5867,13 +5896,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         // ★ U3: 同角色累积到最后一条条目(缓存 lastEntry 加速)
         if (cached.lastEntry && cached.lastEntry._role === roleLabel && cached.lastEntry.parentNode === logBox) {
           var lastChunk = cached.lastEntry.querySelector('.ai-thought-chunk');
-          if (lastChunk) lastChunk.textContent = cleanReasoningText((lastChunk.textContent || '') + String(evt.chunk).slice(0, 4000));
+          if (lastChunk) updateStreamThought(lastChunk, cleanReasoningText((lastChunk.textContent || '') + String(evt.chunk).slice(0, 4000)));
         } else {
           var entry = el('div', { class: 'ai-thought-entry' });
           entry._role = roleLabel;
           entry.innerHTML = '<div class="ai-thought-role">' + escapeHtml(roleLabel) + '</div><div class="ai-thought-chunk"></div>';
-          entry.querySelector('.ai-thought-chunk').textContent = cleanReasoningText(String(evt.chunk).slice(0, 4000));
           logBox.appendChild(entry);
+          updateStreamThought(entry.querySelector('.ai-thought-chunk'), cleanReasoningText(String(evt.chunk).slice(0, 4000)));
           cached.lastEntry = entry;
         }
         try { logBox.scrollTop = logBox.scrollHeight; } catch (e) {}
@@ -6795,6 +6824,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var responding = false;
     var researchModel = opts.model || 'pro';
     var renderFrame = 0;
+    var answerInk = null;
     var renderStreamMarkdown = createStreamingMarkdownCache(renderMarkdown);
 
     function setStep(stepIdx) {
@@ -6898,13 +6928,17 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (S._dtCurrentReqId !== reqId || !customModelIdentityCurrent(flowIdentity) || !progressCard.isConnected) return;
         var answerEl = progressCard.querySelector('.ai-think-answer');
         if (!answerEl) return;
-        patchInnerHTML(answerEl, renderStreamMarkdown(answer));
+        if (!answerInk && window.XtjAiCore && window.XtjAiCore.InkReveal) answerInk = window.XtjAiCore.InkReveal.create(answerEl);
+        if (answerInk) answerInk.begin();
+        patchInnerHTML(answerEl, renderStreamMarkdown(answer), answerInk);
+        if (answerInk) answerInk.commit();
         scrollToBottom(dtMessagesEl, false);
       });
     }
 
     function removeTavilyCard() {
       if (!progressCard) return;
+      if (answerInk) answerInk.clear();
       try { if (progressCard._cleanupTimer) progressCard._cleanupTimer(); } catch (e) {}
       try { progressCard._done = true; } catch (e) {}
       try { progressCard.remove(); } catch (e) {}
@@ -7298,13 +7332,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               var lastEntry = thinkBody.lastElementChild;
               if (lastEntry && lastEntry._role === roleLabel) {
                 var lc = lastEntry.querySelector('.ai-thought-chunk');
-                if (lc) lc.textContent = cleanReasoningText((lc.textContent || '') + chunkText);
+                if (lc) updateStreamThought(lc, cleanReasoningText((lc.textContent || '') + chunkText));
               } else {
                 var entry = document.createElement('div');
                 entry.className = 'ai-thought-entry'; entry._role = roleLabel;
                 entry.innerHTML = '<div class="ai-thought-role">' + escapeHtml(roleLabel) + '</div><div class="ai-thought-chunk"></div>';
-                entry.querySelector('.ai-thought-chunk').textContent = cleanReasoningText(chunkText);
                 thinkBody.appendChild(entry);
+                updateStreamThought(entry.querySelector('.ai-thought-chunk'), cleanReasoningText(chunkText));
               }
               try { thinkBody.scrollTop = thinkBody.scrollHeight; } catch (e) {}
               while (thinkBody.children.length > 80) thinkBody.removeChild(thinkBody.firstChild);

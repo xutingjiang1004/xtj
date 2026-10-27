@@ -152,7 +152,7 @@ test('thinking timer resumes only for a new active phase, sums its duration and 
  }finally{await browser.close();}
 });
 
-// The user rejected the glyph fade. Assert readable, ordered stream updates instead.
+// Existing text stays stable and readable while new text arrives.
 for (const implementation of ['main', 'shared']) test(implementation + ': streamed text remains opaque and reuses the existing text node', async () => {
  const {browser,page}=await fixture();try{
   const result=await page.evaluate(kind=>{
@@ -163,6 +163,66 @@ for (const implementation of ['main', 'shared']) test(implementation + ': stream
    document.documentElement.setAttribute('data-xtj-motion','off');window.prefersReducedMotion=()=>true;output.replaceChildren();const quiet=create();quiet.append('立即显示');quiet.finish();
    return{stable,opacity,complete,runs:output.querySelectorAll('.ai-stream-reveal').length,quiet:output.textContent};
   },implementation);assert.deepEqual(result,{stable:true,opacity:'1',complete:'已有文字新到达的文字🐈',runs:0,quiet:'立即显示'});
+ }finally{await browser.close();}
+});
+
+for (const implementation of ['main', 'shared']) test(implementation + ': new Chinese graphemes receive a bounded ink reveal without a typing queue', async () => {
+ const {browser,page}=await fixture();try{
+  const result=await page.evaluate(async kind=>{
+   const output=document.getElementById('output');output.className='ai-msg-bubble';
+   const make=()=>kind==='main'?createSmoothTextRenderer(output,{plainStream:true}):XtjAiCore.StreamRenderer.create(output,{plainStream:true});
+   const renderer=make(),prefix='已经清晰的文字。',suffix='这是一段新的中文🐈';
+   renderer.append(prefix);renderer.flush();await new Promise(r=>setTimeout(r,220));
+   const node=output.firstChild;renderer.append(suffix);renderer.flush();
+   const matching=Array.from(CSS.highlights.entries()).filter(([name])=>name.startsWith('xtj-ai-ink-'));
+   const ranges=matching.flatMap(([,highlight])=>Array.from(highlight));
+   const expected=Array.from(new Intl.Segmenter(undefined,{granularity:'grapheme'}).segment(suffix)).length;
+   const animations=output.getAnimations().filter(a=>a.effect?.getKeyframes().some(k=>Object.keys(k).some(x=>x.startsWith('--xtj-ai-ink-phase-'))));
+   animations.forEach(a=>{a.pause();a.currentTime=0;});
+   const color=matching.length?getComputedStyle(output,'::highlight('+matching[0][0]+')').color:'';
+   const stable=output.firstChild===node&&ranges.every(r=>r.startContainer===node&&r.startOffset>=prefix.length&&r.endOffset>r.startOffset);
+   const immediate=output.textContent;
+   renderer.append('继续');renderer.flush();
+   const prefixStillStable=ranges.every(r=>r.startContainer===node&&r.startOffset>=prefix.length&&r.endOffset>r.startOffset);
+   renderer.cancel();const afterCancel=Array.from(CSS.highlights.keys()).filter(name=>name.startsWith('xtj-ai-ink-')).length;
+   output.replaceChildren();document.documentElement.setAttribute('data-xtj-motion','off');
+   const quiet=make();quiet.append('降低动态效果时立即显示');quiet.flush();
+   const reduced={text:output.textContent,highlights:Array.from(CSS.highlights.keys()).filter(name=>name.startsWith('xtj-ai-ink-')).length};quiet.cancel();
+   return{count:ranges.length,expected,animations:animations.length,color,stable,immediate,prefixStillStable,afterCancel,reduced};
+  },implementation);
+  assert.equal(result.count,result.expected,JSON.stringify(result));assert.ok(result.animations>0);assert.match(result.color,/0\.72/);
+  assert.equal(result.stable,true);assert.equal(result.prefixStillStable,true);assert.equal(result.immediate,'已经清晰的文字。这是一段新的中文🐈');
+  assert.equal(result.afterCancel,0);assert.deepEqual(result.reduced,{text:'降低动态效果时立即显示',highlights:0});
+ }finally{await browser.close();}
+});
+
+test('research thinking updates keep their text node and apply ink only to the new suffix', async () => {
+ const {browser,page}=await fixture();try{
+  const result=await page.evaluate(async source=>{
+   window.eval(source);const output=document.getElementById('output');output.className='ai-thought-chunk';
+   updateStreamThought(output,'第一段思考。');await new Promise(r=>setTimeout(r,220));const node=output.firstChild;
+   updateStreamThought(output,'第一段思考。继续查证🐈');
+   const ranges=Array.from(CSS.highlights.entries()).filter(([name])=>name.startsWith('xtj-ai-ink-')).flatMap(([,h])=>Array.from(h));
+   const stable=output.firstChild===node&&ranges.length>0&&ranges.every(r=>r.startContainer===node&&r.startOffset>='第一段思考。'.length);
+   return {stable,text:output.textContent};
+  },section('  function updateStreamThought(', '  /**'));
+  assert.deepEqual(result,{stable:true,text:'第一段思考。继续查证🐈'});
+ }finally{await browser.close();}
+});
+
+test('lite devices still show a bounded effect and concurrent streams cannot clear each other', async () => {
+ const {browser,page}=await fixture();try{
+  const result=await page.evaluate(()=>{
+   document.documentElement.classList.add('perf-lite');document.documentElement.dataset.xtjPerfProfile='lite';
+   const first=document.getElementById('output'),second=document.getElementById('timeline');first.className=second.className='ai-msg-bubble';
+   const a=XtjAiCore.StreamRenderer.create(first,{plainStream:true}),b=XtjAiCore.StreamRenderer.create(second,{plainStream:true});
+   const text='连续生成文字不会被动画排队。'.repeat(20);a.append(text);a.flush();b.append('另一段思考和正文');b.flush();
+   const groups=()=>Array.from(CSS.highlights.entries()).filter(([name])=>name.startsWith('xtj-ai-ink-'));
+   const rangeCount=groups().flatMap(([,h])=>Array.from(h)).filter(r=>first.contains(r.startContainer)).length;
+   a.stop();const other=groups().flatMap(([,h])=>Array.from(h)).filter(r=>second.contains(r.startContainer)).length;
+   const complete=first.textContent===text;b.cancel();return{rangeCount,other,complete,remaining:groups().length};
+  });
+  assert.equal(result.rangeCount,12);assert.ok(result.other>0);assert.equal(result.complete,true);assert.equal(result.remaining,0);
  }finally{await browser.close();}
 });
 test('shared: reset cancels the old drain and cannot modify the next answer', async () => {

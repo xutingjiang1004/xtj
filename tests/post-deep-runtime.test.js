@@ -85,7 +85,7 @@ test('closed details cannot be repopulated by a late request', async () => {
 function scrollRuntime() {
   const appended = [], nodes = [], feed = { children: nodes, insertBefore() {}, appendChild() {} };
   const rows = Array.from({ length: 45 }, (_, i) => ({ id: String(i) }));
-  const ctx = { feedEndReached: true, feedPageFetchPending: false, feedLoadMoreFailed: false, feedAllPosts: rows,
+  const ctx = { window: {}, feedEndReached: true, feedPageFetchPending: false, feedLoadMoreFailed: false, feedAllPosts: rows,
     feedAllComments: [], feedAllLikes: [], feedPage: 1, FEED_PAGE_SIZE: 20, feedLoadRequestId: 1, _authStateEpoch: 1, currentUser: 'alice', console,
     document: { getElementById: key => key === 'feed' ? feed : null, createElement: () => ({ setAttribute() {}, remove() {}, style: {} }) },
     getFeedRenderedSliceStart: () => 20 + appended.length, getFilteredPosts: p => p, getRenderableComments: () => [],

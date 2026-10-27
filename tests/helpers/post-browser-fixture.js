@@ -2,8 +2,9 @@
 const fs=require('node:fs'),http=require('node:http'),path=require('node:path');
 const {chromium,webkit}=require('playwright');
 const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aVxkAAAAASUVORK5CYII=','base64');
-async function postBrowserFixture({viewport={width:390,height:844},theme='light',engine='chromium',counts=[2,3,4,9,15,18],holdImages=false,ios=false,user='alice',publicPosts=false,feedUnavailable=false,legacyCoverCache=false,realUploads=false,dmMessages=[]}={}){
+async function postBrowserFixture({viewport={width:390,height:844},theme='light',engine='chromium',counts=[2,3,4,9,15,18],holdImages=false,ios=false,user='alice',publicPosts=false,feedUnavailable=false,legacyCoverCache=false,realUploads=false,dmMessages=[],holdFeed=false,breakProfileInit=false,waitForPost=true,enforceFeedPrivacy=false}={}){
  let releaseStorageResponses;const storageWait=new Promise(resolve=>releaseStorageResponses=resolve),storageRequests=[];
+ let releaseFeed;const feedWait=new Promise(resolve=>releaseFeed=resolve);
  const root=path.resolve('.'),mime={'.html':'text/html','.js':'application/javascript','.css':'text/css','.svg':'image/svg+xml','.mjs':'application/javascript'};
  const server=http.createServer((req,res)=>{const pathname=new URL(req.url,'http://localhost').pathname;
   if(realUploads&&req.method==='POST'&&pathname.startsWith('/test-supabase/storage/v1/object/uploads/')){
@@ -19,6 +20,7 @@ async function postBrowserFixture({viewport={width:390,height:844},theme='light'
  const posts=counts.map((count,n)=>({id:`8c1cb02d-74d0-4e45-9e15-${String(n+1).padStart(12,'0')}`,user_name:'alice',content:`${count} 张图片：正文和媒体排版`,media_type:count>1?'album':'image',media_url:origin+'/test-image/'+n+'-0.png',visibility:publicPosts?'public':'private',created_at:'2026-10-03T12:00:00.000Z',views:4,ip_region_text:'福建',ip_region_status:'resolved',media_items:Array.from({length:count},(_,i)=>({id:`attachment-${n}-${i}`,position:i,media_type:'image',media_url:origin+`/test-image/${n}-${i}.png`,width:400,height:300,file_size:png.length}))}));
  const comments=Array.from({length:6},(_,i)=>({id:`33333333-3333-4333-8333-${String(i+1).padStart(12,'0')}`,post_id:posts[0].id,user_name:i===2?'cat_ai':'alice',generated_by_ai:i===2,parent_comment_id:i===1?`33333333-3333-4333-8333-000000000001`:null,content:'评论 '+i,created_at:`2026-10-03T12:0${i}:00.000Z`})),likes=[];
  page.on('pageerror',error=>errors.push(error.message));
+ if(breakProfileInit)await page.addInitScript(()=>document.addEventListener('DOMContentLoaded',()=>document.getElementById('profileName')?.remove(),{once:true}));
  if(ios) await page.addInitScript(ios=>{
   Object.defineProperty(navigator,'userAgent',{configurable:true,value:'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18 Mobile Safari/604.1'});
   window.ontouchstart=null;
@@ -31,14 +33,14 @@ async function postBrowserFixture({viewport={width:390,height:844},theme='light'
   if(legacyCoverCache)localStorage.setItem('xtj_feed_cache_v7',JSON.stringify({version:7,timestamp:Date.now(),data:{posts:posts.map(p=>{const copy={...p};delete copy.media_items;return copy;}),comments:[],likes:[]}}));
  },{theme,user,legacyCoverCache,posts});
  await page.route('**/*',async route=>{
-  const url=new URL(route.request().url());if(holdImages&&url.pathname.startsWith('/test-image/'))await imageWait;if(url.origin!==origin){await route.abort();return;}
+  const url=new URL(route.request().url());if(holdImages&&url.pathname.startsWith('/test-image/'))await imageWait;if(holdFeed&&url.pathname==='/api/feed')await feedWait;if(url.origin!==origin){await route.abort();return;}
   if(!url.pathname.startsWith('/api/')&&!url.pathname.startsWith('/test-supabase/')){await route.continue();return;}
   const body=route.request().postData()?(()=>{try{return route.request().postDataJSON()}catch(_){return null}})():null;calls.push({path:url.pathname,query:Object.fromEntries(url.searchParams),body});
   let data={ok:true,data:[],users:[],items:[],totals:{posts:posts.length,views:4,likes:0,comments:comments.length}},status=200;
   if(url.pathname==='/api/config/public')data={supabase_url:origin+'/test-supabase',supabase_anon_key:'sb_publishable_test_only_never_production'};
   if(url.pathname==='/api/user/refresh')data={token:'test-only-token',user_name:user};
   if(url.pathname==='/api/dm/list')data={ok:true,data:dmMessages,muted_peers:[]};
-  if(url.pathname==='/api/feed'){data={ok:true,posts,comments,likes,next_offset:posts.length,next_cursor:null,endReached:true,total_post_count:posts.length};if(feedUnavailable){status=503;data={ok:false,retryable:true};}}
+  if(url.pathname==='/api/feed'){const visible=enforceFeedPrivacy&&!route.request().headers().authorization?posts.filter(p=>p.visibility==='public'):posts;data={ok:true,posts:visible,comments,likes,next_offset:visible.length,next_cursor:null,endReached:true,total_post_count:visible.length};if(feedUnavailable){status=503;data={ok:false,retryable:true};}}
   if(url.pathname==='/api/post/media/batch'){if(failMediaBatch){status=503;data={ok:false,retryable:true};}else data={ok:true,posts:posts.filter(p=>body.post_ids.includes(p.id)&&(p.visibility==='public'||p.user_name===user)).map(p=>({id:p.id,media_items:p.media_items}))};}
   if(url.pathname==='/api/avatar/batch')data={ok:true,avatars:{}};
   if(url.pathname==='/api/post/like'){const liked=body.liked;const i=likes.findIndex(l=>l.post_id===body.post_id&&l.user_name==='alice');if(liked&&i<0)likes.push({id:'like-'+body.post_id,post_id:body.post_id,user_name:'alice'});if(!liked&&i>=0)likes.splice(i,1);data={ok:true,liked,like_count:likes.filter(l=>l.post_id===body.post_id).length};}
@@ -53,9 +55,16 @@ async function postBrowserFixture({viewport={width:390,height:844},theme='light'
   if(url.pathname==='/api/post/create'){if(failCreate){status=503;data={ok:false,error:'Injected create failure'};}else{created={id:'8c1cb02d-74d0-4e45-9e15-000000009999',user_name:'alice',...body,media_items:body.attachments||undefined,created_at:'2026-10-03T12:30:00.000Z',ip_region_text:'福建',ip_region_status:'resolved',location_name:'福州'};data={ok:true,data:created};}}
   await route.fulfill({status,json:data});
  });
- await page.goto(origin,{waitUntil:'domcontentloaded'});await page.waitForFunction(()=>window.currentUser===localStorage.getItem('xtj_user')&&document.querySelector('#feed .post-media-grid img'));
+ try {
+  await page.goto(origin,{waitUntil:'domcontentloaded'});
+  if(waitForPost)await page.waitForFunction(()=>window.currentUser===localStorage.getItem('xtj_user')&&document.querySelector('#feed .post-media-grid img'));
+ } catch(error) {
+  const state=await page.evaluate(()=>({user:window.currentUser,stored:localStorage.getItem('xtj_user'),early:window.__xtjEarlyFeed?.status,coreReady:window.__xtjCoreFeedReady,feedText:document.getElementById('feed')?.textContent?.slice(0,180),posts:document.querySelectorAll('#feed .post').length,images:document.querySelectorAll('#feed .post-media-grid img').length})).catch(()=>null);
+  error.message+='\nPost fixture state: '+JSON.stringify({state,errors,calls:calls.map(x=>x.path)});
+  releaseFeed();releaseImages();releaseStorageResponses();await browser.close().catch(()=>{});server.closeAllConnections();await new Promise(r=>server.close(r));throw error;
+ }
  await page.evaluate(theme=>document.documentElement.setAttribute('data-theme',theme),theme);
- return{page,posts,comments,likes,calls,errors,uploads,origin,png,releaseImages,storageRequests,releaseStorageResponses, setFailUploadAt(n){failUploadAt=n;uploadNumber=0;},setFailCreate(v){failCreate=v;},setFeedUnavailable(v){feedUnavailable=v;},setFailMediaBatch(v){failMediaBatch=v;},getCreated(){return created;},async close(){releaseStorageResponses();await browser.close();server.closeAllConnections();await new Promise(r=>server.close(r));}};
+ return{page,posts,comments,likes,calls,errors,uploads,origin,png,releaseImages,releaseFeed,storageRequests,releaseStorageResponses, setFailUploadAt(n){failUploadAt=n;uploadNumber=0;},setFailCreate(v){failCreate=v;},setFeedUnavailable(v){feedUnavailable=v;},setFailMediaBatch(v){failMediaBatch=v;},getCreated(){return created;},async close(){releaseFeed();releaseStorageResponses();await browser.close();server.closeAllConnections();await new Promise(r=>server.close(r));}};
 }
 async function wireAiChat(page){
  await page.evaluate(()=>{
