@@ -67,6 +67,22 @@
     );
   }
 
+  // Reuse the photo wall's own garden so both places stay visually consistent.
+  // The SVG is part of the page, never data returned by a user or an API.
+  window.xtjFeedLoadingHtml = function (message, compact) {
+    var garden = document.getElementById('pwUploadGarden');
+    if (!garden || !garden.querySelector('svg')) return '';
+    return '<div class="feed-garden-loading' + (compact ? ' feed-garden-loading--compact' : ' xtj-loading-skeleton') +
+      '" role="status" aria-live="polite"><div class="pw-garden is-growing" aria-hidden="true">' +
+      garden.innerHTML + '</div><span>' + esc(message || '正在加载帖子') + '</span></div>';
+  };
+  if (typeof document.addEventListener === 'function') document.addEventListener('DOMContentLoaded', function () {
+    var el = feedEl();
+    if (!el || !stillSkeleton(el)) return;
+    var garden = window.xtjFeedLoadingHtml('正在加载帖子');
+    if (garden) el.innerHTML = garden;
+  }, { once: true });
+
   function showError(error) {
     var el = feedEl();
     if (!el || el.querySelector('.post')) return;
@@ -194,6 +210,7 @@
     // Paint soon if core is slow; core can replace with full cards later.
     setTimeout(function () {
       if (pageHidden) return; // S-1：页面已进入 bfcache/卸载，不得再改写 DOM
+      if (state.status !== 'ok' || state.data !== data) return;
       if (stillSkeleton(feedEl()) || !feedEl() || !feedEl().querySelector('.post')) {
         paintMinimal(data);
       }
@@ -202,7 +219,9 @@
     // Second chance after core should have loaded
     setTimeout(function () {
       if (pageHidden) return; // S-1
-      if (stillSkeleton(feedEl())) paintMinimal(data);
+      if (state.status !== 'ok' || state.data !== data) return;
+      var el = feedEl();
+      if (stillSkeleton(el) || (el && !el.querySelector('.post') && !String(el.textContent || '').trim() && !window.__xtjCoreFeedReady)) paintMinimal(data);
       applyToCoreIfReady();
     }, 2500);
   }
@@ -215,12 +234,14 @@
     } catch (e) {}
     setTimeout(function () {
       if (pageHidden) return; // S-1
+      if (state.status !== 'error' || state.error !== err) return;
       if (stillSkeleton(feedEl())) {
         showError(err);
       }
     }, 300);
     setTimeout(function () {
       if (pageHidden) return; // S-1
+      if (state.status !== 'error' || state.error !== err) return;
       if (stillSkeleton(feedEl())) {
         showError(err);
       }

@@ -7,6 +7,133 @@
 
   var CORE = window.XtjAiCore = window.XtjAiCore || {};
 
+  // Highlight only the newest graphemes; no spans, layout measurements or
+  // second typing queue. Browsers without Custom Highlight paint text normally.
+  var inkSlots = [], inkReady = false, inkUnavailable = false;
+  function prepareInk() {
+    if (inkReady) return true;
+    if (inkUnavailable) return false;
+    try {
+      if (!window.CSS || !CSS.highlights || !CSS.registerProperty || !window.Highlight ||
+          !window.Element || !Element.prototype.animate || !CSS.supports('color', 'color-mix(in srgb, red, transparent)')) {
+        inkUnavailable = true; return false;
+      }
+      var rules = [];
+      for (var i = 0; i < 16; i++) {
+        var name = 'xtj-ai-ink-' + i, prop = '--xtj-ai-ink-phase-' + i;
+        try { CSS.registerProperty({ name: prop, syntax: '<number>', inherits: true, initialValue: '1' }); } catch (_) {}
+        inkSlots.push({ name: name, prop: prop, owner: null, highlight: null, animation: null });
+        rules.push('::highlight(' + name + '){color:color-mix(in srgb,var(--xtj-ai-ink-color) calc(72% + 28% * var(' + prop + ',1)),transparent);' +
+          'text-shadow:0 0 calc((1 - var(' + prop + ',1)) * 1.1px) color-mix(in srgb,var(--xtj-ai-ink-color) calc((1 - var(' + prop + ',1)) * 20%),transparent)}');
+      }
+      var style = document.createElement('style'); style.textContent = rules.join('\n'); document.head.appendChild(style);
+      document.addEventListener('visibilitychange', function() {
+        if (document.hidden) inkSlots.forEach(releaseInkSlot);
+      });
+      window.addEventListener('pagehide', function() { inkSlots.forEach(releaseInkSlot); });
+      inkReady = true; return true;
+    } catch (_) { inkUnavailable = true; return false; }
+  }
+  function releaseInkSlot(slot) {
+    if (!slot || !slot.owner) return;
+    var animation = slot.animation;
+    try { if (CSS.highlights.get(slot.name) === slot.highlight) CSS.highlights.delete(slot.name); } catch (_) {}
+    slot.owner = null; slot.highlight = null; slot.animation = null;
+    if (animation) { animation.onfinish = null; animation.oncancel = null; try { animation.cancel(); } catch (_) {} }
+  }
+  function createInkReveal(target, options) {
+    options = options || {};
+    if (!target || !(options.inkReveal === true || (target.matches && target.matches('.ai-msg-bubble,.ai-reasoning-segment,.ai-think-answer')))) return null;
+    var pending = [], theme = null, owner = {};
+    function motionOff() {
+      try { return document.hidden || document.documentElement.getAttribute('data-xtj-motion') === 'off' ||
+        !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); }
+      catch (_) { return true; }
+    }
+    function liteDevice() {
+      var root = document.documentElement;
+      return root.getAttribute('data-xtj-perf-profile') === 'lite' || root.getAttribute('data-perf') === 'lite' || root.classList.contains('perf-lite');
+    }
+    function record(node, start, end) {
+      if (!node || node.nodeType !== 3 || end <= start) return;
+      var parent = node.parentElement;
+      if (parent && parent.closest('a,pre,code,kbd,samp')) return;
+      if (pending.length >= 16) pending.shift();
+      pending.push({ node: node, start: start, end: end });
+    }
+    function inserted(node) {
+      if (!node) return;
+      if (node.nodeType === 3) { record(node, 0, node.data.length); return; }
+      if (node.nodeType !== 1 || node.matches('a,pre,code,kbd,samp')) return;
+      Array.from(node.childNodes).forEach(inserted);
+    }
+    function clear() {
+      pending = [];
+      inkSlots.forEach(function(slot) { if (slot.owner === owner) releaseInkSlot(slot); });
+    }
+    function commit() {
+      try {
+      var changes = pending; pending = [];
+      if (!changes.length) return;
+      if (motionOff()) { clear(); return; }
+      if (!prepareInk()) return;
+      var graphemes = [];
+      changes.forEach(function(change) {
+        var node = change.node;
+        if (!node.isConnected || !target.contains(node)) return;
+        // Limit work per frame for a large packet. Text itself is never delayed.
+        var start = Math.max(change.start, change.end - 128), text = node.data.slice(start, change.end);
+        if (start > change.start && /[\uDC00-\uDFFF]/.test(text.charAt(0))) { start++; text = text.slice(1); }
+        if (window.Intl && Intl.Segmenter) {
+          var segmenter = createInkReveal.segmenter || (createInkReveal.segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' }));
+          for (var item of segmenter.segment(text)) graphemes.push({ node: node, start: start + item.index, end: start + item.index + item.segment.length });
+        } else {
+          var offset = start;
+          Array.from(text).forEach(function(character) { graphemes.push({ node: node, start: offset, end: offset + character.length }); offset += character.length; });
+        }
+      });
+      var lite = liteDevice();
+      graphemes = graphemes.slice(lite ? -12 : -48);
+      if (!graphemes.length) return;
+      var currentTheme = document.documentElement.getAttribute('data-theme') || '';
+      if (theme !== currentTheme) {
+        theme = currentTheme;
+        target.style.setProperty('--xtj-ai-ink-color', getComputedStyle(target).color);
+      }
+      var free = inkSlots.filter(function(slot) { return !slot.owner; });
+      // Larger received groups ripple in two or four short cohorts. Small
+      // packets animate together as they arrive from the network.
+      var lanes = !lite && graphemes.length >= 8 && free.length >= 4 ? 4 : !lite && graphemes.length >= 4 && free.length >= 2 ? 2 : 1;
+      var selected = free.slice(0, lanes);
+      if (!selected.length) {
+        var active = inkSlots.find(function(slot) { return slot.owner === owner && slot.highlight && slot.highlight.size < 64; });
+        if (active) selected = [active];
+      }
+      if (!selected.length) return;
+      var fresh = [];
+      selected.forEach(function(slot) {
+        if (!slot.owner) { slot.owner = owner; slot.highlight = new Highlight(); fresh.push(slot); }
+      });
+      graphemes.forEach(function(part, index) {
+        var slot = selected[Math.min(selected.length - 1, Math.floor(index * selected.length / graphemes.length))];
+        if (slot.highlight.size >= 64) return;
+        try { var range = document.createRange(); range.setStart(part.node, part.start); range.setEnd(part.node, part.end); slot.highlight.add(range); } catch (_) {}
+      });
+      fresh.forEach(function(slot, index) {
+        try {
+          CSS.highlights.set(slot.name, slot.highlight);
+          var from = {}, to = {}; from[slot.prop] = '0'; to[slot.prop] = '1';
+          slot.animation = target.animate([from, to], { duration: 120, delay: index * 18, easing: 'cubic-bezier(.16,1,.3,1)', fill: 'both' });
+          slot.animation.onfinish = function() { releaseInkSlot(slot); };
+          slot.animation.oncancel = function() { releaseInkSlot(slot); };
+        } catch (_) { releaseInkSlot(slot); }
+      });
+      } catch (_) { clear(); }
+    }
+    return { begin: function() { pending = []; }, record: record, inserted: inserted, commit: commit, clear: clear };
+  }
+  CORE.InkReveal = { create: createInkReveal };
+
   // ★ 惰性读取 Markdown：脚本加载顺序不可控时优雅降级为纯文本，而非模块加载期崩溃
   function getMarkdown() {
     return CORE.Markdown;
@@ -28,16 +155,21 @@
      成本线性增长。这里把整体渲染结果放进游离容器解析，与现有子节点逐位
      比对，只替换真正变化的部分，前面未变的节点浏览器完全不碰。
      任何异常都回退整段替换，正确性优先。 */
-  function patchInnerHTML(targetEl, html) {
+  function patchInnerHTML(targetEl, html, ink) {
     if (!targetEl) return;
     function children(parent, wanted, depth) {
       var old = Array.from(parent.childNodes).filter(function(n) { return !(n.nodeType === 1 && n.classList.contains('ai-stream-cursor')); });
       var pos = 0;
       Array.from(wanted.childNodes).forEach(function(want) {
         var have = old[pos++];
-        if (!have) { parent.insertBefore(want.cloneNode(true), parent.querySelector(':scope > .ai-stream-cursor')); return; }
+        if (!have) { var added = want.cloneNode(true); parent.insertBefore(added, parent.querySelector(':scope > .ai-stream-cursor')); if (ink) ink.inserted(added); return; }
         if (have.nodeType === want.nodeType && (want.nodeType === 3 ? have.data === want.data : have.isEqualNode(want))) return;
-        if (have.nodeType === 3 && want.nodeType === 3) { have.data = want.data; return; }
+        if (have.nodeType === 3 && want.nodeType === 3) {
+          var before = have.data;
+          if (want.data.indexOf(before) === 0) { have.appendData(want.data.slice(before.length)); if (ink) ink.record(have, before.length, have.length); }
+          else have.data = want.data;
+          return;
+        }
         var same = have.nodeType === 1 && want.nodeType === 1 && have.tagName === want.tagName && depth < 32 && have.attributes.length === want.attributes.length;
         if (same) same = Array.from(want.attributes).every(function(a) { return have.getAttribute(a.name) === a.value; });
         if (same) children(have, want, depth + 1);
@@ -53,6 +185,7 @@
 
   function createStreamRenderer(targetEl, options) {
     options = options || {};
+    var ink = CORE.InkReveal.create(targetEl, options);
     var prefix = '', markup = '', cacheVerified = false, cacheDisabled = false, blockCache = new Map();
     var cachedMarkdown = getMarkdown() && getMarkdown().render;
     function renderStreamMarkdown(text) {
@@ -176,15 +309,18 @@
       pending = '';
       if (!next) return;
       rendered += next;
+      if (ink) ink.begin();
       if (options.plainStream) {
         plainTextBuffer += next;
         var node = ensurePlainTextNode();
-        try { node.appendData(next); } catch (e) { node.textContent = plainTextBuffer; }
+        var oldLength = node.length;
+        try { node.appendData(next); if (ink) ink.record(node, oldLength, node.length); } catch (e) { node.textContent = plainTextBuffer; }
       } else {
         // The display scheduler already bounds patches to a frame. Wall-clock
         // precision or clock corrections must not suppress an accepted frame.
-        patchInnerHTML(targetEl, renderStreamMarkdown(rendered));
+        patchInnerHTML(targetEl, renderStreamMarkdown(rendered), ink);
       }
+      if (ink) ink.commit();
       ensureCursor();
       if (typeof options.onRender === 'function') {
         try { options.onRender(rendered); } catch (e2) {}
@@ -299,6 +435,7 @@
         if (cancelled) return;
         clearFrame();
         if (pending) emitText(true);
+        if (ink) ink.clear();
         // ★ 停止时补移除光标并复位状态，避免流式结束光标残留
         finished = true;
         removeCursor();
@@ -308,6 +445,7 @@
       cancel: function () {
         if (cancelled) return;
         cancelled = true;
+        if (ink) ink.clear();
         settleDrain(false);
         clearFrame();
         removeCursor();
@@ -321,6 +459,7 @@
       // ★ 新增：供调用方感知取消/重建实例
       isCancelled: function () { return cancelled; },
       reset: function () {
+        if (ink) ink.clear();
         settleDrain(false);
         clearFrame();
         cancelled = false;

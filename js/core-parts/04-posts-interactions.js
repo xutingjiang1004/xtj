@@ -1982,6 +1982,7 @@
             let feedLoadMoreFailed = false;
 
             window.__xtjResetPostState = function() {
+                window.__xtjCoreFeedReady = false;
                 feedLoadRequestId++;
                 feedInteractionMutationVersion++;
                 feedPageFetchPending = false;
@@ -3488,7 +3489,7 @@
                 if (errEl && errEl.parentNode) errEl.parentNode.removeChild(errEl);
                 var feed = document.getElementById("feed");
                 if (feed) {
-                    feed.innerHTML = getXtjLoadingHtml('内容加载中..', '', 'feed');
+                    feed.innerHTML = (window.xtjFeedLoadingHtml && window.xtjFeedLoadingHtml('正在加载帖子')) || getXtjLoadingHtml('内容加载中..', '', 'feed');
                 }
                 if (previousKeyword || getPostSearchState().keyword) {
                     feedAllPosts=[];feedAllComments=[];feedAllLikes=[];feedLoadedPages=[];feedNextOffset=0;feedNextCursor=null;feedEndReached=false;
@@ -4196,7 +4197,9 @@
             function mergeFeedPageIntoState(chunk) {
                 if (!chunk) return;
                 var relationsCurrent = chunk.relationVersion == null || chunk.relationVersion === feedInteractionMutationVersion;
-                var incomingPosts = (chunk.posts || []).map(function(post) {
+                var incomingPosts = (chunk.posts || []).filter(function(post) {
+                    return post && canViewPost(post);
+                }).map(function(post) {
                     if (relationsCurrent) return post;
                     var old = (feedAllPosts || []).find(function(row) { return String(row.id) === String(post.id); });
                     if (!old) return post;
@@ -4204,14 +4207,17 @@
                 });
                 feedAllPosts = mergeFeedRecords(feedAllPosts, incomingPosts, function(post) {
                     return getFeedRecordKey(post, [post && post.user_name, post && post.created_at]);
-                }, true);
-                feedAllComments = mergeFeedRecords(feedAllComments, relationsCurrent ? (chunk.comments || []).filter(function(row) { return !deletedPostCommentIds.has(String(row.id)) && !deletedPostCommentIds.has(String(row.parent_comment_id)); }) : [], function(comment) {
+                }, true).filter(canViewPost);
+                // Never retain another account's private rows or interactions,
+                // even if a stale or incorrect response contains them.
+                var visibleIds = new Set(feedAllPosts.map(function(post) { return String(post.id); }));
+                feedAllComments = mergeFeedRecords((feedAllComments || []).filter(function(row) { return row && visibleIds.has(String(row.post_id)); }), relationsCurrent ? (chunk.comments || []).filter(function(row) { return row && visibleIds.has(String(row.post_id)) && !deletedPostCommentIds.has(String(row.id)) && !deletedPostCommentIds.has(String(row.parent_comment_id)); }) : [], function(comment) {
                     return getFeedRecordKey(comment, [comment && comment.post_id, comment && comment.user_name, comment && comment.created_at, comment && comment.content]);
                 });
-                feedAllLikes = mergeFeedRecords(feedAllLikes, relationsCurrent ? chunk.likes : [], function(like) {
+                feedAllLikes = mergeFeedRecords((feedAllLikes || []).filter(function(like) { return like && visibleIds.has(String(like.post_id)); }), relationsCurrent ? (chunk.likes || []).filter(function(like) { return like && visibleIds.has(String(like.post_id)); }) : [], function(like) {
                     return getFeedRecordKey(like, [like && like.post_id, like && like.user_name, like && like.created_at]);
                 });
-                var pagePostIds = chunk.postIds || [];
+                var pagePostIds = (chunk.postIds || []).filter(function(postId) { return visibleIds.has(String(postId)); });
                 var pageExists = (feedLoadedPages || []).some(function(page) { return page && page.offset === chunk.offset; });
                 if (!pageExists) {
                     feedLoadedPages = (feedLoadedPages || []).concat([{
@@ -4229,7 +4235,7 @@
                 }
                 feedNextCursor = chunk.nextCursor || null;
                 if (chunk.endReached) feedEndReached = true;
-                (chunk.posts || []).forEach(syncPostInfoCache);
+                incomingPosts.forEach(syncPostInfoCache);
                 markFeedStateChanged();
             }
 
@@ -5178,7 +5184,7 @@
                     // ★ 修复：early-feed 已画出的帖子不再被骨架覆盖（此前无差别 innerHTML=
                     // 骨架造成"帖子→骨架→完整列表"首屏闪动）；仅当 feed 尚无内容时才写骨架。
                     if (!feed.querySelector('.post')) {
-                        feed.innerHTML = getXtjLoadingHtml('内容加载中..', '', 'feed');
+                        feed.innerHTML = (window.xtjFeedLoadingHtml && window.xtjFeedLoadingHtml('正在加载帖子')) || getXtjLoadingHtml('内容加载中..', '', 'feed');
                     }
                 }
                 try {
@@ -5255,8 +5261,8 @@
                             }).catch(function() {});
                         }
                     } catch (e) { console.warn('[VIP history preload]', e); }
-                    window.__xtjCoreFeedReady = true;
                     await renderFeedFromMemoryState();
+                    window.__xtjCoreFeedReady = true;
                     setupFeedInfiniteScroll();
                     hydrateDeferredFeedRelations(chunk, requestId).then(function() {
                         if (requestId !== feedLoadRequestId) return;
@@ -5385,9 +5391,9 @@
                 if (continueButton) continueButton.remove();
                 var pageLoading = document.createElement("div");
                 pageLoading.className = "feed-page-loading";
-                pageLoading.setAttribute("role", "status");
-                pageLoading.setAttribute("aria-live", "polite");
-                pageLoading.textContent = "正在加载更多帖子";
+                var gardenLoader = window.xtjFeedLoadingHtml && window.xtjFeedLoadingHtml('正在加载更多帖子', true);
+                if (gardenLoader) pageLoading.innerHTML = gardenLoader;
+                else { pageLoading.setAttribute("role", "status"); pageLoading.setAttribute("aria-live", "polite"); pageLoading.textContent = '正在加载更多帖子'; }
                 var sentinel = document.getElementById("feedSentinel");
                 feed.insertBefore(pageLoading, sentinel || null);
                 // ★ 修复：切片起点统一以"已渲染条数"计算，不再用 feedPage（显示计数）

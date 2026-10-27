@@ -555,6 +555,23 @@ const ADMIN_NAME = "xxz";
                 if (shouldBroadcast) {
                     try { if (typeof window.__xtjBroadcastLogout === 'function') window.__xtjBroadcastLogout(reason); } catch(e) {}
                 }
+                // Resetting an expired or externally changed identity clears the
+                // old account's feed. Restore the anonymous feed and header once
+                // the reset is complete; a newer login must win the race.
+                var resetEpoch = _authStateEpoch;
+                Promise.resolve().then(function() {
+                    if (_authStateEpoch !== resetEpoch || currentUser) return;
+                    try { if (typeof initUI === 'function') Promise.resolve(initUI()).catch(function() {}); } catch (_) {}
+                    if (typeof window.loadFeed !== 'function') return;
+                    var feed = document.getElementById('feed');
+                    if (feed && !feed.children.length && typeof window.xtjFeedLoadingHtml === 'function') {
+                        var loader = window.xtjFeedLoadingHtml('正在加载帖子');
+                        if (loader) feed.innerHTML = loader;
+                    }
+                    Promise.resolve(window.loadFeed(true)).catch(function(error) {
+                        console.warn('[feed] anonymous reload after session reset failed:', error);
+                    });
+                });
             }
             window.clearAllAuthState = clearAllAuthState;
 
@@ -7366,6 +7383,7 @@ function renderProfileActivityList(kind) {
             let feedLoadMoreFailed = false;
 
             window.__xtjResetPostState = function() {
+                window.__xtjCoreFeedReady = false;
                 feedLoadRequestId++;
                 feedInteractionMutationVersion++;
                 feedPageFetchPending = false;
@@ -8872,7 +8890,7 @@ function renderProfileActivityList(kind) {
                 if (errEl && errEl.parentNode) errEl.parentNode.removeChild(errEl);
                 var feed = document.getElementById("feed");
                 if (feed) {
-                    feed.innerHTML = getXtjLoadingHtml('内容加载中..', '', 'feed');
+                    feed.innerHTML = (window.xtjFeedLoadingHtml && window.xtjFeedLoadingHtml('正在加载帖子')) || getXtjLoadingHtml('内容加载中..', '', 'feed');
                 }
                 if (previousKeyword || getPostSearchState().keyword) {
                     feedAllPosts=[];feedAllComments=[];feedAllLikes=[];feedLoadedPages=[];feedNextOffset=0;feedNextCursor=null;feedEndReached=false;
@@ -9580,7 +9598,9 @@ function renderProfileActivityList(kind) {
             function mergeFeedPageIntoState(chunk) {
                 if (!chunk) return;
                 var relationsCurrent = chunk.relationVersion == null || chunk.relationVersion === feedInteractionMutationVersion;
-                var incomingPosts = (chunk.posts || []).map(function(post) {
+                var incomingPosts = (chunk.posts || []).filter(function(post) {
+                    return post && canViewPost(post);
+                }).map(function(post) {
                     if (relationsCurrent) return post;
                     var old = (feedAllPosts || []).find(function(row) { return String(row.id) === String(post.id); });
                     if (!old) return post;
@@ -9588,14 +9608,17 @@ function renderProfileActivityList(kind) {
                 });
                 feedAllPosts = mergeFeedRecords(feedAllPosts, incomingPosts, function(post) {
                     return getFeedRecordKey(post, [post && post.user_name, post && post.created_at]);
-                }, true);
-                feedAllComments = mergeFeedRecords(feedAllComments, relationsCurrent ? (chunk.comments || []).filter(function(row) { return !deletedPostCommentIds.has(String(row.id)) && !deletedPostCommentIds.has(String(row.parent_comment_id)); }) : [], function(comment) {
+                }, true).filter(canViewPost);
+                // Never retain another account's private rows or interactions,
+                // even if a stale or incorrect response contains them.
+                var visibleIds = new Set(feedAllPosts.map(function(post) { return String(post.id); }));
+                feedAllComments = mergeFeedRecords((feedAllComments || []).filter(function(row) { return row && visibleIds.has(String(row.post_id)); }), relationsCurrent ? (chunk.comments || []).filter(function(row) { return row && visibleIds.has(String(row.post_id)) && !deletedPostCommentIds.has(String(row.id)) && !deletedPostCommentIds.has(String(row.parent_comment_id)); }) : [], function(comment) {
                     return getFeedRecordKey(comment, [comment && comment.post_id, comment && comment.user_name, comment && comment.created_at, comment && comment.content]);
                 });
-                feedAllLikes = mergeFeedRecords(feedAllLikes, relationsCurrent ? chunk.likes : [], function(like) {
+                feedAllLikes = mergeFeedRecords((feedAllLikes || []).filter(function(like) { return like && visibleIds.has(String(like.post_id)); }), relationsCurrent ? (chunk.likes || []).filter(function(like) { return like && visibleIds.has(String(like.post_id)); }) : [], function(like) {
                     return getFeedRecordKey(like, [like && like.post_id, like && like.user_name, like && like.created_at]);
                 });
-                var pagePostIds = chunk.postIds || [];
+                var pagePostIds = (chunk.postIds || []).filter(function(postId) { return visibleIds.has(String(postId)); });
                 var pageExists = (feedLoadedPages || []).some(function(page) { return page && page.offset === chunk.offset; });
                 if (!pageExists) {
                     feedLoadedPages = (feedLoadedPages || []).concat([{
@@ -9613,7 +9636,7 @@ function renderProfileActivityList(kind) {
                 }
                 feedNextCursor = chunk.nextCursor || null;
                 if (chunk.endReached) feedEndReached = true;
-                (chunk.posts || []).forEach(syncPostInfoCache);
+                incomingPosts.forEach(syncPostInfoCache);
                 markFeedStateChanged();
             }
 
@@ -10562,7 +10585,7 @@ function renderProfileActivityList(kind) {
                     // ★ 修复：early-feed 已画出的帖子不再被骨架覆盖（此前无差别 innerHTML=
                     // 骨架造成"帖子→骨架→完整列表"首屏闪动）；仅当 feed 尚无内容时才写骨架。
                     if (!feed.querySelector('.post')) {
-                        feed.innerHTML = getXtjLoadingHtml('内容加载中..', '', 'feed');
+                        feed.innerHTML = (window.xtjFeedLoadingHtml && window.xtjFeedLoadingHtml('正在加载帖子')) || getXtjLoadingHtml('内容加载中..', '', 'feed');
                     }
                 }
                 try {
@@ -10639,8 +10662,8 @@ function renderProfileActivityList(kind) {
                             }).catch(function() {});
                         }
                     } catch (e) { console.warn('[VIP history preload]', e); }
-                    window.__xtjCoreFeedReady = true;
                     await renderFeedFromMemoryState();
+                    window.__xtjCoreFeedReady = true;
                     setupFeedInfiniteScroll();
                     hydrateDeferredFeedRelations(chunk, requestId).then(function() {
                         if (requestId !== feedLoadRequestId) return;
@@ -10769,9 +10792,9 @@ function renderProfileActivityList(kind) {
                 if (continueButton) continueButton.remove();
                 var pageLoading = document.createElement("div");
                 pageLoading.className = "feed-page-loading";
-                pageLoading.setAttribute("role", "status");
-                pageLoading.setAttribute("aria-live", "polite");
-                pageLoading.textContent = "正在加载更多帖子";
+                var gardenLoader = window.xtjFeedLoadingHtml && window.xtjFeedLoadingHtml('正在加载更多帖子', true);
+                if (gardenLoader) pageLoading.innerHTML = gardenLoader;
+                else { pageLoading.setAttribute("role", "status"); pageLoading.setAttribute("aria-live", "polite"); pageLoading.textContent = '正在加载更多帖子'; }
                 var sentinel = document.getElementById("feedSentinel");
                 feed.insertBefore(pageLoading, sentinel || null);
                 // ★ 修复：切片起点统一以"已渲染条数"计算，不再用 feedPage（显示计数）
@@ -18652,7 +18675,10 @@ function renderProfileActivityList(kind) {
                 // window.addEventListener('resize', adjustIOSHeight);
                 // window.addEventListener('orientationchange', function() { setTimeout(adjustIOSHeight, 150); });
 
-                await initUI();
+                // A failure in optional profile/header setup must not prevent
+                // the feed boot and its retry watchdog from starting.
+                try { await initUI(); }
+                catch (initError) { console.error('[XTJ] initUI failed:', initError); }
                 normalizeReportModalStructure();
                 requestAnimationFrame(function() {
                     Promise.resolve()

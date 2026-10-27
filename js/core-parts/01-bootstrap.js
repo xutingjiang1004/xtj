@@ -549,6 +549,23 @@ const ADMIN_NAME = "xxz";
                 if (shouldBroadcast) {
                     try { if (typeof window.__xtjBroadcastLogout === 'function') window.__xtjBroadcastLogout(reason); } catch(e) {}
                 }
+                // Resetting an expired or externally changed identity clears the
+                // old account's feed. Restore the anonymous feed and header once
+                // the reset is complete; a newer login must win the race.
+                var resetEpoch = _authStateEpoch;
+                Promise.resolve().then(function() {
+                    if (_authStateEpoch !== resetEpoch || currentUser) return;
+                    try { if (typeof initUI === 'function') Promise.resolve(initUI()).catch(function() {}); } catch (_) {}
+                    if (typeof window.loadFeed !== 'function') return;
+                    var feed = document.getElementById('feed');
+                    if (feed && !feed.children.length && typeof window.xtjFeedLoadingHtml === 'function') {
+                        var loader = window.xtjFeedLoadingHtml('正在加载帖子');
+                        if (loader) feed.innerHTML = loader;
+                    }
+                    Promise.resolve(window.loadFeed(true)).catch(function(error) {
+                        console.warn('[feed] anonymous reload after session reset failed:', error);
+                    });
+                });
             }
             window.clearAllAuthState = clearAllAuthState;
 

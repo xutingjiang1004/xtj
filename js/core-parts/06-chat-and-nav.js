@@ -6074,7 +6074,10 @@
                 // window.addEventListener('resize', adjustIOSHeight);
                 // window.addEventListener('orientationchange', function() { setTimeout(adjustIOSHeight, 150); });
 
-                await initUI();
+                // A failure in optional profile/header setup must not prevent
+                // the feed boot and its retry watchdog from starting.
+                try { await initUI(); }
+                catch (initError) { console.error('[XTJ] initUI failed:', initError); }
                 normalizeReportModalStructure();
                 requestAnimationFrame(function() {
                     Promise.resolve()

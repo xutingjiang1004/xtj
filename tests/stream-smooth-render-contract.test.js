@@ -35,7 +35,9 @@ test('正文流式渲染必须走增量补丁（不得每帧整段替换 innerHT
   assert.match(coreSrc, /function patchInnerHTML\s*\(/, 'stream-renderer.js 必须提供 patchInnerHTML');
   const j = coreSrc.indexOf('function createStreamRenderer');
   const coreBody = coreSrc.slice(j, j + 8000);
-  assert.match(coreBody, /patchInnerHTML\(targetEl, renderStreamMarkdown\(rendered\)\)/,
+  // The optional third argument supplies the reveal effect; rendering must
+  // still go through the same incremental DOM patch.
+  assert.match(coreBody, /patchInnerHTML\(targetEl,\s*renderStreamMarkdown\(rendered\)(?:,\s*ink)?\)/,
     '共享渲染器同样必须走增量补丁');
 });
 
