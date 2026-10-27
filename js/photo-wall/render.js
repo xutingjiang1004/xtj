@@ -269,6 +269,10 @@
   }
 
   function pumpImages(){
+    // Inactive Dock panels retain their layout with opacity:0, so their
+    // images can still intersect the viewport. Do not start hidden work.
+    var panel = document.getElementById('panelAi');
+    if (panel && !panel.classList.contains('active')) return;
     if (activeLoads >= MAX_LOADS || slowImages.size >= Math.max(2, MAX_LOADS) || !pendingImgs.length) return;
     var item = pendingImgs.shift();
     if (!item || !item.target) return pumpImages();

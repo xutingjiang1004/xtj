@@ -16,7 +16,7 @@ function element(id = '') {
     getAttribute: name => attrs[name] || null,
     setAttribute: (name, v) => { attrs[name] = String(v); },
     removeAttribute: name => { delete attrs[name]; },
-    close() {}, showModal() {}, querySelectorAll: () => [], querySelector: () => null,
+    close() {}, showModal() {}, querySelectorAll: () => [], querySelector: () => null, closest: () => null,
     getBoundingClientRect: () => ({ top: 0, bottom: 100 })
   };
   Object.defineProperty(value, 'src', { get: () => attrs.src || '', set: v => { attrs.src = v; } });
@@ -28,7 +28,7 @@ function imageQueueRepro() {
   const imgs = Array.from({ length: 5 }, () => element());
   imgs.forEach((img, i) => { img.setAttribute('data-post-src', '/api/post/test/media/' + i); img.complete = false; img.naturalWidth = 0; });
   const body = element(); body.querySelectorAll = () => imgs; body.matches = () => false; body.nodeType = 1;
-  const context = { document: { body }, innerHeight: 800, location: { href: 'https://xtj.test/', origin: 'https://xtj.test' }, URL, Map, Event,
+  const context = { document: { body, querySelectorAll: () => [] }, innerHeight: 800, location: { href: 'https://xtj.test/', origin: 'https://xtj.test' }, URL, Map, Event,
     setTimeout(fn) { const id = ++clockId; timers.set(id, fn); return id; }, clearTimeout(id) { timers.delete(id); },
     IntersectionObserver: class { constructor(cb) { intersection = cb; } observe() {} unobserve() {} },
     MutationObserver: class { observe() {} }

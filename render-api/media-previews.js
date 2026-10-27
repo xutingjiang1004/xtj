@@ -31,16 +31,28 @@ function createMediaPreviews({ supabase, sharp, fetchImpl = fetch, traffic = med
     if (!data.tag || !Number.isSafeInteger(data.size) || data.size <= 0 || data.size > MAX_SOURCE || !/^image\/(?!svg)[a-z0-9.+-]+$/i.test(data.type)) throw Error('preview_source_unsupported');
     return data;
   }
-  function schedule(work) {
+  function schedule(work, signal) {
+    if (signal?.aborted) return Promise.reject(signal.reason);
     if (queue.length >= 16) return Promise.reject(Error('preview_busy'));
     return new Promise((resolve, reject) => {
-      queue.push({ work, resolve, reject, at: now() }); pump();
+      const item = { work, resolve, reject, at: now(), stop: null };
+      const remove = error => {
+        const index = queue.indexOf(item);
+        if (index < 0) return;
+        queue.splice(index, 1); item.stop(); reject(error);
+      };
+      const aborted = () => remove(signal.reason);
+      const timer = setTimeout(() => remove(Error('preview_busy')), 30000);
+      item.stop = () => { clearTimeout(timer); signal?.removeEventListener('abort', aborted); };
+      signal?.addEventListener('abort', aborted, { once: true });
+      queue.push(item); pump();
     });
   }
   async function pump() {
     if (working || !queue.length) return;
     working = true;
     const item = queue.shift();
+    item.stop();
     try {
       if (now() - item.at > 30000 || isRestricted()) throw Error('preview_busy');
       item.resolve(await item.work());
@@ -54,10 +66,14 @@ function createMediaPreviews({ supabase, sharp, fetchImpl = fetch, traffic = med
       .rotate().resize({ width: 1920, height: 1920, fit: 'inside', withoutEnlargement: true })
       .webp({ quality: 90, alphaQuality: 100, effort: 4 }).timeout({ seconds: 15 }).toBuffer();
   }
-  async function download(bucket, path, expected) {
+  async function download(bucket, path, expected, signal) {
+    signal.throwIfAborted();
     const signed = await supabase.storage.from(bucket).createSignedUrl(path, 60);
+    signal.throwIfAborted();
     if (!signed || signed.error || !signed.data?.signedUrl) throw Error('preview_source_unavailable');
     const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 30000);
+    const aborted = () => controller.abort(signal.reason);
+    signal.addEventListener('abort', aborted, { once: true });
     let reader;
     try {
       traffic.request(bucket, path);
@@ -74,31 +90,69 @@ function createMediaPreviews({ supabase, sharp, fetchImpl = fetch, traffic = med
       }
       if (total !== expected.size) throw Error('preview_source_changed');
       return Buffer.concat(chunks, total);
-    } finally { clearTimeout(timer); if (reader) { await reader.cancel().catch(() => {}); reader.releaseLock(); } }
+    } finally { clearTimeout(timer); signal.removeEventListener('abort', aborted); if (reader) { await reader.cancel().catch(() => {}); reader.releaseLock(); } }
   }
-  async function body(bucket, path, source) {
+  function untilAborted(promise, signal) {
+    return new Promise((resolve, reject) => {
+      const aborted = () => { signal.removeEventListener('abort', aborted); reject(signal.reason); };
+      promise.then(value => { signal.removeEventListener('abort', aborted); resolve(value); }, error => { signal.removeEventListener('abort', aborted); reject(error); });
+      if (signal.aborted) aborted();
+      else signal.addEventListener('abort', aborted, { once: true });
+    });
+  }
+  async function body(bucket, path, source, signal) {
+    signal.throwIfAborted();
     const key = previewTag(bucket, path, source.tag), saved = get(key);
     if (saved) { traffic.previewHit(); return saved; }
-    if (pending.has(key)) return pending.get(key);
-    const work = schedule(async () => {
-      const input = await download(bucket, path, source), result = await encode(input);
-      put(key, result); traffic.generated(); return result;
-    });
-    pending.set(key, work);
-    try { return await work; } finally { if (pending.get(key) === work) pending.delete(key); }
+    let entry = pending.get(key);
+    if (!entry) {
+      entry = { controller: new AbortController(), clients: 0, finished: false };
+      entry.promise = schedule(async () => {
+        // A previous client may have left during encoding. Reuse the finished
+        // display copy instead of downloading its original again for a retry.
+        const ready = get(key);
+        if (ready) { traffic.previewHit(); return ready; }
+        const input = await download(bucket, path, source, entry.controller.signal);
+        entry.controller.signal.throwIfAborted();
+        const result = await encode(input);
+        // libvips work already in progress is bounded by its timeout. Retain
+        // its finished copy even if the last client disconnected meanwhile;
+        // every later use still checks current permissions and source version.
+        put(key, result); traffic.generated(); return result;
+      }, entry.controller.signal).finally(() => {
+        entry.finished = true;
+        if (pending.get(key) === entry) pending.delete(key);
+      });
+      pending.set(key, entry);
+    }
+    entry.clients++;
+    try { return await untilAborted(entry.promise, signal); }
+    finally {
+      if (!--entry.clients && !entry.finished) {
+        entry.controller.abort(Error('preview_cancelled'));
+        if (pending.get(key) === entry) pending.delete(key);
+      }
+    }
   }
   return {
     async stream(req, res, { bucket, path }) {
-      if (traffic.identify) traffic.identify(bucket,path,req.params && req.params.id);
-      const source = await info(bucket, path), etag = previewTag(bucket, path, source.tag);
-      res.set({ 'Cache-Control': 'private, no-cache, must-revalidate', ETag: etag, 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'X-XTJ-Media-Variant': VARIANT });
-      // A deterministic validator survives server restarts. Fresh permission
-      // checks happen in the caller, and fresh source metadata is checked above.
-      if (matches(req.headers['if-none-match'], etag)) { traffic.revalidated(); return res.status(304).end(); }
-      if (req.method === 'HEAD') return res.status(200).type('image/webp').end();
-      const result = await body(bucket, path, source);
-      if (req.destroyed || res.destroyed) return;
-      return res.status(200).set('Content-Length', String(result.length)).type('image/webp').end(result);
+      if (res.destroyed) return;
+      const controller = new AbortController(), closed = () => controller.abort(Error('preview_cancelled'));
+      res.on('close', closed);
+      try {
+        if (traffic.identify) traffic.identify(bucket,path,req.params && req.params.id);
+        const source = await info(bucket, path), etag = previewTag(bucket, path, source.tag);
+        if (controller.signal.aborted) return;
+        res.set({ 'Cache-Control': 'private, no-cache, must-revalidate', ETag: etag, 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'X-XTJ-Media-Variant': VARIANT });
+        // A deterministic validator survives server restarts. Fresh permission
+        // checks happen in the caller, and fresh source metadata is checked above.
+        if (matches(req.headers['if-none-match'], etag)) { traffic.revalidated(); return res.status(304).end(); }
+        if (req.method === 'HEAD') return res.status(200).type('image/webp').end();
+        const result = await body(bucket, path, source, controller.signal);
+        if (req.destroyed || res.destroyed) return;
+        return res.status(200).set('Content-Length', String(result.length)).type('image/webp').end(result);
+      } catch (error) { if (!controller.signal.aborted) throw error; }
+      finally { res.removeListener('close', closed); }
     },
     async rememberUpload({ bucket, path, owner, input, metadata }) {
       const tag = crypto.createHash('md5').update(input).digest('hex'), swap = metadata.orientation >= 5 && metadata.orientation <= 8;

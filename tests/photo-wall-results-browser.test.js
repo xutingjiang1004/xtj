@@ -53,15 +53,35 @@ test('keyboard activation retries a failed wall image before opening its preview
  await p.waitForFunction(()=>document.getElementById('photoPreviewOverlay')?.classList.contains('active'));
  assert.deepEqual(f.errors,[]);
 });
+test('leaving the wall does not start queued image downloads for the hidden page',async t=>{
+ const f=await postBrowserFixture({counts:[1],viewport:{width:390,height:1000}});t.after(()=>f.close());const p=f.page;
+ let release,reads=0;const pending=new Promise(resolve=>release=resolve);t.after(()=>release());
+ await p.route('**/test-image/99-*.png',async r=>{reads++;await pending;await r.fulfill({contentType:'image/png',body:f.png}).catch(()=>{});});
+ await wall(f,()=>Array.from({length:12},(_,i)=>({...row(f),id:'11111111-1111-4111-8111-'+String(i+1).padStart(12,'0'),media_url:f.origin+'/test-image/99-'+i+'.png'})));
+ await p.waitForFunction(()=>[...document.querySelectorAll('#photoGrid img')].filter(img=>img._pwQueued&&!img._pwActiveLoad).length>0);
+ const initial=reads;assert.equal(initial,4);
+ await p.locator('[data-tab="posts"]').filter({visible:true}).click();
+ await p.waitForFunction(()=>!document.getElementById('panelAi').classList.contains('active'));
+ release();await p.waitForTimeout(250);
+ assert.equal(reads,initial,'queued wall images must wait until the user returns to them');
+ await p.locator('[data-tab="ai"]').filter({visible:true}).click();
+ await p.waitForFunction(()=>[...document.querySelectorAll('#photoGrid .photo-wall-item img')].filter(img=>img.naturalWidth===1).length>4);
+ assert.ok(reads>initial);assert.deepEqual(f.errors,[]);
+});
 for(const stage of ['request','body','malformed','missing_data'])test('create '+stage+' failure stays confirmable and retains the original for status retry',async t=>{
- const f=await postBrowserFixture({counts:[1]});t.after(()=>f.close());const p=f.page;await wall(f);
- await p.route('**/api/photo/upload?*',r=>r.fulfill({json:{ok:true,public_url:f.origin+'/test-image/0-0.png'}}));
+ const f=await postBrowserFixture({counts:[1]});t.after(()=>f.close());const p=f.page;let uploads=0;await wall(f);
+ await p.route('**/api/photo/upload?*',r=>{uploads++;return r.fulfill({json:{ok:true,public_url:f.origin+'/test-image/0-0.png'}})});
  await p.evaluate(stage=>{const fetchBase=window.fetch.bind(window),timeoutBase=window.setTimeout.bind(window);window.setTimeout=(fn,ms,...args)=>timeoutBase(fn,ms===25000?50:ms,...args);window.statusReads=0;window.fetch=(url,options)=>{const path=new URL(url,location.href).pathname;if(path==='/api/photo/create'){if(stage==='malformed')return Promise.resolve(new Response('{'));if(stage==='missing_data')return Promise.resolve(new Response('{"ok":true}'));if(stage==='body')return Promise.resolve(new Response(new ReadableStream({start(stream){options.signal.addEventListener('abort',()=>stream.error(new DOMException('timeout','AbortError')),{once:true});}})));return new Promise((_resolve,reject)=>options.signal.addEventListener('abort',()=>reject(new DOMException('timeout','AbortError')),{once:true}));}if(path==='/api/photo/status'){window.statusReads++;return Promise.resolve(new Response(JSON.stringify({ok:true,status:'processing'})));}return fetchBase(url,options);};},stage);
  await p.locator('#photoFileInput').setInputFiles({name:'original.png',mimeType:'image/png',buffer:f.png});await p.locator('#pwStartUploadBtn').click();
  await p.waitForFunction(()=>document.getElementById('pwUploadResultTitle')?.textContent==='正在确认上传结果');
  assert.equal(await p.locator('#pwUploadResultRetry').isVisible(),true);assert.match(await p.locator('#pwUploadResultDetail').innerText(),/待确认 1 张/);
  const before=await p.evaluate(()=>window.statusReads);await p.evaluate(()=>window.retryFailedPhotoUploads());assert.ok(await p.evaluate(()=>window.statusReads)>before);
  assert.match(await p.locator('#pwUploadResultDetail').innerText(),/成功 0 张，失败 0 张，待确认 1 张/);
+ await p.evaluate(async()=>{
+  window.dispatchEvent(new Event('online'));window.dispatchEvent(new Event('pageshow'));document.dispatchEvent(new Event('visibilitychange'));
+  await window.reconcilePendingPhotoUploads();await window.retryFailedPhotoUploads();
+ });
+ assert.equal(uploads,1,'status reconciliation and retry of an unknown result must not resend the original file');
 });
 test('a mixed retry reports the original batch and confirms processing jobs without duplicate uploads',async t=>{
  const f=await postBrowserFixture({counts:[1]});t.after(()=>f.close());const p=f.page,ids=[];let done=false,uploads=0;

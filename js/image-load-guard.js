@@ -7,9 +7,13 @@
   var running = 0;
   window.xtjPostImageScheduling = true;
   function release(state) { if (state.loading) { state.loading = false; running--; } }
+  function activePanel(img) {
+    var panel = img.closest('.dock-panel');
+    return !panel || panel.classList.contains('active');
+  }
   function pump() {
     var waiting = Array.from(tracked.entries()).filter(function (entry) {
-      return entry[1].visible && entry[0].isConnected && entry[0].getAttribute('data-post-src') && !entry[0].getAttribute('src');
+      return entry[1].visible && entry[0].isConnected && activePanel(entry[0]) && entry[0].getAttribute('data-post-src') && !entry[0].getAttribute('src');
     });
     waiting.sort(function (a, b) {
       var ar = a[0].getBoundingClientRect(), br = b[0].getBoundingClientRect();
@@ -107,5 +111,9 @@
   });
   scan(document.body);
   pump();
+  // Opacity-only navigation does not generate IntersectionObserver changes.
+  // Watch just the panel classes to resume their queue when they become active.
+  var panels = new MutationObserver(pump);
+  document.querySelectorAll('.dock-panel').forEach(function (panel) { panels.observe(panel, { attributes: true, attributeFilter: ['class'] }); });
   mutations.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
 })();
