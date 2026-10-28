@@ -20,7 +20,8 @@
       entry.node.style.order = index;
       if (!drag) grid.appendChild(entry.node);
       entry.node.setAttribute('aria-label', '第' + (index + 1) + '张图片，可拖拽排序');
-      entry.node.querySelector('img').alt = '待发布图片 ' + (index + 1);
+      var img = entry.node.querySelector('img');
+      if (img) img.alt = '待发布图片 ' + (index + 1);
       entry.node.querySelector('.post-media-remove').setAttribute('aria-label', '移除第' + (index + 1) + '个附件');
     });
     return true;
@@ -47,7 +48,9 @@
       event.preventDefault();
       if (!drag.ghost) {
         var rect = node.getBoundingClientRect();
-        drag.ghost = node.querySelector('img').cloneNode(); drag.ghost.className = 'post-media-drag-ghost';
+        var ghostImg = node.querySelector('img');
+        drag.ghost = ghostImg ? ghostImg.cloneNode() : document.createElement('div');
+        drag.ghost.className = 'post-media-drag-ghost';
         drag.ghost.setAttribute('aria-hidden', 'true'); drag.ghost.removeAttribute('alt');
         drag.ghost.style.width = rect.width + 'px'; drag.ghost.style.height = rect.height + 'px';
         document.body.appendChild(drag.ghost); node.classList.add('is-dragging');

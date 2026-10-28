@@ -44,7 +44,7 @@
   function createInkReveal(target, options) {
     options = options || {};
     if (!target || !(options.inkReveal === true || (target.matches && target.matches('.ai-msg-bubble,.ai-reasoning-segment,.ai-think-answer')))) return null;
-    var pending = [], theme = null, owner = {};
+    var pending = [], theme = null, owner = {}, lastInkAt = -Infinity;
     function motionOff() {
       try { return document.hidden || document.documentElement.getAttribute('data-xtj-motion') === 'off' ||
         !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); }
@@ -77,6 +77,20 @@
       if (!changes.length) return;
       if (motionOff()) { clear(); return; }
       if (!prepareInk()) return;
+      // Starting a 120ms animation for every SSE packet makes the whole target
+      // re-resolve its inherited ink custom property on every frame. Cap the
+      // decorative effect to a few starts per second; the text itself still
+      // lands on the next display frame.
+      var now = (window.performance && performance.now) ? performance.now() : Date.now();
+      var lite = liteDevice();
+      var isReasoning = !!(target.matches && target.matches('.ai-reasoning-segment'));
+      if (now - lastInkAt < (lite ? 300 : 200)) return;
+      // Long reasoning blocks are the most expensive target: every animated
+      // inherited property resolves style for the whole segment. Keep the wash
+      // only while the block is small; the text itself is never delayed.
+      var maxChars = isReasoning ? (lite ? 4000 : 10000) : (lite ? 12000 : 30000);
+      if (target.textContent && target.textContent.length > maxChars) return;
+      lastInkAt = now;
       // One bounded range per changed text node is enough to create a soft
       // ink wash. Per-grapheme ranges multiply style and animation work for
       // every packet without making text arrive any sooner.
@@ -90,10 +104,16 @@
         try {
           var range = document.createRange();
           range.setStart(node, start); range.setEnd(node, change.end);
-          if (range.toString()) ranges.push(range);
+          if (range.toString()) ranges.push({ range: range, parent: node.parentElement || target });
         } catch (_) {}
       });
-      ranges = ranges.slice(liteDevice() ? -4 : -12);
+      ranges = ranges.slice(lite ? -4 : -12);
+      if (!ranges.length) return;
+      // Animate the newest block element, not the whole bubble: the inherited
+      // ink property then invalidates only that paragraph/list item.
+      var inkTarget = ranges[ranges.length - 1].parent;
+      if (!inkTarget || !target.contains(inkTarget)) inkTarget = target;
+      ranges = ranges.filter(function(entry) { return entry.parent === inkTarget; });
       if (!ranges.length) return;
       var currentTheme = document.documentElement.getAttribute('data-theme') || '';
       if (theme !== currentTheme) {
@@ -107,12 +127,12 @@
       slot = inkSlots.find(function(item) { return !item.owner; });
       if (!slot) return;
       slot.owner = owner; slot.highlight = new Highlight();
-      ranges.forEach(function(range) { try { if (slot.highlight.size < 12) slot.highlight.add(range); } catch (_) {} });
+      ranges.forEach(function(entry) { try { if (slot.highlight.size < 12) slot.highlight.add(entry.range); } catch (_) {} });
       if (!slot.highlight.size) { releaseInkSlot(slot); return; }
       try {
         CSS.highlights.set(slot.name, slot.highlight);
         var from = {}, to = {}; from[slot.prop] = '0'; to[slot.prop] = '1';
-        slot.animation = target.animate([from, to], { duration: 120, easing: 'cubic-bezier(.16,1,.3,1)', fill: 'both' });
+        slot.animation = inkTarget.animate([from, to], { duration: lite ? 60 : 90, easing: 'cubic-bezier(.16,1,.3,1)', fill: 'both' });
         slot.animation.onfinish = function() { releaseInkSlot(slot); };
         slot.animation.oncancel = function() { releaseInkSlot(slot); };
       } catch (_) { releaseInkSlot(slot); }

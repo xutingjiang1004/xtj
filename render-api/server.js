@@ -2449,7 +2449,7 @@ async function executeToolCall(toolCall, context) {
           cards: [aiSiteCard('exchange_rate', fromCur + ' → ' + toCur, erPayload)]
         };
       } catch (e) {
-        return { tool_name: name, from: fromCur, to: toCur, error: e && e.message || '汇率查询失败' };
+        return { tool_name: name, from: fromCur, to: toCur, error: '汇率查询失败，请稍后重试' };
       }
     }
     case 'get_stock_quote': {
@@ -2568,7 +2568,7 @@ async function executeToolCall(toolCall, context) {
           cards: [aiSiteCard('stock_quote', stockName + ' 行情', sqPayload)]
         };
       } catch (e) {
-        return { tool_name: name, symbol: sym, error: e && e.message || '行情查询失败' };
+        return { tool_name: name, symbol: sym, error: '行情查询失败，请稍后重试' };
       }
     }
     case 'calculate': {
@@ -4362,7 +4362,7 @@ function validateString(val, maxLen, fieldName) {
 // 逗号 / 引号 / 括号逃逸出逻辑表达式（PostgREST 的字符串字面量用 \" 反斜杠转义，
 // 而不是 CSV 风格的 "" 加倍——后者会提前终止字符串导致 lexer 报错）
 function pgrstQuote(v) {
-  return '"' + String(v).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
+  return '"' + String(v).replace(/[\u0000-\u001f\u007f]/g, '').replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
 }
 
 function isProtectedAdminTarget(userName) {
@@ -4901,11 +4901,15 @@ function aiSiteSnippet(value, query) {
   return text.slice(0, 240);
 }
 
+function escapeLikeValue(value) {
+  return String(value).replace(/\\/g, '\\\\').replace(/[%_]/g, '\\$&');
+}
+
 async function aiSiteSearch(source, query, userName, limit, isAdmin, searchPlan) {
   var q = aiSiteNormalizeQuery(query);
   if (!q) return { results: [], error: null };
   var take = Math.min(Math.max(Number(limit) || 20, 1), 40);
-  var pattern = '%' + q.replace(/[%_]/g, '\\$&') + '%';
+  var pattern = '%' + escapeLikeValue(q) + '%';
   // multi-keyword: split by whitespace, each word must match
   var keywords = q.split(/\s+/).filter(Boolean);
   var rows = [];
@@ -4917,10 +4921,10 @@ async function aiSiteSearch(source, query, userName, limit, isAdmin, searchPlan)
     // 改为链式 ilike（与 allowlist 的 or() 是顶层 AND，不会被覆盖）；
     // 多关键词场景 JS 侧仍执行 keywords.every 的全文匹配，DB 侧按首个关键词预筛即可。
     var firstKeyword = keywords[0] || q;
-    postQuery = postQuery.ilike('content', '%' + firstKeyword.replace(/[%_]/g, '\\$&') + '%');
+    postQuery = postQuery.ilike('content', '%' + escapeLikeValue(firstKeyword) + '%');
     // author filter
     if (searchPlan && searchPlan.author) {
-      postQuery = postQuery.ilike('user_name', '%' + searchPlan.author.replace(/[%_]/g, '\\$&') + '%');
+      postQuery = postQuery.ilike('user_name', '%' + escapeLikeValue(searchPlan.author) + '%');
     }
     // date range
     if (searchPlan && searchPlan.date_from) postQuery = postQuery.gte('created_at', searchPlan.date_from);
@@ -4969,15 +4973,15 @@ async function aiSiteSearch(source, query, userName, limit, isAdmin, searchPlan)
   } else if (source === 'photos') {
     if (!userName) return { results: [] };
     var photoQuery = supabase.from('posts').select('id,user_name,content,media_url,created_at,visibility').eq('media_type', '__photo_wall__').or('is_deleted.is.null,is_deleted.eq.false');
-    var photoOrParts = keywords.map(function(k) { return 'content.ilike.' + pgrstQuote('%' + k.replace(/[%_]/g, '\\$&') + '%'); });
+    var photoOrParts = keywords.map(function(k) { return 'content.ilike.' + pgrstQuote('%' + escapeLikeValue(k) + '%'); });
     keywords.forEach(function(k) {
-      photoOrParts.push('user_name.ilike.' + pgrstQuote('%' + k.replace(/[%_]/g, '\\$&') + '%'));
+      photoOrParts.push('user_name.ilike.' + pgrstQuote('%' + escapeLikeValue(k) + '%'));
     });
     if (photoOrParts.length > 0) {
       photoQuery = photoQuery.or(photoOrParts.join(','));
     }
     if (searchPlan && searchPlan.author) {
-      photoQuery = photoQuery.ilike('user_name', '%' + searchPlan.author.replace(/[%_]/g, '\\$&') + '%');
+      photoQuery = photoQuery.ilike('user_name', '%' + escapeLikeValue(searchPlan.author) + '%');
     }
     // date range
     if (searchPlan && searchPlan.date_from) photoQuery = photoQuery.gte('created_at', searchPlan.date_from);
@@ -6327,6 +6331,15 @@ function securityRateLimit(windowMs, maxRequests) {
 // opts.skipImageOcr = true 时，图片不再走 OCR 文字通道（由视觉模型直接看图），不生成 image_ocr 卡片
 async function extractEmbeddedFiles(text, opts) {
   if (!text || typeof text !== 'string') return { text: text || '', cards: [] };
+  // Bound the regex scan before it runs: a long message with many "[" starts and
+  // no closing ")" makes the lazy data-URL pattern backtrack quadratically.
+  var MAX_EMBED_SCAN_CHARS = 500000;
+  var MAX_EMBED_CANDIDATES = 200;
+  if (text.length > MAX_EMBED_SCAN_CHARS) return { text: text, cards: [] };
+  var brackets = 0;
+  for (var bi = 0; bi < text.length; bi++) {
+    if (text.charCodeAt(bi) === 91 && ++brackets > MAX_EMBED_CANDIDATES) return { text: text, cards: [] };
+  }
   var skipImageOcr = !!(opts && opts.skipImageOcr);
   var result = text;
   var cards = [];
@@ -11730,9 +11743,9 @@ function safeTextEqual(left, right) {
   var rightBuf = Buffer.from(String(right || ''));
   return leftBuf.length === rightBuf.length && crypto.timingSafeEqual(leftBuf, rightBuf);
 }
-function scryptAsync(password, salt, N, r) {
+function scryptAsync(password, salt, N, r, p) {
   return new Promise(function(resolve, reject) {
-    crypto.scrypt(String(password), salt, 32, { N: N || SCRYPT_DEFAULT_N, r: r || SCRYPT_R, p: SCRYPT_P }, function(error, key) {
+    crypto.scrypt(String(password), salt, 32, { N: N || SCRYPT_DEFAULT_N, r: r || SCRYPT_R, p: p || SCRYPT_P }, function(error, key) {
       if (error) reject(error); else resolve(key);
     });
   });
@@ -11763,7 +11776,7 @@ async function verifyAuthPassword(stored, password, userName) {
       if (!(r >= 1 && r <= 32)) return false;
       var p = parseInt(fields[4], 10);
       if (!(p >= 1 && p <= 8)) return false;
-      var key = await scryptAsync(password, fields[5], N, r);
+      var key = await scryptAsync(password, fields[5], N, r, p);
       return safeTextEqual(fields[6], key.toString('base64url'));
     }
     if (fields.length !== 4 || !fields[2] || !fields[3]) return false;
@@ -12168,7 +12181,7 @@ app.get('/admin/verify', verifyToken, (req, res) => {
 });
 
 // 管理员登出
-app.post('/admin/logout', verifyToken, async (req, res) => {
+app.post('/admin/logout', verifyToken, rateLimit(60000, 30), async (req, res) => {
   // ★ 加固：路由级 try/catch，与其他管理路由对齐（persistRevokedToken 当前不 reject，
   //   但未来重构或 Map/Cookie 操作异常时应返回 500 而非挂起请求）。
   try {
@@ -23261,9 +23274,35 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, rateLimit
 
     // token + 请求次数兜底（搜索额度不在此拦截整轮聊天）
     // 游客不查数据库额度，只受 guestAiAdmission 的 IP/每日上限约束。
-    var rl = req.guestAi
-      ? { allowed: true, quota: null }
-      : await enforceAiChatAccess(userName, { needSearch: false, promptChars: String((req.body && req.body.message) || '').length });
+    // ★ 首包延迟：附件解析 / 配置 / 历史准备与额度校验互不依赖。先把它们一起
+    //   启动，额度校验只等自己那几次 Supabase 往返，不再串行叠加到模型调用前。
+    var _historyModelCandidate = normalizeDeepSeekModelName(req.body && req.body.model);
+    var _historyAllowedModels = [DEEPSEEK_MODEL_FLASH, DEEPSEEK_MODEL_PRO];
+    var _historyResolvedModel = _historyModelCandidate && _historyAllowedModels.indexOf(_historyModelCandidate) >= 0
+      ? _historyModelCandidate
+      : DEEPSEEK_MODEL_REASONER;
+    var _visionEligibleEarly = _historyResolvedModel === DEEPSEEK_MODEL_VISION || _historyResolvedModel === DEEPSEEK_MODEL_FLASH;
+    T_stage.config_start = Date.now();
+    var attachPromise = extractChatAttachments(message, req.body && req.body.attachments, { skipImageOcr: _visionEligibleEarly && _visionImageUrls.length > 0 });
+    var configPromise = getAiConfig();
+    // ★ 2026-09-17：优先使用前端传入的历史（与第三方链路对齐），
+    //   前端未传时才回退查库 —— 见 loadAiContext 内注释。
+    var ctxPromise = loadAiContext(userName, convId, req.body && req.body.messages, {
+      messagesIncludeCurrent: !(req.body && req.body.messages_include_current === false),
+      currentAttachments: req.body && req.body.attachments,
+      contextManagement:req.body&&req.body.context_management===true,
+      allowVision: _visionEligibleEarly,
+      skipDb: !!req.guestAi
+    });
+    var quotaPromise = req.guestAi
+      ? Promise.resolve({ allowed: true, quota: null })
+      : enforceAiChatAccess(userName, { needSearch: false, promptChars: String((req.body && req.body.message) || '').length });
+    // Preparation already started; make sure a quota rejection path cannot leave
+    // it as an unhandled rejection when we return early below.
+    attachPromise.catch(function() {});
+    configPromise.catch(function() {});
+    ctxPromise.catch(function() {});
+    var rl = await quotaPromise;
     if (!rl.allowed) {
       return terminateWithError({
         type: 'error',
@@ -23285,26 +23324,6 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, rateLimit
     }
     _turnAccepted = true;
 
-    // 附件解析与 config/ctx 并行，无附件时 extract 应快速返回
-    // ★ 视觉模型（V4 Flash / V4 Flash Vision）带图时跳过图片 OCR，不再生成「图片文字未识别」卡片
-    var _historyModelCandidate = normalizeDeepSeekModelName(req.body && req.body.model);
-    var _historyAllowedModels = [DEEPSEEK_MODEL_FLASH, DEEPSEEK_MODEL_PRO];
-    var _historyResolvedModel = _historyModelCandidate && _historyAllowedModels.indexOf(_historyModelCandidate) >= 0
-      ? _historyModelCandidate
-      : DEEPSEEK_MODEL_REASONER;
-    var _visionEligibleEarly = _historyResolvedModel === DEEPSEEK_MODEL_VISION || _historyResolvedModel === DEEPSEEK_MODEL_FLASH;
-    T_stage.config_start = Date.now();
-    var attachPromise = extractChatAttachments(message, req.body && req.body.attachments, { skipImageOcr: _visionEligibleEarly && _visionImageUrls.length > 0 });
-    var configPromise = getAiConfig();
-    // ★ 2026-09-17：优先使用前端传入的历史（与第三方链路对齐），
-    //   前端未传时才回退查库 —— 见 loadAiContext 内注释。
-    var ctxPromise = loadAiContext(userName, convId, req.body && req.body.messages, {
-      messagesIncludeCurrent: !(req.body && req.body.messages_include_current === false),
-      currentAttachments: req.body && req.body.attachments,
-      contextManagement:req.body&&req.body.context_management===true,
-      allowVision: _visionEligibleEarly,
-      skipDb: !!req.guestAi
-    });
     var _parallelPrep = await Promise.all([attachPromise, configPromise, ctxPromise]);
     var _attachStream = unwrapAttachmentExtract(_parallelPrep[0]);
     message = _attachStream.text;
@@ -23428,8 +23447,17 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, rateLimit
     var webSearchPref = req.body && req.body.web_search;
     // 主动预搜：开开关，或消息有搜索/时效意图；图片 OCR 默认不预搜
     var proactiveSearch = allowSearch && !blockAutoSearchForOcr && (webSearchPref === true || explicitSearchIntent || liveInfoIntent);
-    // 第三方搜索日额度（免费默认 10 次）；用尽后仅保留模型内置 web_search
-    var thirdPartySearchOkEarly = await canUseThirdPartySearch(userName);
+    // 第三方搜索日额度（免费默认 10 次）；用尽后仅保留模型内置 web_search。
+    // 复用本轮额度校验结果，避免模型调用前再多一次 getQuota 往返。
+    var thirdPartySearchOkEarly;
+    if (req.guestAi) thirdPartySearchOkEarly = false;
+    else if (userName === ADMIN_USERNAME) thirdPartySearchOkEarly = true;
+    else {
+      var _sq = (rl && rl.quota) || {};
+      if (_sq.can_search === false) thirdPartySearchOkEarly = false;
+      else if (Number.isFinite(Number(_sq.search_remaining))) thirdPartySearchOkEarly = Number(_sq.search_remaining) !== 0;
+      else thirdPartySearchOkEarly = await canUseThirdPartySearch(userName);
+    }
 
     // Legacy presearch is unnecessary when the streamed model already has
     // autonomous tools. Required search is enforced separately below.
