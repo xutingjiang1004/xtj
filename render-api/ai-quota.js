@@ -192,6 +192,13 @@ function createAiQuota(supabase) {
         .maybeSingle();
       if (memRes.error || !memRes.data) return quota;
       var row = memRes.data;
+      // Expired Pro rows keep their historical custom columns. The RPC already
+      // falls back to free/default limits when pro_expires_at has passed; do not
+      // re-open those custom limits (including -1 = unlimited) here.
+      var plan = String(row.plan || '').toLowerCase();
+      var proExpires = row.pro_expires_at ? Date.parse(row.pro_expires_at) : NaN;
+      var proActive = !row.pro_expires_at || (Number.isFinite(proExpires) && proExpires > Date.now());
+      if (plan === 'pro' && !proActive) return quota;
       var patched = Object.assign({}, quota);
       var customSearch = row.search_limit_daily;
       if (customSearch !== null && customSearch !== undefined) {

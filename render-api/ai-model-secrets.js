@@ -37,18 +37,25 @@ async function migrateSecrets(db, env = process.env) {
     if (!result || result.error) throw result && result.error || Error('ai_models_migration_unavailable');
     if (!result.data.length) return;
     for (const row of result.data) {
-      const content = JSON.parse(row.content), models = Array.isArray(content.models) ? content.models : [];
-      let changed = false;
-      for (const model of models) {
-        if (model.api_key) {
-          model.api_key_enc=encrypt(model.api_key,env);delete model.api_key;changed=true;
-        } else if (env.ENCRYPTION_KEY && model.api_key_enc && model.api_key_enc.version !== 2) {
-          model.api_key_enc = encrypt(decrypt(model.api_key_enc, env), env); changed = true;
+      try {
+        const content = JSON.parse(row.content), models = Array.isArray(content.models) ? content.models : [];
+        let changed = false;
+        for (const model of models) {
+          if (model.api_key) {
+            model.api_key_enc=encrypt(model.api_key,env);delete model.api_key;changed=true;
+          } else if (env.ENCRYPTION_KEY && model.api_key_enc && model.api_key_enc.version !== 2) {
+            model.api_key_enc = encrypt(decrypt(model.api_key_enc, env), env); changed = true;
+          }
         }
-      }
-      if (changed) {
-        const saved = await db.from('posts').update({ content: JSON.stringify(content) }).eq('id', row.id).eq('content', row.content);
-        if (!saved || saved.error) throw saved && saved.error || Error('ai_models_migration_save_failed');
+        if (changed) {
+          const saved = await db.from('posts').update({ content: JSON.stringify(content) }).eq('id', row.id).eq('content', row.content).select('id');
+          if (!saved || saved.error || !Array.isArray(saved.data) || !saved.data.length) {
+            throw (saved && saved.error) || Error('ai_models_migration_save_failed');
+          }
+        }
+      } catch (rowError) {
+        // One corrupt/CAS-lost row must not block every other account's migration.
+        console.warn('[AI-MODELS] migrate row skipped:', row.id, rowError && rowError.message);
       }
     }
     after = result.data.at(-1).id;

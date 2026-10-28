@@ -174,7 +174,17 @@
       if (enabled) { options.notify('语音对话已开启：完整识别后发送，回复朗读完会继续聆听'); void listen(); }
     }
     function suspend() { enabled = false; cancelInput(); stopSpeech(); }
-    function visibility() { if (global.document.hidden) suspend(); }
+    var suspendedByVisibility = false;
+    function visibility() {
+      if (global.document.hidden) {
+        if (enabled) { suspendedByVisibility = true; cancelInput(); stopSpeech(); }
+        return;
+      }
+      if (suspendedByVisibility) {
+        suspendedByVisibility = false;
+        if (enabled) { options.notify('已恢复语音对话'); void listen(); }
+      }
+    }
     function identityChanged() { if (!options.current(owner)) suspend(); }
     global.document.addEventListener('visibilitychange',visibility);
     global.addEventListener('pagehide',suspend);

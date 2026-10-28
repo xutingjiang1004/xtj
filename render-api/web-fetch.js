@@ -191,7 +191,8 @@ function requestPinnedHttps(parsed, addresses, maxBytes, timeoutMs, headers, ext
         Host: parsed.host,
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
         Accept: 'text/html,application/xhtml+xml,text/plain,application/json;q=0.9,*/*;q=0.5',
-        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+        'Accept-Encoding': 'identity'
       }, headers || {}),
       // ★ 2026-09-13 修复 P0（read_web_page 100% 失败 "Invalid IP address: undefined"）：
       //   Node 22 的 net.connect 在 IPv4/IPv6 双栈场景会传 options.all = true，
@@ -810,7 +811,8 @@ function requestPinnedJson(parsedUrl, addresses, opts) {
     var headers = Object.assign({
       Host: parsedUrl.host,
       'User-Agent': 'xtj-server/1.0',
-      Accept: 'application/json,text/plain,*/*;q=0.8'
+      Accept: 'application/json,text/plain,*/*;q=0.8',
+      'Accept-Encoding': 'identity'
     }, opts.headers || {});
     if (bodyBuf) {
       headers['Content-Length'] = bodyBuf.length;

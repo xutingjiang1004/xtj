@@ -4463,7 +4463,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     messagesEl.innerHTML = '';
     var isTimeout = r && (r.status === 0 || r.error_code === 'timeout');
     var isNetwork = r && r.error_code === 'network_error';
-    var tip = isTimeout
+    var isAuth = r && (r.error_code === 'auth' || r.status === 401);
+    var tip = isAuth
+      ? '登录已失效，请重新登录后再发送'
+      : isTimeout
       ? '聊天记录加载超时，可继续发送消息或点击重试'
       : (isNetwork ? '网络连接异常，聊天记录更新失败' : '聊天记录暂时无法加载，你仍可发送新消息');
     var state = buildEmptyState(tip);
@@ -4675,6 +4678,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var cancelled = false;
     var finished = false;
     var drainState = null;
+    var selectionRetryHandler = null;
     function settleDrain(ok) {
       var state = drainState; drainState = null;
       if (!state) return;
@@ -4734,6 +4738,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (!rafId) return;
       try { cancelFrame(rafId); } catch (e) {}
       rafId = 0;
+    }
+    function clearSelectionRetry() {
+      if (!selectionRetryHandler) return;
+      try { document.removeEventListener('selectionchange', selectionRetryHandler); } catch (_) {}
+      selectionRetryHandler = null;
     }
 
     function ensurePlainTextNode() {
@@ -4825,6 +4834,16 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             patchInnerHTML(targetEl, renderStreamMarkdown(rendered), ink);
             resumePlainMarkdownTail();
           }
+        } else if (!selectionRetryHandler) {
+          // Consumed text must not be lost while the user has a selection.
+          // Re-render the accumulated text once the selection clears.
+          selectionRetryHandler = function() {
+            if (isSelectionInTarget(targetEl)) return;
+            try { document.removeEventListener('selectionchange', selectionRetryHandler); } catch (_) {}
+            selectionRetryHandler = null;
+            try { patchInnerHTML(targetEl, renderStreamMarkdown(rendered), ink); } catch (_) {}
+          };
+          try { document.addEventListener('selectionchange', selectionRetryHandler); } catch (_) {}
         }
       }
       if (ink) ink.commit();
@@ -4928,6 +4947,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (idx !== -1) S.activeRenderers.splice(idx, 1);
         if (cancelled || finished || !targetEl) return;
         clearFrame();
+        clearSelectionRetry();
         if (pending && !(typeof finalText === 'string' && finalText.length > 0)) emitText(true);
         finished = true;
         paused = false;
@@ -4958,6 +4978,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       stop: function() {
         if (cancelled) return;
         clearFrame();
+        clearSelectionRetry();
         if (pending) emitText(true);
         if (ink) ink.clear();
         finished = true;
@@ -4976,6 +4997,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         settleDrain(false);
         api.isCancelled = true;
         clearFrame();
+        clearSelectionRetry();
         removeCursor();
         pending = '';
         rendered = '';
@@ -9558,6 +9580,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // Empty/invalid drafts must never interrupt a reply. A distinct valid send
     // replaces the active turn synchronously, including its auth/preflight phase.
     if (!text && !fileList.some(function(f) { return f && f.dataUrl; })) return;
+    if (!S.active) { notify('聊天面板未就绪，请重新打开或登录后再发送'); return; }
     if (text.length > 50000) { notify('消息过长，最多 50000 字符，请精简后重试'); return; }
     if (S.sending || S._interruptChat) interruptCurrentChat();
     S.lastSendFingerprint = sendFingerprint;
@@ -9695,6 +9718,16 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         maybeRestoreEmptyState(messagesEl);
       } catch (eRmDom) {}
     }
+    // A send can hit `!S.active` after the local placeholder was already added
+    // (e.g. opening the panel failed auth). Without this cleanup S.sending stays
+    // true forever and every later send is blocked.
+    function abandonInactiveSend() {
+      if (S._currentReqId !== reqId || !customModelIdentityCurrent(sendIdentity)) return;
+      try { assistantNode.remove(); } catch (_) {}
+      removeThisUserMessage();
+      restoreInputText();
+      resetSendingIfCurrent();
+    }
 
     // ============================================================
     // P1 修复: 立即显示用户消息和助手等待节点 (<=100ms)
@@ -9811,7 +9844,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     } catch (eQ) {}
     // A close/reopen can start a new send while this quota request is pending.
     // The stale send must not clear or reuse the newer send's state.
-    if ((sendToken !== S.sendSeq || !customModelIdentityCurrent(sendIdentity)) || !S.active) return;
+    if (sendToken !== S.sendSeq || !customModelIdentityCurrent(sendIdentity)) return;
+    if (!S.active) { abandonInactiveSend(); return; }
     var qGate = canSendWithQuota();
     if (!qGate.ok) {
       notify(qGate.message || '今日额度已用完');
@@ -9823,7 +9857,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }
 
     var authOk = await ensureUserAuthOrNotify({ allowGuest: true, fastPath: true });
-    if ((sendToken !== S.sendSeq || !customModelIdentityCurrent(sendIdentity)) || (S._currentReqId !== reqId || !customModelIdentityCurrent(sendIdentity)) || !S.active) return;
+    if (sendToken !== S.sendSeq || !customModelIdentityCurrent(sendIdentity) || S._currentReqId !== reqId) return;
+    if (!S.active) { abandonInactiveSend(); return; }
     if (!authOk) {
       // 认证失败 => 清理UI，恢复状态
       try { assistantNode.remove(); } catch (e) {}
@@ -9977,11 +10012,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             if ((sendToken !== S.sendSeq || !customModelIdentityCurrent(sendIdentity)) || (S._currentReqId !== reqId || !customModelIdentityCurrent(sendIdentity)) || controller.signal.aborted) return;
             var _resp2 = await aiFeatureFetch(url, {
               method: 'POST',
-              headers: (_auth2 && _auth2.headers) || headers,
+              headers: withOpenRouterHint((_auth2 && _auth2.headers) || {}, isCustomModel ? customCfg : null),
               body: fetchBody,
               signal: controller.signal
             });
-            if (_resp2) resp = _resp2;
+            if (_resp2) {
+              try { if (resp && resp.body) resp.body.cancel().catch(function() {}); } catch (_) {}
+              resp = _resp2;
+            }
           } catch (eRetry401) {
             // 重发本身失败（网络/中断）：保留原始 401 响应走下方统一错误分支
           }
@@ -10627,7 +10665,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             onRender: function() { scrollToBottom(messagesEl, false); }
           });
           // P4 修复: 设置复制事件监听器
-          setupBubbleCopy(assistantBubble, messagesEl);
+          // Renderer can be recreated on tool/narration rounds; bind copy handlers
+          // only once per bubble or listeners stack up.
+          if (!assistantBubble.__copyBound) {
+            assistantBubble.__copyBound = true;
+            setupBubbleCopy(assistantBubble, messagesEl);
+          }
         }
         return assistantBubble;
       }
@@ -11707,7 +11750,17 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               ensureAssistantBubbleReady();
               clearInterval(_idleCheckTimer);
               var drained = await contentRenderer.drain(aiContent, controller.signal);
-              if (S._currentReqId !== reqId || !customModelIdentityCurrent(sendIdentity)) return;
+              if (S._currentReqId !== reqId || !customModelIdentityCurrent(sendIdentity)) {
+                // Superseded while draining: release this request's controller and
+                // reader even though another turn owns the UI now.
+                if (sharedCtrl) {
+                  try { window.XtjAiCore.RequestController.unregisterInFlight('cat_ai', sharedCtrl); } catch (eUnregStale) {}
+                  try { sharedCtrl.dispose(); } catch (eDisposeStale) {}
+                }
+                try { cancelAiStreamReader(reader); } catch (eReaderStale) {}
+                resetSendingIfCurrent();
+                return;
+              }
               if (assistantNode.isConnected === false) {
                 // ★ 修复（P1 发送锁永久卡死）：气泡被移除（切换/清空/重建会话）时，
                 //   原实现直接 return，跳过了 S.sending=false、unregisterInFlight、
@@ -11777,6 +11830,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       }
       
       try { clearInterval(_idleCheckTimer); } catch (e) {}
+      // Normal done/EOF path: release the reader/body instead of waiting for GC.
+      try { if (reader && typeof reader.cancel === 'function') reader.cancel(); } catch (eReaderDone) {}
 
       // H-25: 45s 无数据超时 — 清理节点、复位状态并提示，避免永久"处理中"
       if (timedOut) {
@@ -11955,7 +12010,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var cachedData = getAiHistoryCache(S.conversationId);
       cachedMsgs = cachedData && cachedData.messages;
       
-      if (cachedMsgs && Array.isArray(cachedMsgs) && cachedMsgs.length > 0) {
+      if (!S.sending && cachedMsgs && Array.isArray(cachedMsgs) && cachedMsgs.length > 0) {
         hasCache = true;
         S.messages = cachedMsgs;
         S._pendingLocalMsgs = cachedMsgs.filter(function(m) { return m && m._pendingSync === true; });
@@ -11972,11 +12027,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         renderAiHistoryCards(messagesEl, cachedMsgs, cachedNodes, []);
         S.autoScrollPinned = true;
         scrollToBottom(messagesEl, true);
-      } else if (!messagesEl.children.length
+      } else if (!S.sending && (!messagesEl.children.length
           || messagesEl.querySelector('.ai-history-unavailable')
           // renderAiRoot starts with the welcome empty-state, so checking only
           // children.length skipped the loading indicator on every cold open.
-          || messagesEl.querySelector('.ai-chat-empty')) {
+          || messagesEl.querySelector('.ai-chat-empty'))) {
         messagesEl.innerHTML = '';
         var loadingState = buildEmptyState('正在加载聊天记录…');
         loadingState.classList.add('ai-history-loading');
@@ -12386,7 +12441,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     if (cid === S.conversationId && S.messages.length > 0) return;
     if (S._switchAiComposerDraft) S._switchAiComposerDraft(cid);
     if (S._aiChatFilesCleanup) S._aiChatFilesCleanup();
-    abortCurrentRequest();
+    abortCurrentRequest('chat');
     // ★★ 2026-09-29（审计 S2「切会话后旧流仍继续收尾，污染新会话」）：
     //   现象：A 会话 AI 还在输出时切到 B，B 里会莫名多出一条 A 的 AI 回复，
     //   并被写进 B 的本地缓存（下次打开 B 还能看到"别人的回答"）；若 A 流还没
@@ -12397,6 +12452,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     //   修法：切会话时把 _currentReqId 置空，旧流所有收尾路径（含 finishAiMessage）
     //   都会因"我不再是当前请求"而短路；同时作废本轮的本地待同步消息引用。
     S._currentReqId = null;
+    S._interruptChat = null;
     S._pendingLocalMsgs = [];
     removeHistoryUnavailableBanner(S.messagesEl);
     
@@ -14905,6 +14961,7 @@ function showChatMessages() {
     S.deepThinkProgressCard = null;
     // 重置所有状态，避免重开后残留
     S.sending = false;
+    S._interruptChat = null;
     S.paused = false;
     S.activeRenderers = [];
     if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }

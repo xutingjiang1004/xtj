@@ -3,30 +3,40 @@ const { parentPort, workerData } = require('node:worker_threads');
 const zlib = require('node:zlib');
 const MAX_TEXT = 200000;
 function validateOfficeZip(buffer) {
-  if (buffer.readUInt32LE(0) !== 0x04034b50) return; // legacy XLS is not a ZIP
+  // A ZIP may have a prepended stub (self-extracting / polyglot), so byte 0 is
+  // not a reliable "is ZIP" test. Locate the EOCD first; only fall back to the
+  // legacy-XLS path when no valid central directory can be found.
+  const looksZip = buffer.length >= 4 && buffer.readUInt32LE(0) === 0x04034b50;
   let end = -1;
   for (let i = buffer.length - 22; i >= Math.max(0, buffer.length - 65557); i--) {
     if (buffer.readUInt32LE(i) === 0x06054b50) { end = i; break; }
   }
-  if (end < 0) throw Error('invalid_zip');
+  if (end < 0) { if (looksZip) throw Error('invalid_zip'); return; }
   const count = buffer.readUInt16LE(end + 10);
   let offset = buffer.readUInt32LE(end + 16), total = 0;
   if (count > 2000 || count === 65535) throw Error('document_expansion_limit');
-  for (let i = 0; i < count; i++) {
-    if (offset + 46 > end || buffer.readUInt32LE(offset) !== 0x02014b50) throw Error('invalid_zip_directory');
-    const flags = buffer.readUInt16LE(offset + 8), method = buffer.readUInt16LE(offset + 10);
-    const compressed = buffer.readUInt32LE(offset + 20), size = buffer.readUInt32LE(offset + 24);
-    const local = buffer.readUInt32LE(offset + 42);
-    total += size;
-    if (flags & 1 || size > 16 * 1024 * 1024 || total > 64 * 1024 * 1024 || local + 30 > buffer.length) throw Error('document_expansion_limit');
-    if (buffer.readUInt32LE(local) !== 0x04034b50) throw Error('invalid_zip_entry');
-    const start = local + 30 + buffer.readUInt16LE(local + 26) + buffer.readUInt16LE(local + 28);
-    if (start + compressed > offset || ![0, 8].includes(method)) throw Error('invalid_zip_entry');
-    const input = buffer.subarray(start, start + compressed);
-    // Verify the actual inflated length; directory sizes alone are untrusted.
-    const output = method === 0 ? input : zlib.inflateRawSync(input, { maxOutputLength: Math.min(size + 1, 16 * 1024 * 1024 + 1) });
-    if (output.length !== size) throw Error('invalid_zip_size');
-    offset += 46 + buffer.readUInt16LE(offset + 28) + buffer.readUInt16LE(offset + 30) + buffer.readUInt16LE(offset + 32);
+  try {
+    for (let i = 0; i < count; i++) {
+      if (offset + 46 > end || buffer.readUInt32LE(offset) !== 0x02014b50) throw Error('invalid_zip_directory');
+      const flags = buffer.readUInt16LE(offset + 8), method = buffer.readUInt16LE(offset + 10);
+      const compressed = buffer.readUInt32LE(offset + 20), size = buffer.readUInt32LE(offset + 24);
+      const local = buffer.readUInt32LE(offset + 42);
+      total += size;
+      if (flags & 1 || size > 16 * 1024 * 1024 || total > 64 * 1024 * 1024 || local + 30 > buffer.length) throw Error('document_expansion_limit');
+      if (buffer.readUInt32LE(local) !== 0x04034b50) throw Error('invalid_zip_entry');
+      const start = local + 30 + buffer.readUInt16LE(local + 26) + buffer.readUInt16LE(local + 28);
+      if (start + compressed > offset || ![0, 8].includes(method)) throw Error('invalid_zip_entry');
+      const input = buffer.subarray(start, start + compressed);
+      // Verify the actual inflated length; directory sizes alone are untrusted.
+      const output = method === 0 ? input : zlib.inflateRawSync(input, { maxOutputLength: Math.min(size + 1, 16 * 1024 * 1024 + 1) });
+      if (output.length !== size) throw Error('invalid_zip_size');
+      offset += 46 + buffer.readUInt16LE(offset + 28) + buffer.readUInt16LE(offset + 30) + buffer.readUInt16LE(offset + 32);
+    }
+  } catch (error) {
+    // No ZIP signature at byte 0: let legacy .xls through; a real ZIP with a
+    // broken central directory is rejected.
+    if (!looksZip) return;
+    throw error;
   }
 }
 async function parse() {

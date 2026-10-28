@@ -20,26 +20,31 @@ function sanitizeAssistantVisibleText(text, options) {
   // 0. Strip dangerous HTML payloads (prompt-injection -> stored-XSS guard).
   //    These tags/attributes are never legitimate markdown, so removing them
   //    (including their inner content) cannot corrupt normal rendering.
+  //    Decode numeric entities first so `&#106;avascript:` / `&#x6a;avascript:`
+  //    are normalised before the scheme checks below.
+  s = s.replace(/&#(x[0-9a-f]+|\d+);?/gi, function (m, code) {
+    var n = code.charAt(0).toLowerCase() === 'x' ? parseInt(code.slice(1), 16) : parseInt(code, 10);
+    return Number.isFinite(n) && n >= 0 && n <= 0x10ffff ? String.fromCodePoint(n) : m;
+  });
   s = s.replace(/<\s*(script|style|iframe|object|embed)\b[^>]*>[\s\S]*?<\s*\/\s*(script|style|iframe|object|embed)\s*>/gi, '');
   s = s.replace(/<\s*(script|style|iframe|object|embed)\b[^>]*\/?\s*>/gi, '');
   // Remove event-handler attributes (onclick/onerror/...).
   // 审计 🟡 属性分隔符放宽：旧 `\s+on...` 要求 "on" 前有空白，`<img/onerror=...>`（无空白
   // 分隔符）绕过；`\S*on...` 覆盖 `/`、引号、括号等紧邻分隔形式。代价是可能误伤形如
   // "phone=" 的词（"on" 前有字母），由前端渲染层最终兜底，此处主防线优先保证剥离。
-  // ★ 修复：`\S*` 在无空白的超长正文上会退化成 O(n²) 回溯（每个起点都把剩余文本
-  //   吃进 \S* 再逐字符回退找 "on"），可卡死事件循环。属性前缀本身不可能很长，
-  //   改为有界量词 \S{0,64}，既保留 `<img/onerror=` 这类紧邻分隔的覆盖，又把单次
-  //   匹配代价压到常数级。
-  s = s.replace(/\S{0,64}on[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, ' ');
+  // ★ 修复：`\S{0,64}` 在无空白超长正文上仍会退化成 O(n²) 回溯（每个起点把
+  //   剩余文本吃进量词再逐字符回退找 "on"）。改为固定边界的前缀 + 有界属性值，
+  //   单次匹配代价为常数级；用捕获组保留分隔符，避免误删前面的 `/` 或引号。
+  s = s.replace(/(^|[^\w-])on[a-z]{1,20}\s*=\s*(?:"[^"]{0,512}"|'[^']{0,512}'|[^\s>]{1,512})/gi, '$1 ');
   // Neutralize dangerous URL protocols that survive markdown rendering.
   // ① 实体编码 scheme 绕过（javascript&#58; / javascript&#x3a;）：markdown 链接
   // `[x](javascript&#58;alert(1))` 渲染后浏览器解码属性值为 javascript: 即恢复执行。
   // 先把危险 scheme 后的冒号数字实体（&#58;/&#x3a;）归一化为字面冒号供下方正则命中。
   s = s.replace(/(javascript|vbscript|data)\s*(?:&#(?:0*58|x0*3a);?)/gi, '$1:');
-  s = s.replace(/\bjavascript\s*:/gi, ' ');
+  s = s.replace(/\b(?:java|vb)[\s\u0000-\u0020]*script[\s\u0000-\u0020]*:/gi, ' ');
   // ③ 补充 vbscript:（IE 时代脚本协议）与可内嵌脚本的 data:image/svg+xml 中和
   s = s.replace(/\bvbscript\s*:/gi, ' ');
-  s = s.replace(/\bdata\s*:\s*(?:text\/html|image\/svg\+xml)\b/gi, ' ');
+  s = s.replace(/\bdata[\s\u0000-\u0020]*:\s*(?:text\/html|image\/svg\+xml)\b/gi, ' ');
 
   // When roleplay is on, skip action cleanup so backend does not rewrite RP style.
   if (options.skipActionCleanup) return s;

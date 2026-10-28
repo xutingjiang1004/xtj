@@ -97,6 +97,7 @@
 
     // ── Cleanup ──────────────────────────────────────────────────────────
     function dispose() {
+      finalize(STATE.CANCELLED, 'disposed');
       clearTimers();
       try { controller.abort('disposed'); } catch (e) {}
     }
