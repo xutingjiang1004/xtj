@@ -31,7 +31,7 @@ test('high-quality display copies preserve originals, bound dimensions and share
   await request(f.app).get(route).expect(401);assert.equal(f.downloads,0);
   const [a,b]=await Promise.all([request(f.app).get(route).set('Authorization','reader'),request(f.app).get(route).set('Authorization','reader')]);
   assert.equal(a.status,200);assert.equal(b.status,200);assert.equal(f.downloads,1);
-  const meta=await sharp(a.body).metadata();assert.equal(meta.format,'webp');assert.equal(meta.width,1920);assert.ok(meta.height>1000);
+  const meta=await sharp(a.body).metadata();assert.equal(meta.format,'webp');assert.equal(meta.width,1080);assert.ok(meta.height>600);
   assert.equal(a.headers.etag,b.headers.etag);assert.equal(a.headers['cache-control'],'private, no-cache, must-revalidate');
   const decoded=await sharp(a.body).raw().toBuffer();assert.ok(Math.abs(decoded[0]-0x78)<8&&Math.abs(decoded[1]-0xbb)<8&&Math.abs(decoded[2]-0xa4)<8,'preview retains the source colors');
   const original=await request(f.app).get('/api/photo/'+A+'/media').set('Authorization','reader').expect(200);assert.deepEqual(original.body,f.input);

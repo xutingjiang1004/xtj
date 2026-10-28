@@ -1,7 +1,7 @@
 'use strict';
 const crypto = require('node:crypto');
 const { mediaTraffic } = require('./media-traffic');
-const VARIANT = 'hq1920-q90-v1', MAX_SOURCE = 50 * 1024 * 1024;
+const VARIANT = 'hd1080-q80-v1', MAX_SOURCE = 50 * 1024 * 1024;
 function cleanTag(value) { return String(value || '').replace(/^W\//, '').replace(/^"|"$/g, ''); }
 function sourceInfo(data) {
   const meta = data && data.metadata || {};
@@ -60,11 +60,14 @@ function createMediaPreviews({ supabase, sharp, fetchImpl = fetch, traffic = med
     finally { working = false; void pump(); }
   }
   async function encode(input) {
-    // An independent display copy. Originals are never rewritten. One decoder
-    // at a time bounds free-instance memory; 90 quality is not a byte target.
+    // An independent display copy. Originals are never rewritten or replaced.
+    // 2026-10-28：列表统一用 1080px / q80 —— 之前 1920/q90 单张约 540-740KB，
+    // 一页 3 张就 2MB，既拖慢首屏，也让免费实例的串行编码长期占满进程。
+    // 点开大图仍走原图字节（不带 preview 参数），分辨率与画质不受此影响。
+    // One decoder at a time bounds free-instance memory.
     return sharp(input, { animated: false, limitInputPixels: 64 * 1024 * 1024 })
-      .rotate().resize({ width: 1920, height: 1920, fit: 'inside', withoutEnlargement: true })
-      .webp({ quality: 90, alphaQuality: 100, effort: 4 }).timeout({ seconds: 15 }).toBuffer();
+      .rotate().resize({ width: 1080, height: 1080, fit: 'inside', withoutEnlargement: true })
+      .webp({ quality: 80, alphaQuality: 100, effort: 4 }).timeout({ seconds: 15 }).toBuffer();
   }
   async function download(bucket, path, expected, signal) {
     signal.throwIfAborted();
