@@ -4114,6 +4114,19 @@ function shouldCountVisit(ip) {
         if (!k.endsWith('_' + today)) keysToDelete.push(k);
       });
       keysToDelete.forEach(function(k) { visitCache.delete(k); });
+      // ★ 修复：上面的清理只删「非今天」的键。若单日唯一 IP 数就超过上限，
+      //   size 会一直停在上限之上并继续增长（内存单调上升）。这里补一层硬上限：
+      //   仍超限时按 Map 插入顺序淘汰最旧条目（同一天内先去重较早的 IP）。
+      var overflow = visitCache.size - 10000;
+      if (overflow > 0) {
+        var oldest = visitCache.keys();
+        while (overflow > 0) {
+          var nextKey = oldest.next();
+          if (nextKey.done) break;
+          visitCache.delete(nextKey.value);
+          overflow -= 1;
+        }
+      }
     }, 100);
   }
   return true;
@@ -12272,7 +12285,7 @@ async function deleteAnnouncementHandler(req, res) {
     const { id } = req.params;
     const { data: post } = await supabase.from('posts').select('actor_key, media_type').eq('id', id).maybeSingle();
     if (!post) return res.status(404).json({ error: '公告不存在', code: 'not_found' });
-    if (post.media_type && post.media_type !== '__ann__') {
+    if (post.media_type !== '__ann__') {
       return res.status(400).json({ error: '目标不是公告', code: 'not_announcement' });
     }
     const actorKey = post.actor_key;
@@ -14218,7 +14231,7 @@ app.get('/api/stats/snapshot', authenticateUser, rateLimit(60000, 30), async (re
     var interactionLimit = isAdmin ? 5000 : 1000;
     const [postsResult, likesResult, commentsResult, visitsResult] = await Promise.all([
       applyPublicPostExclusions(supabase.from('posts')
-        .select('id, user_name, content, media_url, media_type, visibility, views, actor_key, created_at, is_pinned, pinned_at'))
+        .select('id, user_name, content, media_url, media_type, visibility, views, actor_key, created_at, is_pinned, pinned_at, is_deleted'))
         .order('created_at', { ascending: false }).limit(limit),
       supabase.from('likes').select('id::text, post_id, user_name, created_at').order('created_at', { ascending: false }).limit(interactionLimit),
       supabase.from('comments').select('id::text, post_id, user_name, content, created_at').order('created_at', { ascending: false }).limit(interactionLimit),
@@ -14229,6 +14242,9 @@ app.get('/api/stats/snapshot', authenticateUser, rateLimit(60000, 30), async (re
     if (failed) return res.status(500).json({ error: sanitizeError(failed), code: 'stats_snapshot_failed' });
 
     var posts = (postsResult.data || []).filter(function(post) {
+      // ★ 修复：软删（is_deleted=true）的帖子不得进入统计快照——此前只按 media_type
+      //   白名单过滤，已删帖的正文/媒体仍会随 /api/stats/snapshot 返回。
+      if (post.is_deleted === true) return false;
       return !post.visibility || post.visibility === 'public' || post.user_name === req.userName;
     });
     var postIds = new Set(posts.map(function(post) { return String(post.id); }));
@@ -17181,6 +17197,20 @@ app.post('/api/report', rateLimit(60000, 5), authenticateUser, async (req, res) 
       .select('id').eq('user_name', String(targetUserVal)).eq('media_type', AUTH_MARKER).limit(1).maybeSingle();
     if (tgtCheckErr) return res.status(503).json({ error: '举报校验暂不可用' });
     if (!targetExistsRec) return res.status(400).json({ error: '被举报用户不存在' });
+  }
+  // ★ 修复：target_user 与 target_id 此前各自独立、都来自客户端，没有归属校验。
+  //   攻击者可拿 A 的帖子 id 把 target_user 填成 B（B 真实存在即可通过上面的存在性校验），
+  //   管理员按 target_user 封禁时就封错了人。这里服务端反查帖子归属并要求一致。
+  //   只在 target_type=post 且 target_id 是合法 UUID 时校验；照片墙对象用 media_url
+  //   无法按 id 反查，保持原有行为。
+  if (targetUserVal && String(target_type) === 'post' &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(target_id))) {
+    var { data: targetPostRec, error: targetPostErr } = await supabase.from('posts')
+      .select('user_name').eq('id', String(target_id)).maybeSingle();
+    if (targetPostErr) return res.status(503).json({ error: '举报校验暂不可用' });
+    if (targetPostRec && String(targetPostRec.user_name || '') !== String(targetUserVal)) {
+      return res.status(400).json({ error: '举报目标与被举报用户不一致' });
+    }
   }
   
   const reportContent = JSON.stringify({
@@ -22994,7 +23024,11 @@ app.get('/api/agent/image', authenticateUser, securityRateLimit(3600000, 40), as
         return res.status(502).json({ error: '生图服务返回了无效地址', code: 'image_upstream_blocked' });
       }
       var isPlaceholder = /\/default\.jpe?g(\?|#|$)/i.test(finalUrl);
-      if (!/^image\//.test(cType)) {
+      // ★ 修复：此前只放行 ^image/，image/svg+xml 会被原样回源 —— SVG 内可内嵌
+      //   脚本，经同源代理返回即成为存储型 XSS 面。生图服务只应返回位图，这里改为
+      //   位图白名单，并把 Content-Type 归一化后配合 nosniff 输出。
+      var safeImageType = String(cType).split(';')[0].trim().toLowerCase();
+      if (!/^image\/(?:png|jpe?g|webp|gif)$/.test(safeImageType)) {
         if (i >= delays.length - 1) {
           return res.status(502).json({ error: '生图服务返回了非图片内容，请稍后重试', code: 'image_bad_response' });
         }
@@ -23015,9 +23049,10 @@ app.get('/api/agent/image', authenticateUser, securityRateLimit(3600000, 40), as
       if (buf.length > 16 * 1024 * 1024) {
         return res.status(502).json({ error: '生图服务返回内容过大', code: 'image_too_large' });
       }
-      res.setHeader('Content-Type', cType);
+      res.setHeader('Content-Type', safeImageType);
       res.setHeader('Cache-Control', 'no-store');
       res.setHeader('X-Image-Proxy', '1');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
       return res.end(buf);
     }
     return res.status(503).json({ error: '图片服务繁忙，暂时无法生成，请稍后重试', code: 'image_busy' });
@@ -27716,7 +27751,10 @@ process.on('unhandledRejection', function(reason) {
   }
   if (_unhandledRejectionCount >= UNHANDLED_REJECTION_EXIT_THRESHOLD) {
     console.error('[FATAL] ' + (UNHANDLED_REJECTION_WINDOW_MS / 1000) + ' 秒内连续 ' + _unhandledRejectionCount + ' 次未处理 Promise 失败，进程状态可能不一致，退出避免数据损坏');
-    process.exit(1);
+    // ★ 修复：此前直接 process.exit(1) 会切断所有进行中的 SSE 流与未完成的落库、
+    //   绕过 gracefulShutdown。改为与 uncaughtException / SIGTERM 同一收尾路径，
+    //   先停止接收新连接并给在途请求 5 秒收尾时间。
+    gracefulShutdown(1);
   }
 });
 

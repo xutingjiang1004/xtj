@@ -435,7 +435,7 @@
                 } catch (e) {}
             }
 
-            function applyStatSnapshot(posts, comments, likes, viewEvents) {
+            function applyStatSnapshot(posts, comments, likes, viewEvents, fromServer) {
                 var visiblePosts = normalizePosts(Array.isArray(posts) ? posts : []).filter(function(p) {
                     return p && !isSystemPost(p) && canViewPost(p);
                 });
@@ -473,7 +473,12 @@
                 if (viewsCountEl) viewsCountEl.textContent = String(statViewEvents.length);
                 // 只显示点赞数，不再把评论混进"总点赞"
                 if (likesCountEl) likesCountEl.textContent = String(statAllLikes.length);
-                statCacheTime = Date.now();
+                // ★ 修复（P1 统计缓存被污染）：缓存有效期只能由「服务端快照」建立。
+                //   此前无论数据来源都写 statCacheTime，而统计弹窗会先用 feed 内存数据
+                //   回填一次，于是 hasUsableStatCache() 立刻为真，
+                //   ensureStatDataLoaded(false) 永远短路 —— 服务端统计（含浏览记录、
+                //   精确 likes/comments 计数）在常规路径上从不请求，"总浏览"恒为 0。
+                if (fromServer === true) statCacheTime = Date.now();
             }
 
             var statRequestId = 0;
@@ -495,7 +500,7 @@
                 if (!force && statDataPromise) return statDataPromise;
                 statDataPromise = fetchStatSnapshotWithTimeout(5000).then(function(snapshot) {
                     if (snapshot) {
-                        applyStatSnapshot(snapshot.posts, snapshot.comments, snapshot.likes, snapshot.view_events);
+                        applyStatSnapshot(snapshot.posts, snapshot.comments, snapshot.likes, snapshot.view_events, true);
                     }
                     return snapshot;
                 }).finally(function() {
@@ -561,7 +566,7 @@
                 renderStatByTypeFinal(statCurrentType);
                 ensureStatDataLoaded(false).then(function(snapshot) {
                     if (!snapshot || !modal.classList.contains('active') || !statCurrentType) return;
-                    applyStatSnapshot(snapshot.posts, snapshot.comments, snapshot.likes, snapshot.view_events);
+                    applyStatSnapshot(snapshot.posts, snapshot.comments, snapshot.likes, snapshot.view_events, true);
                     renderStatByTypeFinal(statCurrentType);
                 }).catch(function() {});
             };
@@ -797,7 +802,7 @@
                     renderStatByTypeFinal(type);
                     ensureStatDataLoaded(false).then(function(snapshot) {
                         if (!snapshot || !modal || !modal.classList.contains('active') || statCurrentType !== type || requestId !== statRequestId) return;
-                        applyStatSnapshot(snapshot.posts, snapshot.comments, snapshot.likes, snapshot.view_events);
+                        applyStatSnapshot(snapshot.posts, snapshot.comments, snapshot.likes, snapshot.view_events, true);
                         renderStatByTypeFinal(type);
                     }).catch(function() {});
                     return;
@@ -806,7 +811,7 @@
                 var snapshot = await ensureStatDataLoaded(true);
                 if (!modal || !modal.classList.contains('active') || statCurrentType !== type || requestId !== statRequestId) return;
                 if (snapshot) {
-                    applyStatSnapshot(snapshot.posts, snapshot.comments, snapshot.likes, snapshot.view_events);
+                    applyStatSnapshot(snapshot.posts, snapshot.comments, snapshot.likes, snapshot.view_events, true);
                     renderStatByTypeFinal(type);
                 } else if (body) {
                     body.innerHTML = '<div class="stat-empty">加载失败，请重试</div>';

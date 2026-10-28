@@ -26,7 +26,11 @@ function sanitizeAssistantVisibleText(text, options) {
   // 审计 🟡 属性分隔符放宽：旧 `\s+on...` 要求 "on" 前有空白，`<img/onerror=...>`（无空白
   // 分隔符）绕过；`\S*on...` 覆盖 `/`、引号、括号等紧邻分隔形式。代价是可能误伤形如
   // "phone=" 的词（"on" 前有字母），由前端渲染层最终兜底，此处主防线优先保证剥离。
-  s = s.replace(/\S*on[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, ' ');
+  // ★ 修复：`\S*` 在无空白的超长正文上会退化成 O(n²) 回溯（每个起点都把剩余文本
+  //   吃进 \S* 再逐字符回退找 "on"），可卡死事件循环。属性前缀本身不可能很长，
+  //   改为有界量词 \S{0,64}，既保留 `<img/onerror=` 这类紧邻分隔的覆盖，又把单次
+  //   匹配代价压到常数级。
+  s = s.replace(/\S{0,64}on[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, ' ');
   // Neutralize dangerous URL protocols that survive markdown rendering.
   // ① 实体编码 scheme 绕过（javascript&#58; / javascript&#x3a;）：markdown 链接
   // `[x](javascript&#58;alert(1))` 渲染后浏览器解码属性值为 javascript: 即恢复执行。

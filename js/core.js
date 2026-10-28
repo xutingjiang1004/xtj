@@ -2283,11 +2283,26 @@ function isAdmin() {
                     });
                 } catch(e) {}
             };
-            if (typeof requestIdleCallback === 'function') {
-                requestIdleCallback(preloadFn, { timeout: 2000 });
-            } else {
-                setTimeout(preloadFn, 2000);
-            }
+            // ★ 性能修复：原实现在 DOMContentLoaded 阶段就 requestIdleCallback(timeout:2000)，
+            //   2 秒超时会在页面还没闲下来时强行下载 ai-agent.min.js(352KB) +
+            //   ai-agent.min.css(173KB)，与首屏 feed/图片抢带宽和主线程 —— 弱机上正好把
+            //   首屏拖慢。改为：
+            //   ① 等 window.load（首屏资源基本就绪）再闲时预取；
+            //   ② 超时放宽到 8s，真正闲下来才下；
+            //   ③ 省流模式或 2g/3g 网络直接不预取，用户真要开 AI 时按需加载（有骨架屏兜底）。
+            var startWhenIdle = function() {
+                try {
+                    var conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+                    if (conn && (conn.saveData === true || /^(slow-)?2g$|^3g$/i.test(String(conn.effectiveType || '')))) return;
+                } catch (eConn) {}
+                if (typeof requestIdleCallback === 'function') {
+                    requestIdleCallback(preloadFn, { timeout: 8000 });
+                } else {
+                    setTimeout(preloadFn, 8000);
+                }
+            };
+            if (document.readyState === 'complete') startWhenIdle();
+            else window.addEventListener('load', startWhenIdle, { once: true });
         }
         // 在消息页面加载后触发预加载
         window.__xtjScheduleAiPreload = scheduleAiPreload;
@@ -8216,6 +8231,28 @@ function renderProfileActivityList(kind) {
                 });
             }
 
+            // ★ 首屏性能：normalizePost 每次都要 parsePostContent（JSON.parse + try/catch）
+            //   并重建 media_items；而 renderPostCard 先把 post normalize 一次，再分别交给
+            //   formatPostTime / buildPostBadges / buildPostStatsLine / buildPostActionHtml，
+            //   每个函数内部又各自 normalizePost(post) 一次 —— 单张卡片重复 4 次，输出完全相同。
+            //   这里按「对象身份」+ feedStateVersion 复用同一轮渲染内的结果：
+            //   状态一变（markFeedStateChanged）即整体失效，因此不会读到过期内容，
+            //   结果与直接调用 normalizePost 完全等价（normalizePost 对同一对象是幂等的）。
+            var _postNormalizeMemo = new WeakMap();
+            var _postNormalizeMemoVersion = -1;
+            function normalizePostForRender(post) {
+                if (!post || typeof post !== 'object') return normalizePost(post);
+                if (_postNormalizeMemoVersion !== feedStateVersion) {
+                    _postNormalizeMemo = new WeakMap();
+                    _postNormalizeMemoVersion = feedStateVersion;
+                }
+                var cached = _postNormalizeMemo.get(post);
+                if (cached) return cached;
+                var normalized = normalizePost(post);
+                _postNormalizeMemo.set(post, normalized);
+                return normalized;
+            }
+
             function formatRelativeTime(dateStr) {
                 var d = window.safeParseDate ? window.safeParseDate(dateStr) : new Date(dateStr);
                 var diff = Math.floor((Date.now() - d.getTime()) / 1000);
@@ -8227,7 +8264,7 @@ function renderProfileActivityList(kind) {
             }
 
             function formatPostTime(post) {
-                var normalized = normalizePost(post);
+                var normalized = normalizePostForRender(post);
                 var time = normalized.created_at ? window.safeParseDate(normalized.created_at).toLocaleString() : "";
                 var editedAt = normalized._contentMeta && normalized._contentMeta.edited_at ? normalized._contentMeta.edited_at : null;
                 if (editedAt) return time + " (已编辑)";
@@ -8235,7 +8272,7 @@ function renderProfileActivityList(kind) {
             }
 
             function buildPostBadges(post) {
-                var normalized = normalizePost(post);
+                var normalized = normalizePostForRender(post);
                 var bits = [];
                 bits.push('<span class="post-visibility-badge ' + (normalized.visibility === "private" ? 'private' : 'public') + '">' + (normalized.visibility === "private" ? '私密' : '公开') + '</span>');
                 if (normalized.is_pinned) bits.push('<span class="post-pin-badge">置顶</span>');
@@ -8243,7 +8280,7 @@ function renderProfileActivityList(kind) {
             }
 
             function buildPostStatsLine(post, likeCount, commentCount) {
-                var normalized = normalizePost(post);
+                var normalized = normalizePostForRender(post);
                 return '浏览 ' + (normalized.views || 0) +
                     ' | 点赞 ' + (likeCount || 0) +
                     ' | 评论 ' + (commentCount || 0);
@@ -8262,7 +8299,7 @@ function renderProfileActivityList(kind) {
                     '<button class="action-btn" onclick="openComment(\'' + idJs + '\')">评论</button>'
                 ];
                 if (canPinPost(post)) {
-                    actions.push('<button type="button" class="action-btn pin" data-post-id="' + idHtml + '">' + (normalizePost(post).is_pinned ? '取消置顶' : '置顶') + '</button>');
+                    actions.push('<button type="button" class="action-btn pin" data-post-id="' + idHtml + '">' + (normalizePostForRender(post).is_pinned ? '取消置顶' : '置顶') + '</button>');
                 }
                 if (canDelete) {
                     actions.push('<button type="button" class="action-btn del" onclick="openDelete(\'' + idJs + '\', \'' + actorKeyJs + '\')">删除</button>');
@@ -8703,7 +8740,7 @@ function renderProfileActivityList(kind) {
             window.buildPostCommentsHtml = buildPostCommentsHtml;
 
             function renderPostCard(post, commentMap, likeMap, likeUserMap) {
-                var normalized = normalizePost(post);
+                var normalized = normalizePostForRender(post);
                 // 安全兜底：content 是系统遥测/定位 JSON 则跳过
                 if (looksLikeSystemTelemetry(normalized.content)) {
                     return '';
@@ -10569,8 +10606,15 @@ function renderProfileActivityList(kind) {
                                 if (requestId !== feedLoadRequestId) return;
                                 await renderFeedFromMemoryState();
                                 setupFeedInfiniteScroll();
+                                // ★ 首屏性能：ensureFeedCoverageForVisibleSlice 在「切片已够」
+                                //   时直接 return true 不合并任何数据，此前仍会紧接着再跑一次
+                                //   renderFeedFromMemoryState → 整段 feed.innerHTML 重建，内容与
+                                //   刚渲染的完全一致（纯浪费）。这里用 feedStateVersion 判断本轮
+                                //   是否真的合并了新页：没变就不重建，渲染结果保持等价。
+                                var coverageStateVersion = feedStateVersion;
                                 ensureFeedCoverageForVisibleSlice(FEED_PAGE_SIZE, requestId).then(function() {
                                     if (requestId !== feedLoadRequestId) return;
+                                    if (feedStateVersion === coverageStateVersion) return;
                                     return renderFeedFromMemoryState();
                                 }).catch(function(error) {
                                     console.warn('[feed] cached coverage refresh failed:', error);
@@ -22076,7 +22120,7 @@ function renderProfileActivityList(kind) {
                 } catch (e) {}
             }
 
-            function applyStatSnapshot(posts, comments, likes, viewEvents) {
+            function applyStatSnapshot(posts, comments, likes, viewEvents, fromServer) {
                 var visiblePosts = normalizePosts(Array.isArray(posts) ? posts : []).filter(function(p) {
                     return p && !isSystemPost(p) && canViewPost(p);
                 });
@@ -22114,7 +22158,12 @@ function renderProfileActivityList(kind) {
                 if (viewsCountEl) viewsCountEl.textContent = String(statViewEvents.length);
                 // 只显示点赞数，不再把评论混进"总点赞"
                 if (likesCountEl) likesCountEl.textContent = String(statAllLikes.length);
-                statCacheTime = Date.now();
+                // ★ 修复（P1 统计缓存被污染）：缓存有效期只能由「服务端快照」建立。
+                //   此前无论数据来源都写 statCacheTime，而统计弹窗会先用 feed 内存数据
+                //   回填一次，于是 hasUsableStatCache() 立刻为真，
+                //   ensureStatDataLoaded(false) 永远短路 —— 服务端统计（含浏览记录、
+                //   精确 likes/comments 计数）在常规路径上从不请求，"总浏览"恒为 0。
+                if (fromServer === true) statCacheTime = Date.now();
             }
 
             var statRequestId = 0;
@@ -22136,7 +22185,7 @@ function renderProfileActivityList(kind) {
                 if (!force && statDataPromise) return statDataPromise;
                 statDataPromise = fetchStatSnapshotWithTimeout(5000).then(function(snapshot) {
                     if (snapshot) {
-                        applyStatSnapshot(snapshot.posts, snapshot.comments, snapshot.likes, snapshot.view_events);
+                        applyStatSnapshot(snapshot.posts, snapshot.comments, snapshot.likes, snapshot.view_events, true);
                     }
                     return snapshot;
                 }).finally(function() {
@@ -22202,7 +22251,7 @@ function renderProfileActivityList(kind) {
                 renderStatByTypeFinal(statCurrentType);
                 ensureStatDataLoaded(false).then(function(snapshot) {
                     if (!snapshot || !modal.classList.contains('active') || !statCurrentType) return;
-                    applyStatSnapshot(snapshot.posts, snapshot.comments, snapshot.likes, snapshot.view_events);
+                    applyStatSnapshot(snapshot.posts, snapshot.comments, snapshot.likes, snapshot.view_events, true);
                     renderStatByTypeFinal(statCurrentType);
                 }).catch(function() {});
             };
@@ -22438,7 +22487,7 @@ function renderProfileActivityList(kind) {
                     renderStatByTypeFinal(type);
                     ensureStatDataLoaded(false).then(function(snapshot) {
                         if (!snapshot || !modal || !modal.classList.contains('active') || statCurrentType !== type || requestId !== statRequestId) return;
-                        applyStatSnapshot(snapshot.posts, snapshot.comments, snapshot.likes, snapshot.view_events);
+                        applyStatSnapshot(snapshot.posts, snapshot.comments, snapshot.likes, snapshot.view_events, true);
                         renderStatByTypeFinal(type);
                     }).catch(function() {});
                     return;
@@ -22447,7 +22496,7 @@ function renderProfileActivityList(kind) {
                 var snapshot = await ensureStatDataLoaded(true);
                 if (!modal || !modal.classList.contains('active') || statCurrentType !== type || requestId !== statRequestId) return;
                 if (snapshot) {
-                    applyStatSnapshot(snapshot.posts, snapshot.comments, snapshot.likes, snapshot.view_events);
+                    applyStatSnapshot(snapshot.posts, snapshot.comments, snapshot.likes, snapshot.view_events, true);
                     renderStatByTypeFinal(type);
                 } else if (body) {
                     body.innerHTML = '<div class="stat-empty">加载失败，请重试</div>';
