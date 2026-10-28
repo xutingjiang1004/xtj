@@ -1,6 +1,6 @@
 {
   "name": "xtj",
-  "version": "0.95.0",
+  "version": "0.96.0",
   "description": "XTJ - 照片墙与社区平台（单页前端 + Express/Supabase 后端）",
   "main": "render-api/server.js",
   "scripts": {
