@@ -5675,6 +5675,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
     function draw(ts) {
       if (!state.running || state.paused) return;
+      // ★ 泄漏修复：卡片被移除（切换会话/新建对话/清空容器/重新加载历史）后，
+      //   IntersectionObserver 不会为游离节点回调，rAF 循环会永久空转（每帧绘制+ResizeObserver）。
+      //   每帧最便宜的自检：脱离文档即自停并释放监听。
+      if (!card.isConnected) { stop(); return; }
       if (state.profile.fps && state.lastFrameTs && ts - state.lastFrameTs < (1000 / state.profile.fps)) {
         state.rafId = requestAnimationFrame(draw);
         return;
@@ -5936,7 +5940,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       researchCard._researchState.startedAt = Date.now();
       var elapsedTimer = setInterval(function() {
         // ★ 定时器泄漏修复：_done 后自清理，避免历史回看卡片空转永久驻留
-        if (researchCard._done) { try { clearInterval(elapsedTimer); } catch (e) {} researchCard._researchState.elapsedTimer = null; return; }
+        // ★ 追加：卡片被移出文档（切会话/新建/清空容器，未走 _done 收尾）同样自清理，
+        //   否则每次中途打断深入研究都会残留一个每秒空转的 interval。
+        if (researchCard._done || !researchCard.isConnected) { try { clearInterval(elapsedTimer); } catch (e) {} researchCard._researchState.elapsedTimer = null; return; }
         syncResearchElapsed(researchCard, Date.now() - researchCard._researchState.startedAt);
       }, 1000);
       researchCard._researchState.elapsedTimer = elapsedTimer;
@@ -5964,7 +5970,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var cardStart = Date.now();
     var cardEl = card;
     var cardTimer = setInterval(function() {
-      if (S.deepThinkProgressCard !== cardEl || cardEl._done) { clearInterval(cardTimer); return; }
+      if (S.deepThinkProgressCard !== cardEl || cardEl._done || !cardEl.isConnected) { clearInterval(cardTimer); return; }
       var el = cardEl.querySelector('.ai-progress-elapsed');
       if (el) {
         var sec = Math.floor((Date.now() - cardStart) / 1000);
@@ -6006,7 +6012,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       }
       if (evt.type === 'thinking_chunk') {
         if (!card._thinkingLog) card._thinkingLog = [];
-        card._thinkingLog.push({ agent_role: evt.agent_role, chunk: evt.chunk, round: evt.round || 0 });
+        card._thinkingLog.push({ agent_role: evt.agent_role, chunk: String(evt.chunk == null ? '' : evt.chunk).slice(0, 4000), round: evt.round || 0 });
         setResearchCardState(card, 'thinking', {
           elapsedMs: research.elapsedMs || 0,
           stepCount: card._thinkingLog.length,
@@ -6048,7 +6054,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (titleText) titleText.textContent = '搜索中...';
     } else if (evt.type === 'thinking_chunk') {
       if (!card._thinkingLog) card._thinkingLog = [];
-      card._thinkingLog.push({ agent_role: evt.agent_role, chunk: evt.chunk, round: evt.round || 0 });
+      card._thinkingLog.push({ agent_role: evt.agent_role, chunk: String(evt.chunk == null ? '' : evt.chunk).slice(0, 4000), round: evt.round || 0 });
       var logBox = cached.logBox;
       if (logBox) {
         if (logBox.style.display === 'none') logBox.style.display = '';
@@ -9429,14 +9435,20 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (message === 'AI 工具数据表尚未迁移') message = '搜索服务正在初始化，请稍后重试。';
       if (status) status.textContent = message || '搜索暂不可用，请重试。';
     } finally {
-      if (currentSearch()) {
-      if (S.siteSearchCtrl && S.siteSearchCtrl === controller) S.siteSearchCtrl = null;
-      var results = document.getElementById('aiSiteSearchResults');
-      if (results) {
-        results.classList.remove('is-loading');
-        results.removeAttribute('aria-busy');
-      }
-      if (submit) submit.disabled = false;
+      // ★ 修复（P1 站内搜索永久禁用）：清理此前被 `if (currentSearch())` 包住，而
+      //   closeSiteSearch() 会自增 siteSearchLifecycleId，使 currentSearch() 恒为 false
+      //   —— 关闭面板后 submit 一直 disabled、骨架屏也不摘，再次打开就无法再搜。
+      //   现在：只要没有「更新的搜索请求」接管（S.siteSearchCtrl 已被置 null 或仍是本
+      //   请求），就无条件收敛 UI；被新请求接管时交给新请求收尾，避免互踩。
+      var ownsSearchUi = S.siteSearchCtrl === controller || S.siteSearchCtrl === null;
+      if (ownsSearchUi) {
+        if (S.siteSearchCtrl === controller) S.siteSearchCtrl = null;
+        var results = document.getElementById('aiSiteSearchResults');
+        if (results) {
+          results.classList.remove('is-loading');
+          results.removeAttribute('aria-busy');
+        }
+        if (submit) submit.disabled = false;
       }
     }
   }
@@ -11689,7 +11701,21 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               ensureAssistantBubbleReady();
               clearInterval(_idleCheckTimer);
               var drained = await contentRenderer.drain(aiContent, controller.signal);
-              if ((S._currentReqId !== reqId || !customModelIdentityCurrent(sendIdentity)) || assistantNode.isConnected === false) return;
+              if (S._currentReqId !== reqId || !customModelIdentityCurrent(sendIdentity)) return;
+              if (assistantNode.isConnected === false) {
+                // ★ 修复（P1 发送锁永久卡死）：气泡被移除（切换/清空/重建会话）时，
+                //   原实现直接 return，跳过了 S.sending=false、unregisterInFlight、
+                //   resetSendingIfCurrent() 等收尾 —— 之后所有发送都被
+                //   `if (S.sending) return` 拦住，只能刷新页面。
+                //   这里补齐与正常收尾一致的并发控制器注销，再释放本轮锁。
+                if (sharedCtrl) {
+                  try { window.XtjAiCore.RequestController.unregisterInFlight('cat_ai', sharedCtrl); } catch (eUnreg) {}
+                  try { sharedCtrl.dispose(); } catch (eDispose) {}
+                }
+                try { cancelAiStreamReader(reader); } catch (eDetached) {}
+                resetSendingIfCurrent();
+                return;
+              }
               if (!drained || controller.signal.aborted) throw new DOMException('Reply cancelled', 'AbortError');
               finishAiMessage(assistantNode, aiContent, aiReasoning, evt);
               if (streamComplete && aiContent.trim() && window.XTJHaptics) window.XTJHaptics.play('success');
@@ -12171,10 +12197,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   }
   // Account metadata is authoritative; legacy device titles remain a fallback
   // until the user next edits them and synchronizes the explicit change.
-  function getConversationTitleOverride(cid) {
+  function getConversationTitleOverride(cid, legacyTitles) {
     if (!cid) return '';
     var record=conversationMetadata.get(cid);if(record&&record.revision>0)return record.title||'';
-    try { var m = JSON.parse(scopedStorageGet('xtj_ai_conv_titles') || '{}'); return m[cid] || ''; } catch (e) { return ''; }
+    // ★ 性能：调用方可传入一次性解析好的本地标题表，避免列表渲染时每条会话都
+    //   重新 JSON.parse 一遍不断增大的 localStorage 映射（O(n) 次 parse → O(1) 次）。
+    try { var m = legacyTitles || JSON.parse(scopedStorageGet('xtj_ai_conv_titles') || '{}'); return m[cid] || ''; } catch (e) { return ''; }
   }
   function setConversationTitleOverride(cid, title) {
     if (!cid) return;
@@ -12219,6 +12247,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }
     var groups = {};
     var ordered = [];
+    // ★ 性能：本地标题表只解析一次，供下方每条会话复用（原实现每条会话解析两次）。
+    var legacyTitles = null;
+    try { legacyTitles = JSON.parse(scopedStorageGet('xtj_ai_conv_titles') || '{}'); } catch (eTitles) { legacyTitles = {}; }
     S.conversations.forEach(function(conv) {
       var key = getConversationGroupLabel(conv.updated_at || conv.created_at || '');
       if (!groups[key]) {
@@ -12235,12 +12266,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           class: 'ai-conv-item' + (conv.conversation_id === S.conversationId ? ' active' : ''),
           'data-conv-id': conv.conversation_id
         });
+        var convTitle = getConversationTitleOverride(conv.conversation_id, legacyTitles) || conv.title || '新对话';
         var openBtn = el('button', {
           type: 'button', class: 'ai-conv-open',
-          'aria-label': '打开对话：' + (getConversationTitleOverride(conv.conversation_id) || conv.title || '新对话')
+          'aria-label': '打开对话：' + convTitle
         });
         item.appendChild(openBtn);
-        item.appendChild(el('div', { class: 'ai-conv-title', text: (getConversationTitleOverride(conv.conversation_id) || conv.title || '新对话') }));
+        item.appendChild(el('div', { class: 'ai-conv-title', text: convTitle }));
         item.appendChild(el('div', { class: 'ai-conv-time', text: conv.updated_at ? fmtTime(conv.updated_at) : '' }));
         item.appendChild(el('div', { class: 'ai-conv-preview', text: getConversationPreview(conv) }));
         var meta = el('div', { class: 'ai-conv-meta' });
@@ -12309,6 +12341,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (cid === S.conversationId) {
           if (S._aiChatFilesCleanup) S._aiChatFilesCleanup();
           abortCurrentRequest('chat'); S.historyRequestId += 1; S._currentReqId = null;
+          // ★ 修复（P1 历史永久 loading）：自增 historyRequestId 会让在途 loadHistory 的
+          //   finally 因 requestId 不匹配而跳过复位，S.loading/loadingMore 就永久为 true，
+          //   之后 loadHistory 一律早退 → 历史空白。作废请求的同时必须复位这两个标志。
+          S.loading = false;
+          S.loadingMore = false;
           S._pendingLocalMsgs = [];
           S.conversationId = null;
           S.messages = [];
@@ -12654,6 +12691,11 @@ function showChatMessages() {
           clearAiConversationHistoryCache(deleteCid, 'normal');
           if (!currentDelete()) return;
           abortCurrentRequest('chat'); S.historyRequestId += 1; S._currentReqId = null;
+          // ★ 修复（P1 历史永久 loading）：自增 historyRequestId 会让在途 loadHistory 的
+          //   finally 因 requestId 不匹配而跳过复位，S.loading/loadingMore 就永久为 true，
+          //   之后 loadHistory 一律早退 → 历史空白。作废请求的同时必须复位这两个标志。
+          S.loading = false;
+          S.loadingMore = false;
           S._pendingLocalMsgs = [];
           writeConvId(null);
           if (S._aiChatFilesCleanup) S._aiChatFilesCleanup();
@@ -12711,6 +12753,9 @@ function showChatMessages() {
       if (!readUserName()) {
         abortCurrentRequest('chat');
         S.historyRequestId += 1;
+        // ★ 修复：作废在途历史请求时必须同时复位加载标志（否则历史永久空白）。
+        S.loading = false;
+        S.loadingMore = false;
         S._pendingLocalMsgs = [];
         _aiChatFiles = []; _aiChatFileSelectionSeq++;
         S._aiChatFilesLoading = false;
@@ -12751,6 +12796,9 @@ function showChatMessages() {
           if (S._switchAiComposerDraft) S._switchAiComposerDraft(r.data.conversation_id);
           abortCurrentRequest('chat');
           S.historyRequestId += 1;
+          // ★ 修复：作废在途历史请求时必须同时复位加载标志（否则历史永久空白）。
+          S.loading = false;
+          S.loadingMore = false;
           S._pendingLocalMsgs = [];
         // Pending attachments belong to the current conversation only.
         _aiChatFiles = []; _aiChatFileSelectionSeq++;
@@ -14812,6 +14860,10 @@ function showChatMessages() {
     S._historyBusy = false;
     S.sendSeq = (S.sendSeq || 0) + 1;
     S.historyRequestId += 1;
+    // ★ 修复：关闭面板同样作废在途历史请求，必须复位加载标志，否则再次打开时
+    //    loadHistory 会因 S.loading 恒真而直接早退，表现为历史一直空白。
+    S.loading = false;
+    S.loadingMore = false;
     S.conversationRequestId += 1;
     window.__xtjAiChatActive = false;
     document.body.classList.remove('xtj-research-open');

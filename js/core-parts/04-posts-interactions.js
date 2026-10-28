@@ -2815,6 +2815,28 @@
                 });
             }
 
+            // ★ 首屏性能：normalizePost 每次都要 parsePostContent（JSON.parse + try/catch）
+            //   并重建 media_items；而 renderPostCard 先把 post normalize 一次，再分别交给
+            //   formatPostTime / buildPostBadges / buildPostStatsLine / buildPostActionHtml，
+            //   每个函数内部又各自 normalizePost(post) 一次 —— 单张卡片重复 4 次，输出完全相同。
+            //   这里按「对象身份」+ feedStateVersion 复用同一轮渲染内的结果：
+            //   状态一变（markFeedStateChanged）即整体失效，因此不会读到过期内容，
+            //   结果与直接调用 normalizePost 完全等价（normalizePost 对同一对象是幂等的）。
+            var _postNormalizeMemo = new WeakMap();
+            var _postNormalizeMemoVersion = -1;
+            function normalizePostForRender(post) {
+                if (!post || typeof post !== 'object') return normalizePost(post);
+                if (_postNormalizeMemoVersion !== feedStateVersion) {
+                    _postNormalizeMemo = new WeakMap();
+                    _postNormalizeMemoVersion = feedStateVersion;
+                }
+                var cached = _postNormalizeMemo.get(post);
+                if (cached) return cached;
+                var normalized = normalizePost(post);
+                _postNormalizeMemo.set(post, normalized);
+                return normalized;
+            }
+
             function formatRelativeTime(dateStr) {
                 var d = window.safeParseDate ? window.safeParseDate(dateStr) : new Date(dateStr);
                 var diff = Math.floor((Date.now() - d.getTime()) / 1000);
@@ -2826,7 +2848,7 @@
             }
 
             function formatPostTime(post) {
-                var normalized = normalizePost(post);
+                var normalized = normalizePostForRender(post);
                 var time = normalized.created_at ? window.safeParseDate(normalized.created_at).toLocaleString() : "";
                 var editedAt = normalized._contentMeta && normalized._contentMeta.edited_at ? normalized._contentMeta.edited_at : null;
                 if (editedAt) return time + " (已编辑)";
@@ -2834,7 +2856,7 @@
             }
 
             function buildPostBadges(post) {
-                var normalized = normalizePost(post);
+                var normalized = normalizePostForRender(post);
                 var bits = [];
                 bits.push('<span class="post-visibility-badge ' + (normalized.visibility === "private" ? 'private' : 'public') + '">' + (normalized.visibility === "private" ? '私密' : '公开') + '</span>');
                 if (normalized.is_pinned) bits.push('<span class="post-pin-badge">置顶</span>');
@@ -2842,7 +2864,7 @@
             }
 
             function buildPostStatsLine(post, likeCount, commentCount) {
-                var normalized = normalizePost(post);
+                var normalized = normalizePostForRender(post);
                 return '浏览 ' + (normalized.views || 0) +
                     ' | 点赞 ' + (likeCount || 0) +
                     ' | 评论 ' + (commentCount || 0);
@@ -2861,7 +2883,7 @@
                     '<button class="action-btn" onclick="openComment(\'' + idJs + '\')">评论</button>'
                 ];
                 if (canPinPost(post)) {
-                    actions.push('<button type="button" class="action-btn pin" data-post-id="' + idHtml + '">' + (normalizePost(post).is_pinned ? '取消置顶' : '置顶') + '</button>');
+                    actions.push('<button type="button" class="action-btn pin" data-post-id="' + idHtml + '">' + (normalizePostForRender(post).is_pinned ? '取消置顶' : '置顶') + '</button>');
                 }
                 if (canDelete) {
                     actions.push('<button type="button" class="action-btn del" onclick="openDelete(\'' + idJs + '\', \'' + actorKeyJs + '\')">删除</button>');
@@ -3302,7 +3324,7 @@
             window.buildPostCommentsHtml = buildPostCommentsHtml;
 
             function renderPostCard(post, commentMap, likeMap, likeUserMap) {
-                var normalized = normalizePost(post);
+                var normalized = normalizePostForRender(post);
                 // 安全兜底：content 是系统遥测/定位 JSON 则跳过
                 if (looksLikeSystemTelemetry(normalized.content)) {
                     return '';
@@ -5168,8 +5190,15 @@
                                 if (requestId !== feedLoadRequestId) return;
                                 await renderFeedFromMemoryState();
                                 setupFeedInfiniteScroll();
+                                // ★ 首屏性能：ensureFeedCoverageForVisibleSlice 在「切片已够」
+                                //   时直接 return true 不合并任何数据，此前仍会紧接着再跑一次
+                                //   renderFeedFromMemoryState → 整段 feed.innerHTML 重建，内容与
+                                //   刚渲染的完全一致（纯浪费）。这里用 feedStateVersion 判断本轮
+                                //   是否真的合并了新页：没变就不重建，渲染结果保持等价。
+                                var coverageStateVersion = feedStateVersion;
                                 ensureFeedCoverageForVisibleSlice(FEED_PAGE_SIZE, requestId).then(function() {
                                     if (requestId !== feedLoadRequestId) return;
+                                    if (feedStateVersion === coverageStateVersion) return;
                                     return renderFeedFromMemoryState();
                                 }).catch(function(error) {
                                     console.warn('[feed] cached coverage refresh failed:', error);

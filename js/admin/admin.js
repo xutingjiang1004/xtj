@@ -1888,6 +1888,10 @@
     };
 
     window.deleteUserAccount = async function(userName) {
+        // ★ 修复：删除动作此前只靠 confirmDeleteUser 里的 ADMIN 判断保护，
+        //   而 deleteUserAccount 本身是全局可调用的（控制台/其他代码路径可绕过确认层）。
+        //   这里补同样的兜底，避免唯一管理员账号被直接删除。
+        if (String(userName || '') === String(ADMIN)) { showToast('不能对管理员执行此操作', 'error'); return; }
         try {
             await apiCall('DELETE', '/admin/user/' + encodeURIComponent(userName));
             showToast('用户账号已删除', 'success');

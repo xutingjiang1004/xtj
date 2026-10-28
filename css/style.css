@@ -16620,6 +16620,16 @@ html.perf-lite [class*="backdrop"] {
   -webkit-backdrop-filter: none !important;
 }
 
+/* ★ 补充降级：上面只覆盖了类名带 glass/backdrop 的元素，而 :is(button, ...)
+   这条通用规则（style.css:7470）会给**每个按钮**加
+   backdrop-filter: var(--button-glass-blur)。实测首页仍有 188 个元素在跑合成
+   模糊层（包含大面积的 button.post-media-cell），低端机上滚动时每帧都要重新
+   采样背景。低性能档位直接把该变量置空，一次性覆盖全部按钮选择器；
+   balanced / full 档位不受影响，视觉与原来一致。 */
+html.perf-lite {
+  --button-glass-blur: none;
+}
+
 /* 常驻动画：只关掉无限循环的装饰性动画，保留一次性过渡 */
 html.perf-lite *,
 html.perf-lite *::before,
@@ -16963,3 +16973,37 @@ html[data-xtj-motion="off"] #pwUploadProgressOverlay .pw-upload-progress-bar-fil
 .pp-confirm-title, .pp-confirm-msg, [data-theme="dark"] .pp-confirm-title, [data-theme="dark"] .pp-confirm-msg { color:#08130e;text-shadow:0 .5px 0 rgba(255,255,255,.35); }
 .pp-confirm-msg { font-weight:500; }
 @media (prefers-reduced-transparency:reduce) { .pp-confirm-dialog, [data-theme="dark"] .pp-confirm-dialog { background:#f8faf9;backdrop-filter:none;-webkit-backdrop-filter:none; } }
+
+/* ============================================================================
+   ★ 2026-10-28：perf-lite 残留模糊二次收敛。
+   首轮把 --button-glass-blur 置空后，仍有一批组件在**自己的规则里写死**了
+   backdrop-filter（不走变量），实测低性能档仍残留 58 个模糊元素：
+     style.css:13869  .btn/.btn-ghost/.btn-primary/... 组 —— 写死 blur(18px) saturate(155%)
+     style.css:10152  .xtj-skeleton-card                  —— blur(14px)
+     style.css:4943   .profile-activity-card（含 --summary）—— var(--profile-glass-filter)
+     style.css:4917   .profile-user-card                  —— var(--profile-glass-filter)
+   这里只在 html.perf-lite 作用域内关闭模糊，balanced / full 档位完全不受影响；
+   只关模糊，不改颜色、尺寸、布局与阴影。底部导航相关选择器不在本次收敛清单内。
+   ============================================================================ */
+html.perf-lite .btn,
+html.perf-lite .btn-ghost,
+html.perf-lite .btn-primary,
+html.perf-lite .theme-toggle-btn,
+html.perf-lite .announcement-btn,
+html.perf-lite .report-btn,
+html.perf-lite .user-pill,
+html.perf-lite .nav-input,
+html.perf-lite nav,
+html.perf-lite .toast,
+html.perf-lite .notification-bubble,
+html.perf-lite .xtj-skeleton-card,
+html.perf-lite .xtj-loading-skeleton,
+html.perf-lite .profile-user-card,
+html.perf-lite .profile-activity-card,
+html.perf-lite .profile-activity-card--summary,
+html.perf-lite .stat-two-col .stat-col,
+html.perf-lite .profile-detail-modal,
+html.perf-lite .profile-detail-info-item {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}

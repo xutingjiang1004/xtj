@@ -2277,11 +2277,26 @@ function isAdmin() {
                     });
                 } catch(e) {}
             };
-            if (typeof requestIdleCallback === 'function') {
-                requestIdleCallback(preloadFn, { timeout: 2000 });
-            } else {
-                setTimeout(preloadFn, 2000);
-            }
+            // ★ 性能修复：原实现在 DOMContentLoaded 阶段就 requestIdleCallback(timeout:2000)，
+            //   2 秒超时会在页面还没闲下来时强行下载 ai-agent.min.js(352KB) +
+            //   ai-agent.min.css(173KB)，与首屏 feed/图片抢带宽和主线程 —— 弱机上正好把
+            //   首屏拖慢。改为：
+            //   ① 等 window.load（首屏资源基本就绪）再闲时预取；
+            //   ② 超时放宽到 8s，真正闲下来才下；
+            //   ③ 省流模式或 2g/3g 网络直接不预取，用户真要开 AI 时按需加载（有骨架屏兜底）。
+            var startWhenIdle = function() {
+                try {
+                    var conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+                    if (conn && (conn.saveData === true || /^(slow-)?2g$|^3g$/i.test(String(conn.effectiveType || '')))) return;
+                } catch (eConn) {}
+                if (typeof requestIdleCallback === 'function') {
+                    requestIdleCallback(preloadFn, { timeout: 8000 });
+                } else {
+                    setTimeout(preloadFn, 8000);
+                }
+            };
+            if (document.readyState === 'complete') startWhenIdle();
+            else window.addEventListener('load', startWhenIdle, { once: true });
         }
         // 在消息页面加载后触发预加载
         window.__xtjScheduleAiPreload = scheduleAiPreload;
