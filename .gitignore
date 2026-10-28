@@ -125,3 +125,7 @@ miniprogram_npm/
 
 # Cloudflare local runtime state
 .wrangler/
+
+# 本地调试临时目录（app.asar 解包、文档抽取等一次性产物，非源码，不入版本库）
+/.tmp/
+/.tmp2/
