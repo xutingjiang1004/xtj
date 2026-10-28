@@ -90,7 +90,6 @@
       // only while the block is small; the text itself is never delayed.
       var maxChars = isReasoning ? (lite ? 4000 : 10000) : (lite ? 12000 : 30000);
       if (target.textContent && target.textContent.length > maxChars) return;
-      lastInkAt = now;
       // One bounded range per changed text node is enough to create a soft
       // ink wash. Per-grapheme ranges multiply style and animation work for
       // every packet without making text arrive any sooner.
@@ -132,6 +131,7 @@
       try {
         CSS.highlights.set(slot.name, slot.highlight);
         var from = {}, to = {}; from[slot.prop] = '0'; to[slot.prop] = '1';
+        lastInkAt = now;
         slot.animation = inkTarget.animate([from, to], { duration: lite ? 60 : 90, easing: 'cubic-bezier(.16,1,.3,1)', fill: 'both' });
         slot.animation.onfinish = function() { releaseInkSlot(slot); };
         slot.animation.oncancel = function() { releaseInkSlot(slot); };

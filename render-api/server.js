@@ -1711,6 +1711,38 @@ function normalizeMarketSymbol(raw) {
 }
 
 // Function Calling 工具执行器
+// Build the model-facing tool message. `cards` / `data_url` are UI-only and can
+// contain multi-MB base64 (make_file/generate_pdf/image_process); sending them
+// back to the provider bloats the prompt and bills tokens for binary data.
+// Truncate the content field before serialising so the resulting string is
+// always valid JSON, never a sliced JSON fragment.
+function modelFacingToolResult(toolResult, maxChars) {
+  var max = Math.max(1000, Math.min(Number(maxChars) || 24000, 2000000));
+  if (!toolResult || typeof toolResult !== 'object') return String(toolResult || '').slice(0, max);
+  var out = {};
+  ['tool_name', 'error', 'query', 'results_count', 'url', 'title', 'success', 'count', 'items_total', 'items_truncated', 'recoverable', 'instruction'].forEach(function(k) {
+    if (toolResult[k] !== undefined) out[k] = toolResult[k];
+  });
+  if (toolResult.content !== undefined) {
+    var text = typeof toolResult.content === 'string' ? toolResult.content : JSON.stringify(toolResult.content);
+    out.content = String(text).replace(/data:[^"'\s,;]+;base64,[A-Za-z0-9+/=]{100,}/g, '[附件数据已省略]');
+  }
+  var json = JSON.stringify(out);
+  if (json.length > max) {
+    var baseLen = JSON.stringify(Object.assign({}, out, { content: '' })).length;
+    out.content = String(out.content || '').slice(0, Math.max(500, max - baseLen - 120)) + '\n…[已截断]';
+    json = JSON.stringify(out);
+    if (json.length > max) {
+      json = JSON.stringify({
+        tool_name: out.tool_name || '',
+        error: out.error || '',
+        content: String(out.content || '').slice(0, Math.max(500, max - 200)) + '\n…[已截断]'
+      });
+    }
+  }
+  return json;
+}
+
 async function executeToolCall(toolCall, context) {
   // ★ 配额绕过修复：context 可能是 undefined 或裸 AbortSignal（历史调用方传法），
   // 统一规整为对象并初始化请求级已用搜索计数，防止单请求内多轮工具调用超发。
@@ -6116,7 +6148,7 @@ function aiChatConcurrencyGate(req, res, next) {
 
 function rateLimit(windowMs, maxRequests) {
   return (req, res, next) => {
-    const key = getRealIp(req) + ':' + rateLimitPathKey(req);
+    const key = getRealIp(req) + ':' + windowMs + ':' + rateLimitPathKey(req);
     const now = Date.now();
     const record = rateLimitStore.get(key) || { count: 0, resetAt: now + windowMs };
 
@@ -6331,24 +6363,51 @@ function securityRateLimit(windowMs, maxRequests) {
 // opts.skipImageOcr = true 时，图片不再走 OCR 文字通道（由视觉模型直接看图），不生成 image_ocr 卡片
 async function extractEmbeddedFiles(text, opts) {
   if (!text || typeof text !== 'string') return { text: text || '', cards: [] };
-  // Bound the regex scan before it runs: a long message with many "[" starts and
-  // no closing ")" makes the lazy data-URL pattern backtrack quadratically.
-  var MAX_EMBED_SCAN_CHARS = 500000;
-  var MAX_EMBED_CANDIDATES = 200;
-  if (text.length > MAX_EMBED_SCAN_CHARS) return { text: text, cards: [] };
-  var brackets = 0;
-  for (var bi = 0; bi < text.length; bi++) {
-    if (text.charCodeAt(bi) === 91 && ++brackets > MAX_EMBED_CANDIDATES) return { text: text, cards: [] };
-  }
   var skipImageOcr = !!(opts && opts.skipImageOcr);
   var result = text;
   var cards = [];
-  // 匹配 ![](data:...) 和 [](data:...) 模式
-  var fileRegex = /(!?)\[([^\]]*)\]\(data:([^,;]+);?[^,]*?(?:;base64)?,(.+?)\)/g;
-  var match;
+  var match, scanPos = 0;
   var fileIndex = 0;
   var totalBytes = 0;
-  while ((match = fileRegex.exec(text)) !== null) {
+  // Linear scan instead of a lazy `(.+?)` regex: the old pattern backtracked
+  // quadratically on long messages with many "[" starts and no closing ")".
+  // data: URLs cannot contain ")" so indexOf is both safe and exact.
+  function nextEmbeddedFile() {
+    while (scanPos < text.length) {
+      var marker = text.indexOf('](data:', scanPos);
+      if (marker < 0) return null;
+      var dataStart = marker + 2;
+      var close = text.indexOf(')', dataStart);
+      if (close < 0) return null;
+      var raw = text.slice(dataStart, close);
+      var comma = raw.indexOf(',');
+      if (comma < 0) { scanPos = close + 1; continue; }
+      var header = raw.slice(0, comma);
+      var mimeMatch = header.match(/^data:([^;,]+)(?:;[^,]*)?$/i);
+      if (!mimeMatch) { scanPos = close + 1; continue; }
+      var labelStart = text.lastIndexOf('[', marker);
+      var label = '';
+      var fullStart = marker;
+      if (labelStart >= 0) {
+        var candidate = text.slice(labelStart + 1, marker);
+        if (candidate.indexOf('[') < 0 && candidate.indexOf(']') < 0) {
+          label = candidate;
+          fullStart = labelStart;
+          if (fullStart > 0 && text.charAt(fullStart - 1) === '!') fullStart--;
+        }
+      }
+      scanPos = close + 1;
+      return {
+        0: text.slice(fullStart, close + 1),
+        1: text.charAt(fullStart) === '!' ? '!' : '',
+        2: label,
+        3: mimeMatch[1],
+        4: raw.slice(comma + 1)
+      };
+    }
+    return null;
+  }
+  while ((match = nextEmbeddedFile()) !== null) {
     var fileName = match[2] || ('file_' + (fileIndex + 1));
     var mimeType = match[3];
     var base64Data = match[4];
@@ -8420,14 +8479,14 @@ async function callDeepSeek(messages, options) {
           var _eText = String(r.toolResult.error);
           var _recoverable = /未找到|未能识别|位置为空|无效|不存在|不支持|请换|请改用|超时|timeout/i.test(_eText)
             && !/服务暂时不可用|服务侧问题|上游接口异常/i.test(_eText);
-          toolContent = JSON.stringify(Object.assign({}, r.toolResult, {
+          toolContent = modelFacingToolResult(Object.assign({}, r.toolResult, {
             recoverable: _recoverable,
             instruction: _recoverable
               ? '本次工具调用参数未能命中结果。请修正参数后重试一次（例如改用规范的城市名、缩短或放宽查询词、换一个更常见的名称）。若重试仍失败，再如实告知用户。禁止凭猜测编造数据。'
               : '该工具当前不可用（服务侧故障，与参数无关）。请如实告知用户服务暂时不可用，禁止编造数据，也不要反复重试同一工具。'
-          })).slice(0, maxToolResultChars);
+          }), maxToolResultChars);
         } else {
-          toolContent = r.toolResult ? JSON.stringify(r.toolResult).slice(0, maxToolResultChars) : '{}';
+          toolContent = modelFacingToolResult(r.toolResult, maxToolResultChars);
         }
         workingMessages.push({ role: 'tool', tool_call_id: r.tcId, content: toolContent });
       });
@@ -9602,7 +9661,7 @@ async function callDeepSeekViaResponses(messages, options) {
         // ★ 2026-09-15：与 /chat 路径对齐，工具结果回带上限 8000 → 24000 字符，
         //   避免 Responses 链路里 read_web_page / run_code 的输出被腰斩，
         //   导致模型"再读一次"或凭残缺信息作答。
-        var toolContent = r.toolResult ? JSON.stringify(r.toolResult).slice(0, 24000) : '{}';
+        var toolContent = modelFacingToolResult(r.toolResult, 24000);
         // S-9: 原样回带模型产出的 function_call 项，与 function_call_output 配对，
         // 保留跨轮工具调用上下文（此前下一轮丢失 function_call 导致多轮工具链失效）
         // ★ 兜底：id 缺失（上游 done 事件也没下发）时用 map 内生成的确定性占位，
@@ -21821,6 +21880,13 @@ app.post('/api/agent/custom-chat/stream', guestOpenRouterAuth, aiChatConcurrency
   var provider = String(body.provider || '').trim();
   var apiKey = String(body.api_key || '').trim();
   var model = String(body.model || '').trim();
+  // Public window only opens the server-managed OpenRouter model. A guest who
+  // sends the OpenRouter hint header but a different provider/base_url in the
+  // body must not turn this route into an anonymous proxy for arbitrary hosts.
+  if (req.guestAi && provider !== 'openrouter') {
+    writeSse(res, { type: 'error', error: '请先登录后再使用第三方模型', code: 'auth_required' });
+    return safeEnd();
+  }
   if (provider === 'openrouter') {
     try { var managed = openRouter.resolveConfig(req.userName, ADMIN_USERNAME, body); apiKey = managed.api_key; model = managed.model; if (res._aiRetryOwner) res._aiRetryOwner.freeOnly = true; }
     catch (managedError) { writeSse(res, openRouter.event(managedError)); return safeEnd(); }
@@ -22442,6 +22508,13 @@ app.post('/api/agent/custom-chat/deep-stream', guestOpenRouterAuth, aiChatConcur
   var provider = String(body.provider || '').trim();
   var apiKey = String(body.api_key || '').trim();
   var model = String(body.model || '').trim();
+  // Public window only opens the server-managed OpenRouter model. A guest who
+  // sends the OpenRouter hint header but a different provider/base_url in the
+  // body must not turn this route into an anonymous proxy for arbitrary hosts.
+  if (req.guestAi && provider !== 'openrouter') {
+    writeSse(res, { type: 'error', error: '请先登录后再使用第三方模型', code: 'auth_required' });
+    return safeEnd();
+  }
   if (provider === 'openrouter') {
     try { var managed = openRouter.resolveConfig(req.userName, ADMIN_USERNAME, body); apiKey = managed.api_key; model = managed.model; if (res._aiRetryOwner) res._aiRetryOwner.freeOnly = true; }
     catch (managedError) { writeSse(res, openRouter.event(managedError)); return safeEnd(); }
@@ -23162,7 +23235,7 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, rateLimit
       marker: AI_AGENT_MESSAGE_MARKER, thinkingElapsedMs: res._aiThinkingElapsedMs || 0,
       startedAt: T0, requestId: clientReqId || ('server_' + T0),
       finishReason: aborted ? 'cancelled' : 'upstream_error' });
-    interruptedSave.then(function(saved) { if (!saved) console.warn('[AGENT-STREAM] interrupted history save failed'); });
+    interruptedSave.then(function(saved) { if (!saved) console.warn('[AGENT-STREAM] interrupted history save failed'); }).catch(function(saveError) { console.warn('[AGENT-STREAM] interrupted history save rejected:', saveError && saveError.message); });
   });
 
   function terminateWithError(errObj) {
@@ -23295,14 +23368,14 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, rateLimit
       skipDb: !!req.guestAi
     });
     var quotaPromise = req.guestAi
-      ? Promise.resolve({ allowed: true, quota: null })
+      ? null
       : enforceAiChatAccess(userName, { needSearch: false, promptChars: String((req.body && req.body.message) || '').length });
     // Preparation already started; make sure a quota rejection path cannot leave
     // it as an unhandled rejection when we return early below.
     attachPromise.catch(function() {});
     configPromise.catch(function() {});
     ctxPromise.catch(function() {});
-    var rl = await quotaPromise;
+    var rl = req.guestAi ? { allowed: true, quota: null } : await quotaPromise;
     if (!rl.allowed) {
       return terminateWithError({
         type: 'error',
@@ -23454,7 +23527,8 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, rateLimit
     else if (userName === ADMIN_USERNAME) thirdPartySearchOkEarly = true;
     else {
       var _sq = (rl && rl.quota) || {};
-      if (_sq.can_search === false) thirdPartySearchOkEarly = false;
+      if (_sq.search_unlimited === true) thirdPartySearchOkEarly = true;
+      else if (_sq.can_search === false) thirdPartySearchOkEarly = false;
       else if (Number.isFinite(Number(_sq.search_remaining))) thirdPartySearchOkEarly = Number(_sq.search_remaining) !== 0;
       else thirdPartySearchOkEarly = await canUseThirdPartySearch(userName);
     }
@@ -24084,13 +24158,17 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, rateLimit
                 // F-1: FC 预检路径工具驱动的真实搜索调用计入请求级计数器
                 if (tr && (tr.tool_name === 'search_web' || tr.tool_name === 'tavily_search') && !tr.error && req._searchApiCalls) req._searchApiCalls.n = (req._searchApiCalls.n || 0) + 1;
                 return { toolCallId: tc.id, toolResult: tr };
+              }).catch(function(toolError) {
+                // Every tool_call must have a matching role:'tool' message or the
+                // next provider request is rejected for an incomplete sequence.
+                return { toolCallId: tc.id, toolResult: { tool_name: (tc.function && tc.function.name) || 'tool', error: String(toolError && toolError.message || '工具执行失败') } };
               });
             }));
             clearInterval(_toolProgressTimer);
             // 串行写入结果（SSE 保证顺序）
             for (var tri = 0; tri < toolResults.length; tri++) {
               var item = toolResults[tri];
-              messages.push({ role: 'tool', tool_call_id: item.toolCallId, content: JSON.stringify(item.toolResult) });
+              messages.push({ role: 'tool', tool_call_id: item.toolCallId, content: modelFacingToolResult(item.toolResult) });
               var trItems = null;
               try { trItems = JSON.parse(item.toolResult.content || '[]'); } catch(e) {
                 try { console.warn('[AI-FC] parse tool result error:', e && e.message); } catch(ee) {}
@@ -25009,7 +25087,7 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, rateLimit
           toolResult.cards.forEach(function(card) { card = Object.assign({}, card, { tool_call_id: toolResults[ti].id }); siteToolCards.push(card); writeSse(res, { type: 'card', call_id: toolResults[ti].id, card: card }); });
         }
         
-        roundMessages.push({ role: 'tool', content: JSON.stringify(toolResult), tool_call_id: toolResults[ti].id });
+        roundMessages.push({ role: 'tool', content: modelFacingToolResult(toolResult), tool_call_id: toolResults[ti].id });
       }
       toolRound++;
        if (useThinking) {
@@ -25408,6 +25486,10 @@ async function runResearchSubAgent(opts) {
   try {
     var r1 = await callDeepSeekViaResponses(searchMessages, {
       thinking_mode: 'off', model:subModel,
+      // The search phase is explicitly instructed to search; without tools the
+      // model could only answer from memory and onSearchStatus never fired.
+      tools: aiToolsForSearch(true),
+      _userName: opts.userName || '',
       max_tokens: 6000,
       max_tool_rounds: 8,
       total_timeout_ms: 420000, // 海量多轮检索阶段放宽到 7 分钟

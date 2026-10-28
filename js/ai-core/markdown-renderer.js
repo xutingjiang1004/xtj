@@ -16,7 +16,7 @@
       .replace(/'/g, '&#39;');
   };
 
-  var BLOCKED_TAGS_RE = /<\s*(\/)?\s*(script|iframe|object|embed|form|style|link|meta|base|applet|frame|frameset|ilayer|layer|bgsound|title|head|html|body|svg|math|details|summary|video|audio|source)\b/gi;
+  var BLOCKED_TAGS_RE = /<\s*(\/)?\s*(script|iframe|object|embed|form|style|link|meta|base|applet|frame|frameset|ilayer|layer|bgsound|title|head|html|body|svg|math|details|summary|video|audio|source|template|noscript|xmp|plaintext|noembed|noframes)\b/gi;
   // 事件处理属性 + style（防 style="position:fixed" 全屏钓鱼）；首组捕获保留边界字符
   var BLOCKED_ATTRS_RE = /(^|[\s"'>\/])(?:on[a-z0-9_]+|style)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'<>&\/=]+)/gi;
   // 实体编码的事件属性名（onerror → &#111;nerror）

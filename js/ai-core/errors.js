@@ -111,7 +111,7 @@
     if (/rate|limit|频繁|429/i.test(msg)) {
       return buildError(ERROR_CODES.RATE_LIMITED, USER_MESSAGES[ERROR_CODES.RATE_LIMITED], true, options);
     }
-    if (/auth|login|登录|认证|token/i.test(msg)) {
+    if (/auth|login|登录|认证|\btoken\b/i.test(msg)) {
       return buildError(ERROR_CODES.AUTH_FAILED, USER_MESSAGES[ERROR_CODES.AUTH_FAILED], false, options);
     }
     if (/tool|工具/i.test(msg)) {

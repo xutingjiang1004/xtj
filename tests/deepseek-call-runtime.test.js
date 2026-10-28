@@ -35,6 +35,7 @@ function loadCallDeepSeek(fetchImpl) {
     "var DEEPSEEK_CURRENCY = 'CNY';",
     'function getPreferredDeepSeekModel(model) { return model; }',
     'function normalizeDeepSeekUsageModel(model, fallback) { return model || fallback; }',
+    'function modelFacingToolResult(result, max) { return result ? JSON.stringify(result).slice(0, Number(max) || 24000) : "{}"; }',
     'async function executeToolCall() { return { ok: true }; }'
   ].join('\n');
   vm.runInContext(dependencies + '\n' + source.slice(start, end) + '\nglobalThis.callDeepSeekForTest = callDeepSeek;', sandbox);

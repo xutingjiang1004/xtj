@@ -306,3 +306,6 @@ html[data-xtj-motion=off] .ai-select-pop,html.xtj-reduce-motion .ai-select-pop {
 .ai-thinking.is-preparing .ai-thinking-label{color:var(--ai-text-muted,#617b6f)}
 @media(prefers-reduced-motion:reduce){.ai-thinking-indicator{transition:none}}
 html[data-xtj-motion=off] .ai-thinking-indicator,html.xtj-reduce-motion .ai-thinking-indicator{transition:none}
+/* Mobile chat page uses z-index:99999; body-level popups must sit above it. */
+@media(max-width:767px){.ai-context-popup{z-index:100100}.ai-compare-modal{z-index:100090}}
+@media(prefers-reduced-motion:reduce){.ai-followups{animation:none}.ai-followup:hover{transform:none}}html[data-xtj-motion=off] .ai-followups,html.xtj-reduce-motion .ai-followups{animation:none}html[data-xtj-motion=off] .ai-followup:hover,html.xtj-reduce-motion .ai-followup:hover{transform:none}

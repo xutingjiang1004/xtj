@@ -41,6 +41,21 @@
     requestOptions = requestOptions || {};
     var signal = requestOptions.signal;
     if (fetchOptions && fetchOptions.signal) signal = fetchOptions.signal;
+    var timeoutMs = Number(requestOptions.timeoutMs) || 0;
+    var timer = null;
+    if (timeoutMs > 0 && typeof AbortController === 'function') {
+      var controller = new AbortController();
+      var external = signal;
+      timer = setTimeout(function () { try { controller.abort('timeout'); } catch (_) {} }, timeoutMs);
+      if (external) {
+        if (external.aborted) { try { controller.abort(external.reason || 'aborted'); } catch (_) {} }
+        else if (typeof external.addEventListener === 'function') {
+          external.addEventListener('abort', function () { try { controller.abort(external.reason || 'aborted'); } catch (_) {} }, { once: true });
+        }
+      }
+      signal = controller.signal;
+    }
+    function clearTimeoutTimer() { if (timer) { clearTimeout(timer); timer = null; } }
 
     var gotResponse = false;
     return fetch(url, Object.assign({}, fetchOptions, { signal: signal })).then(function (resp) {
@@ -59,7 +74,7 @@
         throw Errors.build(Errors.CODES.NETWORK_ERROR, Errors.MESSAGES[Errors.CODES.NETWORK_ERROR], true, requestOptions);
       }
       throw Errors.classify(err, requestOptions);
-    });
+    }).finally(clearTimeoutTimer);
   }
 
   // ── SSE Stream reader ──────────────────────────────────────────────────

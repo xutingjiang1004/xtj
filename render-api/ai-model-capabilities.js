@@ -33,7 +33,9 @@ async function probeCapabilities(config, deps = {}) {
   const safeUrl = deps.safeUrl || assertSafeWebUrl, transport = deps.transport || requestPinnedJson;
   const safe = await safeUrl(String(config.base_url || '').trim() || ENDPOINTS[config.provider]);
   if (safe.parsed.protocol !== 'https:') throw Error('https_required');
-  const endpoint = new URL(safe.parsed.href.replace(/\/+$/, '') + '/chat/completions');
+  const endpoint = new URL(safe.parsed.href);
+  endpoint.pathname = endpoint.pathname.replace(/\/+$/, '') + '/chat/completions';
+  endpoint.search = ''; endpoint.hash = '';
   const usage = {prompt_tokens:0,completion_tokens:0,total_tokens:0}, results = [];
   const base = { model:config.model, max_tokens:64, messages:[{role:'user',content:'只回复 OK。'}] };
   async function probe(name, extra, verify) {
