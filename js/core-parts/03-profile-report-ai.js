@@ -1637,9 +1637,15 @@ function renderProfileActivityList(kind) {
                                     // 通过统一 upsert 函数插入
                                     upsertAiComment(aiComment, commentIdStr, postId);
                                 } else {
-                                    // 数据不完整，回退到全量刷新
+                                    // completed but payload is malformed: polling cannot
+                                    // repair it. Refresh once and stop the 2s loop instead
+                                    // of reloading the whole feed ~45 times.
+                                    showCatAiStatus(commentIdStr, '小猫回复数据异常，请点击重试', true);
+                                    delete window.__catAiPollTimers[commentIdStr];
+                                    delete window.__catAiPollControllers[commentIdStr];
+                                    delete window.__catAiPollStatus[commentIdStr];
                                     if (typeof loadFeed === 'function') loadFeed(true).catch(function() {});
-                                    window.__catAiPollTimers[commentIdStr] = setTimeout(poll, baseInterval);
+                                    return;
                                 }
                             } else if (data.status === 'not_triggered') {
                                 // F4：not_triggered 视为“任务尚未同步”，继续轮询。

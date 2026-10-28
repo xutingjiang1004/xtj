@@ -12,6 +12,19 @@
     clearTimeout(state.timer); pending.delete(state.remote); bytes -= state.bytes; state.lease.release();
   }
   function clear() { Array.from(pending.values()).forEach(release); }
+  function handoff(state, item, lease) {
+    if (!valid(state)) return;
+    var images = Array.from(document.images).filter(function (img) { return img.getAttribute('src') === lease.url; });
+    if (!images.length) { release(state); return; }
+    images.forEach(function (img) { img.src = item.media_url; });
+    Promise.all(images.map(function (img) { return img.decode ? img.decode().catch(function () {}) : Promise.resolve(); }))
+      .then(function () { if (valid(state)) release(state); });
+  }
+  function scheduleHandoff(state, item, lease) {
+    // Let the new card render first; if it never does, releasing makes the next
+    // render use item.media_url directly.
+    setTimeout(function () { if (valid(state)) handoff(state, item, lease); }, 800);
+  }
   function prepare(files, post) {
     if (!post || !window.XtjPostComposerMedia || !window.XtjPostMedia) return;
     window.XtjPostMedia.getPostMediaItems(post).forEach(function (item, index) {
@@ -24,13 +37,12 @@
       state.timer = setTimeout(function () { release(state); }, 180000);
       // Seed after a HEAD/version check instead of downloading the original
       // from Storage again. A failed seed leaves the local upload visible.
-      if (window.xtjSeedOriginalMedia) window.xtjSeedOriginalMedia(remote, file).then(function (stored) {
-        if (!stored || !valid(state)) return;
-        var images = Array.from(document.images).filter(function (img) { return img.getAttribute('src') === lease.url; });
-        images.forEach(function (img) { img.src = item.media_url; });
-        Promise.all(images.map(function (img) { return img.decode ? img.decode().catch(function () {}) : Promise.resolve(); }))
-          .then(function () { if (valid(state)) release(state); });
-      }).catch(function () {});
+      if (!window.xtjSeedOriginalMedia) { scheduleHandoff(state, item, lease); return; }
+      window.xtjSeedOriginalMedia(remote, file).then(function (stored) {
+        if (!valid(state)) return;
+        if (!stored) { scheduleHandoff(state, item, lease); return; }
+        handoff(state, item, lease);
+      }).catch(function () { scheduleHandoff(state, item, lease); });
     });
   }
   window.XtjPostOriginals = { prepare: prepare, displayUrl: function (value) { var state = pending.get(canonical(value)); return state && valid(state) ? state.lease.url : value; }, clear: clear };

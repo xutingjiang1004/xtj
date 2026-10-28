@@ -38,6 +38,7 @@
     var list = Array.from(files || []);
     if (!list.length) return list;
     if (list.some(function(f) { return !f || !/^(image|video|audio)\//.test(f.type || '') || /\.(svgz?|html?|xml|swf)$/i.test(f.name || '') || /^image\/svg\+xml/i.test(f.type || ''); })) throw new Error('仅支持图片、视频或音频，不支持可执行文件');
+    if (list.some(function(f) { return /^image\/(heic|heif|tiff?)$/i.test(f.type || '') || /\.(heic|heif|tiff?)$/i.test(f.name || ''); })) throw new Error('暂不支持 HEIC/HEIF/TIFF 图片，请转换为 JPG 或 PNG 后再上传');
     if (list.some(function(f) { return f.size > MAX_POST_FILE_BYTES; })) throw new Error('每个文件不能超过50MB');
     var images = list.every(function(f) { return f.type.startsWith('image/'); });
     if (!images && list.length > 1) throw new Error('视频或音频只能选择一个，不能与图片混合');

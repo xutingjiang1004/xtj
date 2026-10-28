@@ -183,6 +183,16 @@
   // handled while preserving the original rejection for callers that await it.
   window.__xtjEarlyFeedPromise.catch(function () {});
 
+  // A known account must not issue the anonymous early request: core cannot
+  // reuse it (private/visible rows differ) and would fetch /api/feed again.
+  var bootUser = '';
+  try { bootUser = String((window.currentUser || '') || localStorage.getItem('xtj_user') || '').trim(); } catch (_) {}
+  if (bootUser) {
+    state.status = 'skipped';
+    try { resolveEarly(null); } catch (_) {}
+    return;
+  }
+
   function finishOk(data) {
     state.status = 'ok';
     state.data = data;

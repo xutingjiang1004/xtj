@@ -56,7 +56,22 @@
     if (img._xtjMediaAuthRetry === key && (img._xtjMediaAuthRetrySrc === source || Date.now() - img._xtjMediaAuthRetryAt < 60000)) return false;
     img._xtjMediaAuthRetry = key;
     img._xtjMediaAuthRetryAt = Date.now();
-    window.xtjEnsureMediaSession(url.href, { force: true }).then(function (ready) {
+    // An <img> error is not proof of an expired session: deleted/private media
+    // returns 404 and a decode failure also lands here. Probe first and only
+    // rotate the session for 401/403.
+    var authCheck = Promise.resolve(null);
+    try {
+      if (typeof fetch === 'function') {
+        authCheck = fetch(url.href, { method: 'HEAD', credentials: 'include', cache: 'no-store' }).catch(function () { return null; });
+      }
+    } catch (_) {}
+    authCheck.then(function (resp) {
+      if (!resp || (resp.status !== 401 && resp.status !== 403)) {
+        if (failed) failed();
+        return false;
+      }
+      return window.xtjEnsureMediaSession(url.href, { force: true });
+    }).then(function (ready) {
       if (!current(owner, generation) || !img.isConnected || img.getAttribute('src') !== source) return;
       if (!ready) { if (failed) failed(); return; }
       url.searchParams.set('xtj_retry', Date.now().toString(36));

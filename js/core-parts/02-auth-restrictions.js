@@ -367,6 +367,7 @@
                     // 后台异步加载数据，不阻塞 UI
                     saveUserInfo(confirmedUser, false).catch(function() {});
                     initUI().catch(function() {});
+                    try { if (typeof clearFeedCache === 'function') clearFeedCache(); } catch (_) {}
                     initialLoad(true).catch(function() {});
                     // 记录用户访问
                     logUserVisitToApi(confirmedUser);
@@ -476,6 +477,7 @@
                     //   一旦抛错会让"注册成功"toast 之后又弹"注册失败"，且跳过下方
                     //   initialLoad 与访问记录。与登录路径（initUI().catch）对齐。
                     await initUI().catch(function() {});
+                    try { if (typeof clearFeedCache === 'function') clearFeedCache(); } catch (_) {}
                     initialLoad(true).catch(function() {});
                     // 记录用户访问
                     logUserVisitToApi(currentUser);

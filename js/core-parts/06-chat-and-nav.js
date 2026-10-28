@@ -6114,7 +6114,7 @@
                         }
                         var hasPosts = !!feedEl.querySelector('.post');
                         var _feedTextProbe = String(feedEl.textContent || '');
-                        var hasSkeleton = !!feedEl.querySelector('.xtj-loading-skeleton, .xtj-skeleton-card, .xtj-magic-loading, .loading');
+                        var hasSkeleton = !!feedEl.querySelector('.xtj-loading-skeleton, .xtj-skeleton-card, .xtj-magic-loading, .xtj-sk-pack, .xtj-sk-row');
                         var hasError = !!feedEl.querySelector('#feedBootError, #feedInitError, #feedWatchdogError, .feed-load-more-error')
                             || /加载失败|加载中断|启动加载失败|加载超时/.test(_feedTextProbe);
                         var isEmpty = !hasPosts && !hasError && _feedTextProbe.trim().length < 8;
@@ -8490,21 +8490,30 @@
 
             try {
                 if (typeof API_BASE !== 'undefined' && API_BASE) {
-                    var reportHeaders = { 'Content-Type': 'application/json' };
-                    var reportToken = getUserToken();
-                    if (reportToken) reportHeaders['Authorization'] = 'Bearer ' + reportToken;
-                    var res = await fetch(API_BASE + '/api/report', {
-                        method: 'POST',
-                        headers: reportHeaders,
-                        body: JSON.stringify({
-                            reporter_name: currentUser,
-                            target_type: _reportType,
-                            target_id: _reportSelectedId,
-                            target_user: _reportTargetUser,
-                            report_category: _reportSelectedReason,
-                            report_reason: finalReason
-                        })
+                    var reportBody = JSON.stringify({
+                        reporter_name: currentUser,
+                        target_type: _reportType,
+                        target_id: _reportSelectedId,
+                        target_user: _reportTargetUser,
+                        report_category: _reportSelectedReason,
+                        report_reason: finalReason
                     });
+                    var res;
+                    if (typeof window.xtjProtectedFetch === 'function') {
+                        res = await window.xtjProtectedFetch('/api/report', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: reportBody,
+                            authOwner: currentUser,
+                            authEpoch: window.__xtjGetAuthEpoch ? window.__xtjGetAuthEpoch() : 0,
+                            timeoutMs: 15000
+                        });
+                    } else {
+                        var reportHeaders = { 'Content-Type': 'application/json' };
+                        var reportToken = getUserToken();
+                        if (reportToken) reportHeaders['Authorization'] = 'Bearer ' + reportToken;
+                        res = await fetch(API_BASE + '/api/report', { method: 'POST', credentials: 'include', headers: reportHeaders, body: reportBody });
+                    }
                     var data = await res.json();
                     if (!res.ok) throw new Error(data.error || '提交失败');
                 } else {

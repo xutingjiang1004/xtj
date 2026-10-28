@@ -62,34 +62,60 @@
     row.append(stamp, button);
     return { row: row, day: day };
   }
-  function render(s) {
+  function render(s, options) {
     if (!current(s)) return;
-    var list = byId('authorPostsList'), frag = document.createDocumentFragment(), previous = '', year = '';
-    s.posts.forEach(function (post) {
-      var nextYear = new Date(post.created_at).getFullYear();
-      if (Number.isFinite(nextYear) && String(nextYear) !== year) { year = String(nextYear); frag.appendChild(make('h4', 'author-post-year', year)); previous = ''; }
-      var rendered = renderRow(post, previous); previous = rendered.day; frag.appendChild(rendered.row);
-    });
-    list.replaceChildren(frag);
-    var cover = byId('authorPostsCover'); cover.replaceChildren();
+    var list = byId('authorPostsList');
+    if (!list) return;
+    var appendFrom = options && Number.isInteger(options.appendFrom) ? options.appendFrom : 0;
+    var frag = document.createDocumentFragment(), previous = '', year = '';
+    var appendOnly = appendFrom > 0 && s._renderedCount === appendFrom;
+    if (appendOnly) {
+      previous = s._renderDay || '';
+      year = s._renderYear || '';
+      s.posts.slice(appendFrom).forEach(function (post) {
+        var nextYear = new Date(post.created_at).getFullYear();
+        if (Number.isFinite(nextYear) && String(nextYear) !== year) { year = String(nextYear); frag.appendChild(make('h4', 'author-post-year', year)); previous = ''; }
+        var rendered = renderRow(post, previous); previous = rendered.day; frag.appendChild(rendered.row);
+      });
+      list.appendChild(frag);
+    } else {
+      s.posts.forEach(function (post) {
+        var nextYear = new Date(post.created_at).getFullYear();
+        if (Number.isFinite(nextYear) && String(nextYear) !== year) { year = String(nextYear); frag.appendChild(make('h4', 'author-post-year', year)); previous = ''; }
+        var rendered = renderRow(post, previous); previous = rendered.day; frag.appendChild(rendered.row);
+      });
+      list.replaceChildren(frag);
+    }
+    s._renderedCount = s.posts.length;
+    s._renderYear = year;
+    s._renderDay = previous;
+    var cover = byId('authorPostsCover');
     var coverItem;
     if (s.profile && safeUrl(s.profile.cover_url)) coverItem = {media_url:s.profile.cover_url};
-    if (!coverItem && !s.profile) s.posts.some(function (post) { coverItem = media(post).find(function (item) { return /^(image|photo)$/.test(item.media_type) && safeUrl(item.media_url); }); return !!coverItem; });
+    if (!coverItem) s.posts.some(function (post) { coverItem = media(post).find(function (item) { return /^(image|photo)$/.test(item.media_type) && safeUrl(item.media_url); }); return !!coverItem; });
+    var coverKey = coverItem ? safeUrl(coverItem.media_url) : '';
+    if (cover && s._coverKey !== coverKey) {
+      cover.replaceChildren();
+      if (coverItem) {
+        var img = document.createElement('img'); img.alt = ''; img.src = coverKey; img.decoding = 'async';
+        img.addEventListener('error', function () { img.remove(); }); cover.appendChild(img);
+      }
+      s._coverKey = coverKey;
+    }
     var signature = byId('authorPostsSignature');
     if (!signature) { signature=make('div','author-post-signature'); signature.id='authorPostsSignature'; byId('upcName').insertAdjacentElement('afterend',signature); }
     signature.textContent = s.profile && s.profile.signature || '';
-    if (coverItem) {
-      var img = document.createElement('img'); img.alt = ''; img.src = safeUrl(coverItem.media_url); img.decoding = 'async';
-      img.addEventListener('error', function () { img.remove(); }); cover.appendChild(img);
-    }
   }
   function status(s, label, retry) {
     if (!current(s)) return;
-    var host = byId('authorPostsStatus'); host.replaceChildren(); host.setAttribute('aria-busy', s.loading ? 'true' : 'false');
+    var host = byId('authorPostsStatus');
+    var hadFocus = !!(host && document.activeElement && host.contains(document.activeElement) && document.activeElement.classList.contains('author-post-load-more'));
+    host.replaceChildren(); host.setAttribute('aria-busy', s.loading ? 'true' : 'false');
     if (label) host.appendChild(make('span', 'author-post-status-text', label));
     if ((retry && s.retryable !== false) || (!retry && s.hasMore)) {
       var button = make('button', 'author-post-load-more', retry ? '重试' : '加载更多'); button.type = 'button'; button.disabled = s.loading;
       button.addEventListener('click', function () { load(s); }); host.appendChild(button);
+      if (hadFocus) { try { button.focus(); } catch (_) {} }
     }
   }
   async function load(s) {
@@ -105,11 +131,14 @@
       if (!current(s)) return;
       if (!response.ok || !data.ok || !Array.isArray(data.posts)) throw Object.assign(Error(data.error || '动态加载失败'), { retryable: data.retryable !== false });
       var seen = new Set(s.posts.map(function (post) { return String(post.id); }));
+      var beforeCount = s.posts.length;
       data.posts.forEach(function (post) { if (post.user_name === s.author && !seen.has(String(post.id))) { s.posts.push(post); seen.add(String(post.id)); } });
+      var appended = s.posts.length > beforeCount;
       s.profile = data.profile || s.profile; s.restricted = !!data.restricted;
       if (s.restricted) s.posts = [];
       s.cursor = data.next_cursor; s.hasMore = !!data.has_more && !!s.cursor; s.loading = false; s.retryable = true;
-      render(s); status(s, s.restricted ? '对方已关闭个人动态页访问' : !s.posts.length ? '还没有可查看的动态' : s.hasMore ? '' : '已显示全部动态');
+      render(s, appended && beforeCount > 0 && !s.restricted ? { appendFrom: beforeCount } : undefined);
+      status(s, s.restricted ? '对方已关闭个人动态页访问' : !s.posts.length ? '还没有可查看的动态' : s.hasMore ? '' : '已显示全部动态');
     } catch (error) {
       if (!current(s)) return;
       s.loading = false; s.retryable = error.retryable !== false; status(s, error.message || '动态暂时无法加载', true);
@@ -126,7 +155,7 @@
     if (detail && detail.classList.contains('active') && typeof window.closeModal === 'function') window.closeModal('postDetailModal');
     window.__xtjCloseAuthorPosts();
     if (!byId('authorPostsList')) return;
-    var owner = identity(); state = { author: author, owner: owner.owner, epoch: owner.epoch, generation: generation, posts: [], hasMore: false, loading: false, cursor: null };
+    var owner = identity(); state = { author: author, owner: owner.owner, epoch: owner.epoch, generation: generation, posts: [], hasMore: false, loading: false, cursor: null, _renderedCount: 0, _renderYear: '', _renderDay: '', _coverKey: null };
     var scroll = byId('authorPostsScroll'); if (scroll) scroll.scrollTop = 0;
     load(state);
   };
