@@ -2156,6 +2156,29 @@ function isAdmin() {
                 _aiChatOpenPromise = null;
             };
 
+            // ★ 修复（P1「小猫 AI 卡住打不开，然后哪里都点不了」）：
+            //   骨架屏此前没有任何退出入口 —— 一旦模块脚本被前面的图片请求挤住
+            //   （实测 45 秒都发不出去），整页被 #panelAiChat 盖住且无法返回，
+            //   只能刷新。这里提供最小收尾：作废本次打开、收起面板、归还滚动、
+            //   回到帖子页；无需 ai-agent 已加载。
+            window.__xtjAbortAiChatOpen = function() {
+                try { window.__xtjCancelPendingAiChatOpen(); } catch (eCancel) {}
+                var panel = document.getElementById('panelAiChat');
+                if (panel) {
+                    panel.classList.remove('active', 'is-entering', 'is-leaving');
+                    panel.classList.add('hidden');
+                    panel.setAttribute('aria-hidden', 'true');
+                    panel.removeAttribute('aria-busy');
+                    panel.style.display = '';
+                    panel.innerHTML = '';
+                }
+                try { document.body.style.overflow = ''; } catch (eOverflow) {}
+                try {
+                    var postsTab = document.querySelector('[data-desktop-tab="posts"]');
+                    if (postsTab) postsTab.click();
+                } catch (eTab) {}
+            };
+
             window.__xtjOpenAiChat = function() {
                 if (_aiChatOpenInProgress) return;
                 _aiChatOpenInProgress = true;
@@ -2179,6 +2202,15 @@ function isAdmin() {
                 // 显示 loading 在 AI 页面内部
                 var loadingEl = aiChatPanel ? aiChatPanel.querySelector('.ai-chat-loading') : null;
                 if (loadingEl) loadingEl.textContent = '正在加载 AI 模块...';
+
+                // ★ 慢加载提示：模块脚本可能被首屏图片请求挤在队列里（实测可达数十秒）。
+                //   至少让用户知道还在走、并且有返回入口，而不是看起来死机。
+                var slowTimer = setTimeout(function() {
+                    if (openGeneration !== _aiChatOpenGeneration) return;
+                    if (loadingEl && loadingEl.style.display !== 'none') {
+                        loadingEl.textContent = '网络较慢，仍在加载 AI 模块…可点左上角返回';
+                    }
+                }, 8000);
 
                 // 初始化分阶段错误状态
                 var errorState = { resource: false, auth: false, config: false, sessions: false, history: false };
@@ -2209,6 +2241,7 @@ function isAdmin() {
                     }
                     console.error('[XTJ] ai-agent lazy load failed:', err);
                 }).finally(function() {
+                    clearTimeout(slowTimer);
                     if (openGeneration === _aiChatOpenGeneration) {
                         _aiChatOpenInProgress = false;
                         if (loadingEl) loadingEl.textContent = '';
@@ -2220,7 +2253,10 @@ function isAdmin() {
         lazyAiChatLauncher();
 
         function getAiChatSkeleton() {
-            return '<div class="ai-chat-container" style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:80px 20px 160px;background:var(--bg-primary, #fff);">'
+            // ★ 返回入口必须常驻：模块未加载时 ai-agent 的 closeAiChat 还不存在，
+            //   骨架屏没有退出口会让整页看起来死锁（用户实际只能刷新）。
+            return '<button type="button" class="ai-chat-skeleton-back" onclick="window.__xtjAbortAiChatOpen&&window.__xtjAbortAiChatOpen()" aria-label="返回帖子" style="position:fixed;top:18px;left:18px;z-index:2147483000;display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:999px;border:1px solid rgba(0,0,0,.10);background:rgba(255,255,255,.94);color:#333;font-size:14px;line-height:1;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.08);">← 返回</button>'
+                + '<div class="ai-chat-container" style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:80px 20px 160px;background:var(--bg-primary, #fff);">'
                 + '<div class="ai-chat-loading" style="font-size:15px;color:var(--text-secondary, #888);margin-bottom:20px;text-align:center;"></div>'
                 + '<div class="ai-chat-error" style="display:none;max-width:360px;text-align:center;color:var(--text-primary, #333);"></div>'
                 + '</div>';

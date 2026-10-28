@@ -2162,6 +2162,29 @@ function isAdmin() {
                 _aiChatOpenPromise = null;
             };
 
+            // ★ 修复（P1「小猫 AI 卡住打不开，然后哪里都点不了」）：
+            //   骨架屏此前没有任何退出入口 —— 一旦模块脚本被前面的图片请求挤住
+            //   （实测 45 秒都发不出去），整页被 #panelAiChat 盖住且无法返回，
+            //   只能刷新。这里提供最小收尾：作废本次打开、收起面板、归还滚动、
+            //   回到帖子页；无需 ai-agent 已加载。
+            window.__xtjAbortAiChatOpen = function() {
+                try { window.__xtjCancelPendingAiChatOpen(); } catch (eCancel) {}
+                var panel = document.getElementById('panelAiChat');
+                if (panel) {
+                    panel.classList.remove('active', 'is-entering', 'is-leaving');
+                    panel.classList.add('hidden');
+                    panel.setAttribute('aria-hidden', 'true');
+                    panel.removeAttribute('aria-busy');
+                    panel.style.display = '';
+                    panel.innerHTML = '';
+                }
+                try { document.body.style.overflow = ''; } catch (eOverflow) {}
+                try {
+                    var postsTab = document.querySelector('[data-desktop-tab="posts"]');
+                    if (postsTab) postsTab.click();
+                } catch (eTab) {}
+            };
+
             window.__xtjOpenAiChat = function() {
                 if (_aiChatOpenInProgress) return;
                 _aiChatOpenInProgress = true;
@@ -2185,6 +2208,15 @@ function isAdmin() {
                 // 显示 loading 在 AI 页面内部
                 var loadingEl = aiChatPanel ? aiChatPanel.querySelector('.ai-chat-loading') : null;
                 if (loadingEl) loadingEl.textContent = '正在加载 AI 模块...';
+
+                // ★ 慢加载提示：模块脚本可能被首屏图片请求挤在队列里（实测可达数十秒）。
+                //   至少让用户知道还在走、并且有返回入口，而不是看起来死机。
+                var slowTimer = setTimeout(function() {
+                    if (openGeneration !== _aiChatOpenGeneration) return;
+                    if (loadingEl && loadingEl.style.display !== 'none') {
+                        loadingEl.textContent = '网络较慢，仍在加载 AI 模块…可点左上角返回';
+                    }
+                }, 8000);
 
                 // 初始化分阶段错误状态
                 var errorState = { resource: false, auth: false, config: false, sessions: false, history: false };
@@ -2215,6 +2247,7 @@ function isAdmin() {
                     }
                     console.error('[XTJ] ai-agent lazy load failed:', err);
                 }).finally(function() {
+                    clearTimeout(slowTimer);
                     if (openGeneration === _aiChatOpenGeneration) {
                         _aiChatOpenInProgress = false;
                         if (loadingEl) loadingEl.textContent = '';
@@ -2226,7 +2259,10 @@ function isAdmin() {
         lazyAiChatLauncher();
 
         function getAiChatSkeleton() {
-            return '<div class="ai-chat-container" style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:80px 20px 160px;background:var(--bg-primary, #fff);">'
+            // ★ 返回入口必须常驻：模块未加载时 ai-agent 的 closeAiChat 还不存在，
+            //   骨架屏没有退出口会让整页看起来死锁（用户实际只能刷新）。
+            return '<button type="button" class="ai-chat-skeleton-back" onclick="window.__xtjAbortAiChatOpen&&window.__xtjAbortAiChatOpen()" aria-label="返回帖子" style="position:fixed;top:18px;left:18px;z-index:2147483000;display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:999px;border:1px solid rgba(0,0,0,.10);background:rgba(255,255,255,.94);color:#333;font-size:14px;line-height:1;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.08);">← 返回</button>'
+                + '<div class="ai-chat-container" style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:80px 20px 160px;background:var(--bg-primary, #fff);">'
                 + '<div class="ai-chat-loading" style="font-size:15px;color:var(--text-secondary, #888);margin-bottom:20px;text-align:center;"></div>'
                 + '<div class="ai-chat-error" style="display:none;max-width:360px;text-align:center;color:var(--text-primary, #333);"></div>'
                 + '</div>';
@@ -19533,11 +19569,13 @@ function renderProfileActivityList(kind) {
                 {
                     version: 'v0.96.0', date: '2026-10-28',
                     content: `<h4>加载更快、滚动更顺，审计问题修复</h4><ul>
+                      <li><b>小猫 AI 不再卡死</b>：模块脚本被首屏图片请求挤住时，此前会一直停在「正在加载 AI 模块」并且整页无法点击、只能刷新。现在加载页左上角常驻<b>返回</b>按钮，超过 8 秒会提示「网络较慢」，随时可退回帖子页；小猫 AI、照片墙、图片预览模块改为提前抓取，不再排在图片后面。</li>
                       <li><b>首屏提速</b>：主程序和 Supabase SDK 改为提前抓取；小猫 AI 模块的预取从「2 秒后强制下载 525KB」改为「页面加载完成后空闲时下载」，省流模式与 2G／3G 不预取，不再和首屏抢带宽。</li>
                       <li><b>滚动更顺</b>：低性能设备档位下真正关闭按钮的玻璃模糊（此前只关掉了名字里带 glass 的元素），模糊合成层由 188 个降到 30 个；<b>正常档位的视觉保持不变</b>。</li>
                       <li><b>帖子渲染减负</b>：同一张卡片的内容解析由 7 次降到 2 次；封面数据没有新增时不再整段重绘信息流。</li>
                       <li><b>小猫 AI 长时间使用</b>：深入研究的动画与计时器在卡片被移除后自动停止，思考日志按单条截断，会话标题只解析一次，不再随会话数量变慢。</li>
                       <li><b>三处「卡死」修复</b>：发送中途切换会话导致发送按钮永久不可用、关闭站内搜索后无法再搜索、删除或新建会话后历史一直空白。</li>
+                      <li><b>图片更省流量</b>：列表和照片墙格子的预览图从 1920px／q90 降到 1080px／q80，一页图片体量约为原来的三分之一到四分之一，加载更快、也更少占用服务器。点开看大图<b>仍然是你上传的原图</b>，分辨率、画质和 EXIF 都不变。</li>
                       <li><b>统计数据</b>：修复「总浏览」长期显示 0 —— 本地回填曾把服务端统计缓存标成有效，导致服务端快照从未请求；已删除的帖子也不再进入统计。</li>
                       <li><b>安全与稳定</b>：举报时校验被举报用户与内容归属一致（防诱导封禁）；公告删除只允许真正的公告；生图代理只回传位图并禁止 MIME 嗅探；访问去重缓存加上限；未处理异常改为优雅关闭，不再直接切断进行中的回复。</li>
                       <li><b>数据库</b>：新增迁移修复带幂等标识的评论在 <code>search_path=''</code> 下 <code>sha256()</code> 无法解析、评论提交失败的问题。</li>
