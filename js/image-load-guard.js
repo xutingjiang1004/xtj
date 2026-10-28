@@ -52,6 +52,9 @@
     state.timer = setTimeout(function () {
       state.timer = 0;
       if (!img.isConnected || source !== img.getAttribute('src') || (img.complete && img.naturalWidth > 0)) return;
+      // Abort the stalled request before freeing the slot; otherwise another
+      // four requests start while the old ones are still in flight.
+      try { if (img.getAttribute('src') === source) img.removeAttribute('src'); } catch (_) {}
       release(state);
       if (img.id === 'photoPreviewImage') img.dispatchEvent(new Event('xtj:image-timeout'));
       else if (window.markPostImageFailed) window.markPostImageFailed(img);

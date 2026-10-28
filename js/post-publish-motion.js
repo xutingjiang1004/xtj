@@ -172,5 +172,5 @@
   window.addEventListener('auth-ready',clearInvalid);
   window.addEventListener('pagehide',function() { active.forEach(function(state) { state.stop(); }); });
   document.addEventListener('visibilitychange',function() { if (document.hidden) active.forEach(function(state) { state.stop(); }); });
-  window.XtjPostPublishMotion = {capture:capture,play:play};
+  window.XtjPostPublishMotion = {capture:capture,play:play,stop:function(state){ if(state&&typeof state.stop==='function') state.stop(); }};
 })();

@@ -1035,14 +1035,25 @@
                 var sel = safePostSelector(postId);
                 return sel ? document.querySelector(sel) : null;
             }
+            function syncPostCommentCount(postId) {
+                var id = String(postId);
+                var post = (feedAllPosts || []).find(function(row) { return String(row.id) === id; });
+                if (!post) return;
+                post.comment_count = (feedAllComments || []).filter(function(row) { return String(row.post_id) === id; }).length;
+                try { schedulePostCardPatch(postId); } catch (_) {}
+            }
             function findPostCardElement(postId) {
                 return findBySafePostSelector(postId);
             }
+            var deletedPostIds = new Set();
             function removeDeletedPostFromFeed(postId) {
+                deletedPostIds.add(String(postId));
                 if (!Array.isArray(feedAllPosts)) return;
                 feedAllPosts = feedAllPosts.filter(function(post) {
                     return String(post.id) !== String(postId);
                 });
+                feedAllComments = (feedAllComments || []).filter(function(row) { return String(row && row.post_id) !== String(postId); });
+                feedAllLikes = (feedAllLikes || []).filter(function(row) { return String(row && row.post_id) !== String(postId); });
             }
             async function confirmPostDeleteStatus(postId, identity) {
                 identity = identity || capturePostActionIdentity();
@@ -1972,6 +1983,7 @@
             let feedStateVersion = 0;
             let feedInteractionMutationVersion = 0;
             var deletedPostCommentIds = new Set();
+            var deletedPostIds = deletedPostIds || new Set();
             var engagementRefreshTimers = new Map();
             let feedNextOffset = 0;
             let feedNextCursor = null;
@@ -2444,10 +2456,11 @@
     var hasFullData = Array.isArray(feedAllPosts) && Array.isArray(feedAllLikes) && Array.isArray(feedAllComments);
     if (hasFullData) {
         posts = feedAllPosts;
+        var visibleIds = new Set(feedAllPosts.map(function(post) { return String(post && post.id); }));
         feedAllLikes.forEach(function(like) {
-            if (!(like && (like.is_like === false || like.like_type === 'unlike'))) totalLikes += 1;
+            if (like && visibleIds.has(String(like.post_id)) && !(like.is_like === false || like.like_type === 'unlike')) totalLikes += 1;
         });
-        totalComments = feedAllComments.length;
+        totalComments = feedAllComments.filter(function(comment) { return comment && visibleIds.has(String(comment.post_id)); }).length;
         posts.forEach(function(p) {
             if (p && Number(p.views)) totalViews += Number(p.views);
         });
@@ -2532,15 +2545,15 @@
                     var result = await response.json().catch(function() { return {}; });
                     assertPostPublishIdentity(flight);
                     if (!response.ok || !result.ok || !result.data) {
-                        return { ok: false, error: new Error(result.error || '发布失败') };
+                        return { ok: false, error: new Error(result.error || '发布失败'), status: response.status, code: result.code || '' };
                     }
                     var data = normalizePost(result.data);
                     // The create acknowledgement is enough to render the post.
                     // IP metadata is refreshed separately, never on the critical path.
                     assertPostPublishIdentity(flight);
-                    return { ok: true, fallback: false, data: data };
+                    return { ok: true, fallback: false, data: data, duplicate: result.duplicate === true };
                 } catch (error) {
-                    return { ok: false, error: error };
+                    return { ok: false, error: error, status: 0 };
                 }
             }
 
@@ -4220,7 +4233,7 @@
                 if (!chunk) return;
                 var relationsCurrent = chunk.relationVersion == null || chunk.relationVersion === feedInteractionMutationVersion;
                 var incomingPosts = (chunk.posts || []).filter(function(post) {
-                    return post && canViewPost(post);
+                    return post && !deletedPostIds.has(String(post.id)) && canViewPost(post);
                 }).map(function(post) {
                     if (relationsCurrent) return post;
                     var old = (feedAllPosts || []).find(function(row) { return String(row.id) === String(post.id); });
@@ -4229,7 +4242,7 @@
                 });
                 feedAllPosts = mergeFeedRecords(feedAllPosts, incomingPosts, function(post) {
                     return getFeedRecordKey(post, [post && post.user_name, post && post.created_at]);
-                }, true).filter(canViewPost);
+                }, true).filter(canViewPost).filter(function(post) { return !deletedPostIds.has(String(post && post.id)); });
                 // Never retain another account's private rows or interactions,
                 // even if a stale or incorrect response contains them.
                 var visibleIds = new Set(feedAllPosts.map(function(post) { return String(post.id); }));
@@ -4285,8 +4298,13 @@
                     var chunk = await fetchFeedPageChunk(feedNextOffset, requestId);
                     if (!chunk) return false;
                     if (!chunk.posts.length) {
-                        feedEndReached = true;
-                        break;
+                        var canAdvance = !chunk.endReached && (chunk.nextCursor || Number(chunk.nextOffset) > Number(feedNextOffset || 0));
+                        if (!canAdvance) { feedEndReached = true; break; }
+                        // A scan window can legitimately contain only system rows;
+                        // advance the cursor and keep looking instead of ending.
+                        mergeFeedPageIntoState(chunk);
+                        guard++;
+                        continue;
                     }
                     mergeFeedPageIntoState(chunk);
                     guard++;
@@ -4945,12 +4963,23 @@
                 btn.innerHTML = flight.markup || '<span>发动态</span>'; delete btn._composeMarkup; delete btn.dataset.originalText;
             }
             function pendingPostMediaKey(owner) { return 'xtj_post_media_pending_' + encodeURIComponent(owner); }
+            function postRequestKeyFor(owner, text, files, visibility, location) {
+                var seed = [String(owner || ''), String(text || ''), (files || []).map(function(file) { return file.name + ':' + file.size + ':' + (file.lastModified || 0); }).join('|'), String(visibility || ''), location ? JSON.stringify(location) : ''].join('\u0000');
+                var h1 = 2166136261, h2 = 0;
+                for (var i = 0; i < seed.length; i++) {
+                    var code = seed.charCodeAt(i);
+                    h1 ^= code; h1 = Math.imul(h1, 16777619);
+                    h2 = (Math.imul(h2, 31) + code) | 0;
+                }
+                return 'post_req_' + (h1 >>> 0).toString(36) + (h2 >>> 0).toString(36);
+            }
+            var postUploadCache = new Map();
             function readPendingPostMedia(owner) {
                 try { var rows = JSON.parse(window.safeStorage.get(pendingPostMediaKey(owner)) || '[]'); return Array.isArray(rows) ? rows : []; } catch (_) { return []; }
             }
-            function rememberPendingPostMedia(owner, path, uploadId) {
+            function rememberPendingPostMedia(owner, path, uploadId, keepForRetry) {
                 var rows = readPendingPostMedia(owner).filter(function(row) { return row.storage_path !== path; });
-                rows.push({ storage_path: path, upload_id: uploadId });
+                rows.push({ storage_path: path, upload_id: uploadId, keep_for_retry: !!keepForRetry });
                 try { window.safeStorage.set(pendingPostMediaKey(owner), JSON.stringify(rows)); } catch (_) {}
             }
             function forgetPendingPostMedia(owner, path) {
@@ -4974,6 +5003,7 @@
                 var identity = { owner: currentUser, epoch: _authStateEpoch };
                 if (!identity.owner) return;
                 readPendingPostMedia(identity.owner).forEach(function(row) {
+                    if (row && row.keep_for_retry) return;
                     if (Array.from(activePostUploadFlights).some(function(flight) { return flight.owner === identity.owner; })) return;
                     cleanupPendingPostMedia(identity, row.storage_path, row.upload_id);
                 });
@@ -5034,6 +5064,9 @@
                 postPublishFlight = flight;
                 activePostUploadFlights.add(flight);
                 var publishLocation = postLocationData ? Object.assign({}, postLocationData) : null;
+                var requestKey = postRequestKeyFor(flight.owner, submittedText, selectedPostMedia, visibility, publishLocation);
+                var cachedUpload = postUploadCache.get(requestKey);
+                var reusedUpload = false;
                 btn.disabled = true;
                 btn.classList.add('is-loading');
                 btn.setAttribute('aria-busy', 'true');
@@ -5046,28 +5079,46 @@
                     var media_type = "";
                     var attachments = [];
                     if (file && window.XtjPostMedia) {
-                        var uploaded = await window.XtjPostMedia.mapUploads(selectedPostMedia, async function(selectedFile, position) {
-                            assertPostPublishIdentity(flight);
-                            var path = buildStorageUploadPath('posts', selectedFile.name), uploadId = crypto.randomUUID();
-                            var pending = { storage_path: path, upload_id: uploadId };
-                            uploadedMedia.push(pending);
-                            rememberPendingPostMedia(flight.owner, path, uploadId);
-                            var prepareResponse = await window.xtjProtectedFetch('/api/post/media/prepare', { method: 'POST', authOwner: flight.owner, authEpoch: flight.epoch, body: JSON.stringify(pending) });
-                            var prepared = await prepareResponse.json();
-                            assertPostPublishIdentity(flight);
-                            if (!prepareResponse.ok || !prepared.ok || prepared.storage_path !== path) throw new Error(prepared.error || '上传准备失败');
-                            var uploadRes = flight.progress ? await flight.progress.upload(sb, path, selectedFile, position) : await sb.storage.from('uploads').upload(path, selectedFile, { upsert: false });
-                            assertPostPublishIdentity(flight);
-                            if (uploadRes.error) throw uploadRes.error;
-                            var dimensions = selectedFile.type.startsWith('image/') ? await readPostImageDimensions(selectedFile) : {};
-                            assertPostPublishIdentity(flight);
-                            return Object.assign({}, pending, dimensions, { position: position, media_type: selectedFile.type.split('/')[0],
-                                media_url: sb.storage.from('uploads').getPublicUrl(path).data.publicUrl, file_size: selectedFile.size });
-                        }, 3);
-                        media_url = uploaded[0].media_url;
-                        media_type = uploaded.length > 1 ? 'album' : uploaded[0].media_type;
-                        if (media_type === 'album' || media_type === 'image') attachments = uploaded;
-                        else { uploadedPath = uploaded[0].storage_path; mediaUploadId = uploaded[0].upload_id; }
+                        if (cachedUpload) {
+                            media_url = cachedUpload.media_url;
+                            media_type = cachedUpload.media_type;
+                            attachments = cachedUpload.attachments.slice();
+                            uploadedPath = cachedUpload.uploadedPath;
+                            mediaUploadId = cachedUpload.mediaUploadId;
+                            uploadedMedia = cachedUpload.uploadedMedia.slice();
+                            reusedUpload = true;
+                        } else {
+                            var uploaded = await window.XtjPostMedia.mapUploads(selectedPostMedia, async function(selectedFile, position) {
+                                assertPostPublishIdentity(flight);
+                                var path = buildStorageUploadPath('posts', selectedFile.name), uploadId = crypto.randomUUID();
+                                var pending = { storage_path: path, upload_id: uploadId };
+                                uploadedMedia.push(pending);
+                                rememberPendingPostMedia(flight.owner, path, uploadId);
+                                var prepareResponse = await window.xtjProtectedFetch('/api/post/media/prepare', { method: 'POST', authOwner: flight.owner, authEpoch: flight.epoch, body: JSON.stringify(pending) });
+                                var prepared = await prepareResponse.json();
+                                assertPostPublishIdentity(flight);
+                                if (!prepareResponse.ok || !prepared.ok || prepared.storage_path !== path) throw new Error(prepared.error || '上传准备失败');
+                                var uploadRes = flight.progress ? await flight.progress.upload(sb, path, selectedFile, position) : await sb.storage.from('uploads').upload(path, selectedFile, { upsert: false });
+                                assertPostPublishIdentity(flight);
+                                if (uploadRes.error) throw uploadRes.error;
+                                var dimensions = selectedFile.type.startsWith('image/') ? await readPostImageDimensions(selectedFile) : {};
+                                assertPostPublishIdentity(flight);
+                                return Object.assign({}, pending, dimensions, { position: position, media_type: selectedFile.type.split('/')[0],
+                                    media_url: sb.storage.from('uploads').getPublicUrl(path).data.publicUrl, file_size: selectedFile.size });
+                            }, 3);
+                            media_url = uploaded[0].media_url;
+                            media_type = uploaded.length > 1 ? 'album' : uploaded[0].media_type;
+                            if (media_type === 'album' || media_type === 'image') attachments = uploaded;
+                            else { uploadedPath = uploaded[0].storage_path; mediaUploadId = uploaded[0].upload_id; }
+                            postUploadCache.set(requestKey, {
+                                media_url: media_url,
+                                media_type: media_type,
+                                attachments: attachments.slice(),
+                                uploadedPath: uploadedPath,
+                                mediaUploadId: mediaUploadId,
+                                uploadedMedia: uploadedMedia.slice()
+                            });
+                        }
                     } else if (file) {
                         throw new Error('附件模块未加载，请刷新后重试');
                     }
@@ -5079,7 +5130,7 @@
                         content: contentPayload,
                         media_url: media_url,
                         media_type: media_type || null,
-                        actor_key: deviceId,
+                        actor_key: requestKey,
                         visibility: metadata.visibility,
                         is_pinned: false,
                         pinned_at: null,
@@ -5094,11 +5145,24 @@
                     var insertRes = await insertPostRecord(payload, contentPayload, flight);
                     assertPostPublishIdentity(flight);
                     if (!insertRes.ok) {
+                        var ambiguousFailure = !insertRes.status || insertRes.status >= 500;
+                        if (ambiguousFailure) {
+                            uploadedMedia.forEach(function(item) { rememberPendingPostMedia(flight.owner, item.storage_path, item.upload_id, true); });
+                            assertPostPublishIdentity(flight);
+                            showToast("发布结果未确认，请重试；不会重复发布");
+                            return;
+                        }
+                        postUploadCache.delete(requestKey);
                         await Promise.all(uploadedMedia.map(function(item) { return cleanupPendingPostMedia(flight, item.storage_path, item.upload_id); }));
                         assertPostPublishIdentity(flight);
                         showToast("发布失败: " + ((insertRes.error && insertRes.error.message) || "未知错误"));
                         return;
                     }
+                    if (insertRes.duplicate && !reusedUpload && uploadedMedia.length) {
+                        await Promise.all(uploadedMedia.map(function(item) { return cleanupPendingPostMedia(flight, item.storage_path, item.upload_id); }));
+                        uploadedMedia = [];
+                    }
+                    postUploadCache.delete(requestKey);
                     uploadedMedia.forEach(function(item) { forgetPendingPostMedia(flight.owner, item.storage_path); });
                     if (flight.progress) flight.progress.confirmed();
                     uploadedMedia = [];
@@ -5136,6 +5200,10 @@
                     }
                     loadProfileActivity(true).catch(function() {});
                 } catch (e) {
+                    if (publishMotion && window.XtjPostPublishMotion && window.XtjPostPublishMotion.stop) {
+                        try { window.XtjPostPublishMotion.stop(publishMotion); } catch (_) {}
+                    }
+                    postUploadCache.delete(requestKey);
                     await Promise.all(uploadedMedia.map(function(item) { return cleanupPendingPostMedia(flight, item.storage_path, item.upload_id); }));
                     if (postPublishIdentityCurrent(flight)) showToast("发布失败: " + (e.message || "网络错误"));
                 } finally {
@@ -5253,23 +5321,31 @@
                     // A publish may finish while this request is in flight.
                     // Preserve current state and merge this page when that happens.
                     if (stateVersionAtRequest === feedStateVersion) {
-                        if (!chunk.posts.length) {
+                        var emptyCanAdvance = !chunk.endReached && (chunk.nextCursor || Number(chunk.nextOffset) > Number(feedNextOffset || 0));
+                        var emptyTerminal = !chunk.posts.length && !emptyCanAdvance;
+                        if (emptyTerminal) {
                             var detailId = String(window.__xtjPostDetailCurrentId || '');
                             var removedPosts = feedAllPosts.slice();
                             if (detailId && removedPosts.some(function(post) { return String(post.id) === detailId; })) closeModal('postDetailModal');
                             if (typeof window.__xtjDropPostMediaCache === 'function') removedPosts.forEach(function(post) { window.__xtjDropPostMediaCache(post.id); });
                         }
-                        feedAllPosts = [];
-                        feedAllComments = [];
-                        feedAllLikes = [];
-                        feedLoadedPages = [];
-                        feedNextOffset = 0;
-                        feedNextCursor = null;
-                        feedEndReached = false;
-                        markFeedStateChanged();
+                        if (emptyTerminal) {
+                            feedAllPosts = [];
+                            feedAllComments = [];
+                            feedAllLikes = [];
+                            feedLoadedPages = [];
+                            feedNextOffset = 0;
+                            feedNextCursor = null;
+                            feedEndReached = false;
+                            markFeedStateChanged();
+                        }
                     }
                     if (chunk.posts.length) mergeFeedPageIntoState(chunk);
-                    else feedEndReached = true;
+                    else {
+                        // Advance over an empty scan window; only a terminal page ends the feed.
+                        mergeFeedPageIntoState(chunk);
+                        if (emptyTerminal) feedEndReached = true;
+                    }
                     writeFeedCacheSnapshot();
                     // 批量预加载所有出现过的用户的 VIP 历史（用于显示历史 Pro 帖子的 Pro 标志）
                     try {

@@ -87,7 +87,7 @@
          DCL 因此推迟到 4s 量级。preload 只提前「下载」，不改变执行顺序
          （defer 仍按文档顺序执行），构建脚本会同步刷新 ?v= 指纹。 -->
     <link rel="preload" as="script" href="js/vendor/supabase.min.js?v=e8c548fa1b" />
-    <link rel="preload" as="script" href="js/core.min.js?v=592835587e" />
+    <link rel="preload" as="script" href="js/core.min.js?v=0fc2769ded" />
     <!-- 小猫 AI 模块按需加载，但实测它会被首屏图片请求挤在连接队列里几十秒，
          用户点开只看到「正在加载 AI 模块」且无法返回。这里在第一波就把它取下来，
          执行时机仍由模块加载器决定（不会提前执行）。 -->
@@ -340,8 +340,8 @@
                     </div>
                 </div>
                 <!-- 首屏并行拉帖：不依赖 core.js / supabase，避免大包未下载完时永久 skeleton -->
-                <script src="js/post-media.min.js?v=8e96bf8662"></script>
-                <script src="js/early-feed.min.js?v=9867fa072f"></script>
+                <script src="js/post-media.min.js?v=4c3d5efb64"></script>
+                <script src="js/early-feed.min.js?v=a630a58d66"></script>
             </div>
         </div>
 
@@ -1250,23 +1250,23 @@
     <script defer src="js/config.min.js?v=fcde94254b"></script>
     <script defer src="js/performance.min.js?v=ac348c42e0"></script>
     <script defer src="js/mobile-viewport.min.js?v=3b1b69fbaf"></script>
-    <script defer src="js/media-session.min.js?v=3cc32930e1"></script>
+    <script defer src="js/media-session.min.js?v=2e766b9507"></script>
     <script defer src="js/media-cache.min.js?v=61d2629804"></script>
-    <script defer src="js/image-load-guard.min.js?v=32cde155a0"></script>
+    <script defer src="js/image-load-guard.min.js?v=c8ebeb7aca"></script>
     <script defer src="js/post-composer-media.min.js?v=b26173f84d"></script>
-    <script defer src="js/post-originals.min.js?v=211f98f2b2"></script>
+    <script defer src="js/post-originals.min.js?v=b6ca281d48"></script>
     <script defer src="js/post-publish-progress.min.js?v=3ef713325f"></script>
-    <script defer src="js/post-publish-motion.min.js?v=15757bac84"></script>
+    <script defer src="js/post-publish-motion.min.js?v=da76b1b6d0"></script>
     <script defer src="js/profile-settings.min.js?v=c80c4db38b"></script>
-    <script defer src="js/author-posts.min.js?v=452c9363d2"></script>
+    <script defer src="js/author-posts.min.js?v=eac6120329"></script>
     <script src="js/ip-city-data.min.js?v=84becef210"></script>
     <script src="js/ip-location.min.js?v=56f2c41fe8"></script>
     <script defer src="js/core-utils.min.js?v=a376d5219e"></script>
     <script defer src="js/photo-wall/story.min.js?v=167ce053d3"></script>
     <script defer src="js/voice-transcription.min.js?v=6247e4303f"></script>
-    <script defer src="js/core.min.js?v=592835587e"></script>
+    <script defer src="js/core.min.js?v=0fc2769ded"></script>
     <script defer src="js/login-device.min.js?v=7f402fc787"></script>
-    <script defer src="js/theme-toggle.min.js?v=dd3746237f"></script>
+    <script defer src="js/theme-toggle.min.js?v=f67dfa81a9"></script>
     <script defer src="js/desktop-shell.min.js?v=1782d34613"></script>
     <script defer src="js/ux-features.min.js?v=d2d1987f33"></script>
 

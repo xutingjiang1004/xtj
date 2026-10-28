@@ -12,6 +12,7 @@
   var gesture = null;
   var dragFrame = 0;
   var suppressPointerClick = false;
+  var suppressPointerClickTimer = 0;
 
   function getSystemTheme() {
     return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
@@ -378,6 +379,10 @@
     if (!gesture || (event && event.pointerId !== gesture.id)) return;
     var old = resetGesture();
     suppressPointerClick = old.dragged || cancelled;
+    if (suppressPointerClick) {
+      clearTimeout(suppressPointerClickTimer);
+      suppressPointerClickTimer = setTimeout(function() { suppressPointerClick = false; }, 400);
+    }
     if (cancelled || !old.dragged) {
       if (palette) animatePalette(old.original, function() { clearPalette(); applyThemeMode(resolveThemeMode()); });
       else syncControls(resolveTheme(resolveThemeMode()), resolveThemeMode());
@@ -390,6 +395,7 @@
   function beginThemeGesture(event) {
         if (gesture || !event.isPrimary || event.button !== 0) return;
         suppressPointerClick = false;
+        clearTimeout(suppressPointerClickTimer);
         stopPaletteAnimation();
         var orb = themeBtn.querySelector('.theme-toggle-orb');
         var box = themeBtn.getBoundingClientRect();

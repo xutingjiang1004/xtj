@@ -257,6 +257,9 @@
     var _adminDetailAbortController = null;
     var adminTabSwitchGeneration = 0;
     var searchUser = '', searchPost = '';
+    var ADMIN_POSTS_PAGE_SIZE = 100;
+    var ADMIN_POST_HIDDEN_TYPES = new Set([ANN_MARKER, '__photo_wall__', REPORT_MARKER, '__vip__', '__vip_order__', '__vip_plan__', '__pro_gift__', '__pro_gift_claim__', '__user_style__', '__auth__', '__admin_auth__', '__user_info__', '__user_visit__', '__login_event__', '__user_behavior__', '__security_alert__', '__admin_audit__', '__client_error__', '__email_sent__', '__email_recipient_history__']);
+    var adminPostsFiltered = [], adminPostsRendered = 0;
     // 主 Tab 白名单：refreshAdminTab / switchTab / initAdminClient 共用，避免三份名单漂移
     // （blacklist 已下线并入 bans，不出现在名单中）
     var allowedTabs = ['ann','stats','users','security','posts','likes','comments','reports','bans','mutes','photos','email','audit','behavior','errorlog','ai','online','profile','support'];
@@ -1980,8 +1983,12 @@
             try {
                 if (!API_BASE) throw new Error('未配置 API_BASE，无法删除');
                 await apiCall('DELETE', '/admin/post/' + encodeURIComponent(id));
-                await loadAllData(true);
+                // The delete already succeeded; a failed list refresh must not be
+                // reported as "删除失败" or leave the deleted row on screen.
+                allPosts = (allPosts || []).filter(function(x) { return String(x.id) !== String(id); });
+                try { if (typeof window.renderTab === 'function') window.renderTab(currentTab); } catch (_) {}
                 showToast('帖子已成功删除', 'success');
+                try { await loadAllData(true); } catch (_) { showToast('已删除，但列表刷新失败，请手动刷新', 'error'); }
             } catch(e) { showToast('删除失败: ' + e.message, 'error'); }
         });
     };
@@ -2026,14 +2033,13 @@
         searchPost = (inp ? inp.value : searchPost).trim();
         if (_postSearchTimer) clearTimeout(_postSearchTimer);
         _postSearchTimer = setTimeout(function() {
-            renderTab('posts');
-            requestAnimationFrame(function() {
-                var el = document.getElementById('postSearchInp');
-                if (el) {
-                    var len = el.value.length;
-                    try { el.focus(); el.setSelectionRange(len, len); } catch(e) {}
-                }
-            });
+            adminPostsFiltered = filterAdminPosts();
+            adminPostsRendered = 0;
+            var count = document.getElementById('adminPostsCount');
+            if (count) count.textContent = String(adminPostsFiltered.length);
+            var host = document.getElementById('adminPostsTableHost');
+            if (host) host.replaceChildren();
+            renderAdminPostsPage();
         }, 200);
     };
 
@@ -3054,44 +3060,72 @@
     function buildAdminMediaThumb(post, username, createdAt) {
         if (!post) return '-';
         var items=Array.isArray(post.media_items) && post.media_items.length ? post.media_items : [{media_url:post.media_url,media_type:post.media_type}];
-        return items.map(function(item){
+        var shown = items.slice(0, 3);
+        var html = shown.map(function(item){
             var url=adminMediaSource(item.media_url);if(!url)return '';
             if (!/^https?:\/\//.test(url) && url.indexOf('/api/')!==0) return '📎';
             if (item.media_type==='video' || item.media_type==='audio') return '<a href="'+escapeHtml(url)+'" target="_blank" rel="noopener">查看'+(item.media_type==='video'?'视频':'音频')+'</a>';
-            return '<img src="'+escapeHtml(url)+'" style="width:48px;height:48px;object-fit:cover;border-radius:6px;cursor:pointer;" onclick="previewAdminPhoto(\''+safeJsStr(url)+'\',\''+safeJsStr(username || post.user_name || '')+'\',\''+safeJsStr(createdAt || post.created_at || '')+'\')" title="点击预览原图">';
-        }).join(' ') || '-';
+            return '<img src="'+escapeHtml(url)+'" loading="lazy" decoding="async" width="48" height="48" style="width:48px;height:48px;object-fit:cover;border-radius:6px;cursor:pointer;" onclick="previewAdminPhoto(\''+safeJsStr(url)+'\',\''+safeJsStr(username || post.user_name || '')+'\',\''+safeJsStr(createdAt || post.created_at || '')+'\')" title="点击预览原图">';
+        }).filter(Boolean).join(' ');
+        if (items.length > shown.length) html += ' <span class="admin-media-more">+' + (items.length - shown.length) + '</span>';
+        return html || '-';
     }
 
+    function filterAdminPosts() {
+        var q = searchPost.toLowerCase();
+        return allPosts.filter(function(p) {
+            if (ADMIN_POST_HIDDEN_TYPES.has(p.media_type)) return false;
+            if (!q) return true;
+            return (p.user_name || '').toLowerCase().includes(q) || (p.content || '').toLowerCase().includes(q);
+        });
+    }
+    function adminPostRowHtml(p) {
+        var summary = getAdminPostSummary(p);
+        var content = summary.hasImage && !summary.text ? '' : String(summary.text || '').slice(0, 60);
+        if (summary.text && summary.text.length > 60) content += '...';
+        return '<tr><td>' + escapeHtml(p.user_name || '') + '</td>' +
+            '<td>' + escapeHtml(content) + '</td>' +
+            '<td>' + buildAdminMediaThumb(p) + '</td>' +
+            '<td>' + (p.views || 0) + '</td>' +
+            '<td>' + formatTime(p.created_at) + '</td>' +
+            '<td><button class="btn-sm del" onclick="deleteAdminPost(\'' + safeJsStr(p.id) + '\')">删除</button></td></tr>';
+    }
+    function adminPostsTableHtml() {
+        return '<div class="table-wrap"><table><thead><tr><th>用户</th><th>内容</th><th>附件</th><th>浏览</th><th>时间</th><th>操作</th></tr></thead><tbody id="adminPostsTbody"></tbody></table></div>';
+    }
+    function renderAdminPostsPage() {
+        var host = document.getElementById('adminPostsTableHost');
+        var footer = document.getElementById('adminPostsFooter');
+        var hadFocus = !!(footer && document.activeElement && footer.contains(document.activeElement));
+        if (!host) return;
+        if (!adminPostsFiltered.length) {
+            host.innerHTML = '<div class="empty">无匹配帖子</div>';
+            if (footer) footer.textContent = '';
+            return;
+        }
+        if (!document.getElementById('adminPostsTbody')) host.innerHTML = adminPostsTableHtml();
+        var tbody = document.getElementById('adminPostsTbody');
+        if (!tbody) return;
+        var page = adminPostsFiltered.slice(adminPostsRendered, adminPostsRendered + ADMIN_POSTS_PAGE_SIZE);
+        if (page.length) tbody.insertAdjacentHTML('beforeend', page.map(adminPostRowHtml).join(''));
+        adminPostsRendered += page.length;
+        var more = adminPostsRendered < adminPostsFiltered.length;
+        if (footer) {
+            footer.innerHTML = '显示 ' + adminPostsRendered + ' / ' + adminPostsFiltered.length + (more ? ' <button type="button" class="btn-sm" onclick="loadMoreAdminPosts()">加载更多</button>' : ' 条');
+            if (hadFocus && more) { var next = footer.querySelector('button'); if (next) { try { next.focus(); } catch (_) {} } }
+        }
+    }
+    window.loadMoreAdminPosts = function() { renderAdminPostsPage(); };
+
     window.renderPostsTab = async function(el) {
-        var visiblePosts = allPosts.filter(function(p) { return [ANN_MARKER, '__photo_wall__', REPORT_MARKER, '__vip__', '__vip_order__', '__vip_plan__', '__pro_gift__', '__pro_gift_claim__', '__user_style__', '__auth__', '__admin_auth__', '__user_info__', '__user_visit__', '__login_event__', '__user_behavior__', '__security_alert__', '__admin_audit__', '__client_error__', '__email_sent__', '__email_recipient_history__'].indexOf(p.media_type) < 0; });
-        var h = '<div class="card"><h3>帖子管理（' + visiblePosts.length + '条）</h3>';
+        adminPostsFiltered = filterAdminPosts();
+        adminPostsRendered = 0;
+        var h = '<div class="card"><h3>帖子管理（<span id="adminPostsCount">' + adminPostsFiltered.length + '</span>条）</h3>';
         h += '<div class="search-bar"><input id="postSearchInp" placeholder="搜索帖子内容或用户名..." oninput="searchPostInp()" value="' + escapeHtml(searchPost) + '" /></div>';
-        var filtered = visiblePosts;
-        if (searchPost) {
-            var q = searchPost.toLowerCase();
-            filtered = visiblePosts.filter(function(p) {
-                return (p.user_name || '').toLowerCase().includes(q) || (p.content || '').toLowerCase().includes(q);
-            });
-        }
-        if (!filtered.length) {
-            h += '<div class="empty">无匹配帖子</div>';
-        } else {
-            h += '<div class="table-wrap"><table><thead><tr><th>用户</th><th>内容</th><th>附件</th><th>浏览</th><th>时间</th><th>操作</th></tr></thead><tbody>';
-            filtered.forEach(function(p) {
-                var summary = getAdminPostSummary(p);
-                var content = summary.hasImage && !summary.text ? '' : String(summary.text || '').slice(0, 60);
-                if (summary.text && summary.text.length > 60) content += '...';
-                h += '<tr><td>' + escapeHtml(p.user_name || '') + '</td>';
-                h += '<td>' + escapeHtml(content) + '</td>';
-                h += '<td>' + buildAdminMediaThumb(p) + '</td>';
-                h += '<td>' + (p.views || 0) + '</td>';
-                h += '<td>' + formatTime(p.created_at) + '</td>';
-                h += '<td><button class="btn-sm del" onclick="deleteAdminPost(\'' + safeJsStr(p.id) + '\')">删除</button></td></tr>';
-            });
-            h += '</tbody></table></div>';
-        }
+        h += '<div id="adminPostsTableHost"></div><div id="adminPostsFooter" class="empty" style="padding:10px 0;"></div>';
         h += '</div>';
         el.innerHTML = h;
+        renderAdminPostsPage();
     };
 
     window.renderLikesTab = async function(el) {

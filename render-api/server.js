@@ -13627,6 +13627,26 @@ app.post('/api/post/create', authenticateUser, rateLimit(60000, 20), async (req,
     if (clientActorKey && !/^[A-Za-z0-9_:.\-]{1,128}$/.test(clientActorKey)) {
       return res.status(400).json({ error: '幂等键格式无效', code: 'invalid_actor_key' });
     }
+    // Idempotent create: the browser sends a deterministic post_req_* key for a
+    // draft. A lost response followed by a retry must return the existing post
+    // instead of creating a duplicate row.
+    if (clientActorKey && clientActorKey.indexOf('post_req_') === 0) {
+      var existingCreate = await supabase.from('posts')
+        .select('*')
+        .eq('user_name', req.userName)
+        .eq('actor_key', clientActorKey)
+        .or('is_deleted.is.null,is_deleted.eq.false')
+        .order('created_at', { ascending: true })
+        .limit(1);
+      if (existingCreate.error) {
+        return res.status(503).json({ error: '发布状态查询暂不可用，请重试', code: 'create_lookup_failed', retryable: true });
+      }
+      var existingRow = existingCreate.data && existingCreate.data[0];
+      if (existingRow && existingRow.is_deleted !== true) {
+        try { existingRow = (await loadPostAttachments(supabase, [existingRow]))[0]; } catch (_) {}
+        return res.json({ ok: true, data: existingRow, duplicate: true });
+      }
+    }
     if (mediaType && ['image', 'video', 'audio'].indexOf(mediaType) < 0 && !(attachments.length && mediaType === 'album')) return res.status(400).json({ error: '媒体类型无效', code: 'invalid_media_type' });
 
     // ── 位置字段（可选，用户主动选择） ──
