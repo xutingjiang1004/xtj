@@ -98,11 +98,16 @@ async function initProvider() {
 }
 
 function esc(s) { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+function assertHeaderSafe(value, label) {
+  if (/[\r\n]/.test(String(value || ""))) throw new Error(`${label}不能包含换行符`);
+}
 
 const server = new McpServer({ name: "xtj-email-mcp", version: "1.0.0" });
 
 server.tool("send_email", "发送邮件；原始 HTML 会被限制为无属性的纯文本排版标签，可能会移除样式/图片/链接", { to: z.string().email().max(254), subject: z.string().min(1).max(MAX_EMAIL_SUBJECT_CHARS), text: z.string().max(MAX_EMAIL_TEXT_CHARS).optional(), html: z.string().max(MAX_EMAIL_HTML_CHARS).optional() }, async (args) => {
   if (!args.text && !args.html) throw new Error("请提供 text 或 html");
+  assertHeaderSafe(args.to, '收件人');
+  assertHeaderSafe(args.subject, '主题');
   if (args.text && args.text.length > MAX_EMAIL_TEXT_CHARS) throw new Error(`文本超过 ${MAX_EMAIL_TEXT_CHARS} 字符上限`);
   if (!isRecipientAllowed(args.to)) throw new Error('收件人不在白名单中');
   const safeHtml = args.html ? sanitizeEmailHtml(args.html) : args.text.split("\n").map(l=>`<p>${esc(l)}</p>`).join("");
@@ -113,6 +118,9 @@ server.tool("send_email", "发送邮件；原始 HTML 会被限制为无属性�
 });
 
 server.tool("send_security_alert", "发送安全警报邮件给管理员", { alert_type: z.enum(["same_ip_multi_users","same_device_multi_users","multi_ip_same_user","geo_change","high_frequency","same_browser_fp","same_canvas_fp"]), user_name: z.string(), ip: z.string().optional(), ip_location: z.string().optional(), detail: z.string().optional() }, async (args) => {
+  assertHeaderSafe(args.user_name, '用户名');
+  assertHeaderSafe(args.ip || '', 'IP');
+  assertHeaderSafe(args.ip_location || '', '地区');
   await initProvider();
   if (!ADMIN_EMAIL) return { content: [{ type: "text", text: "⚠️ 未设置 ADMIN_NOTIFY_EMAIL" }] };
   const labels = { same_ip_multi_users:"同IP多账号",same_device_multi_users:"同设备多账号",multi_ip_same_user:"多IP同账号",geo_change:"地区异常",high_frequency:"高频访问",same_browser_fp:"同浏览器指纹多账号",same_canvas_fp:"同Canvas指纹多账号" };
@@ -123,7 +131,7 @@ server.tool("send_security_alert", "发送安全警报邮件给管理员", { ale
   return { content: [{ type: "text", text: `✅ 安全警报已发送到管理员 ${ADMIN_EMAIL}` }] };
 });
 
-server.tool("send_test_email", "发送测试邮件验证配置", { to: z.string() }, async ({ to }) => {
+server.tool("send_test_email", "发送测试邮件验证配置", { to: z.string().email().max(254) }, async ({ to }) => {
   await initProvider();
   if (!isRecipientAllowed(to)) throw new Error('收件人不在白名单中');
   await sendFn({ to, subject: "XTJ 邮件配置测试", text: `测试邮件\n配置正常 ✅\n时间: ${new Date().toLocaleString("zh-CN")}`, html: `<h2>✅ XTJ 邮件配置测试</h2><p>如果看到此邮件说明配置正常。</p><p>${new Date().toLocaleString("zh-CN")}</p>` });

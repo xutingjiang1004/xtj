@@ -279,7 +279,7 @@ for (const implementation of ['main', 'shared']) test(implementation + ': a new 
    const matching=Array.from(CSS.highlights.entries()).filter(([name])=>name.startsWith('xtj-ai-ink-'));
    const ranges=matching.flatMap(([,highlight])=>Array.from(highlight));
    const expected=1;
-   const animations=output.getAnimations().filter(a=>a.effect?.getKeyframes().some(k=>Object.keys(k).some(x=>x.startsWith('--xtj-ai-ink-phase-'))));
+    const animations=output.getAnimations({subtree:true}).filter(a=>a.effect?.getKeyframes().some(k=>Object.keys(k).some(x=>x.startsWith('--xtj-ai-ink-phase-'))));
    animations.forEach(a=>{a.pause();a.currentTime=0;});
    const color=matching.length?getComputedStyle(output,'::highlight('+matching[0][0]+')').color:'';
    const stable=output.firstChild===node&&ranges.every(r=>r.startContainer===node&&r.startOffset>=prefix.length&&r.endOffset>r.startOffset);

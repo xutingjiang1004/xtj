@@ -65,9 +65,9 @@ async function originalResponse(event, key) {
     event.waitUntil(originalWrite(() => generation === originalGeneration ? cache.put(key, copy) : null).catch(() => {}));
     return reused;
   }
-  // Fail closed on offline, 401, 404, quota limits and server errors. Never
+  // Fail closed on offline, 401, 403, 404, quota limits and server errors. Never
   // return an old body as an offline or stale-while-revalidate fallback.
-  if (response.status === 404 && cache) event.waitUntil(originalWrite(() => cache.delete(key)).catch(() => {}));
+  if ([401, 403, 404].includes(response.status) && cache) event.waitUntil(originalWrite(() => cache.delete(key)).catch(() => {}));
   const bytes = Number(response.headers.get('Content-Length'));
   if (cache && response.status === 200 && response.headers.get('ETag') && /^image\//i.test(response.headers.get('Content-Type') || '') && bytes > 0 && bytes <= ORIGINAL_MAX_FILE_BYTES) {
     const storedHeaders = new Headers(response.headers);

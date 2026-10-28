@@ -3,7 +3,7 @@
   "private": true,
   "type": "commonjs",
   "engines": {
-    "node": ">=20.6.0"
+    "node": ">=22.0.0"
   },
   "scripts": {
     "start": "node --env-file=.env server.js"
@@ -11,14 +11,21 @@
   "dependencies": {
     "@supabase/supabase-js": "2.106.2",
     "cors": "^2.8.5",
+    "dayjs": "^1.11.23",
+    "decimal.js": "^10.6.0",
+    "fast-xml-parser": "^5.11.1",
     "express": "^5.1.0",
     "isolated-vm": "^6.2.0",
     "jszip": "^3.10.1",
+    "lodash": "^4.18.1",
     "mammoth": "^1.12.0",
+    "mathjs": "^15.2.0",
     "multer": "2.5.0",
     "nodemailer": "10.2.1",
+    "papaparse": "^5.7.0",
     "pdf-parse": "^2.4.5",
     "pdfkit": "0.20.2",
+    "proxy-addr": "2.0.8",
     "sharp": "0.35.5",
     "web-push": "3.6.7",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"

@@ -19,6 +19,9 @@ function createLoginBackend(expectedUrl, revokedMarker, cryptoApi, BufferApi, op
     ['/admin/login', 'POST'], ['/admin/logout', 'POST']
   ]);
   const hash = value => cryptoApi.createHash('sha256').update(value).digest('hex');
+  // The username is interpolated into a PostgREST `eq.` filter; reject filter
+  // metacharacters and control characters before any database request.
+  const UNSAFE_USER_NAME = /[\u0000-\u001f\u007f,()"\\]/;
   const result = (status, body, cookies = []) => ({ status, body, cookies });
   const unavailable = (code = 'auth_unavailable') => result(503, { error: '认证服务暂不可用，请稍后重试', code, retryable: true });
   const invalid = () => result(401, { error: '登录凭证无效或已过期', code: 'auth_expired' });
@@ -307,7 +310,7 @@ function createLoginBackend(expectedUrl, revokedMarker, cryptoApi, BufferApi, op
       if (path === '/api/user/login' || path === '/admin/login') {
         const admin = path === '/admin/login';
         const user = typeof (admin ? body.username : body.user_name) === 'string' ? (admin ? body.username : body.user_name).trim() : '';
-        if (!user || user.length > 50 || typeof body.password !== 'string' || !body.password || body.password.length > 128) return result(400, { error: '缺少用户名或密码' });
+        if (!user || user.length > 50 || UNSAFE_USER_NAME.test(user) || typeof body.password !== 'string' || !body.password || body.password.length > 128) return result(400, { error: '缺少用户名或密码' });
         let account, stored;
         if (admin) {
           if (!env.ADMIN_PASSWORD && !env.ADMIN_PASSWORD_HASH) return unavailable('admin_configuration_unavailable');

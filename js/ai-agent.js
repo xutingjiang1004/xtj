@@ -6168,6 +6168,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       return false;
     }
     var preflight = window.ensureProtectedOperationAuth || window.ensureRealUserAuth;
+    // Ordinary sends already carry the access token and the server is the
+    // authority; a 401 is refreshed and retried once below. Skip the duplicate
+    // preflight so the chat request leaves the browser a round trip earlier.
+    if (options && options.fastPath && window._xtjAuthState !== 'auth_pending' && typeof window.getUserToken === 'function') {
+      try { if (window.getUserToken()) return true; } catch (_) {}
+    }
     if (typeof preflight !== 'function') return true;
     try {
       var auth = await preflight();
@@ -9816,7 +9822,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       return;
     }
 
-    var authOk = await ensureUserAuthOrNotify({ allowGuest: true });
+    var authOk = await ensureUserAuthOrNotify({ allowGuest: true, fastPath: true });
     if ((sendToken !== S.sendSeq || !customModelIdentityCurrent(sendIdentity)) || (S._currentReqId !== reqId || !customModelIdentityCurrent(sendIdentity)) || !S.active) return;
     if (!authOk) {
       // 认证失败 => 清理UI，恢复状态
