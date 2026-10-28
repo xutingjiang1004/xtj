@@ -1,5 +1,17 @@
 # 更新日志
 
+## 2026-10-28 前端加载提速与审计问题修复（v0.96.0）
+
+- 首屏资源调度：`supabase.min.js` 与 `core.min.js` 增加 `preload`，只提前下载、不改变 defer 执行顺序；`core.min.js` 原本排在第 31 个 defer 脚本，受同源连接数限制被前面的小文件挤晚。小猫 AI 模块的预取由「DOMContentLoaded 后 2 秒强制下载」改为「`window.load` 之后空闲时下载、8 秒兜底」，`saveData` 与 2G／3G 网络不预取，按需打开时仍有骨架屏兜底。
+- 低性能档降级补完：此前 `html.perf-lite` 只关闭了类名含 glass／backdrop 的模糊，`:is(button, …)` 通用规则仍给每个按钮（含大面积 `button.post-media-cell`）加 `backdrop-filter`，实测 188 个元素在跑合成模糊层。新增 `--button-glass-blur: none` 与写死模糊的组件收敛，低性能档降到 30 个；balanced／full 档位视觉不变，底部导航未触碰。
+- 信息流渲染：`normalizePost` 按对象身份加 `feedStateVersion` 记忆，单张卡片从 7 次解析降到 2 次；切片覆盖检查未合并新页时不再重复执行整段 `feed.innerHTML` 重建。渲染结果与排序保持等价。
+- 小猫 AI 运行时：研究卡的 rAF 动画与 elapsed／进度计时器在卡片脱离文档时自停并释放监听，避免切会话或新建对话后永久空转；`_thinkingLog` 单块截断到 4000 字；会话列表的本地标题映射由每条会话解析两次改为整表解析一次。
+- 三处 P1 卡死：流式 `done` 时助手气泡已被移除会跳过 `S.sending=false`，导致发送永久禁用；站内搜索 `finally` 被 `currentSearch()` 拦住，关闭面板后提交按钮永久 disabled；删除／新建会话与关闭面板自增 `historyRequestId` 却未复位 `S.loading`，历史恒为空。
+- 统计数据：`applyStatSnapshot` 只允许服务端快照写入 `statCacheTime`。此前本地回填也会写，`hasUsableStatCache()` 立即为真，服务端快照在常规路径永不请求，「总浏览」长期为 0 并显示「暂无用户浏览记录」。`/api/stats/snapshot` 同时补过滤 `is_deleted`。
+- 安全与稳定：`/api/report` 反查帖子归属并要求与 `target_user` 一致，防止用 A 的帖子举报 B 诱导封禁；公告删除严格限定 `media_type='__ann__'`（此前 NULL／空串可删普通帖）；生图代理改为 png／jpeg／webp／gif 白名单并输出 `nosniff`，阻断 `image/svg+xml` 同源 XSS；`visitCache` 在清理非当日键后补硬上限；`unhandledRejection` 达阈值改走 `gracefulShutdown`，不再直接 `process.exit` 切断进行中的 SSE 与落库；AI 动作清洗正则由 `\S*` 改为有界 `\S{0,64}`，消除无空格长文本的 O(n²) 回溯。
+- 数据库：新增 `20261028153000_fix_comment_sha256_search_path.sql`，用 `pg_proc` 反查 pgcrypto 所在 schema 并 `ALTER FUNCTION … SET search_path`，修复 `xtj_create_comment` 在 `search_path=''` 下 `sha256(bytea)` 不可解析、带幂等标识的评论必定失败的问题。该迁移需在 Supabase 手动执行后生效。
+- 验证：`npm run build`、`test:consistency`、`complete-tests`（99/99）通过；AI runtime 51 项与前端契约 42 项通过。Playwright 用例因本机未安装 chromium 未执行，未做 iPhone／iPad 真机验收。
+
 ## 2026-10-27 小猫 AI 流式渲染开销与首屏延迟测量
 
 - 常见普通中文段落改为按显示帧追加到有界文本节点，不再每批都重解析累计正文；出现 Markdown 语法时保留原解析器与节点补丁，代码、链接和表格的正确性优先。深入研究报告共用该渲染器，思考增量不再反复读取、清洗和重建累计文本。
