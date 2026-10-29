@@ -1187,9 +1187,29 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     catch (ePaint) { node.textContent = clean; }
   }
 
+  function normalizeReasoningLayout(txt) {
+    var source = String(txt || '').replace(/\r\n/g, '\n');
+    var parts = source.split(/(```[\s\S]*?```)/g);
+    var blockStart = /^(?:[-*]\s|\d+\.\s|>\s?|#{1,6}\s|\|)/;
+    var cjk = /[\u3400-\u9fff\uf900-\ufaff]/;
+    return parts.map(function(part, idx) {
+      if (idx % 2 === 1) return part;
+      return part
+        .replace(/[ \t]+\n/g, '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .replace(/([^\n])\n(?!\n)/g, function(match, prev, offset, str) {
+          var rest = str.slice(offset + match.length);
+          if (blockStart.test(rest)) return match;
+          var next = rest.charAt(0);
+          if (cjk.test(prev) && cjk.test(next)) return prev;
+          return prev + ' ';
+        });
+    }).join('');
+  }
+
   function cleanReasoningText(txt) {
     if (!txt) return '';
-    return String(txt).split('\n').map(function(line) {
+    var stripped = String(txt).split('\n').map(function(line) {
       var trimmed = line.trim();
       if (!trimmed) return line;
       // 仅当整段以 ( 开头、以 ) 结尾时去掉最外层括号
@@ -1198,6 +1218,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       }
       return line;
     }).join('\n');
+    return normalizeReasoningLayout(stripped);
   }
 
   // 简单 Markdown → HTML 渲染
@@ -3848,9 +3869,34 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     container.classList.toggle('expanded', !!expanded);
     toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
     caret.textContent = '\u25be';
-    if (messagesEl && expanded) {
-      scrollToBottom(messagesEl, false);
+    if (messagesEl && expanded) revealThinking(container, messagesEl);
+  }
+
+  function revealThinking(container, messagesEl) {
+    if (!container || !messagesEl) return;
+    function place() {
+      if (!container.isConnected || !messagesEl.isConnected) return;
+      var anchor = container.querySelector('.ai-thinking-toggle') || container;
+      var panel = container.querySelector('.ai-thinking-panel');
+      var view = messagesEl.getBoundingClientRect();
+      var top = anchor.getBoundingClientRect();
+      var bottom = panel ? panel.getBoundingClientRect().bottom : top.bottom;
+      var root = messagesEl.closest('#aiChatRoot') || messagesEl;
+      var header = 0, input = 0;
+      try {
+        var metrics = getComputedStyle(root);
+        header = parseFloat(metrics.getPropertyValue('--ai-header-height')) || 0;
+        input = parseFloat(metrics.getPropertyValue('--ai-input-height')) || 0;
+      } catch (eMetrics) {}
+      var topLimit = view.top + Math.max(8, header + 8);
+      var bottomLimit = view.bottom - Math.max(12, input + 8);
+      if (top.top >= topLimit && bottom <= bottomLimit) return;
+      var delta = top.top - topLimit;
+      if (bottom - top.top < bottomLimit - topLimit && bottom > bottomLimit) delta = bottom - bottomLimit;
+      if (delta) messagesEl.scrollTop += delta;
     }
+    requestAnimationFrame(place);
+    setTimeout(place, 320);
   }
 
   function formatThinkingElapsed(ms) {
@@ -10642,7 +10688,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         //   旧判定 `>= 0` 让这个 0 覆盖掉 thinkingTimer.stop() 测到的真实时长，
         //   于是界面上稳定出现「已思考 0s」。0 视为「服务端没测到」，保留客户端值。
         if (evt && typeof evt.thinking_elapsed_ms === 'number' && Number.isFinite(evt.thinking_elapsed_ms) && evt.thinking_elapsed_ms > 0) finalThinkingElapsedMs = evt.thinking_elapsed_ms;
-        if (reasoningRenderer) reasoningRenderer.finish();
+        if (reasoningRenderer) {
+          var settledReasoning = activeReasoningSegment && activeReasoningSegment.__rawReasoning;
+          reasoningRenderer.finish(settledReasoning ? cleanReasoningText(settledReasoning) : undefined);
+        }
 
         // 判断是否有有效正文；没有时给出兜底提示，避免气泡完全空白
         var hasContent = !!(content && String(content).trim().length > 0);
@@ -10702,7 +10751,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         }
         setAiRootState('ai-idle');
         
-        if ((thinking || node.querySelector('.ai-process-timeline') || reasoningStarted && finalThinkingElapsedMs>0) && finalThinkingMode !== 'off' && _sendThinkingMode !== 'off') {
+        var thinkingBodyHasText = false;
+        try {
+          var liveThinkingBody = node.querySelector('.ai-thinking-body');
+          thinkingBodyHasText = !!(liveThinkingBody && String(liveThinkingBody.textContent || '').trim());
+        } catch (eThinkingBody) {}
+        if ((thinking || thinkingBodyHasText || node.querySelector('.ai-process-timeline') || reasoningStarted && finalThinkingElapsedMs>0) && finalThinkingMode !== 'off' && _sendThinkingMode !== 'off') {
           // ★ 修复：优先用 reasoningContainer（流式期间创建的），但必须验证节点仍在 DOM 中。
           //   本轮使用发送时的档位，切换设置只影响下一次发送。
           //   此前若 reasoningContainer 持有脱离 DOM 的陈旧引用（search_supplement 重置、
@@ -10947,7 +11001,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
       var activeToolTimeline = null, activeReasoningSegment = null;
       function closeReasoningSegment() {
-        if (reasoningRenderer) { reasoningRenderer.finish(); reasoningRenderer = null; }
+        if (reasoningRenderer) {
+          var settledReasoning = activeReasoningSegment && activeReasoningSegment.__rawReasoning;
+          reasoningRenderer.finish(settledReasoning ? cleanReasoningText(settledReasoning) : undefined);
+          reasoningRenderer = null;
+        }
         activeReasoningSegment = null;
       }
       function processBody() {
@@ -12676,8 +12734,31 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     finally{historyExports.delete(controller);if(button&&button.isConnected&&customModelIdentityCurrent(identity)&&life===S.lifecycleId)button.disabled=false;}
   }
 
+  function conversationListShown() {
+    if (S.showingHistory) return true;
+    var list = S.conversationsEl;
+    if (!list || !list.isConnected || list.closest('.ai-conv-page-shell')) return false;
+    try {
+      var style = window.getComputedStyle(list);
+      return style.display !== 'none' && style.visibility !== 'hidden' && list.getClientRects().length > 0;
+    } catch (eShown) { return false; }
+  }
+
   function renderConversationListStyled(container) {
     container.innerHTML = '';
+    var listBar = el('div', { class: 'ai-conv-list-bar' });
+    listBar.appendChild(el('strong', { text: '历史会话' }));
+    var listClose = el('button', { type: 'button', class: 'ai-conv-list-close', 'aria-label': '关闭历史会话', text: '关闭' });
+    listClose.addEventListener('click', function(ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      hideConversationListPage();
+      var histBtnNow = document.querySelector('.ai-chat-hist-btn');
+      var newBtnNow = document.querySelector('.ai-chat-new-btn');
+      if (histBtnNow) syncAiHeaderButtons(histBtnNow, newBtnNow);
+    });
+    listBar.appendChild(listClose);
+    container.appendChild(listBar);
     if (!S.conversations.length) {
       container.appendChild(el('div', { class: 'ai-no-history', text: '暂无聊天记录' }));
       return;
@@ -13055,7 +13136,7 @@ function showChatMessages() {
         notify('游客聊天不会保存记录，登录后可查看历史对话');
         return;
       }
-      if (S.showingHistory) {
+      if (conversationListShown()) {
         hideConversationListPage();
         syncAiHeaderButtons(histBtn, newBtn);
         return;
