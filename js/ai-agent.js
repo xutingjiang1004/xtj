@@ -3091,6 +3091,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     search_web: '搜索网页', tavily_search: '搜索网页', read_web_page: '阅读网页',
     web_extract: '提取网页内容', extract_links: '提取链接', page_meta: '查看网页信息',
     search_social: '搜索社交内容',
+    search_posts: '搜索帖子', search_comments: '搜索评论', search_photos: '搜索照片',
+    search_dm_messages: '搜索私信', search_ai_history: '搜索对话', search_users: '搜索用户',
+    search_everything: '搜索站内',
     // 实时信息类
     get_weather: '查询天气', get_current_time: '获取当前时间',
     get_exchange_rate: '查询汇率', get_stock_quote: '查询股票行情',
@@ -3134,7 +3137,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // 检索类 —— 走"已搜索 N 个网页"专用句式，这里只标记类型
     search_web: '网页', tavily_search: '网页', read_web_page: '网页',
     web_extract: '网页', extract_links: '链接', page_meta: '网页信息',
-    search_social: '社交内容',search_document:'文件原文',read_document_section:'文件段落',
+    search_social: '社交内容',
+    search_posts: '帖子', search_comments: '评论', search_photos: '照片',
+    search_dm_messages: '私信', search_ai_history: '历史对话', search_users: '用户',
+    search_everything: '站内',
+    search_document:'文件原文',read_document_section:'文件段落',
     // 实时信息类
     get_weather: '天气工具', get_current_time: '时间工具',
     get_exchange_rate: '汇率工具', get_stock_quote: '行情工具',
@@ -11118,6 +11125,39 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       }
 
       var activeToolTimeline = null, activeReasoningSegment = null, activeRailBeat = null, railReasonCursor = 0;
+      function latestReasoningLine(text) {
+        var raw = String(text || '');
+        if (raw.length > 240) raw = raw.slice(-240);
+        var clean = cleanReasoningText(raw).replace(/\s+/g, ' ').trim();
+        if (!clean) return '';
+        var cut = -1;
+        for (var i = 0; i < clean.length - 1; i++) {
+          if ('。！？!?'.indexOf(clean.charAt(i)) >= 0) cut = i;
+        }
+        var line = (cut >= 0 ? clean.slice(cut + 1) : clean).trim();
+        if (!line) line = clean;
+        if (line.length > 48) line = line.slice(0, 48) + '…';
+        return line;
+      }
+      function clearRailLiveLine() {
+        var live = assistantNode.querySelector(':scope > .ai-process-rail > .ai-rail-live');
+        if (live) live.remove();
+      }
+      function syncRailLiveLine() {
+        if (_sendThinkingMode === 'off') return;
+        var line = latestReasoningLine(aiReasoning.slice(railReasonCursor));
+        if (!line) return;
+        var rail = assistantNode.querySelector(':scope > .ai-process-rail');
+        if (!rail) {
+          rail = el('div', { class: 'ai-process-rail' });
+          if (assistantBubble && assistantBubble.parentNode === assistantNode) assistantNode.insertBefore(rail, assistantBubble);
+          else assistantNode.appendChild(rail);
+        }
+        var live = rail.querySelector(':scope > .ai-rail-live');
+        if (!live) live = el('div', { class: 'ai-rail-live' });
+        if (live.parentNode !== rail || live !== rail.lastElementChild) rail.appendChild(live);
+        if (live.textContent !== line) live.textContent = line;
+      }
       function commitNarrationToRail(text) {
         var value = String(text || '').trim();
         if (!value) return;
@@ -11132,6 +11172,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           assistantBubble.style.display = 'none';
           try { delete assistantBubble.__xtjStreamHtml; } catch (eHtml) { assistantBubble.__xtjStreamHtml = ''; }
         }
+        clearRailLiveLine();
         var rail = assistantNode.querySelector(':scope > .ai-process-rail');
         if (!rail) {
           rail = el('div', { class: 'ai-process-rail' });
@@ -12217,6 +12258,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               // ★ 修复：渲染器按剩余配额接收（200k 上限此前只截累积字符串，渲染器无界增长）
               if (chunkText && aiReasoning.length <= 200000) reasoningRenderer.append(chunkText, evtReceivedAt);
             }
+            syncRailLiveLine();
             continue;
           }
           
@@ -12234,6 +12276,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             // Empty packets and a leading blank line are not an answer phase.
             // Keep the thinking panel alive and retain whitespace for code.
             if (!accepted || !aiContent.trim()) continue;
+            clearRailLiveLine();
             if (_sendThinkingMode !== 'off' && finalThinkingElapsedMs > 0 && assistantNode.querySelector('.ai-rail-beat')) {
               var answerHead = assistantNode.querySelector('.ai-thinking');
               if (answerHead) setThinkingStatus(answerHead, '已思考 ' + formatThinkingElapsed(finalThinkingElapsedMs));
@@ -12832,7 +12875,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       S.conversationCursor = r.data.next_cursor || null;
       await refreshConversationMetadata(r.data.conversations.map(function(row){return row.conversation_id;}),current);
       if (!current()) return false;
-      if (!append) S._conversationsFreshUntil = Date.now() + 20000;
+      if (!append && S.conversations.length) S._conversationsFreshUntil = Date.now() + 20000;
       return true;
     } catch (error) {
       if (!current()) return false;

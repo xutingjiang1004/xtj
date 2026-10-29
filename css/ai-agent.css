@@ -885,7 +885,8 @@ html[data-xtj-motion=weak] .ai-thinking.is-thinking.expanded .ai-thinking-panel 
 }
 .ai-process-rail .ai-tool-step[data-tool-name="search_web"]::after,
 .ai-process-rail .ai-tool-step[data-tool-name="tavily_search"]::after,
-.ai-process-rail .ai-tool-step[data-tool-name="search_social"]::after {
+.ai-process-rail .ai-tool-step[data-tool-name="search_social"]::after,
+.ai-process-rail .ai-tool-step[data-tool-name^="search_"]::after {
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233a9271' stroke-width='1.8'><circle cx='12' cy='12' r='9'/><path d='M3 12h18M12 3c2.5 2.8 3.8 6 3.8 9s-1.3 6.2-3.8 9c-2.5-2.8-3.8-6-3.8-9s1.3-6.2 3.8-9z'/></svg>");
 }
 .ai-process-rail .ai-tool-step[data-tool-name="read_web_page"]::after,
@@ -912,15 +913,35 @@ html[data-xtj-motion=weak] .ai-thinking.is-thinking.expanded .ai-thinking-panel 
   color: #3d6a60;
 }
 .ai-process-rail .ai-tool-step-detail {
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
-  max-width: none;
+  max-width: min(46vw, 16em);
   margin: 0;
   font-size: 13px;
   color: #7d9490;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.ai-rail-live {
+  position: relative;
+  margin: 2px 0 6px 22px;
+  color: rgba(90, 116, 108, .9);
+  font-size: 13.5px;
+  line-height: 1.5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ai-rail-live::before {
+  content: '';
+  position: absolute;
+  left: -19px;
+  top: 7px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #3a9271;
 }
 .ai-process-rail .ai-tool-step-status { display: none; }
 .ai-process-rail .ai-tool-step.is-error .ai-tool-step-status {
@@ -932,6 +953,7 @@ html[data-xtj-motion=weak] .ai-thinking.is-thinking.expanded .ai-thinking-panel 
   0% { opacity: 0; transform: translate3d(-4px, -3px, 0); }
   100% { opacity: 1; transform: translate3d(0, 0, 0); }
 }
+[data-theme="dark"] .ai-rail-live { color: rgba(198, 220, 210, .9); }
 [data-theme="dark"] .ai-rail-sentence { color: rgba(214, 228, 222, .9); }
 [data-theme="dark"] .ai-rail-reason { color: rgba(176, 196, 188, .88); }
 [data-theme="dark"] .ai-rail-beat::before { background: rgba(140, 186, 164, .35); }
@@ -7728,7 +7750,22 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
 .ai-process-timeline .ai-tool-step-body:has(> .ai-tool-inline-result:not([hidden])),
 .ai-process-timeline .ai-tool-step-body:has(> .ai-tool-data-details) { display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:3px 8px; align-items:baseline; }
 .ai-process-rail .ai-tool-step-body:has(> .ai-tool-inline-result:not([hidden])),
-.ai-process-rail .ai-tool-step-body:has(> .ai-tool-data-details) { display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:2px 6px; align-items:baseline; }
+.ai-process-rail .ai-tool-step-body:has(> .ai-tool-data-details) {
+  display: flex;
+  justify-content: flex-start;
+  align-items: baseline;
+  gap: 6px;
+  width: 100%;
+}
+.ai-process-rail .ai-process-timeline .ai-tool-step-body > .ai-tool-inline-result:not([hidden]),
+.ai-process-rail .ai-process-timeline .ai-tool-step-body > .ai-tool-data-details {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: auto;
+  margin: 0;
+}
+.ai-process-rail .ai-tool-inline-result > button.ai-tool-result-card-title,
+.ai-process-rail .ai-tool-data-details > summary { grid-column: auto; }
 .ai-process-timeline .ai-tool-step-detail { min-width:0; overflow-wrap:break-word; word-break:normal; white-space:normal; }
 .ai-process-timeline .ai-tool-step-body:has(> .ai-tool-inline-result:not([hidden])) > .ai-tool-step-title,
 .ai-process-timeline .ai-tool-step-body:has(> .ai-tool-data-details) > .ai-tool-step-title { grid-column:1; grid-row:1; }
@@ -7740,6 +7777,16 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
 .ai-process-timeline .ai-tool-step-body > .ai-tool-data-details { display:contents; }
 .ai-process-timeline .ai-tool-inline-result > button.ai-tool-result-card-title,
 .ai-process-timeline .ai-tool-data-details > summary { grid-column:3; grid-row:1; white-space:nowrap; margin:0!important; padding:0!important; min-width:0!important; min-height:24px!important; height:auto!important; border:0!important; border-radius:0!important; background:none!important; box-shadow:none!important; transform:none!important; font-size:11px; font-weight:500; line-height:1.6; color:var(--primary); cursor:pointer; }
+.ai-process-rail .ai-process-timeline .ai-tool-step-detail {
+  flex: 0 1 auto;
+  grid-column: auto;
+  max-width: min(46vw, 16em);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ai-process-rail .ai-process-timeline .ai-tool-inline-result > button.ai-tool-result-card-title,
+.ai-process-rail .ai-process-timeline .ai-tool-data-details > summary { grid-column: auto; }
 .ai-process-timeline .ai-tool-inline-result > button.ai-tool-result-card-title::before,
 .ai-process-timeline .ai-tool-inline-result > button.ai-tool-result-card-title::after { content:none!important; }
 .ai-process-timeline .ai-search-toggle { margin-left:4px; }

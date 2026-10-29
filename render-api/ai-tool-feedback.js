@@ -6,6 +6,9 @@ const OUTCOMES = {
   get_weather: '已查询天气', get_current_time: '已获取当前时间',
   calculate: '已完成计算', run_code: '已执行代码', process_json: '已处理数据',
   task_plan: '已更新任务计划', make_file: '已生成文件', make_chart: '已生成图表',
+  search_posts: '已搜索帖子', search_comments: '已搜索评论', search_photos: '已搜索照片',
+  search_dm_messages: '已搜索私信', search_ai_history: '已搜索对话', search_users: '已搜索用户',
+  search_everything: '已搜索站内',
   generate_pdf: '已生成 PDF', qr_code: '已生成二维码', image_process: '已处理图片',
   get_exchange_rate: '已查询汇率', get_stock_quote: '已查询行情',
   convert_units: '已完成单位换算', extract_links: '已提取链接', page_meta: '已读取网页信息'
