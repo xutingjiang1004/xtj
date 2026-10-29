@@ -862,14 +862,7 @@
                 resetDockChatTyping();
                 closeChatHistory(); cancelChatVoice(); clearChatMessageDraft(); clearDockChatFilePreview(false); _chatHistoryFocus = '';
                 if (!window.currentUser) { showToast('请先登录'); return; }
-                // ★ 2026-09-27 待产品确认（审计 C13）：禁言是否应禁止"查看"私信。
-                //   审计认为「禁言应只禁发送，不应禁查看」，但这属于**产品语义**问题，不是明确 bug。
-                //   现状：禁言用户被这一行直接挡在会话之外（连历史都看不了）。
-                //   保守处理：暂不放开权限，仅保留拦截 + TODO。
-                //   → 若产品确认改为「仅禁发」，改动点：删除/放宽**本行** return，
-                //     会话即可进入；发送侧仍由 sendDockChatMessage 第 1940 行附近的
-                //     isUserMuted() 拦截兜底（发送必须拦，不动）。
-                if (isUserMuted()) { showToast("您已被禁言，无法发送消息"); return; }
+                // 禁言只拦发送（sendDockChatMessageSingle / 闪图 / 转发），阅读记录保持可用。
                 if (userName === window.currentUser) { switchDockTab('chat', true); return; }
                 if (currentDockTab === 'posts') {
                     const postsPanel = document.getElementById('panelPosts');
@@ -1375,7 +1368,7 @@
                 var displayName = friendNote || conversation.other_user;
                 var signature = buildDockChatConversationSignature(conversation);
                 return [
-                    '<div class="chat-list-item" data-chat-user="', escapeHtml(conversation.other_user), '" data-signature="', escapeHtml(signature),
+                    '<div class="chat-list-item" role="button" tabindex="0" data-chat-user="', escapeHtml(conversation.other_user), '" data-signature="', escapeHtml(signature),
                     '" data-last-time="', escapeHtml(conversation.last_time || ''), '" style="--xtj-enter-delay:', String(Math.min((index || 0) * 12, 48)),
                     'ms" onclick="openChat(\'', safeUser, '\')">',
                     '<div class="cli-avatar">', getDockChatConversationAvatarHtml(conversation.other_user), '</div>',
@@ -1402,6 +1395,8 @@
                     var signature = buildDockChatConversationSignature(conversation);
                     var row = existingMap[userName];
                     if (row && row.getAttribute('data-signature') === signature) {
+                        row.setAttribute('role', 'button');
+                        if (!row.hasAttribute('tabindex')) row.tabIndex = 0;
                         row.style.setProperty('--xtj-enter-delay', String(Math.min(index * 12, 48)) + 'ms');
                         fragment.appendChild(row);
                         return;
@@ -1412,6 +1407,16 @@
                     fragment.appendChild(row);
                 });
                 el.replaceChildren(fragment);
+                if (!el.__xtjChatListKeys) {
+                    el.__xtjChatListKeys = true;
+                    el.addEventListener('keydown', function(event) {
+                        var row = event.target.closest && event.target.closest('.chat-list-item[data-chat-user]');
+                        if (!row || row.classList.contains('admin-chat-entry')) return;
+                        if (event.key !== 'Enter' && event.key !== ' ') return;
+                        event.preventDefault();
+                        if (typeof window.openChat === 'function') window.openChat(row.getAttribute('data-chat-user'));
+                    });
+                }
                 _dockChatListRenderSignature = nextListSignature;
                 return nextListSignature;
             }
@@ -1520,8 +1525,44 @@
                 function stamp(row) { var s=String(row && row.created_at || '');var m=s.match(/^(.*:\d{2})(?:\.(\d+))?(?:Z|\+00:00)$/);return m ? m[1]+'.'+String(m[2]||'').padEnd(6,'0') : s; }
                 return stamp(a).localeCompare(stamp(b)) || String(a && a.id || '').localeCompare(String(b && b.id || ''));
             }
+            function retainDockChatHistoryWindow(rows) {
+                var pending = [], settled = [];
+                (rows || []).forEach(function(row) {
+                    if (isDockChatLocalPendingMessage(row)) pending.push(row);
+                    else settled.push(row);
+                });
+                var newerHidden = settled.length > 360;
+                if (newerHidden) settled = settled.slice(0, 360);
+                return { rows: sortDockChatMessages(settled.concat(pending)), newerHidden: newerHidden };
+            }
+            function syncDockChatNewerButton(peer, el) {
+                var state = _chatPagination[getDockChatCacheKey(peer)];
+                var button = el.querySelector('.chat-history-newer');
+                if (!state || !state.newerHidden) { if (button) button.remove(); return; }
+                if (!button) {
+                    button = document.createElement('button');
+                    button.type = 'button';
+                    button.className = 'chat-history-newer';
+                    button.textContent = '查看更新的消息';
+                    button.onclick = function() { loadDockChatMessages(peer, true, false, true); };
+                }
+                var cache = _chatCache[getDockChatCacheKey(peer)] || [];
+                var anchor = null;
+                for (var i = 0; i < cache.length && !anchor; i++) {
+                    if (!isDockChatLocalPendingMessage(cache[i])) continue;
+                    var id = String(cache[i].id || cache[i].__tempId || '');
+                    if (!id) continue;
+                    var nodes = el.querySelectorAll('.chat-msg-row');
+                    for (var j = 0; j < nodes.length; j++) {
+                        if (nodes[j].getAttribute('data-message-id') === id) { anchor = nodes[j]; break; }
+                    }
+                }
+                if (anchor) el.insertBefore(button, anchor);
+                else el.appendChild(button);
+            }
             function syncDockChatHistoryButton(peer) {
                 var el=document.getElementById('dockChatMessages');if(!el||dockChatActiveUser!==peer)return;
+                syncDockChatNewerButton(peer, el);
                 var state=_chatPagination[getDockChatCacheKey(peer)],button=el.querySelector('.chat-history-more');
                 if(!state||!state.has_more||_chatHistoryFocus&&!state.historical){if(button)button.remove();return;}
                 if(!button){button=document.createElement('button');button.type='button';button.className='chat-history-more';button.onclick=function(){loadOlderDockChatMessages(peer);};el.prepend(button);}
@@ -1542,9 +1583,10 @@
                     var prior=_chatCache[key]||[],byId=new Map(prior.map(function(row){return [String(row.id),row];}));
                     (body.data||[]).forEach(function(row){byId.set(String(row.id),reconcileDockChatMessage(byId.get(String(row.id)),row));});
                     var rows=sortDockChatMessages(Array.from(byId.values())).filter(function(row){return !isDmMessageLocallyDeleted(row);});
-                    // Keep at most two pages in the historical DOM. Continuing
-                    // upwards still reaches the entire conversation via cursor.
-                    _chatCache[key]=rows.slice(0,360);state.has_more=!!body.has_more;state.cursor=body.next_cursor||null;state.historical=true;
+                    // 已落库的历史最多留两页，避免越翻越长。未发出、发送失败的气泡不在这 360 条里，
+                    // 被挤出窗口的更新消息用「查看更新的消息」整页回到最新，不能把失败气泡一起丢掉。
+                    var windowed=retainDockChatHistoryWindow(rows);
+                    _chatCache[key]=windowed.rows;state.has_more=!!body.has_more;state.cursor=body.next_cursor||null;state.historical=true;state.newerHidden=windowed.newerHidden||!!state.newerHidden;
                     _chatHistoryFocus=peer;_chatRenderSignature[peer]=undefined;renderDockMessages(peer,_chatCache[key],false);
                     if(anchor&&anchor.isConnected)el.scrollTop+=anchor.getBoundingClientRect().top-top;
                     setDockChatJumpLatestVisible(true);
@@ -1884,16 +1926,11 @@
                     var mh = Math.round(Number(media.h || 0));
                     var hasRealDims = (mw > 0 && mh > 0 && mw <= 20000 && mh <= 20000);
                     if (!hasRealDims) { mw = 4; mh = 3; }
-                    var dimAttr = ' style="aspect-ratio:' + mw + ' / ' + mh + '"';
-                    if (hasRealDims) dimAttr += ' width="' + mw + '" height="' + mh + '"';
-                    // ★ 2026-09-27 修复（审计 M8：4:3 兜底不写 width/height，盒子 0×0）：
-                    //   老消息没有 w/h 时兜 4:3，但此前**不写** width/height，而 CSS 是
-                    //   `width:auto`（css/style.css .chat-msg .msg-img）→ `aspect-ratio` 需要
-                    //   至少一维确定才能算出另一维，两维都 auto 时盒子塌成 0×0，老消息仍会
-                    //   布局跳动。这里给兜底 `<img>` 补一个**确定的宽度基准** width:100%
-                    //   （走 .has-media 气泡的满宽 + max-height:260px 约束），aspect-ratio
-                    //   据此算出高度，盒子立刻有尺寸，也不破坏有真实 w/h 的现有正确渲染。
-                    else dimAttr += ' style="aspect-ratio:' + mw + ' / ' + mh + ';width:100%"';
+                    // 只能有一个 style。第二个 style 会被 HTML 忽略，老图的 width:100% 从未生效，
+                    // aspect-ratio 在宽高都是 auto 时把盒子塌成 0。有真实像素时仍写 width/height。
+                    var dimAttr = hasRealDims
+                        ? ' style="aspect-ratio:' + mw + ' / ' + mh + '" width="' + mw + '" height="' + mh + '"'
+                        : ' style="aspect-ratio:' + mw + ' / ' + mh + ';width:100%"';
                     // ★ 2026-09-25 修复（聊天图片预览器降级到旧 #imgViewer）：
                     //   此前 onclick 只传了 src，没有把 <img> 自身作为 triggerEl 传入。
                     //   openImageViewer → openPostImagePreview 依赖 triggerEl 读取
@@ -2780,11 +2817,14 @@
                     return drainDockChatSendQueue();
                 }
                 _dockChatSendQueue.shift();
-                return sendDockChatMessageSingle(null, next.content, { queued: true });
+                return sendDockChatMessageSingle(null, next.content, { queued: true, replyDraft: next.replyDraft || null });
             }
             async function sendDockChatMessageSingle(queuedFile, queuedText, retryOptions) {
-                _chatContextSeq++;
-                _chatHistoryFocus = '';
+                var forwarding = !!(retryOptions && retryOptions.forwardTo);
+                if (!forwarding) {
+                    _chatContextSeq++;
+                    _chatHistoryFocus = '';
+                }
                 if (!currentUser) { showToast('请先登录'); return; }
                 if (isUserMuted()) { showToast("您已被禁言，无法发送消息"); return; }
                 const inp = document.getElementById('dockChatInput');
@@ -2793,15 +2833,16 @@
                 var retrying = !!(retryOptions && retryOptions.isRetry);
                 var queuedSend = !!(retryOptions && retryOptions.queued);
                 const fileInput = document.getElementById('dockChatFileInp');
-                let file = queuedFile || (!queuedSend && !retrying && (_chatRecordedFile || (fileInput && fileInput.files[0]))) || null;
+                let file = queuedFile || (!queuedSend && !retrying && !forwarding && (_chatRecordedFile || (fileInput && fileInput.files[0]))) || null;
                 if (file) file = normalizeDockChatMediaFile(file);
                 if (_chatVoice) { showToast('请先结束录音'); return; }
-                if (_chatEditDraft && !retrying) { await sendChatEditedMessage(content); return; }
-                var replyDraftSource = (retrying || queuedSend) ? null : _chatReplyDraft;
+                if (_chatEditDraft && !retrying && !forwarding) { await sendChatEditedMessage(content); return; }
+                var replyDraftSource = (retrying || queuedSend || forwarding) ? null : _chatReplyDraft;
                 var replyDraft = replyDraftSource ? Object.assign({}, replyDraftSource) : null;
-                if (retrying && retryOptions.replyDraft) replyDraft = Object.assign({}, retryOptions.replyDraft);
+                if ((retrying || queuedSend) && retryOptions && retryOptions.replyDraft) replyDraft = Object.assign({}, retryOptions.replyDraft);
                 if (!content && !file) return;
-                if (!dockChatActiveUser) {
+                var targetUser = forwarding ? String(retryOptions.forwardTo || '') : dockChatActiveUser;
+                if (!targetUser) {
                     if (content) showToast('请先选择一个聊天对象');
                     return;
                 }
@@ -2810,16 +2851,19 @@
                 //   「上一条消息正在发送」的提示里被丢掉，用户以为发出去了。
                 //   队列 drain 本身已同时等待 dockChatSending 与 _chatBatchSending。
                 if (dockChatSending || _chatBatchSending) {
+                    if (forwarding) { showToast('上一条消息正在发送，请稍候再转发'); return; }
                     if (queuedSend) {
-                        _dockChatSendQueue.unshift({ content: content, peer: dockChatActiveUser, owner: currentUser, epoch: _authStateEpoch });
+                        _dockChatSendQueue.unshift({ content: content, peer: dockChatActiveUser, owner: currentUser, epoch: _authStateEpoch, replyDraft: replyDraft });
                         return;
                     }
                     if (!file && content) {
                         if (_dockChatSendQueue.length >= 5) { showToast('排队消息过多，请等当前消息发送完成'); return; }
-                        _dockChatSendQueue.push({ content: content, peer: dockChatActiveUser, owner: currentUser, epoch: _authStateEpoch });
+                        var queuedReply = replyDraft ? Object.assign({}, replyDraft) : null;
+                        _dockChatSendQueue.push({ content: content, peer: dockChatActiveUser, owner: currentUser, epoch: _authStateEpoch, replyDraft: queuedReply });
                         inp.value = '';
                         try { inp.dispatchEvent(new Event('input', { bubbles: true })); } catch (eQueueInput) {}
                         try { persistDockChatDraft(dockChatActiveUser, ''); } catch (eQueueDraft) {}
+                        if (queuedReply) clearChatMessageDraft(false);
                         showToast('已排队，上一条发送完成后自动发出');
                         return;
                     }
@@ -2832,7 +2876,6 @@
                 var sendOwner=currentUser,sendEpoch=_authStateEpoch;
                 function sameSender(){return currentUser===sendOwner && _authStateEpoch===sendEpoch;}
                 function assertSender(){if(!sameSender() || flight.controller.signal.aborted){var error=new Error('账号已切换，发送已停止');error.code='identity_changed';throw error;}}
-                var targetUser = dockChatActiveUser;
                 if (targetUser === currentUser) { showToast('不能给自己发送消息'); return; }
                 var maxFileSize = 50 * 1024 * 1024;
                 if (file && file.size > maxFileSize) { showToast("文件大小不能超过50MB"); return; }
@@ -2848,9 +2891,10 @@
                 var sendOriginal=isDmOriginalSendEnabled();
                 var sendOrigin = captureDockChatSendOrigin(file);
                 var flight={controller:new AbortController(),owner:sendOwner,epoch:sendEpoch};_chatSendFlight=flight;
-                dockChatSending = true; if (!retrying && !queuedSend && (!queuedFile || inp.value.trim()===content)) inp.value = '';
-                if (!retrying) rememberDockChatDraft(targetUser,inp.value);
-                sendDockChatTyping(false);
+                dockChatSending = true;
+                if (!forwarding && !retrying && !queuedSend && (!queuedFile || inp.value.trim()===content)) inp.value = '';
+                if (!forwarding && !retrying) rememberDockChatDraft(targetUser,inp.value);
+                if (!forwarding) sendDockChatTyping(false);
                 if (_dockChatDraftTimer && !retrying) { clearTimeout(_dockChatDraftTimer); _dockChatDraftTimer = null; }
                 // 把真实的发送状态告诉 ux-features 的指示器（它此前是假的 1.8 秒计时）
                 try { if (typeof window.__xtjNotifyChatSending === 'function') window.__xtjNotifyChatSending(true); } catch (e) {}
@@ -2882,7 +2926,7 @@
                             localPreviewUrl = URL.createObjectURL(file);
                             mediaPayload = { kind: mediaKind, url: localPreviewUrl, mimeType: file.type || '', duration: file.__voiceDuration || 0 };
                             var previewImage=document.querySelector('#dockCfpThumb img');
-                            if (previewImage && previewImage.naturalWidth && previewImage.naturalHeight) {
+                            if (!forwarding && previewImage && previewImage.naturalWidth && previewImage.naturalHeight) {
                                 mediaPayload.w=previewImage.naturalWidth; mediaPayload.h=previewImage.naturalHeight;
                             }
                         } catch (previewError) { /* 本地预览失败时仍继续发送原文件 */ }
@@ -2907,7 +2951,7 @@
                 renderDockMessages(targetUser, upsertDockChatCacheMessage(targetUser, optimisticMessage), true);
                 animateDockChatSend(tempId,targetUser,sendOrigin);
                 applyDockChatConversationPreview(targetUser, optimisticMessage, 0);
-                if (file && !retrying) clearDockChatFilePreview(false);
+                if (file && !retrying && !forwarding) clearDockChatFilePreview(false);
                 // 失败重发时复用同一个文件对象（File 在内存里保留，页面刷新后重发不可用）
                 var pendingFile = file || null;
                 try {
@@ -3074,6 +3118,7 @@
                     //   已经把本条会话的预览/时间就地更新好了，发送**不会**改变其它会话。
                     //   现在把它真正作为主更新路径；全量校准交给轮询/可见性变化/手动刷新。
                     applyDockChatConversationPreview(targetUser, insertedMessage, 0);
+                    if (forwarding) showToast('已转发给 ' + targetUser);
                     if (typeof window.__xtjRefreshIOSChatViewport === 'function') {
                         window.__xtjRefreshIOSChatViewport({ preserveFocus: true, forceScroll: true });
                     }
@@ -3127,12 +3172,12 @@
                     if (dockChatActiveUser === targetUser) renderDockMessages(targetUser, _chatCache[getDockChatCacheKey(targetUser)] || [], true);
                     // 注意：不再把内容回填到输入框 —— 消息已经以失败气泡留在会话里，
                     // 回填会让用户以为没发出去而重复发送。
-                    showToast('发送失败：' + ((e && e.message) ? e.message : '未知错误') + '（长按该条可重发）');
+                    showToast((forwarding ? '转发失败：' : '发送失败：') + ((e && e.message) ? e.message : '未知错误') + (forwarding ? '' : '（长按该条可重发）'));
                 }
                 finally {
                     if(_chatSendFlight!==flight || !sameSender())return;
                     _chatSendFlight=null;dockChatSending=false;
-                    if (window.currentUser === sendOwner && !inp.value) persistDockChatDraft(targetUser,'');
+                    if (window.currentUser === sendOwner && !forwarding && !inp.value) persistDockChatDraft(targetUser,'');
                     try { if (typeof window.__xtjNotifyChatSending === 'function') window.__xtjNotifyChatSending(false); } catch (e) {}
                     setTimeout(function() {
                         try { drainDockChatSendQueue(); } catch (eDrainQueue) {}
@@ -3157,7 +3202,7 @@
             //   现在墓碑按账号同步到服务端（/api/dm/deleted），localStorage 退化为
             //   本地快取：启动时与服务端合并，删除时回推，离线删除在下次同步补传。
             var DM_DELETED_KEY_PREFIX = 'xtj_dm_deleted_';
-            var DM_DELETED_MAX = 500;
+            var DM_DELETED_MAX = 8000;
             // ★ 2026-09-27 修复（审计 C12）：
             //   _dmDeletedSyncedUsers 的键此前只用"对手 userName" u，但墓碑实际是
             //   **账号级**的（DM_DELETED_KEY_PREFIX + currentUser，服务端 /api/dm/deleted
@@ -3179,9 +3224,15 @@
                 } catch (e) { return []; }
             }
 
-            function persistDmDeletedIds(list) {
+            function persistDmDeletedIds(list, protectedCount) {
                 try {
-                    var clean = (Array.isArray(list) ? list : []).slice(0, DM_DELETED_MAX);
+                    var clean = Array.isArray(list) ? list.slice() : [];
+                    var pin = Math.max(0, Math.min(clean.length, Number(protectedCount) || 0));
+                    if (clean.length > DM_DELETED_MAX && pin < clean.length) {
+                        var pinned = clean.slice(0, pin);
+                        var room = DM_DELETED_MAX - pinned.length;
+                        clean = room > 0 ? pinned.concat(clean.slice(pin, pin + room)) : pinned;
+                    }
                     window.safeStorage.set(DM_DELETED_KEY_PREFIX + (currentUser || ''), JSON.stringify(clean));
                     return clean;
                 } catch (e) { return []; }
@@ -3305,7 +3356,7 @@
                         var onlyLocal = localIds.filter(function(id) { return serverIds.indexOf(id) < 0; });
                         var toPush = onlyLocal.concat(pending).filter(function(id, i, arr) { return arr.indexOf(id) === i; });
                         var changed = JSON.stringify(merged) !== JSON.stringify(localIds);
-                        if (changed) persistDmDeletedIds(merged);
+                        if (changed) persistDmDeletedIds(merged, serverIds.length);
                         if (toPush.length) {
                             // 补传失败不回滚"已同步"标记也无妨：失败的 ID 会进待补传队列由下次重试。
                             pushDmDeletedToServer(toPush);
@@ -3725,7 +3776,7 @@
                     row.addEventListener('click', function(ev) {
                         ev.preventDefault(); ev.stopPropagation();
                         closeDockForwardPicker();
-                        forwardDmMessage(value, name);
+                        forwardDmMessage(message, name);
                     });
                     list.appendChild(row);
                 });
@@ -3746,29 +3797,40 @@
                 document.addEventListener('keydown', onDmActionKeydown, true);
             }
 
-            async function forwardDmMessage(value, targetUser) {
-                if (!value || !targetUser) return;
-                var owner=currentUser,epoch=_authStateEpoch;
+            async function forwardDmMessage(message, targetUser) {
+                if (!message || !targetUser || !currentUser) return;
+                if (targetUser === currentUser) { showToast('不能转发给自己'); return; }
+                var payload = getDMMessagePayload(message) || {};
+                if (payload.flash || payload.withdrawn) { showToast('这条消息不能转发'); return; }
+                if (isUserMuted()) { showToast('您已被禁言，无法发送消息'); return; }
+                var text = (getDMMessageText(message) || '').trim();
+                var media = resolveDockChatMedia(message);
+                var owner = currentUser, epoch = _authStateEpoch;
+                var file = null;
                 try {
-                    var resp = await window.xtjProtectedFetch('/api/dm/send', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ target_user: targetUser, content: value }),
-                        timeoutMs: 60000,authOwner:owner,authEpoch:epoch
-                    });
-                    var data = await resp.json().catch(function() { return {}; });
-                    if(owner!==currentUser || epoch!==_authStateEpoch)return;
-                    if (!resp.ok || !data || !data.ok) {
-                        throw new Error((data && data.error) || ('HTTP ' + resp.status));
+                    var src = media && media.src ? String(media.src) : '';
+                    if (src && /^blob:/i.test(src)) { showToast('这条附件还在发送，请完成后再转发'); return; }
+                    if (src) {
+                        var safeSrc = (typeof sanitizeUrl === 'function') ? sanitizeUrl(src) : '';
+                        if (!safeSrc || !/^https?:\/\//i.test(safeSrc)) { showToast('附件暂时无法转发，请稍后重试'); return; }
+                        showToast('正在转发…');
+                        var response = await fetch(safeSrc, { credentials: 'omit' });
+                        if (owner !== currentUser || epoch !== _authStateEpoch) return;
+                        if (!response.ok) { showToast('附件暂时无法转发，请稍后重试'); return; }
+                        var blob = await response.blob();
+                        if (!blob || blob.size <= 0) { showToast('附件暂时无法转发，请稍后重试'); return; }
+                        if (blob.size > 50 * 1024 * 1024) { showToast('附件超过 50MB，无法转发'); return; }
+                        var mime = blob.type || (media.kind === 'image' ? 'image/jpeg' : media.kind === 'video' ? 'video/mp4' : media.kind === 'audio' ? 'audio/mpeg' : '');
+                        var ext = mime.indexOf('/') > 0 ? '.' + mime.split('/')[1].split(';')[0].replace('jpeg', 'jpg') : '';
+                        var name = String(media.name || '').trim() || ('转发的附件' + ext);
+                        try { file = new File([blob], name, { type: mime || 'application/octet-stream' }); }
+                        catch (eFile) { blob.name = name; file = blob; }
+                        if (!getChatUploadKind(normalizeDockChatMediaFile(file))) { showToast('这种附件不能转发'); return; }
                     }
-                    showToast('已转发给 ' + targetUser);
-                    scheduleDockChatListRefresh(200);
-                    if (dockChatActiveUser === targetUser && data.message) {
-                        replaceDockChatCacheMessage(targetUser, null, Object.assign({},data.message,{__committedRevision:++_chatCommittedRevision}));
-                        loadDockChatMessages(targetUser, false, true);
-                    }
+                    if (!text && !file) { showToast('这条消息没有可转发的内容'); return; }
+                    await sendDockChatMessageSingle(file, text, { forwardTo: targetUser });
                 } catch (e) {
-                    if(owner!==currentUser || epoch!==_authStateEpoch)return;
+                    if (owner !== currentUser || epoch !== _authStateEpoch || (e && e.code === 'identity_changed')) return;
                     showToast('转发失败：' + ((e && e.message) || '未知错误'));
                 }
             }
@@ -3994,8 +4056,18 @@
                     var result = await chatFeatureApi('history/context?peer=' + encodeURIComponent(peer) + '&message_id=' + encodeURIComponent(id));
                     if (seq !== _chatContextSeq || epoch !== _authStateEpoch || owner !== window.currentUser || dockChatActiveUser !== peer) return;
                     _dockChatLoadSeq++; _chatHistoryRefreshSeq++; _chatHistoryFocus = peer; _chatHistoryAnchor = result.focus_id;
-                    _chatCache[getDockChatCacheKey(peer)] = result.data;
-                    _chatRenderSignature[peer] = undefined; renderDockMessages(peer, result.data, false);
+                    var historyRows = Array.isArray(result.data) ? result.data.slice() : [];
+                    var oldest = historyRows[0];
+                    var historyKey = getDockChatCacheKey(peer);
+                    _chatPagination[historyKey] = {
+                        has_more: !!result.has_older && !!(oldest && oldest.created_at && oldest.id),
+                        cursor: oldest && oldest.created_at && oldest.id ? (String(oldest.created_at) + '|' + String(oldest.id)) : null,
+                        loading: false,
+                        historical: true,
+                        newerHidden: !!result.has_newer
+                    };
+                    _chatCache[historyKey] = historyRows;
+                    _chatRenderSignature[peer] = undefined; renderDockMessages(peer, historyRows, false);
                     requestAnimationFrame(function() {
                         if (seq !== _chatContextSeq || epoch !== _authStateEpoch || owner !== window.currentUser || dockChatActiveUser !== peer) return;
                         var row = document.querySelector('#dockChatMessages [data-message-id="' + result.focus_id + '"]');
@@ -4474,7 +4546,18 @@
                     };controls.appendChild(button);});item.appendChild(controls);host.appendChild(item);
                 });document.getElementById('dockChatFilePreview').appendChild(host);
             }
+            function dockChatComposerLocked() {
+                var input = document.getElementById('dockChatInput');
+                var notice = document.getElementById('dockChatRelationshipNotice');
+                return !!(input && input.disabled) || !!(notice && !notice.hidden);
+            }
+            function restoreDockChatSendAvailability() {
+                var input = document.getElementById('dockChatInput');
+                var send = document.getElementById('dockChatSendBtn');
+                if (send) send.disabled = !!(input && input.disabled);
+            }
             function selectChatAttachments(files) {
+                if (dockChatComposerLocked()) { syncChatAttachmentInput(); showToast('成为好友后才能发送附件'); return false; }
                 if(dockChatSending || _chatBatchSending){syncChatAttachmentInput();showToast('请等待当前附件发送完成');return false;}
                 var valid=Array.from(files||[]).map(normalizeDockChatMediaFile).filter(function(f){return f && getChatUploadKind(f) && !isBlockedDmFile(f) && f.size>0 && f.size<=50*1024*1024;});
                 if(valid.length!==files.length)showToast('部分附件类型或大小不支持，已跳过');
@@ -4520,7 +4603,8 @@
                 host.addEventListener('pointerdown',function(event){
                     if(event.pointerType!=='touch' || event.target.closest('button,a,img,video,audio'))return;
                     var row=event.target.closest('.chat-msg-row'),message=row && findDockMessageByRow(row);
-                    if(!message || message.__optimistic || message.__failed || (getDMMessagePayload(message)||{}).withdrawn)return;
+                    var swipePayload = getDMMessagePayload(message) || {};
+                    if(!message || message.__optimistic || message.__failed || swipePayload.withdrawn || swipePayload.flash)return;
                     swipe={row:row,bubble:row.querySelector('.chat-msg'),id:event.pointerId,x:event.clientX,y:event.clientY,dx:0,active:false,peer:dockChatActiveUser,owner:window.currentUser};
                 });
                 host.addEventListener('pointermove',function(event){if(!swipe || swipe.id!==event.pointerId)return;
@@ -4680,6 +4764,8 @@
                 container.__xtjMsgActionsBound = true;
                 container.tabIndex=0;
                 container.setAttribute('role','region');
+                container.setAttribute('aria-live','off');
+                container.removeAttribute('aria-relevant');
                 container.setAttribute('aria-label','聊天消息，使用上下方向键选择消息，按回车打开操作');
                 container.addEventListener('keydown',function(event){
                     var row=event.target.closest('.chat-msg-row'),interactive=event.target.closest('button,a,input,textarea,video,audio');
@@ -4765,7 +4851,7 @@
             }
 
             var _flashViewer=null,_flashConsumed=new Set(),_flashSending=false,_flashSendFlight=null,_flashQuota=null,_flashQuotaFlight=null,_flashViewTokens=new Map();
-            function cancelChatFlashSend(){if(!_flashSendFlight)return;_flashSendFlight.controller.abort();_flashSendFlight=null;_flashSending=false;dockChatSending=false;var send=document.getElementById('dockChatSendBtn'),flash=document.getElementById('chatFlashSendBtn');if(send)send.disabled=false;if(flash){flash.textContent='闪图';flash.disabled=false;}}
+            function cancelChatFlashSend(){if(!_flashSendFlight)return;_flashSendFlight.controller.abort();_flashSendFlight=null;_flashSending=false;dockChatSending=false;restoreDockChatSendAvailability();var flash=document.getElementById('chatFlashSendBtn');if(flash){flash.textContent='闪图';flash.disabled=false;}}
             var _flashReceiptJobs = new Map();
             function readFlashReceipts(owner){try{var records=JSON.parse(localStorage.getItem('xtj_flash_receipts_'+owner)||'{}');return records && typeof records==='object' && !Array.isArray(records)?records:{};}catch(_){return {};}}
             function writeFlashReceipts(owner,records){try{localStorage.setItem('xtj_flash_receipts_'+owner,JSON.stringify(records));return true;}catch(_){return false;}}
@@ -4796,6 +4882,8 @@
             function syncChatFlashButton(file){var b=document.getElementById('chatFlashSendBtn');if(b){b.hidden=!file||!/^image\//.test(file.type)||isBlockedDmFile(file);b.disabled=_flashSending;paintChatFlashQuota();if(!b.hidden)void refreshChatFlashQuota(false);}}
             window.sendChatFlash=async function(){
                 if(_flashSending||dockChatSending||_chatBatchSending)return;
+                if(dockChatComposerLocked()){showToast('成为好友后才能发送闪图');return;}
+                if(isUserMuted()){showToast('您已被禁言，无法发送消息');return;}
                 var file=_chatAttachmentQueue[0]||(document.getElementById('dockChatFileInp').files||[])[0],owner=currentUser,peer=dockChatActiveUser,epoch=_authStateEpoch,original=isDmOriginalSendEnabled();
                 if(!owner||!peer||!file||!/^image\//.test(file.type))return;
                 if(file.size>20*1024*1024){showToast('闪图照片不能超过 20MB');return;}
@@ -4814,7 +4902,7 @@
                     if(_chatAttachmentQueue.length){showDockChatFilePreview(_chatAttachmentQueue[0]);renderChatAttachmentQueue();}else clearDockChatFilePreview(false);
                     showToast('闪图已发送，对方可查看一次，清晰显示 3 秒');
                 }catch(error){if(active())showToast(error.message||'闪图发送失败，请重试');}
-                finally{if(_flashSendFlight===flight){_flashSendFlight=null;_flashSending=false;dockChatSending=false;document.getElementById('dockChatSendBtn').disabled=false;if(button){button.textContent='闪图';button.disabled=false;}}}
+                finally{if(_flashSendFlight===flight){_flashSendFlight=null;_flashSending=false;dockChatSending=false;restoreDockChatSendAvailability();if(button){button.textContent='闪图';button.disabled=false;}}}
             };
             window.openChatFlash=async function(id){
                 if(_flashViewer||!currentUser||!/^[a-f0-9-]{36}$/i.test(String(id)))return;

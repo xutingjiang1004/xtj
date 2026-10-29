@@ -16738,8 +16738,9 @@ html.perf-lite .ai-chat-bubble {
 #panelChat #dockChatContainer .cli-preview { line-height: 1.5; color: var(--chat-muted); }
 #panelChat #dockChatContainer .chat-empty { color:var(--chat-muted); }
 #panelChat #dockChatContainer .chat-empty > div:not(.ce-icon) { color:var(--chat-muted)!important; }
-#panelChat #dockChatMessages .chat-history-more { display:block;min-height:44px;margin:8px auto;padding:8px 14px;border:0;background:transparent;box-shadow:none;color:var(--chat-ink);font-size:13px; }
+#panelChat #dockChatMessages .chat-history-more, #panelChat #dockChatMessages .chat-history-newer { display:block;min-height:44px;margin:8px auto;padding:8px 14px;border:0;background:transparent;box-shadow:none;color:var(--chat-ink);font-size:13px; }
 #panelChat #dockChatMessages .chat-history-more:disabled { opacity:.6; }
+#panelChat #dockChatContainer .chat-list-item:focus-visible { outline:2px solid var(--chat-accent,#219d72); outline-offset:2px; }
 .photo-wall-item:focus-visible { outline:3px solid var(--primary,#287b55);outline-offset:3px; }
 #panelChat #dockChatContainer .chat-messages { padding-bottom: 18px; scroll-behavior: auto; }
 #panelChat #dockChatContainer .chat-msg { box-shadow: 0 2px 6px rgba(30, 70, 50, .035); }

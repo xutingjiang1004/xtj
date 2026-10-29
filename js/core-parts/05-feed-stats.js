@@ -1161,8 +1161,9 @@
             });
 
             function startDMPolling(interval, skipImmediate) {
-                // Broadcast is immediate; a sitewide list-only poll covers disconnections.
-                interval = Math.min(interval || 30000,30000);
+                // Broadcast is immediate; polling is only the fallback.
+                // 会话内 60 秒、列表 5 分钟必须按调用方传入的间隔生效，不能再夹到 30 秒。
+                interval = Math.max(30000, Number(interval) || 30000);
                 if (dmpollTimer) {
                     if (dmpollInterval === interval) return;
                     clearInterval(dmpollTimer); dmpollTimer = null;

@@ -64,5 +64,24 @@ test('media bubble image must not be sized relative to the bubble itself', () =>
 test('opening a chat does not immediately duplicate the detail request through polling', () => {
   const openChat = between(core, 'window.openChat = function(userName)', 'async function loadDockChatList(userRetry)');
   assert.match(openChat, /startDMPolling\(60000, true\)/);
+  assert.doesNotMatch(openChat, /isUserMuted\(\)[\s\S]{0,80}return;/);
   assert.match(core, /startDMPolling\(300000, !!\(options && options\.source === 'openChat'\)\)/);
+  const polling = between(core, 'function startDMPolling(interval, skipImmediate)', 'function stopDMPolling()');
+  assert.match(polling, /Math\.max\(30000, Number\(interval\) \|\| 30000\)/);
+  assert.doesNotMatch(polling, /Math\.min\(interval/);
+});
+
+test('private chat keeps unsent rows, reply quotes and real forwards', () => {
+  const older = between(core, 'async function loadOlderDockChatMessages(peer)', 'async function refreshDockChatHistoryWindow');
+  assert.match(older, /retainDockChatHistoryWindow/);
+  assert.match(core, /state\.newerHidden/);
+  const send = between(core, 'async function sendDockChatMessageSingle(queuedFile, queuedText, retryOptions)', 'function persistDmDeletedIds');
+  assert.match(send, /replyDraft: queuedReply/);
+  assert.match(send, /replyDraft: next\.replyDraft \|\| null|replyDraft: replyDraft/);
+  assert.match(send, /forwardTo/);
+  const forward = between(core, 'async function forwardDmMessage(message, targetUser)', 'async function resendDmMessage');
+  assert.match(forward, /sendDockChatMessageSingle\(file, text, \{ forwardTo: targetUser \}\)/);
+  assert.doesNotMatch(forward, /content: value/);
+  assert.match(core, /swipePayload\.flash/);
+  assert.match(core, /persistDmDeletedIds\(merged, serverIds\.length\)/);
 });
