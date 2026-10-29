@@ -708,6 +708,28 @@
     visibility 0s linear 0s;
 }
 
+/* Live reasoning keeps the same fade and rise, but does not interpolate
+   row height or clip. Those two change layout/paint on every frame while
+   the first tokens are still arriving, and a closing clip hides the newest
+   line until the 280ms curtain finishes. A finished panel still uses the
+   grid + clip curtain above, because its height is no longer changing. */
+.ai-thinking.is-thinking.expanded .ai-thinking-panel {
+  clip-path: none;
+  overflow: visible;
+  will-change: transform, opacity;
+  transition:
+    opacity 220ms ease,
+    transform 280ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    visibility 0s linear 0s;
+}
+html[data-xtj-motion=off] .ai-thinking.is-thinking.expanded .ai-thinking-panel,
+html[data-xtj-motion=weak] .ai-thinking.is-thinking.expanded .ai-thinking-panel {
+  transition: none;
+  transform: none;
+  will-change: auto;
+  clip-path: none;
+}
+
 .ai-thinking.expanded .ai-thinking-body {
   visibility: visible !important;
   opacity: 1 !important;
@@ -3446,8 +3468,10 @@ html[data-xtj-motion="off"] .ai-chat-input-bar {
   }
 
   .ai-thinking-panel *,
-  .ai-thinking-caret {
+  .ai-thinking-caret,
+  .ai-thinking.is-thinking.expanded .ai-thinking-panel {
     transition: none !important;
+    will-change: auto;
   }
 }
 

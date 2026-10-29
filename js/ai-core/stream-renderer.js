@@ -89,10 +89,9 @@
           if (start > last.start && /[\uDC00-\uDFFF]/.test(node.data.charAt(start))) start++;
           slot.range.setStart(node, start);
         }
-        // Highlight ranges are live, but some engines only repaint after the
-        // range is registered again. Re-adding does not restart the fade.
-        try { slot.highlight.clear(); if (slot.range.toString()) slot.highlight.add(slot.range); } catch (_) {}
-        return !!slot.highlight.size;
+        // The range is already in the highlight. Moving its edges updates the
+        // wash; clearing and re-adding it would restyle on every token.
+        return !slot.range.collapsed && slot.highlight && slot.highlight.size > 0;
       } catch (_) { return false; }
     }
     function commit() {
