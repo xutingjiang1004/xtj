@@ -805,16 +805,17 @@ html[data-xtj-motion=weak] .ai-thinking.is-thinking.expanded .ai-thinking-panel 
   min-height: 0;
 }
 .ai-process-rail.is-folded > .ai-rail-fold { overflow: hidden; }
+/* 句子行和工具行共用 30px 行高，上下节奏才一致。 */
 .ai-rail-beat {
   position: relative;
-  padding: 0 0 4px 22px;
+  padding: 0 0 0 22px;
 }
 .ai-rail-beat::before {
   content: '';
   position: absolute;
   left: 7px;
-  top: 16px;
-  bottom: -4px;
+  top: 19px;
+  bottom: 0;
   width: 1.5px;
   background: rgba(91, 151, 131, .38);
 }
@@ -824,12 +825,13 @@ html[data-xtj-motion=weak] .ai-thinking.is-thinking.expanded .ai-thinking-panel 
   all: unset;
   position: relative;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
   width: 100%;
+  min-height: 30px;
   box-sizing: border-box;
   margin: 0;
-  padding: 3px 0 4px !important;
+  padding: 0 !important;
   border: 0 !important;
   border-radius: 0 !important;
   background: transparent !important;
@@ -842,8 +844,8 @@ html[data-xtj-motion=weak] .ai-thinking.is-thinking.expanded .ai-thinking-panel 
   text-align: left;
   color: rgba(62, 92, 86, .9);
   font: inherit;
-  font-size: 13.5px;
-  line-height: 1.55;
+  font-size: 14.5px;
+  line-height: 1.5;
   cursor: pointer;
   appearance: none;
   -webkit-appearance: none;
@@ -851,7 +853,7 @@ html[data-xtj-motion=weak] .ai-thinking.is-thinking.expanded .ai-thinking-panel 
 .ai-rail-mark {
   position: absolute;
   left: -19px;
-  top: 8px;
+  top: 11px;
   width: 8px;
   height: 8px;
   border-radius: 50%;
@@ -910,8 +912,10 @@ html[data-xtj-motion=weak] .ai-thinking.is-thinking.expanded .ai-thinking-panel 
 }
 .ai-process-rail .ai-tool-step {
   position: relative;
-  min-height: 24px;
-  padding: 3px 0;
+  display: flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0;
 }
 .ai-process-rail .ai-tool-round-list .ai-tool-step,
 .ai-process-rail .ai-tool-step {
@@ -968,7 +972,7 @@ html[data-xtj-motion=weak] .ai-thinking.is-thinking.expanded .ai-thinking-panel 
   content: '';
   position: absolute;
   left: -22px;
-  top: 6px;
+  top: 8px;
   width: 14px;
   height: 14px;
   border: 0;
@@ -8050,6 +8054,26 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
   box-sizing: border-box;
   overflow-wrap: anywhere;
 }
+/* 工具结果里的「重试这一步」保持站内文字按钮的样子：无胶囊、无底色。 */
+.ai-tool-card .ai-msg-act,
+.ai-tool-result-error .ai-msg-act {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 2px;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+  color: var(--primary, #3a9271) !important;
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+.ai-tool-card .ai-msg-act:hover,
+.ai-tool-result-error .ai-msg-act:hover { text-decoration: underline; }
+[data-theme="dark"] .ai-tool-card .ai-msg-act,
+[data-theme="dark"] .ai-tool-result-error .ai-msg-act { color: #8fd0b8 !important; }
 .ai-process-rail .ai-tool-inline-result > button.ai-tool-result-card-title,
 .ai-process-rail .ai-tool-data-details > summary { grid-column: auto; }
 .ai-process-timeline .ai-tool-step-detail { min-width:0; overflow-wrap:break-word; word-break:normal; white-space:normal; }

@@ -1828,7 +1828,7 @@ async function executeToolCall(toolCall, context) {
         var officialResult = await executeToolCall({function:{name:'search_web',arguments:JSON.stringify(officialArgs)}},context);
         return Object.assign({},officialResult,{tool_name:name});
       }
-      if (context.freeOnly) return {tool_name:name,error:'MiniMax 免费模式不调用付费搜索服务，请使用 search_web 免费搜索'};
+      if (context.freeOnly) return {tool_name:name,error:'当前 OpenRouter 免费模型不调用付费搜索服务，请使用 search_web 免费搜索'};
       var tq = String(args.query || '').trim().slice(0, 200);
       var tMax = Math.min(Math.max(parseInt(args.max_results, 10) || 5, 1), 10);
       if (!tq) return { tool_name: name, error: '搜索关键词为空' };
@@ -22108,6 +22108,13 @@ app.post('/api/agent/custom-chat/stream', guestOpenRouterAuth, aiChatConcurrency
   // The same full, server-owned tool set is available to every chat model.
   var TOOL_ROUNDS_MAX = aiTaskPolicy.MAX_TOOL_ROUNDS;
   var customTools = aiToolsForWorkMode();
+  // OpenRouter 免费模型不能调用付费搜索：不要把 tavily_search 放进工具列表，
+  // 否则模型会反复调用同一个必然被拒的工具，整轮都在失败重试。
+  if (provider === 'openrouter' && Array.isArray(customTools)) {
+    customTools = customTools.filter(function(tool) {
+      return !(tool && tool.function && tool.function.name === 'tavily_search');
+    });
+  }
   var toolContext = { freeOnly: provider === 'openrouter', userName: req.userName || '', signal: controller.signal, searchConsumed: 0 };
   if(provider === 'deepseek' && _safeCheck.parsed.hostname === 'api.deepseek.com') toolContext.deepseekKey = apiKey;
   var customConfig;
@@ -22292,6 +22299,7 @@ app.post('/api/agent/custom-chat/stream', guestOpenRouterAuth, aiChatConcurrency
           console.log('[CUSTOM] DSML fallback parsed %d tool call(s) from text round=%d',
             dsmlProbe.calls.length, rounds);
           // 命中 DSML：把解析出的调用规范化成与原生 tool_calls 相同结构。
+          customToolCallCount += dsmlProbe.calls.length;
           var dsmlTcs = dsmlProbe.calls.map(function(c, ci) {
             return {
               id: c.id || ('dsml_' + (rounds + 1) + '_' + (ci + 1)),
@@ -22358,6 +22366,7 @@ app.post('/api/agent/custom-chat/stream', guestOpenRouterAuth, aiChatConcurrency
           try { if (!res.writableEnded && !aborted) writeSse(res, { type: _thinkMode === 'off' ? 'content' : 'reasoning', text: _cnNarr + '\n\n' }); } catch (e) {}
         }
       }
+      customToolCallCount += tcs.length;
       // 前端时间线：先展示"进行中"
       writeSse(res, { type: 'tool_calls', tools: tcs.map(function(t) { var a = {}; try { a = JSON.parse(t.function.arguments || '{}'); } catch (e) {} return { id: t.id, name: t.function.name, args: a }; }) });
       for (var rI = 0; rI < tcs.length; rI++) {
@@ -22460,11 +22469,18 @@ app.post('/api/agent/custom-chat/stream', guestOpenRouterAuth, aiChatConcurrency
   var rounds = 0;
   // 记录同一工具 + 同一参数的累计调用次数，用于打断模型的重复检索循环。
   var customCallCounts = Object.create(null);
+  // 这一轮的工具调用总量与起始时间：到点后强制让模型收尾，
+  // 避免慢模型一直搜到连接被中断、用户拿不到任何答案。
+  var customToolCallCount = 0;
+  var customTurnStartedAt = Date.now();
   try {
     await runRequiredSearch({ enabled: _webSearch, text: text, messages: conversation, execute: executeToolCall, context: toolContext, write: event => writeSse(res, event), normalizeItems: normalizeToolResultItems });
     if(body.context_management===true)manageAiContextWindow(conversation,Math.max(0,fwdMessages.length-1),req,res,customConvId,controller.signal);
     while (rounds <= TOOL_ROUNDS_MAX && !aborted && !res.writableEnded) {
-      var rr = await runCustomRound(toolsInUse && rounds < TOOL_ROUNDS_MAX);
+      // 慢模型常常一直检索到连接被掐断：3 分钟或 24 次调用后就不再提供工具，
+      // 让它在已有结果上直接作答，至少保证这一轮有正文。
+      var customOverBudget = (Date.now() - customTurnStartedAt) > 180000 || customToolCallCount >= 24;
+      var rr = await runCustomRound(toolsInUse && rounds < TOOL_ROUNDS_MAX && !customOverBudget);
       if (rr.stop) break;
       if (rr.retryWithoutUsage || rr.retryWithoutThinking) continue;
       if (rr.retryWithoutTools) { toolsInUse = false; continue; }

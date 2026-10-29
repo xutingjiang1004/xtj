@@ -4526,12 +4526,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   }
 
   function assistantFeatures() { return window.XtjAiCore && window.XtjAiCore.AssistantFeatures; }
-  function attachAiFollowups(node,msg) {
-    var features=assistantFeatures();
-    // ★ 2026-10-29：没有正文的消息不挂推荐追问。追问条挂在 .ai-msg 上，
-    //   出现在一条「只有思考过程」的消息下面会像是追问了一句不存在的回答。
-    if(!msg || !String(msg.content || '').trim()) return;
-    if(features && msg && msg.role==='assistant' && !msg.interrupted && !msg.deep_think) features.attachFollowups(node,msg.followups,function(text){return S._askPreservingDraft ? S._askPreservingDraft(text,[]).catch(function(error){notify(error.message||'推荐问题未发送，请重试');}) : Promise.resolve();});
+  function attachAiFollowups() {
+    // 2026-10-30：推荐追问（「猜你想问」）不够准，产品上直接去掉，
+    // 不再在回复下面挂这一块。保留函数名给既有调用点，避免改一处漏一处。
+    return;
   }
   function aiReading(messagesEl,deep) {
     var tools=window.XtjAiCore && window.XtjAiCore.ReadingTools,owner=readUserName();
@@ -10518,7 +10516,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         reasoning_effort_supported: customCfg.reasoning_effort_supported === true,
         message: text,
         messages: hl,
-        messages_include_current: false,followup_suggestions:true,context_estimate:true,
+        messages_include_current: false,followup_suggestions:false,context_estimate:true,
         context_management:sendSettings.contextManaged||undefined,context_window_tokens:sendSettings.contextManaged?sendSettings.contextWindowTokens:undefined,context_memory:sendSettings.contextManaged?sendSettings.contextMemory:undefined,
         thinking_mode: _sendThinkingMode,
         thinking_max: sendSettings.thinkMax === true,
@@ -10548,7 +10546,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         conversation_id: S.conversationId,
         // ★ 关键修复：携带历史，服务端优先使用（不再强依赖 convId 查库）
         messages: _builtinHist,
-        messages_include_current: false,followup_suggestions:true,context_estimate:true,
+        messages_include_current: false,followup_suggestions:false,context_estimate:true,
         context_management:sendSettings.contextManaged||undefined,context_window_tokens:sendSettings.contextManaged?sendSettings.contextWindowTokens:undefined,context_memory:sendSettings.contextManaged?sendSettings.contextMemory:undefined,
         client_request_id: reqId,
         thinking_mode: _sendThinkingMode,
