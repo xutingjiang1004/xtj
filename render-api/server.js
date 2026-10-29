@@ -85,7 +85,7 @@ const deepSeekPricing = require('./deepseek-pricing');
 const { queryWeather, queryWeatherData, formatWeatherText, CITY_COORDS } = require('./weather');
 const { fetchSafeWebPage, assertSafeWebUrl, requestPinnedStream, fetchSafeRaw, fetchSafeBuffer, fetchSafeRedirectBuffer } = require('./web-fetch');
 const { ocrImageBuffer } = require('./image-ocr');
-const { endSse, writeSse } = require('./sse-write');
+const { endSse, writeSse, writeSseComment } = require('./sse-write');
 const { getProcessEvents } = require('./ai-process-events');
 const { createChatFeatures } = require('./chat-features');
 const { createDmPrivateStorage, dmStorageBucket, PRIVATE_BUCKET } = require('./dm-private-storage');
@@ -7703,9 +7703,9 @@ async function callDeepSeek(messages, options) {
   //   都已各自带 8~15s 的内部超时，外层 45s 形同虚设；
   //   收紧到 20s 后，一个卡死的工具不再把整轮多工具编排拖满 45s，
   //   而正常工具（P99 < 10s）仍留足一倍余量。
-  var TOTAL_TIMEOUT_MS = Math.max(180000, useThinking ? 300000 : 180000); // 3-5 min total
-  var FIRST_TOKEN_TIMEOUT_MS = useThinking ? 60000 : 45000; // 45-60s for first response
-  var IDLE_TIMEOUT_MS = useThinking ? 60000 : 45000; // 45-60s without progress
+  var TOTAL_TIMEOUT_MS = 1800000; // 30 min ceiling for long reasoning
+  var FIRST_TOKEN_TIMEOUT_MS = useThinking ? 1800000 : 45000;
+  var IDLE_TIMEOUT_MS = useThinking ? 1800000 : 45000;
   var SINGLE_TOOL_TIMEOUT_MS = 20000; // 20s per tool call
   var firstTokenReceived = false;
   var totalTimer = null;
@@ -8146,6 +8146,7 @@ async function callDeepSeek(messages, options) {
         var roundToolChoice = round === 0 && options && options.first_tool_choice
           ? options.first_tool_choice
           : toolChoice;
+        if (round > 0 && round >= maxToolRounds - 1) roundToolChoice = 'none';
         if (roundToolChoice) apiBody.tool_choice = roundToolChoice;
       }
       if (requestedMaxTokens !== null) apiBody.max_tokens = requestedMaxTokens;
@@ -8526,7 +8527,7 @@ async function callDeepSeek(messages, options) {
             noToolBody.temperature = Math.min(Math.max(options.temperature, 0), 2);
           }
             var noToolController = new AbortController();
-            var noToolTimer = setTimeout(function() { noToolController.abort(); }, useThinking ? 120000 : 60000);
+            var noToolTimer = setTimeout(function() { noToolController.abort(); }, useThinking ? 1800000 : 60000);
             var noToolAbortHandler = null;
             if (externalSignal) {
               noToolAbortHandler = function() { try { noToolController.abort(); } catch (e) {} };
@@ -9132,13 +9133,13 @@ async function callDeepSeekViaResponses(messages, options) {
   }
 
   var controller = new AbortController();
-  var TOTAL_TIMEOUT_MS = Math.max(180000, useThinking ? 300000 : 180000);
-  // 允许调用方按场景放宽总时长（如深入研究的海量检索阶段），上限 15 分钟
+  var TOTAL_TIMEOUT_MS = 1800000;
+  // 允许调用方按场景放宽总时长（如深入研究的海量检索阶段），上限 30 分钟
   if (options && Number.isFinite(Number(options.total_timeout_ms))) {
-    TOTAL_TIMEOUT_MS = Math.min(Math.max(Number(options.total_timeout_ms), 60000), 900000);
+    TOTAL_TIMEOUT_MS = Math.min(Math.max(Number(options.total_timeout_ms), 60000), 1800000);
   }
-  var FIRST_TOKEN_TIMEOUT_MS = useThinking ? 60000 : 45000;
-  var IDLE_TIMEOUT_MS = useThinking ? 60000 : 45000;
+  var FIRST_TOKEN_TIMEOUT_MS = useThinking ? 1800000 : 45000;
+  var IDLE_TIMEOUT_MS = useThinking ? 1800000 : 45000;
   var firstTokenReceived = false;
   var totalTimer = null;
   var idleTimer = null;
@@ -21895,7 +21896,7 @@ app.post('/api/agent/custom-chat/stream', guestOpenRouterAuth, aiChatConcurrency
     _heartbeatTimer = setInterval(function() {
       if (res.writableEnded || aborted) { clearHeartbeat(); return; }
       var lastWrite = res._sseLastWriteAt || 0;
-      if (Date.now() - lastWrite >= 8000) { try { writeSse(res, { type: 'heartbeat', t: Date.now() }); } catch (_) {} }
+      if (Date.now() - lastWrite >= 8000) { try { writeSse(res, { type: 'heartbeat', t: Date.now() }); writeSseComment(res, 'ping'); } catch (_) {} }
     }, 4000);
   }
   function safeEnd() {
@@ -22008,7 +22009,7 @@ app.post('/api/agent/custom-chat/stream', guestOpenRouterAuth, aiChatConcurrency
     return safeEnd();
   }
 
-  var timeoutMs = Math.max(15000, Math.min(Number(body.timeout_ms) || 180000, 300000));
+  var timeoutMs = Math.max(15000, Math.min(Number(body.timeout_ms) || 1800000, 1800000));
   var controller = new AbortController();
   function abortCustomUpstream() { if (aborted) { try { controller.abort(); } catch (_) {} } }
   req.on('aborted', abortCustomUpstream);
@@ -22449,7 +22450,7 @@ app.post('/api/agent/custom-chat/stream', guestOpenRouterAuth, aiChatConcurrency
     await runRequiredSearch({ enabled: _webSearch, text: text, messages: conversation, execute: executeToolCall, context: toolContext, write: event => writeSse(res, event), normalizeItems: normalizeToolResultItems });
     if(body.context_management===true)manageAiContextWindow(conversation,Math.max(0,fwdMessages.length-1),req,res,customConvId,controller.signal);
     while (rounds <= TOOL_ROUNDS_MAX && !aborted && !res.writableEnded) {
-      var rr = await runCustomRound(toolsInUse);
+      var rr = await runCustomRound(toolsInUse && rounds < TOOL_ROUNDS_MAX);
       if (rr.stop) break;
       if (rr.retryWithoutUsage || rr.retryWithoutThinking) continue;
       if (rr.retryWithoutTools) { toolsInUse = false; continue; }
@@ -22521,7 +22522,7 @@ app.post('/api/agent/custom-chat/deep-stream', guestOpenRouterAuth, aiChatConcur
     _heartbeatTimer = setInterval(function() {
       if (res.writableEnded || aborted) { clearHeartbeat(); return; }
       var lastWrite = res._sseLastWriteAt || 0;
-      if (Date.now() - lastWrite >= 8000) { try { writeSse(res, { type: 'heartbeat', t: Date.now() }); } catch (_) {} }
+      if (Date.now() - lastWrite >= 8000) { try { writeSse(res, { type: 'heartbeat', t: Date.now() }); writeSseComment(res, 'ping'); } catch (_) {} }
     }, 4000);
   }
   function safeEnd() {
@@ -22602,7 +22603,7 @@ app.post('/api/agent/custom-chat/deep-stream', guestOpenRouterAuth, aiChatConcur
     return safeEnd();
   }
 
-  var timeoutMs = Math.max(30000, Math.min(Number(body.timeout_ms) || 240000, 300000));
+  var timeoutMs = Math.max(30000, Math.min(Number(body.timeout_ms) || 1800000, 1800000));
   var controller = new AbortController();
   var timer = setTimeout(function() { try { controller.abort(); } catch (e) {} }, timeoutMs);
 
@@ -23200,6 +23201,11 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, rateLimit
   res._aiFollowupQuestion = String(req.body && req.body.message || '').slice(0,1000);
   var T0 = Date.now();
   var T_stage = {};
+  function logAiTiming(phase) {
+    try {
+      console.log('[AGENT-STREAM] timing ' + JSON.stringify({ phase: phase, reqId: clientReqId, ms: Date.now() - T0 }));
+    } catch (eTiming) {}
+  }
   var userName = req.userName;
   // 游客没有账号名，防串流键退化为当前出口 IP（不写入用户字段）。
   var streamOwnerKey = userName || ('guest:' + getRealIp(req));
@@ -23213,6 +23219,7 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, rateLimit
   var requestAbortCtrl = new AbortController();
   var clientReqId = String((req.body && req.body.client_request_id) || '').trim() || 'server_'+genConvId();
   res._aiClientRequestId = clientReqId;
+  logAiTiming('received');
   res._aiStartedAt = T0;
   req._searchApiCalls.signal = requestAbortCtrl.signal;
   req._searchApiCalls.userName = userName;
@@ -23243,7 +23250,7 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, rateLimit
       if (res.writableEnded || aborted) { clearStreamHeartbeat(); return; }
       var lastWrite = res._sseLastWriteAt || 0;
       if (Date.now() - lastWrite >= 2500) {
-        try { writeSse(res, { type: 'heartbeat', t: Date.now() }); } catch (_) {}
+        try { writeSse(res, { type: 'heartbeat', t: Date.now() }); writeSseComment(res, 'ping'); } catch (_) {}
       }
     }, 1500);
   }
@@ -23363,6 +23370,7 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, rateLimit
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no');
     if (typeof res.flushHeaders === 'function') res.flushHeaders();
+    logAiTiming('sse_open');
     if (aborted) return safeEnd();
 
     // 会话管理（convId 是纯字符串运算，零 IO，可安全前置到校验之前）
@@ -24659,7 +24667,7 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, rateLimit
     var contentBuffer = '';
     // ★ P1 修复：thinking 模式下多轮工具调用 + idle-timer reset 会让单个流无限延长。
     //   加一个 while 循环级的总超时（180s），硬上限防止 DeepSeek reasoning chain 长时间挂起。
-    var totalTimer = setTimeout(function() { aborted = true; try { controller && controller.abort(); } catch (e) {} }, 180000);
+    var totalTimer = setTimeout(function() { aborted = true; try { controller && controller.abort(); } catch (e) {} }, 1800000);
     _totalTimer = totalTimer;
 
     while (toolRound < MAX_TOOL_ROUNDS && !aborted) {
@@ -24674,7 +24682,11 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, rateLimit
     if (typeof controller !== 'undefined' && controller) { try { controller.abort(); } catch (e) {} }
     var controller = new AbortController();
     _controller = controller;
-    var timer = setTimeout(function() { controller.abort(); }, useThinking ? 120000 : DEEPSEEK_TIMEOUT_MS);
+    if (toolRound > 0 && toolRound >= MAX_TOOL_ROUNDS - 1) apiBody.tool_choice = 'none';
+    res._aiReasoningOpened = false;
+    res._aiContentOpened = false;
+    if (!res._aiModelCallLogged) { res._aiModelCallLogged = true; logAiTiming('model_call'); }
+    var timer = setTimeout(function() { controller.abort(); }, useThinking ? 1800000 : DEEPSEEK_TIMEOUT_MS);
     _timer = timer;
     
     var streamResp;
@@ -24808,7 +24820,7 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, rateLimit
     function startChunkTimer() {
       clearChunkTimer();
       return new Promise(function (_, reject) {
-        chunkTimer = setTimeout(function () { chunkTimer = null; reject(new Error('chunk_timeout')); }, 60000);
+        chunkTimer = setTimeout(function () { chunkTimer = null; reject(new Error('chunk_timeout')); }, useThinking ? 1800000 : 120000);
       });
     }
     while (true) {
@@ -24832,8 +24844,8 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, rateLimit
       //   因为 reasoning 模型思考阶段可能长时间无输出（心跳已保证客户端连接存活）；
       //   非思考模式保持 60 秒。
       var idleElapsed = Date.now() - lastChunkTime;
-      if (idleElapsed > (useThinking ? 90000 : 60000)) {
-        console.log('[AGENT-STREAM] idle timeout ' + (useThinking ? '90s' : '60s') + ', aborting');
+      if (idleElapsed > (useThinking ? 1800000 : 120000)) {
+        console.log('[AGENT-STREAM] idle timeout ' + (useThinking ? '30m' : '120s') + ', aborting');
         controller.abort();
         if (!aborted) {
           if (contentBuffer && contentBuffer.length > 0) {
@@ -24860,7 +24872,7 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, rateLimit
             });
           } else {
             // ★ 2026-09-17：超时且无任何内容——补发终结 done，避免前端误判连接中断
-            return terminateWithError({ type: 'error', error: 'AI 回复超时（60 秒无响应），请重试' });
+            return terminateWithError({ type: 'error', error: 'AI 回复超时，请重试' });
           }
         }
         return safeEnd();
@@ -24886,7 +24898,7 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, rateLimit
               await finishStream(res, { reqWorkMode: req._workMode === true, contentBuffer: contentBuffer, reasoningBuffer: reasoningBuffer, thinkingMode: thinkingMode, useThinking: useThinking, usedModel: usedModel, usage: usageInStream || null, searchMeta: _toolSearchMeta || _sharedSearchMeta, searchApiCount: req._searchApiCalls ? req._searchApiCalls.n : 0, siteCards: siteToolCards, finishReason: 'idle_timeout', userName: userName, convId: convId, message: message, streamSeq: streamSeq, ctx: ctx, reasoningStartedAt: reasoningStartedAt, roleplayEnabled: roleplayEnabled, startTime: T0 });
             } else {
               // ★ 2026-09-17：chunk 超时且无内容——补发终结 done
-              return terminateWithError({ type: 'error', error: 'AI 回复超时（60 秒无响应），请重试' });
+              return terminateWithError({ type: 'error', error: 'AI 回复超时，请重试' });
             }
           }
           return safeEnd();
@@ -24938,9 +24950,14 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, rateLimit
             }
             // ★ 2026-09-17：小包合并（40ms 窗口），降低 SSE 事件密度
             reasoningCoalesceBuf += delta.reasoning_content;
-            if (!reasoningCoalesceTimer) scheduleReasoningCoalesce();
-            // 阈值兜底：单窗口累积过大时立即刷出，避免首个事件延迟感
-            if (reasoningCoalesceBuf.length >= 160) flushReasoningCoalesce();
+            if (typeof logAiTiming === 'function' && !res._aiFirstTokenLogged) { res._aiFirstTokenLogged = true; try { logAiTiming('first_token'); } catch (eFirst) {} }
+            if (!res._aiReasoningOpened) {
+              res._aiReasoningOpened = true;
+              flushReasoningCoalesce();
+            } else {
+              if (!reasoningCoalesceTimer) scheduleReasoningCoalesce();
+              if (reasoningCoalesceBuf.length >= 160) flushReasoningCoalesce();
+            }
           }
         }
         if (delta.content) {
@@ -24949,10 +24966,15 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, rateLimit
           // ★ 2026-09-17：小包合并（40ms 窗口）。注意 contentBuffer（用于落库的
           //   完整正文）仍在逐片累积，合并只影响 SSE 推送粒度，不影响持久化内容。
           contentCoalesceBuf += delta.content;
-          if (!contentCoalesceTimer) scheduleContentCoalesce();
-          // 阈值兜底：单窗口累积过大时立即刷出，让长文本仍能快速到达
-          if (contentCoalesceBuf.length >= 240) {
+          if (typeof logAiTiming === 'function' && !res._aiFirstTokenLogged) { res._aiFirstTokenLogged = true; try { logAiTiming('first_token'); } catch (eFirstC) {} }
+          if (!res._aiContentOpened) {
+            res._aiContentOpened = true;
             if (!flushContentCoalesce()) { aborted = true; break; }
+          } else {
+            if (!contentCoalesceTimer) scheduleContentCoalesce();
+            if (contentCoalesceBuf.length >= 240) {
+              if (!flushContentCoalesce()) { aborted = true; break; }
+            }
           }
         }
         

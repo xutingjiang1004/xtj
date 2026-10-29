@@ -39,7 +39,7 @@ test('thinking deltas delivered in one browser packet are visible by the next di
  await emit(p,{type:'done',complete:true,saved:true,content:'已完成核对。',reasoning:expected});await p.waitForFunction(()=>!document.querySelector('.ai-msg.assistant.generating'));assert.deepEqual(f.errors,[]);
 });
 
-test('real thinking and answer streams apply the ink effect to newly received characters',{timeout:30000},async t=>{
+test('real thinking and answer streams show text immediately without an ink wash',{timeout:30000},async t=>{
  const f=await aiPolishFixture();t.after(()=>f.close());const p=f.page;
  await p.evaluate(()=>{
   document.documentElement.removeAttribute('data-perf');document.documentElement.removeAttribute('data-xtj-motion');
@@ -56,12 +56,12 @@ test('real thinking and answer streams apply the ink effect to newly received ch
  assert.equal(await p.locator('.ai-reasoning-segment').textContent(),'真实思考逐字柔和出现。');
  await emit(p,{type:'content',text:'正文也按原有顺序柔和出现。'});await frames(p);
  assert.match(await p.locator('.ai-msg.assistant .ai-msg-bubble').textContent(),/正文也按原有顺序柔和出现。/);
- const surfaces=await p.evaluate(()=>inkSurfaces);assert.ok(surfaces.some(x=>x.thinking),JSON.stringify(surfaces));assert.ok(surfaces.some(x=>x.answer),JSON.stringify(surfaces));
+ const surfaces=await p.evaluate(()=>inkSurfaces);assert.deepEqual(surfaces,[]);
  await emit(p,{type:'done',complete:true,saved:true,content:'正文也按原有顺序柔和出现。',reasoning:'真实思考逐字柔和出现。'});
  await p.waitForFunction(()=>!document.querySelector('.ai-msg.assistant.generating'));assert.deepEqual(f.errors,[]);
 });
 
-test('research thinking and report streams use the same ordered ink reveal',{timeout:45000},async t=>{
+test('research thinking and report streams show text immediately without an ink wash',{timeout:45000},async t=>{
  const f=await aiPolishFixture();t.after(()=>f.close());const p=f.page;
  await p.evaluate(()=>{
   window.inkResearch=[];const original=CSS.highlights.set.bind(CSS.highlights);
@@ -80,7 +80,7 @@ test('research thinking and report streams use the same ordered ink reveal',{tim
  await emit(p,{type:'research_content',content:'研究结论按顺序显示。'});await frames(p);
  assert.equal(await p.locator('.ai-thought-chunk').filter({hasText:'逐项核实原始资料。'}).count(),1);
  assert.match(await p.locator('.ai-think-answer').last().textContent(),/研究结论按顺序显示。/);
- const surfaces=await p.evaluate(()=>inkResearch);assert.ok(surfaces.some(x=>x.thinking),JSON.stringify(surfaces));assert.ok(surfaces.some(x=>x.answer),JSON.stringify(surfaces));
+ const surfaces=await p.evaluate(()=>inkResearch);assert.deepEqual(surfaces,[]);
  await emit(p,{type:'research_done',answer:'研究结论按顺序显示。',conversation_id:'POLISH01',saved:true});
  await p.waitForFunction(()=>!document.querySelector('.ai-research-card.generating'));assert.deepEqual(f.errors,[]);
 });
