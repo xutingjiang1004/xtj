@@ -822,7 +822,7 @@ html[data-xtj-motion=weak] .ai-thinking.is-thinking.expanded .ai-thinking-panel 
 .ai-rail-sentence {
   all: unset;
   position: relative;
-  display: flex !important;
+  display: flex;
   align-items: flex-start;
   gap: 8px;
   width: 100%;
@@ -879,6 +879,7 @@ html[data-xtj-motion=weak] .ai-thinking.is-thinking.expanded .ai-thinking-panel 
   white-space: pre-wrap;
 }
 .ai-rail-beat.is-open .ai-rail-reason { display: block; }
+.ai-chat-root .ai-rail-beat.no-sentence > .ai-rail-sentence,
 .ai-rail-beat.no-sentence > .ai-rail-sentence,
 .ai-rail-beat.no-reason > .ai-rail-sentence .ai-rail-caret { display: none; }
 .ai-process-rail .ai-tool-activity-head,
@@ -901,23 +902,72 @@ html[data-xtj-motion=weak] .ai-thinking.is-thinking.expanded .ai-thinking-panel 
   min-height: 24px;
   padding: 2px 0;
 }
-.ai-process-rail .ai-tool-step::after {
+.ai-process-rail .ai-tool-round-list .ai-tool-step,
+.ai-process-rail .ai-tool-step {
+  animation: aiRailStepIn 220ms cubic-bezier(.16, 1, .3, 1) both;
+}
+.ai-process-rail .ai-tool-round-list .ai-tool-step.is-running,
+.ai-process-rail .ai-tool-round-list .ai-tool-step.is-done {
+  padding-left: 0;
+}
+.ai-process-rail .ai-tool-round-list .ai-tool-step.is-running::before {
+  content: none;
+  animation: none;
+  box-shadow: none;
+}
+.ai-process-rail .ai-tool-round,
+.ai-process-rail .ai-tool-activity,
+.ai-process-rail .ai-tool-result-card {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  animation: none;
+  max-width: none;
+}
+.ai-process-rail .ai-tool-result-card-title {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: #5d8f80;
+}
+.ai-process-rail .ai-tool-step::after,
+.ai-process-rail .ai-tool-round-list .ai-tool-step.is-running::after,
+.ai-process-rail .ai-tool-round-list .ai-tool-step.is-done::after {
   left: -22px;
   top: 4px;
   width: 14px;
   height: 14px;
   border: 0;
   border-radius: 0;
-  background: center / 14px 14px no-repeat;
+  background-color: transparent;
+  background-position: center;
+  background-size: 14px 14px;
+  background-repeat: no-repeat;
   box-shadow: none;
-  animation: none;
 }
+.ai-process-rail .ai-tool-round-list .ai-tool-step.is-running::after {
+  animation: aiRailIconPulse 1.6s ease-in-out infinite;
+}
+.ai-process-rail .ai-tool-round-list .ai-tool-step.is-done::after { animation: none; opacity: 1; }
+.ai-process-rail .ai-tool-round-list .ai-tool-step[data-tool-name="search_web"]::after,
+.ai-process-rail .ai-tool-round-list .ai-tool-step[data-tool-name="tavily_search"]::after,
+.ai-process-rail .ai-tool-round-list .ai-tool-step[data-tool-name="search_social"]::after,
+.ai-process-rail .ai-tool-round-list .ai-tool-step[data-tool-name^="search_"]::after,
 .ai-process-rail .ai-tool-step[data-tool-name="search_web"]::after,
 .ai-process-rail .ai-tool-step[data-tool-name="tavily_search"]::after,
 .ai-process-rail .ai-tool-step[data-tool-name="search_social"]::after,
 .ai-process-rail .ai-tool-step[data-tool-name^="search_"]::after {
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233a9271' stroke-width='1.8'><circle cx='12' cy='12' r='9'/><path d='M3 12h18M12 3c2.5 2.8 3.8 6 3.8 9s-1.3 6.2-3.8 9c-2.5-2.8-3.8-6-3.8-9s1.3-6.2 3.8-9z'/></svg>");
 }
+.ai-process-rail .ai-tool-round-list .ai-tool-step[data-tool-name="read_web_page"]::after,
+.ai-process-rail .ai-tool-round-list .ai-tool-step[data-tool-name="web_extract"]::after,
+.ai-process-rail .ai-tool-round-list .ai-tool-step[data-tool-name="page_meta"]::after,
+.ai-process-rail .ai-tool-round-list .ai-tool-step[data-tool-name="read_document"]::after,
+.ai-process-rail .ai-tool-round-list .ai-tool-step[data-tool-name="read_document_section"]::after,
 .ai-process-rail .ai-tool-step[data-tool-name="read_web_page"]::after,
 .ai-process-rail .ai-tool-step[data-tool-name="web_extract"]::after,
 .ai-process-rail .ai-tool-step[data-tool-name="page_meta"]::after,
@@ -925,6 +975,8 @@ html[data-xtj-motion=weak] .ai-thinking.is-thinking.expanded .ai-thinking-panel 
 .ai-process-rail .ai-tool-step[data-tool-name="read_document_section"]::after {
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233a9271' stroke-width='1.8'><path d='M6 4.5h9.5L19 8v11.5H6z'/><path d='M15 4.5V8h4M8.5 12h7M8.5 15.5h7'/></svg>");
 }
+.ai-process-rail .ai-tool-round-list .ai-tool-step[data-tool-name="image_info"]::after,
+.ai-process-rail .ai-tool-round-list .ai-tool-step[data-tool-name="image_process"]::after,
 .ai-process-rail .ai-tool-step[data-tool-name="image_info"]::after,
 .ai-process-rail .ai-tool-step[data-tool-name="image_process"]::after {
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233a9271' stroke-width='1.8'><rect x='4' y='5' width='16' height='14' rx='2'/><circle cx='9' cy='10' r='1.4'/><path d='M7 16l3.2-3.2 2.2 2.2L16 11l3 3.5'/></svg>");
@@ -977,13 +1029,23 @@ html[data-xtj-motion=weak] .ai-thinking.is-thinking.expanded .ai-thinking-panel 
   display: inline;
   color: #c44b5a;
 }
-.ai-flow-in { animation: aiRailIn .22s cubic-bezier(.16, 1, .3, 1) both; }
+.ai-flow-in { animation: aiRailWash 280ms cubic-bezier(.16, 1, .3, 1) both; }
 @media (prefers-reduced-motion: reduce) {
-  .ai-process-rail, .ai-process-rail.is-folded, .ai-flow-in { transition: none; animation: none; }
+  .ai-process-rail, .ai-process-rail.is-folded, .ai-flow-in,
+  .ai-process-rail .ai-tool-step,
+  .ai-process-rail .ai-tool-step::after { transition: none; animation: none; filter: none; }
 }
-@keyframes aiRailIn {
-  0% { opacity: 0; transform: translate3d(-4px, -3px, 0); }
-  100% { opacity: 1; transform: translate3d(0, 0, 0); }
+@keyframes aiRailWash {
+  0% { opacity: 0; filter: blur(6px); transform: translate3d(0, 6px, 0); }
+  100% { opacity: 1; filter: none; transform: none; }
+}
+@keyframes aiRailStepIn {
+  0% { opacity: 0; transform: translate3d(0, 4px, 0); }
+  100% { opacity: 1; transform: none; }
+}
+@keyframes aiRailIconPulse {
+  0%, 100% { opacity: .45; }
+  50% { opacity: 1; }
 }
 [data-theme="dark"] .ai-rail-live { color: rgba(198, 220, 210, .9); }
 [data-theme="dark"] .ai-rail-sentence { color: rgba(214, 228, 222, .9); }
@@ -997,8 +1059,16 @@ html[data-xtj-motion=weak] .ai-thinking.is-thinking.expanded .ai-thinking-panel 
 }
 html[data-xtj-motion="off"] .ai-flow-in,
 html[data-xtj-motion="off"] .ai-rail-caret,
+html[data-xtj-motion="off"] .ai-process-rail .ai-tool-step,
 html.xtj-reduce-motion .ai-flow-in,
-html.xtj-reduce-motion .ai-rail-caret { animation: none; transition: none; }
+html.xtj-reduce-motion .ai-rail-caret,
+html.xtj-reduce-motion .ai-process-rail .ai-tool-step {
+  animation: none;
+  transition: none;
+  filter: none;
+  opacity: 1;
+  transform: none;
+}
 
 .ai-msg.typing {
   margin: 1px 0 2px;
@@ -7274,57 +7344,67 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
 
 /* ===================== 新增：复制/分享 · 语音 · 快捷指令 · AI生图 · 导出 · 重命名 ===================== */
 
-/* AI 回复底部操作按钮（复制 / 分享 / 重新生成）
-   改为一个整体分段组（segmented group）：共享一个圆角胶囊外壳，
-   内部为扁平按钮 + 发丝分隔线，避免"三颗独立胶囊"的割裂感。 */
+/* 复制 / 分享 / 重新生成 / 继续生成：跟顶栏「历史」「新对话」同一套小按钮，
+   不再用消息气泡或渐变胶囊。 */
 .ai-msg-actions {
   display: inline-flex;
   align-items: center;
-  gap: 0;
+  flex-wrap: wrap;
+  gap: 6px;
   margin-left: 0;
-  padding: 1px 2px;
-  border: 1px solid rgba(126, 191, 172, 0.22);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.5);
-  box-shadow: 0 1px 2px rgba(30, 60, 52, 0.04) inset;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
-.ai-msg-actions .ai-msg-act {
+.ai-msg-actions .ai-msg-act,
+.ai-continue-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 3px;
-  padding: 3px 9px;
-  border: none;
-  border-radius: 999px;
-  background: transparent;
-  color: rgba(85, 116, 110, 0.88);
+  margin-top: 0;
+  padding: 5px 10px;
+  min-height: 31px;
+  border: 1px solid var(--ai-border, rgba(140, 196, 158, .28));
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.62);
+  color: var(--ai-text-muted, rgba(70, 95, 85, .9));
+  box-shadow: 0 8px 18px rgba(141, 177, 164, 0.08);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
   font-size: 11px;
-  line-height: 1.5;
+  font-weight: 500;
+  line-height: 1;
   white-space: nowrap;
   cursor: pointer;
   position: relative;
-  transition: background 0.16s ease, color 0.16s ease;
+  transition: transform 0.16s ease, background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
   user-select: none;
   -webkit-user-select: none;
   -webkit-tap-highlight-color: transparent;
 }
-/* 按钮之间的发丝分隔线（属于后一个按钮左侧） */
-.ai-msg-actions .ai-msg-act + .ai-msg-act::before {
-  content: "";
-  position: absolute;
-  left: -0.5px;
-  top: 22%;
-  bottom: 22%;
-  width: 1px;
-  background: rgba(126, 191, 172, 0.2);
-  pointer-events: none;
+.ai-continue-btn { margin-top: 8px; }
+.ai-chat-root button.ai-continue-btn {
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.62);
+  color: var(--ai-text-muted, rgba(70, 95, 85, .9));
+  font-weight: 500;
+  box-shadow: 0 8px 18px rgba(141, 177, 164, 0.08);
 }
+/* 按钮之间的发丝分隔线（属于后一个按钮左侧） */
+.ai-msg-actions .ai-msg-act + .ai-msg-act::before { content: none; }
 .ai-msg-actions .ai-msg-act:hover,
-.ai-msg-actions .ai-msg-act:focus-visible {
-  background: rgba(126, 191, 172, 0.14);
+.ai-msg-actions .ai-msg-act:focus-visible,
+.ai-continue-btn:hover,
+.ai-continue-btn:focus-visible {
+  background: rgba(255, 255, 255, 0.9);
+  border-color: rgba(66, 155, 122, .45);
   color: rgba(46, 130, 105, 0.98);
 }
-/* 重新生成：同一组的扁平项，仅靠文字色稍作强调，不另起胶囊 */
+.ai-msg-actions .ai-msg-act:active,
+.ai-continue-btn:active { transform: scale(0.98); box-shadow: none; }
 .ai-msg-actions .ai-msg-act-regen { color: rgba(43, 128, 103, 0.96); }
 .ai-msg-actions .ai-msg-act-regen:hover,
 .ai-msg-actions .ai-msg-act-regen:focus-visible {
@@ -7332,10 +7412,14 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
   color: rgba(24, 108, 86, 1);
 }
 [data-theme="dark"] .ai-msg-actions {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(140, 196, 158, 0.2);
+  background: transparent;
+  border-color: transparent;
 }
-[data-theme="dark"] .ai-msg-actions .ai-msg-act {
+[data-theme="dark"] .ai-msg-actions .ai-msg-act,
+[data-theme="dark"] .ai-continue-btn,
+[data-theme="dark"] .ai-chat-root button.ai-continue-btn {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(140, 196, 158, 0.24);
   color: rgba(190, 214, 208, 0.86);
 }
 [data-theme="dark"] .ai-msg-actions .ai-msg-act + .ai-msg-act::before {

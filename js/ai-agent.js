@@ -11209,6 +11209,22 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       }
 
       var activeToolTimeline = null, activeReasoningSegment = null, activeRailBeat = null, railReasonCursor = 0;
+      function paintRailSentence(beat, text, auto) {
+        var value = String(text || '').trim();
+        if (!beat || !value) return;
+        beat.__narration = value;
+        beat.__autoSentence = !!auto;
+        beat.classList.remove('no-sentence');
+        var label = beat.querySelector('.ai-rail-sentence-text');
+        if (label && label.textContent !== value) label.textContent = value;
+        var cleaned = cleanReasoningText(aiReasoning.slice(Math.max(0, railReasonCursor)));
+        if (cleaned) {
+          beat.__reasoning = cleaned;
+          var reason = beat.querySelector('.ai-rail-reason');
+          if (reason) reason.textContent = cleaned;
+          beat.classList.remove('no-reason');
+        }
+      }
       function latestReasoningLine(text) {
         var raw = String(text || '');
         if (raw.length > 240) raw = raw.slice(-240);
@@ -11220,7 +11236,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         }
         var line = (cut >= 0 ? clean.slice(cut + 1) : clean).trim();
         if (!line) line = clean;
-        if (line.length > 48) line = line.slice(0, 48) + '…';
+        if (line.length > 80) line = line.slice(0, 80) + '…';
         return line;
       }
       function clearRailLiveLine() {
@@ -11295,6 +11311,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         var line = latestReasoningLine(aiReasoning.slice(railReasonCursor));
         if (!line) return;
         var fold = ensureRailFold();
+        var lastBeat = fold.querySelector(':scope > .ai-rail-beat:last-of-type');
+        if (lastBeat && String(lastBeat.__narration || '').trim() === line) {
+          var same = fold.querySelector(':scope > .ai-rail-live');
+          if (same) same.remove();
+          return;
+        }
         var live = fold.querySelector(':scope > .ai-rail-live');
         if (!live) live = el('div', { class: 'ai-rail-live' });
         if (live.parentNode !== fold || live !== fold.lastElementChild) fold.appendChild(live);
@@ -11361,8 +11383,17 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             provisional.classList.remove('no-reason');
           }
           activeRailBeat = provisional;
+          activeRailBeat.__autoSentence = false;
+        } else if (activeRailBeat && activeRailBeat.isConnected && activeRailBeat.__autoSentence && !activeRailBeat.querySelector('.ai-tool-step')) {
+          paintRailSentence(activeRailBeat, value, false);
+          activeRailBeat.__narration = value;
+          activeRailBeat.__reasoning = cleanReasoningText(slice);
+          var autoReason = activeRailBeat.querySelector('.ai-rail-reason');
+          if (activeRailBeat.__reasoning && autoReason) autoReason.textContent = activeRailBeat.__reasoning;
+          if (activeRailBeat.__reasoning) activeRailBeat.classList.remove('no-reason');
         } else {
           activeRailBeat = createProcessRailBeat(value, slice);
+          activeRailBeat.__autoSentence = false;
           fold.appendChild(activeRailBeat);
         }
         sealedContents.push(value);
@@ -11411,10 +11442,22 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           activeToolTimeline = el('div', { class: 'ai-tool-timeline ai-tool-status ai-process-timeline', role: 'status', 'aria-live': 'polite' });
           if (_sendThinkingMode !== 'off') {
             var foldHost = ensureRailFold();
-            if (!activeRailBeat || !activeRailBeat.isConnected || activeRailBeat.classList.contains('is-provisional')) {
-              activeRailBeat = createProcessRailBeat('', aiReasoning.slice(railReasonCursor));
+            var freshReason = latestReasoningLine(aiReasoning.slice(railReasonCursor));
+            var missingBeat = !activeRailBeat || !activeRailBeat.isConnected || activeRailBeat.classList.contains('is-provisional');
+            var splitBeat = !missingBeat && !!activeRailBeat.querySelector('.ai-tool-step') && !!freshReason && freshReason !== String(activeRailBeat.__narration || '').trim();
+            if (missingBeat || splitBeat) {
+              var carried = activeRailBeat && activeRailBeat.classList.contains('is-provisional') ? String(activeRailBeat.__narration || '').trim() : '';
+              if (activeRailBeat && activeRailBeat.classList.contains('is-provisional') && activeRailBeat.parentNode) activeRailBeat.remove();
+              var sentence = carried || freshReason;
+              activeRailBeat = createProcessRailBeat(sentence, aiReasoning.slice(railReasonCursor));
+              activeRailBeat.__autoSentence = !carried;
               railReasonCursor = aiReasoning.length;
               foldHost.appendChild(activeRailBeat);
+              clearRailLiveLine();
+            } else if (!String(activeRailBeat.__narration || '').trim() && freshReason) {
+              paintRailSentence(activeRailBeat, freshReason, true);
+              railReasonCursor = aiReasoning.length;
+              clearRailLiveLine();
             }
             activeRailBeat.querySelector('.ai-rail-tools').appendChild(activeToolTimeline);
           } else assistantNode.insertBefore(activeToolTimeline, assistantBubble);
@@ -12454,6 +12497,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               }
             }
             syncRailLiveLine();
+            if (activeRailBeat && activeRailBeat.isConnected && !String(activeRailBeat.__narration || '').trim()) {
+              var filledLine = latestReasoningLine(aiReasoning.slice(railReasonCursor)) || latestReasoningLine(aiReasoning);
+              if (filledLine) {
+                paintRailSentence(activeRailBeat, filledLine, true);
+                railReasonCursor = aiReasoning.length;
+                clearRailLiveLine();
+              }
+            }
             continue;
           }
           

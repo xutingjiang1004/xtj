@@ -281,6 +281,27 @@ test('tool rows have a real entrance, nearby result receipts and reversible resu
  await page.evaluate(()=>{emit({type:'done',content:'检索完成。',thinking_mode:'max',complete:true,saved:true});stream.close();});
 });
 
+test('a reasoning-only tool round shows that sentence, and the next thought starts another row',async t=>{
+ const page=await fixture(t,'max');
+ await page.locator('#aiChatMsgInput').fill('查一下');await page.locator('#aiChatSendBtn').click();await page.waitForFunction(()=>window.stream);
+ await page.evaluate(()=>{
+  emit({type:'reasoning',text:'我先核对官方账号。'});
+  emit({type:'tool_calls',tools:[{id:'s1',name:'search_social',args:{query:'Taylorswift'}}]});
+  emit({type:'reasoning',text:'账号对上了，再看认证。'});
+  emit({type:'tool_calls',tools:[{id:'s2',name:'search_web',args:{query:'官方认证'}}]});
+ });
+ await page.waitForFunction(()=>document.querySelectorAll('.ai-rail-sentence-text').length>=2);
+ const texts=await page.locator('.ai-rail-sentence-text').allTextContents();
+ assert.match(texts[0],/我先核对官方账号/);assert.match(texts[1],/再看认证/);
+ assert.equal(await page.locator('.ai-rail-beat.no-sentence').count(),0);
+ const icon=await page.locator('[data-tool-call-id="s2"]').evaluate(node=>getComputedStyle(node,'::after').backgroundImage);
+ assert.match(icon,/svg/i);
+ const button=await page.evaluate(()=>{const btn=document.createElement('button');btn.className='ai-continue-btn';btn.textContent='继续生成';document.querySelector('.ai-msg.assistant').appendChild(btn);const style=getComputedStyle(btn);return{radius:style.borderRadius,image:style.backgroundImage};});
+ assert.equal(button.radius,'16px');assert.equal(button.image,'none');
+ const wash=await page.locator('.ai-rail-beat').first().evaluate(node=>getComputedStyle(node).animationName);
+ assert.equal(wash,'aiRailWash');
+});
+
 test('a sanitized final answer keeps the existing prefix and reveals new text in reading order instead of flashing a full replacement',async t=>{
  const page=await fixture(t,'off');await page.locator('#aiChatMsgInput').fill('详细回答');await page.locator('#aiChatSendBtn').click();await page.waitForFunction(()=>window.stream);
  await page.evaluate(()=>emit({type:'content',text:'先到的正文。'}));await page.waitForFunction(()=>document.querySelector('.ai-msg.assistant .ai-msg-bubble').textContent.includes('先到的正文。'));
