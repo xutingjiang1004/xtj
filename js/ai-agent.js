@@ -4075,7 +4075,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     toggle.addEventListener('click', function() {
       var msg = container.closest('.ai-msg');
       var rail = msg && msg.querySelector(':scope > .ai-process-rail');
-      var railHas = !!(rail && rail.querySelector('.ai-rail-beat, .ai-tool-step'));
+      // 只有「已经写出过渡句」时，顶部按钮才用来开合整条时间轴。
+      // 还没有过渡句（可能只有几行搜索）时，它展开的是已经到达的思考原文，
+      // 搜索行留在原处不动 —— 否则这段时间里思考原文没有任何入口。
+      var railHas = !!(rail && rail.querySelector('.ai-rail-beat:not(.no-sentence)'));
       if (railHas) {
         var next = rail.classList.contains('is-folded');
         rail.classList.toggle('is-folded', !next);
@@ -4382,12 +4385,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     else beat.classList.add('no-reason');
     if (!String(text || '').trim()) beat.classList.add('no-sentence');
     sentence.addEventListener('click', function() {
-      if (!beat.__reasoning) {
-        var msg = beat.closest && beat.closest('.ai-msg');
-        var toggle = msg && msg.querySelector('.ai-thinking-toggle');
-        if (toggle) toggle.click();
-        return;
-      }
+      // 箭头只负责这一步的思考。没有思考原文时句子不响应点击，
+      // 免得点一句普通过渡句把整条时间轴或顶部面板一起开合。
+      if (!beat.__reasoning) return;
       var open = !beat.classList.contains('is-open');
       beat.classList.toggle('is-open', open);
       sentence.setAttribute('aria-expanded', open ? 'true' : 'false');
@@ -4479,7 +4479,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     body.textContent = ''; body.__orderedProcess = true;
     node.classList.add('ai-ordered-process');
     var room = 64000;
-    var rail = reasoning ? el('div', { class: 'ai-process-rail is-folded' }) : null;
+    // 历史消息与流式结束保持一致：时间轴展开，思考原文默认收着。
+    var rail = reasoning ? el('div', { class: 'ai-process-rail' }) : null;
     var fold = rail ? el('div', { class: 'ai-rail-fold' }) : null;
     if (rail) rail.appendChild(fold);
     var beat = null;
@@ -4510,7 +4511,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     });
     if (reasoning) {
       reconcileReasoningBody(body, msg.reasoning);
-      if (fold && fold.childNodes.length) node.__processSettled = true;
+      if (fold && fold.childNodes.length) {
+        node.__processSettled = true;
+        node.classList.add('is-rail-open');
+      }
       setThinkingStatus(node, thinkingElapsedLabel(msg.thinking_elapsed_ms, '思考过程'));
       if (!(fold && fold.childNodes.length) && node.querySelector('.ai-tool-step.is-error')) setThinkingExpanded(node, true, messagesEl);
     }
@@ -11000,11 +11004,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             if (railHasSteps) {
               rNode.__processSettled = true;
               rNode.__userCollapsed = !thinkingOnly;
-              rNode.classList.toggle('is-rail-open', !!thinkingOnly);
-              settledRail.classList.toggle('is-folded', !thinkingOnly);
+              // 时间轴在正文之后仍保持展开；收着的只是思考原文。
+              rNode.classList.add('is-rail-open');
+              settledRail.classList.remove('is-folded');
               var railToggle = rNode.querySelector('.ai-thinking-toggle');
-              if (railToggle) railToggle.setAttribute('aria-expanded', thinkingOnly ? 'true' : 'false');
-            } else if (settledRail) settledRail.classList.toggle('is-folded', !thinkingOpen && !!rNode.__processSettled);
+              if (railToggle) railToggle.setAttribute('aria-expanded', 'true');
+            } else if (settledRail) settledRail.classList.remove('is-folded');
             if (thinkingTimer) {
               thinkingTimer.syncFinal(finalThinkingElapsedMs);
             } else {
@@ -11027,7 +11032,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (node && _sendThinkingMode !== 'off' && (hasContent || hasSealed)) {
           var provisionalLeft = node.querySelectorAll('.ai-rail-beat.is-provisional');
           for (var pli = 0; pli < provisionalLeft.length; pli++) provisionalLeft[pli].remove();
-          foldRunningProcess();
+          settleRunningProcess();
           dropEmptyProcessRail(node);
         }
         
@@ -11230,17 +11235,31 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         }
         return fold;
       }
-      function foldRunningProcess() {
+      // 正文开始或这一轮结束：思考原文收进顶部，时间轴留在正文上方继续可见。
+      // 时间轴只由用户点「已思考」手动折叠，不再被正文或 done 自动收起。
+      function settleRunningProcess() {
         if (_sendThinkingMode === 'off') return;
         var thinking = assistantNode.querySelector('.ai-thinking');
         var rail = assistantNode.querySelector(':scope > .ai-process-rail');
         clearRailLiveLine();
+        // 正文开始或这一轮结束时，把中途点开的单句思考也收回去。
+        if (rail) {
+          var openBeats = rail.querySelectorAll('.ai-rail-beat.is-open');
+          for (var ob = 0; ob < openBeats.length; ob++) {
+            openBeats[ob].classList.remove('is-open');
+            var obButton = openBeats[ob].querySelector('.ai-rail-sentence');
+            if (obButton) obButton.setAttribute('aria-expanded', 'false');
+          }
+        }
         if (thinking) {
           thinking.__processSettled = true;
           thinking.__userCollapsed = true;
           thinking.classList.remove('is-rail-open');
         }
-        if (rail && rail.querySelector('.ai-rail-beat, .ai-tool-step')) rail.classList.add('is-folded');
+        if (rail && rail.querySelector('.ai-rail-beat, .ai-tool-step')) {
+          rail.classList.remove('is-folded');
+          if (thinking) thinking.classList.add('is-rail-open');
+        }
         if (thinking) setThinkingExpanded(thinking, false, messagesEl);
       }
       function dropEmptyProcessRail(node) {
@@ -11259,9 +11278,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         cancelAnswerPromote();
         var stale = assistantNode.querySelectorAll('.ai-rail-beat.is-provisional');
         for (var si = 0; si < stale.length; si++) stale[si].remove();
-        foldRunningProcess();
+        settleRunningProcess();
         dropEmptyProcessRail(assistantNode);
         ensureAssistantBubbleReady();
+        // 正文气泡第一次出现时，用和时间轴同一节奏的淡入 + 轻微位移。
+        if (assistantBubble && !assistantBubble.__flowShown) {
+          assistantBubble.__flowShown = true;
+          assistantBubble.classList.add('ai-flow-in');
+        }
         if (contentRenderer) contentRenderer.append(aiContent, evtReceivedAt);
       }
       function scheduleAnswerPromote(evtReceivedAt) {
@@ -11282,7 +11306,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           thinking.classList.remove('is-rail-open');
           setThinkingExpanded(thinking, false, messagesEl);
         }
-        if (rail) rail.classList.remove('is-folded');
+        if (rail) {
+          rail.classList.remove('is-folded');
+          if (thinking && rail.querySelector('.ai-rail-beat, .ai-tool-step')) thinking.classList.add('is-rail-open');
+        }
       }
       function syncRailLiveLine() {
         clearRailLiveLine();
@@ -12529,7 +12556,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             cancelAnswerPromote();
             if (_sendThinkingMode !== 'off') {
               if (!answerCommitted && String(aiContent || '').trim()) promoteRunningAnswer(evtReceivedAt);
-              foldRunningProcess();
+              settleRunningProcess();
             }
             if(evt.content && S._newContentPrompt)S._newContentPrompt();
             hideAssistantTyping();

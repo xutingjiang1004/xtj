@@ -12,7 +12,12 @@ test('thinking time accumulates resumed tool/reasoning phases and excludes the f
   now=2800;appendProcessEvent(res,{type:'reasoning',text:'第二轮'});
   now=3000;appendProcessEvent(res,{type:'content',text:'根据原文得出结论。'});assert.equal(res._aiThinkingElapsedMs,1700);
   now=9000;appendProcessEvent(res,{type:'content',text:'后续正文'});appendProcessEvent(res,{type:'done'});assert.equal(res._aiThinkingElapsedMs,1700);
-  assert.deepEqual(getProcessEvents(res).map(e=>e.type),['reasoning','tools','reasoning']);assert.equal(res._aiThinkingActiveAt,null);
+  // content 后紧跟 tool_calls 时，这句先存成 narration，排在工具前面；
+  // 后面的「根据原文得出结论。」没有工具跟随，仍属于正文，不进过程事件。
+  const events=getProcessEvents(res);
+  assert.deepEqual(events.map(e=>e.type),['reasoning','narration','tools','reasoning']);
+  assert.equal(events[1].text,'我先查原文。');
+  assert.equal(res._aiThinkingActiveAt,null);
  }finally{Date.now=realNow;}
 });
 test('zero thinking duration stays measured zero after later body packets',()=>{

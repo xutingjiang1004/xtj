@@ -807,14 +807,14 @@ html[data-xtj-motion=weak] .ai-thinking.is-thinking.expanded .ai-thinking-panel 
 .ai-process-rail.is-folded > .ai-rail-fold { overflow: hidden; }
 .ai-rail-beat {
   position: relative;
-  padding: 0 0 2px 22px;
+  padding: 0 0 4px 22px;
 }
 .ai-rail-beat::before {
   content: '';
   position: absolute;
   left: 7px;
   top: 16px;
-  bottom: -2px;
+  bottom: -4px;
   width: 1.5px;
   background: rgba(91, 151, 131, .38);
 }
@@ -879,7 +879,13 @@ html[data-xtj-motion=weak] .ai-thinking.is-thinking.expanded .ai-thinking-panel 
   line-height: 1.65;
   white-space: pre-wrap;
 }
-.ai-rail-beat.is-open .ai-rail-reason { display: block; }
+.ai-rail-beat.is-open .ai-rail-reason {
+  display: block;
+  /* 思考原文与新的一拍、一次搜索共用同一节奏：淡入 + 轻微上移。 */
+  animation: aiRailWash 280ms cubic-bezier(.16, 1, .3, 1) both;
+}
+/* 没有思考原文的句子不可点，箭头也已隐藏，不假装能展开。 */
+.ai-rail-beat.no-reason > .ai-rail-sentence { cursor: default; }
 .ai-chat-root .ai-rail-beat.no-sentence > .ai-rail-sentence,
 .ai-rail-beat.no-sentence > .ai-rail-sentence,
 .ai-rail-beat.no-reason > .ai-rail-sentence .ai-rail-caret { display: none; }
@@ -890,6 +896,10 @@ html[data-xtj-motion=weak] .ai-thinking.is-thinking.expanded .ai-thinking-panel 
   padding: 0;
   border: 0;
 }
+/* 时间轴里的图标嵌在竖线上（相对工具行左移 22px），
+   轮次容器默认的 overflow:hidden 会把它整块裁掉。 */
+.ai-process-rail .ai-tool-round-list-wrap,
+.ai-process-rail .ai-tool-activity-body { overflow: visible; }
 .ai-process-rail .ai-tool-round.is-collapsed .ai-tool-round-list-wrap,
 .ai-process-rail .ai-tool-activity.is-collapsed .ai-tool-activity-body {
   height: auto !important;
@@ -901,12 +911,18 @@ html[data-xtj-motion=weak] .ai-thinking.is-thinking.expanded .ai-thinking-panel 
 .ai-process-rail .ai-tool-step {
   position: relative;
   min-height: 24px;
-  padding: 2px 0;
+  padding: 3px 0;
 }
 .ai-process-rail .ai-tool-round-list .ai-tool-step,
 .ai-process-rail .ai-tool-step {
   animation: aiRailStepIn 220ms cubic-bezier(.16, 1, .3, 1) both;
 }
+/* 同一轮一起落下的多条工具行错开 30ms，不整排同时闪。 */
+.ai-process-rail .ai-tool-round-list .ai-tool-step:nth-child(2) { animation-delay: 30ms; }
+.ai-process-rail .ai-tool-round-list .ai-tool-step:nth-child(3) { animation-delay: 60ms; }
+.ai-process-rail .ai-tool-round-list .ai-tool-step:nth-child(4) { animation-delay: 90ms; }
+.ai-process-rail .ai-tool-round-list .ai-tool-step:nth-child(5) { animation-delay: 120ms; }
+.ai-process-rail .ai-tool-round-list .ai-tool-step:nth-child(n+6) { animation-delay: 150ms; }
 .ai-process-rail .ai-tool-round-list .ai-tool-step.is-running,
 .ai-process-rail .ai-tool-round-list .ai-tool-step.is-done {
   padding-left: 0;
@@ -947,6 +963,10 @@ html[data-xtj-motion=weak] .ai-thinking.is-thinking.expanded .ai-thinking-panel 
 .ai-process-rail .ai-tool-step::after,
 .ai-process-rail .ai-tool-round-list .ai-tool-step.is-running::after,
 .ai-process-rail .ai-tool-round-list .ai-tool-step.is-done::after {
+  /* 图标是背景图，必须先有 content 才会生成这个伪元素；
+     没有 position:absolute 时 left/top 不生效，宽高也会按 inline 处理。 */
+  content: '';
+  position: absolute;
   left: -22px;
   top: 4px;
   width: 14px;
@@ -1065,14 +1085,27 @@ html[data-xtj-motion=weak] .ai-thinking.is-thinking.expanded .ai-thinking-panel 
 [data-theme="dark"] .ai-process-rail .ai-tool-step-detail { color: #8eaaa0; }
 @media (prefers-reduced-motion: reduce) {
   .ai-flow-in,
-  .ai-rail-caret { animation: none; transition: none; }
+  .ai-rail-caret,
+  .ai-rail-beat.is-open .ai-rail-reason { animation: none; transition: none; }
+}
+/* 低性能档不跑位移和模糊，过程行与思考原文直接落位。 */
+html.perf-lite .ai-flow-in,
+html.perf-lite .ai-process-rail .ai-tool-step,
+html.perf-lite .ai-rail-beat.is-open .ai-rail-reason {
+  animation: none;
+  transition: none;
+  filter: none;
+  opacity: 1;
+  transform: none;
 }
 html[data-xtj-motion="off"] .ai-flow-in,
 html[data-xtj-motion="off"] .ai-rail-caret,
 html[data-xtj-motion="off"] .ai-process-rail .ai-tool-step,
+html[data-xtj-motion="off"] .ai-rail-beat.is-open .ai-rail-reason,
 html.xtj-reduce-motion .ai-flow-in,
 html.xtj-reduce-motion .ai-rail-caret,
-html.xtj-reduce-motion .ai-process-rail .ai-tool-step {
+html.xtj-reduce-motion .ai-process-rail .ai-tool-step,
+html.xtj-reduce-motion .ai-rail-beat.is-open .ai-rail-reason {
   animation: none;
   transition: none;
   filter: none;

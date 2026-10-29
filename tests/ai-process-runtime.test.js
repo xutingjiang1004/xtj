@@ -287,7 +287,7 @@ test('tool rows have a real entrance, nearby result receipts and reversible resu
  await page.evaluate(()=>{emit({type:'done',content:'检索完成。',thinking_mode:'max',complete:true,saved:true});stream.close();});
 });
 
-test('reasoning stays out of the timeline sentence and the finished rail folds into the header',async t=>{
+test('reasoning stays out of the timeline sentence and the finished rail stays open above the answer',async t=>{
  const page=await fixture(t,'max');
  await page.locator('#aiChatMsgInput').fill('查一下');await page.locator('#aiChatSendBtn').click();await page.waitForFunction(()=>window.stream);
  await page.evaluate(()=>{
@@ -303,15 +303,58 @@ test('reasoning stays out of the timeline sentence and the finished rail folds i
  assert.doesNotMatch(await page.locator('.ai-msg.assistant').evaluate(node=>node.innerText),/The user is asking me to search/);
  const folded=await page.locator('.ai-process-rail').evaluate(node=>node.classList.contains('is-folded'));
  const essay=await page.locator('.ai-thinking').evaluate(node=>node.classList.contains('expanded'));
- assert.equal(folded,true);assert.equal(essay,false);
+ assert.equal(folded,false);assert.equal(essay,false);
+ // 还没有过渡句时，顶部按钮展开的是已经到达的推理，搜索行留在原处。
  await page.locator('.ai-thinking-toggle').click();
- const opened=await page.locator('.ai-process-rail').evaluate(node=>node.classList.contains('is-folded'));
- const stillClosed=await page.locator('.ai-thinking').evaluate(node=>node.classList.contains('expanded'));
- assert.equal(opened,false);assert.equal(stillClosed,false);
+ assert.equal(await page.locator('.ai-process-rail').evaluate(node=>node.classList.contains('is-folded')),false);
+ assert.equal(await page.locator('.ai-thinking').evaluate(node=>node.classList.contains('expanded')),true);
+ assert.match(await page.locator('.ai-thinking-body').textContent(),/我先核对官方账号/);
+ assert.ok(await page.locator('.ai-process-rail .ai-tool-step').first().isVisible());
+ await page.locator('.ai-thinking-toggle').click();
+ assert.equal(await page.locator('.ai-thinking').evaluate(node=>node.classList.contains('expanded')),false);
  const icon=await page.locator('[data-tool-call-id="s1"]').evaluate(node=>getComputedStyle(node,'::after').backgroundImage);
  assert.match(icon,/svg/i);
  const countSize=await page.locator('.ai-tool-result-card-title').evaluate(node=>getComputedStyle(node).fontSize);
  assert.equal(countSize,'0px');
+});
+
+test('the rail stays open after the answer starts; each sentence opens only its own reasoning',async t=>{
+ const page=await fixture(t,'max');
+ await page.locator('#aiChatMsgInput').fill('这张涂鸦墙在哪里');await page.locator('#aiChatSendBtn').click();await page.waitForFunction(()=>window.stream);
+ await page.evaluate(()=>{
+  emit({type:'reasoning',text:'先核对墙上的英文和游客涂鸦。'});
+  emit({type:'content',text:'我先从墙面上的文字反查地点。'});
+  emit({type:'tool_calls',tools:[{id:'w1',name:'search_web',args:{query:'Lennon Wall Prague'}}]});
+  emit({type:'tool_result',call_id:'w1',tool_name:'search_web',success:true,count:3,items:[{url:'https://example.com/w',title:'列侬墙'}]});
+ });
+ await page.waitForFunction(()=>document.querySelectorAll('.ai-process-rail .ai-tool-step').length===1);
+ assert.match(await page.locator('.ai-rail-sentence-text').textContent(),/反查地点/);
+ // 句子箭头只展开这一步的思考，搜索行留在原处；各句独立开合。
+ await page.locator('.ai-rail-sentence').first().click();
+ assert.equal(await page.locator('.ai-rail-beat.is-open').count(),1);
+ assert.match(await page.locator('.ai-rail-reason').first().textContent(),/先核对墙上的英文/);
+ assert.ok(await page.locator('.ai-process-rail .ai-tool-step').first().isVisible());
+ await page.locator('.ai-rail-sentence').first().click();
+ assert.equal(await page.locator('.ai-rail-beat.is-open').count(),0);
+ // 正文出现前再展开一句：正文开始时应自动收回。
+ await page.locator('.ai-rail-sentence').first().click();
+ assert.equal(await page.locator('.ai-rail-beat.is-open').count(),1);
+ await page.evaluate(()=>emit({type:'content',text:'地点：捷克布拉格的列侬墙。\n墙面上的喷漆和涂鸦还需要继续核对拍摄时间。'}));
+ await page.waitForFunction(()=>document.querySelector('.ai-msg.assistant .ai-msg-bubble').textContent.includes('列侬墙'));
+ assert.equal(await page.locator('.ai-rail-beat.is-open').count(),0);
+ // 正文已经开始：时间轴不自动折叠，思考原文仍收着。
+ assert.equal(await page.locator('.ai-process-rail').evaluate(node=>node.classList.contains('is-folded')),false);
+ assert.equal(await page.locator('.ai-thinking').evaluate(node=>node.classList.contains('expanded')),false);
+ // 有过渡句时，顶部按钮只开合时间轴，不摊开思考原文。
+ await page.locator('.ai-thinking-toggle').click();
+ assert.equal(await page.locator('.ai-process-rail').evaluate(node=>node.classList.contains('is-folded')),true);
+ assert.equal(await page.locator('.ai-thinking').evaluate(node=>node.classList.contains('expanded')),false);
+ await page.locator('.ai-thinking-toggle').click();
+ assert.equal(await page.locator('.ai-process-rail').evaluate(node=>node.classList.contains('is-folded')),false);
+ await page.evaluate(()=>{emit({type:'done',content:'地点：捷克布拉格的列侬墙。\n墙面上的喷漆和涂鸦还需要继续核对拍摄时间。',thinking_mode:'max',complete:true,saved:true});stream.close();});
+ await page.waitForFunction(()=>!document.querySelector('.ai-msg.generating'));
+ assert.equal(await page.locator('.ai-process-rail').evaluate(node=>node.classList.contains('is-folded')),false);
+ assert.equal(await page.locator('.ai-thinking').evaluate(node=>node.classList.contains('expanded')),false);
 });
 
 test('a sanitized final answer keeps the existing prefix and reveals new text in reading order instead of flashing a full replacement',async t=>{
