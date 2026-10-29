@@ -2787,7 +2787,11 @@
                     if (content) showToast('请先选择一个聊天对象');
                     return;
                 }
-                if (dockChatSending) {
+                // ★ 2026-10-29：附件批次发送期间也要能排队文本。
+                //   旧判定只看 dockChatSending，批量发图时打字回车会落到下面
+                //   「上一条消息正在发送」的提示里被丢掉，用户以为发出去了。
+                //   队列 drain 本身已同时等待 dockChatSending 与 _chatBatchSending。
+                if (dockChatSending || _chatBatchSending) {
                     if (queuedSend) {
                         _dockChatSendQueue.unshift({ content: content, peer: dockChatActiveUser, owner: currentUser, epoch: _authStateEpoch });
                         return;
@@ -4472,7 +4476,9 @@
             }
             async function sendDockChatMessage() {
                 if(_chatEditDraft)return sendDockChatMessageSingle();
-                if(_chatBatchSending){showToast('附件正在依次发送');return;}
+                // 批量附件正在发送：还有待发附件时继续提示，没有待发附件时放行，
+                // 由 sendDockChatMessageSingle 的排队分支把文本排进队列。
+                if(_chatBatchSending && _chatAttachmentQueue.length){showToast('附件正在依次发送');return;}
                 if(!_chatAttachmentQueue.length)return sendDockChatMessageSingle();
                 if(dockChatSending)return;
                 var files=_chatAttachmentQueue.slice(),peer=dockChatActiveUser,owner=window.currentUser,epoch=_authStateEpoch,text=document.getElementById('dockChatInput').value.trim();
@@ -4483,7 +4489,11 @@
                     if(batch.cancelled || owner!==window.currentUser || epoch!==_authStateEpoch || peer!==dockChatActiveUser) {if(owner===window.currentUser && epoch===_authStateEpoch)showToast('剩余附件已保留，返回会话后可继续发送');break;}
                     if(i+1<files.length)_chatAttachmentDrafts.set(peer,{owner:owner,epoch:epoch,files:files.slice(i+1)});else _chatAttachmentDrafts.delete(peer);
                     await sendDockChatMessageSingle(files[i],i===0?text:'');
-                }} finally {if(_chatBatchFlight===batch){_chatBatchFlight=null;_chatBatchSending=false;}}
+                }} finally {if(_chatBatchFlight===batch){_chatBatchFlight=null;_chatBatchSending=false;
+                    // 批次结束是另一个发送锁释放点，同样要触发队列回放，
+                    // 否则批次期间排队的文本会一直挂到用户下次手动发送。
+                    setTimeout(function() { try { drainDockChatSendQueue(); } catch (eBatchDrain) {} }, 0);
+                }}
             }
             function bindChatReplyGestures() {
                 var host=document.getElementById('dockChatMessages');
