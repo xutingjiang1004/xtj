@@ -9816,8 +9816,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       });
       shell.appendChild(webList);
     } else if (Array.isArray(data.results)) {
-      var list = el('div', { class: 'ai-tool-card-list' });
-      data.results.slice(0, 20).forEach(function(item) {
+      var compactResults = type === 'search_results';
+      var allResults = data.results.slice(0, compactResults ? 40 : 20);
+      var initialResults = compactResults ? Math.min(4, allResults.length) : allResults.length;
+      var list = el('div', { class: 'ai-tool-card-list' + (compactResults ? ' is-compact' : '') });
+      var moreList = null;
+      allResults.forEach(function(item, index) {
         var result = el('button', { class: 'ai-tool-result', type: 'button' });
         result.appendChild(el('b', { text: String(item.title || item.source || '结果') }));
         result.appendChild(el('span', { text: String(item.snippet || '').slice(0, 180) }));
@@ -9826,8 +9830,23 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         result.addEventListener('click', function() {
           openAiSearchTarget(item);
         });
-        list.appendChild(result);
+        if (index < initialResults) list.appendChild(result);
+        else {
+          // 站内结果常常几十条，默认只留前四条，其余收在「展开全部」后面。
+          if (!moreList) { moreList = el('div', { class: 'ai-tool-card-more', hidden: true }); list.appendChild(moreList); }
+          moreList.appendChild(result);
+        }
       });
+      if (moreList) {
+        var moreBtn = el('button', { type: 'button', class: 'ai-tool-card-more-btn', text: '展开全部 ' + allResults.length + ' 条' });
+        moreBtn.addEventListener('click', function() {
+          var open = moreList.hasAttribute('hidden');
+          if (open) moreList.removeAttribute('hidden');
+          else moreList.setAttribute('hidden', '');
+          moreBtn.textContent = open ? '收起' : ('展开全部 ' + allResults.length + ' 条');
+        });
+        list.appendChild(moreBtn);
+      }
       shell.appendChild(list);
     } else if (data.payload && data.payload.args) {
       var args = data.payload.args;
@@ -11438,9 +11457,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             if (missingBeat) {
               var carried = activeRailBeat && activeRailBeat.classList.contains('is-provisional') ? String(activeRailBeat.__narration || '').trim() : '';
               if (activeRailBeat && activeRailBeat.classList.contains('is-provisional') && activeRailBeat.parentNode) activeRailBeat.remove();
-              activeRailBeat = createProcessRailBeat(carried, carried ? aiReasoning.slice(railReasonCursor) : '');
-              activeRailBeat.__autoSentence = false;
-              if (carried) railReasonCursor = aiReasoning.length;
+              // 模型没有单独写过渡句时，用它这一步已经写下的思考最后一句补一行，
+              // 让时间轴仍然是一句一句的（而不是只剩工具行）。有正式过渡句时
+              // 后面的 commitNarrationToRail 会把这句替换掉，不会重复。
+              var pendingReason = aiReasoning.slice(railReasonCursor);
+              var autoLine = carried ? '' : latestReasoningLine(pendingReason);
+              activeRailBeat = createProcessRailBeat(carried || autoLine, pendingReason);
+              activeRailBeat.__autoSentence = !carried && !!autoLine;
+              if (carried || autoLine) railReasonCursor = aiReasoning.length;
               foldHost.appendChild(activeRailBeat);
               clearRailLiveLine();
             }

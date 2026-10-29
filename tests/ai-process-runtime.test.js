@@ -287,7 +287,7 @@ test('tool rows have a real entrance, nearby result receipts and reversible resu
  await page.evaluate(()=>{emit({type:'done',content:'检索完成。',thinking_mode:'max',complete:true,saved:true});stream.close();});
 });
 
-test('reasoning stays out of the timeline sentence and the finished rail stays open above the answer',async t=>{
+test('reasoning supplies a timeline sentence when the model writes no narration',async t=>{
  const page=await fixture(t,'max');
  await page.locator('#aiChatMsgInput').fill('查一下');await page.locator('#aiChatSendBtn').click();await page.waitForFunction(()=>window.stream);
  await page.evaluate(()=>{
@@ -298,20 +298,20 @@ test('reasoning stays out of the timeline sentence and the finished rail stays o
   stream.close();
  });
  await page.waitForFunction(()=>!document.querySelector('.ai-msg.generating'));
- assert.equal(await page.locator('.ai-rail-sentence-text').evaluateAll(nodes=>nodes.map(node=>node.textContent).join('')),'');
+ // 模型没有单独写过渡句时，用这一步思考的最后一句补一行，工具挂在它下面。
+ assert.match(await page.locator('.ai-rail-sentence-text').textContent(),/The user is asking me to search/);
  assert.match(await page.locator('.ai-tool-step-detail').textContent(),/Taylorswift/);
- assert.doesNotMatch(await page.locator('.ai-msg.assistant').evaluate(node=>node.innerText),/The user is asking me to search/);
  const folded=await page.locator('.ai-process-rail').evaluate(node=>node.classList.contains('is-folded'));
  const essay=await page.locator('.ai-thinking').evaluate(node=>node.classList.contains('expanded'));
  assert.equal(folded,false);assert.equal(essay,false);
- // 还没有过渡句时，顶部按钮展开的是已经到达的推理，搜索行留在原处。
+ // 已经有句子时，顶部按钮只开合时间轴，思考原文仍收着。
+ await page.locator('.ai-thinking-toggle').click();
+ assert.equal(await page.locator('.ai-process-rail').evaluate(node=>node.classList.contains('is-folded')),true);
+ assert.equal(await page.locator('.ai-thinking').evaluate(node=>node.classList.contains('expanded')),false);
  await page.locator('.ai-thinking-toggle').click();
  assert.equal(await page.locator('.ai-process-rail').evaluate(node=>node.classList.contains('is-folded')),false);
- assert.equal(await page.locator('.ai-thinking').evaluate(node=>node.classList.contains('expanded')),true);
- assert.match(await page.locator('.ai-thinking-body').textContent(),/我先核对官方账号/);
- assert.ok(await page.locator('.ai-process-rail .ai-tool-step').first().isVisible());
- await page.locator('.ai-thinking-toggle').click();
  assert.equal(await page.locator('.ai-thinking').evaluate(node=>node.classList.contains('expanded')),false);
+ assert.ok(await page.locator('.ai-process-rail .ai-tool-step').first().isVisible());
  const icon=await page.locator('[data-tool-call-id="s1"]').evaluate(node=>getComputedStyle(node,'::after').backgroundImage);
  assert.match(icon,/svg/i);
  const countSize=await page.locator('.ai-tool-result-card-title').evaluate(node=>getComputedStyle(node).fontSize);

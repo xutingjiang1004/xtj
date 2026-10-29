@@ -22362,6 +22362,8 @@ app.post('/api/agent/custom-chat/stream', guestOpenRouterAuth, aiChatConcurrency
       writeSse(res, { type: 'tool_calls', tools: tcs.map(function(t) { var a = {}; try { a = JSON.parse(t.function.arguments || '{}'); } catch (e) {} return { id: t.id, name: t.function.name, args: a }; }) });
       for (var rI = 0; rI < tcs.length; rI++) {
         var tcRaw = { function: { name: tcs[rI].function.name, arguments: tcs[rI].function.arguments } };
+        var _callSig = String(tcs[rI].function.name || '') + '|' + String(tcs[rI].function.arguments || '');
+        var _callCount = (customCallCounts[_callSig] = (customCallCounts[_callSig] || 0) + 1);
         writeSse(res, { type: 'tool_pending', call_id: tcs[rI].id, tool_name: tcs[rI].function.name });
         var tRes;
         try { tRes = await executeToolCall(tcRaw, toolContext); } catch (e) { tRes = { tool_name: tcs[rI].function.name, error: '工具执行失败' }; }
@@ -22392,6 +22394,12 @@ app.post('/api/agent/custom-chat/stream', guestOpenRouterAuth, aiChatConcurrency
           });
         }
         else toolBody = JSON.stringify(tRes || {});
+        if (_callCount >= 3) {
+          // 同样的调用已经拿到过结果。第三次起在结果后面明确要求收尾，
+          // 避免模型用相同的查询反复占满整轮预算。
+          toolBody += '\n\n[系统提示] 同一工具、同一组参数已经调用 ' + _callCount
+            + ' 次，结果就在上面。不要再用相同参数重复调用：请直接基于已有结果回答，或改用完全不同的关键词／工具。';
+        }
         conversation.push({ role: 'tool', tool_call_id: tcs[rI].id, content: String(toolBody).slice(0, 12000) });
       }
       return { continueRound: true };
@@ -22450,6 +22458,8 @@ app.post('/api/agent/custom-chat/stream', guestOpenRouterAuth, aiChatConcurrency
 
   var toolsInUse = !!customTools;
   var rounds = 0;
+  // 记录同一工具 + 同一参数的累计调用次数，用于打断模型的重复检索循环。
+  var customCallCounts = Object.create(null);
   try {
     await runRequiredSearch({ enabled: _webSearch, text: text, messages: conversation, execute: executeToolCall, context: toolContext, write: event => writeSse(res, event), normalizeItems: normalizeToolResultItems });
     if(body.context_management===true)manageAiContextWindow(conversation,Math.max(0,fwdMessages.length-1),req,res,customConvId,controller.signal);

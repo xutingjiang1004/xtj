@@ -968,7 +968,7 @@ html[data-xtj-motion=weak] .ai-thinking.is-thinking.expanded .ai-thinking-panel 
   content: '';
   position: absolute;
   left: -22px;
-  top: 4px;
+  top: 6px;
   width: 14px;
   height: 14px;
   border: 0;
@@ -6643,6 +6643,41 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
   text-transform: none;
 }
 .ai-tool-card-list { display: grid; gap: 7px; }
+/* 站内搜索结果通常几十条：标题与时间同一行、摘要压成一行，默认只留前四条。 */
+.ai-tool-card-list.is-compact { display: flex; flex-direction: column; gap: 2px; }
+.ai-tool-card-list.is-compact .ai-tool-result {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 8px;
+  padding: 5px 8px;
+  border-radius: 8px;
+}
+.ai-tool-card-list.is-compact .ai-tool-result > b,
+.ai-tool-card-list.is-compact .ai-tool-result > .ai-tool-result-title-link { grid-column: 1; grid-row: 1; font-size: 12.5px; margin: 0; }
+.ai-tool-card-list.is-compact .ai-tool-result > .ai-tool-result-meta {
+  grid-column: 2; grid-row: 1; align-self: center;
+  font-size: 10.5px; line-height: 1.4; white-space: nowrap;
+}
+.ai-tool-card-list.is-compact .ai-tool-result > span {
+  grid-column: 1 / -1; grid-row: 2;
+  display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden;
+  margin-top: 1px; font-size: 11.5px; line-height: 1.4;
+}
+.ai-tool-card-list.is-compact .ai-tool-card-more { display: flex; flex-direction: column; gap: 2px; }
+.ai-tool-card-list.is-compact .ai-tool-card-more[hidden] { display: none; }
+.ai-tool-card-more-btn {
+  align-self: flex-start;
+  margin: 4px 0 0;
+  padding: 4px 9px;
+  border: 0;
+  border-radius: 8px;
+  background: rgba(72, 164, 122, .1);
+  color: #3d6a60;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.ai-tool-card-more-btn:hover { background: rgba(72, 164, 122, .16); }
+[data-theme="dark"] .ai-tool-card-more-btn { background: rgba(120, 200, 170, .12); color: #c5ddd2; }
 .ai-tool-result { width: 100%; padding: 8px 10px; border: 0; border-radius: 10px; text-align: left; background: rgba(255,255,255,.72); color: inherit; cursor: pointer; }
 .ai-tool-result--link { cursor: default; display: block; }
 .ai-tool-result b, .ai-tool-result span, .ai-tool-result .ai-tool-result-title-link { display: block; }
@@ -7976,10 +8011,44 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
 }
 .ai-process-rail .ai-process-timeline .ai-tool-step-body > .ai-tool-inline-result:not([hidden]),
 .ai-process-rail .ai-process-timeline .ai-tool-step-body > .ai-tool-data-details {
-  display: inline-flex;
+  display: contents;
   flex: 0 0 auto;
   width: auto;
   margin: 0;
+}
+/* 条数跟在标题／查询词后面同一行，展开的网页列表换到下一行、与文字左对齐。 */
+.ai-process-rail .ai-process-timeline .ai-tool-step-body:has(> .ai-tool-data-details) {
+  flex-wrap: wrap;
+  row-gap: 0;
+}
+/* details 本身和它的匿名内容盒都不能生成布局盒，否则条数和网页列表
+   会被关在 details 内部，无法跟标题同一行、也无法占满整行。 */
+.ai-process-rail .ai-process-timeline details.ai-tool-data-details::details-content { display: contents; }
+/* 收起时必须真正隐藏内容，display:contents 不能让折叠失效。 */
+.ai-process-rail .ai-process-timeline details.ai-tool-data-details:not([open])::details-content { display: none; }
+.ai-process-rail .ai-process-timeline .ai-tool-data-details > summary {
+  order: 1;
+  flex: 0 0 auto;
+  margin: 0 !important;
+  padding: 0 !important;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: nowrap;
+  list-style: none;
+}
+.ai-process-rail .ai-process-timeline .ai-tool-data-details > summary::-webkit-details-marker { display: none; }
+.ai-process-rail .ai-process-timeline .ai-tool-data-details > summary::marker { content: ''; }
+.ai-process-rail .ai-process-timeline .ai-tool-data-details > .ai-tool-card,
+.ai-process-rail .ai-process-timeline .ai-tool-inline-result > .ai-search-detail,
+.ai-process-rail .ai-process-timeline .ai-tool-result-error {
+  order: 3;
+  flex: 0 0 100%;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  margin: 6px 0 0;
+  box-sizing: border-box;
+  overflow-wrap: anywhere;
 }
 .ai-process-rail .ai-tool-inline-result > button.ai-tool-result-card-title,
 .ai-process-rail .ai-tool-data-details > summary { grid-column: auto; }
@@ -8006,6 +8075,7 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
 .ai-process-rail .ai-process-timeline .ai-tool-data-details > summary { grid-column: auto; }
 .ai-process-rail .ai-process-timeline .ai-tool-step-body:has(> .ai-tool-step-detail) > .ai-tool-step-title { display: none; }
 .ai-process-rail .ai-process-timeline .ai-tool-inline-result > button.ai-tool-result-card-title {
+  order: 2;
   font-size: 0;
   color: transparent;
 }
