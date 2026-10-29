@@ -190,7 +190,7 @@ test('reading older content shows a new-content prompt without moving the viewpo
   await send(p,'请输出历史资料');await finish(p,0,old);
   await p.waitForFunction(()=>{const node=document.querySelector('#aiChatMessagesArea .ai-msg.assistant:not(.generating) .ai-msg-bubble');return node?.textContent.includes('第 119 段已完成的历史资料');});
   await send(p,'继续补充',1);await emit(p,1,{type:'content',text:'新的回复开始。'});
-  await p.waitForFunction(()=>document.querySelector('#aiChatMessagesArea .generating .ai-msg-bubble')?.textContent.includes('新的回复开始。'));
+  await p.waitForFunction(()=>{const root=document.querySelector('#aiChatMessagesArea .generating');return root&&(root.querySelector('.ai-msg-bubble')?.textContent.includes('新的回复开始。')||root.querySelector('.ai-rail-sentence-text')?.textContent.includes('新的回复开始。'));});
   const before=await scrollUpToRead(p,messages);
   await emit(p,1,{type:'content',text:'持续收到的新内容。'.repeat(80)});const prompt=p.getByRole('button',{name:'查看最新回复',exact:true});await prompt.waitFor();
   await p.waitForFunction(()=>document.querySelector('#aiChatMessagesArea .generating .ai-msg-bubble')?.textContent.includes('持续收到的新内容。'));

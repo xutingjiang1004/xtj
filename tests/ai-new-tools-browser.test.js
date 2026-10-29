@@ -22,6 +22,7 @@ test('a second microphone click cancels native permission wait without a page er
 test('queued reply speech has a usable stop control without a false speaking animation',{timeout:45000},async t=>{
  const f=await fixture(t),p=f.page;await voiceMocks(p);await p.locator('#aiChatMsgInput').fill('请回答这个问题');await p.locator('#aiChatSendBtn').click();await p.waitForFunction(()=>aiPolish.streams.length===1);
  await p.evaluate(()=>aiPolishEmit({type:'done',content:'这是一段真实回复。',conversation_id:'POLISH01',complete:true,saved:true}));
+ await p.locator('.ai-msg.assistant .ai-msg-bubble').click({button:'right'});
  await p.locator('.ai-msg-act-read').last().click();await p.waitForFunction(()=>document.querySelector('#aiVoiceStatus').dataset.stage==='speech_wait');
  const stop=p.getByRole('button',{name:'停止朗读',exact:true});assert.equal(await stop.isVisible(),true);
  assert.notEqual(await p.locator('.ai-voice-state-icon').evaluate(el=>getComputedStyle(el).animationName),'ai-voice-live');
@@ -31,12 +32,13 @@ for(const width of [390,320])test('compact keyboard keeps voice, send and contex
  const f=await fixture(t,{ios:true,viewport:{width,height:844}}),p=f.page;await voiceMocks(p);
  await p.locator('#aiChatMsgInput').fill('请回答这个问题');await p.locator('#aiChatSendBtn').click();await p.waitForFunction(()=>aiPolish.streams.length===1);
  await p.evaluate(()=>aiPolishEmit({type:'done',content:'这是一段真实回复。',conversation_id:'POLISH01',complete:true,saved:true}));
- await p.locator('.ai-msg-act-read').last().waitFor();
+ await p.locator('.ai-msg.assistant .ai-msg-bubble').click({button:'right'});
+ await p.locator('.ai-msg-act-read').last().click();
+ await p.waitForFunction(()=>document.querySelector('#aiVoiceStatus').dataset.stage==='speech_wait');
  const draft='正在编辑的新草稿。\n第二行草稿。\n第三行草稿。\n第四行草稿。\n第五行草稿。';
  await p.locator('#aiChatMsgInput').fill(draft);
  await p.locator('#aiChatFileInp').setInputFiles(Array.from({length:10},(_,i)=>({name:'资料'+i+'.txt',mimeType:'text/plain',buffer:Buffer.from('完整原文'+i)})));
  await p.waitForFunction(()=>document.querySelector('#aiChatFilePreview .ai-file-info')?.textContent.includes('10 个文件'));
- await p.locator('.ai-msg-act-read').last().click();await p.waitForFunction(()=>document.querySelector('#aiVoiceStatus').dataset.stage==='speech_wait');
  await p.locator('#aiChatMsgInput').focus();await p.evaluate(()=>{Object.assign(testKeyboardViewport,{height:280,offsetTop:86});testKeyboardViewport.dispatchEvent(new Event('resize'));testKeyboardViewport.dispatchEvent(new Event('scroll'));});
  await p.waitForFunction(()=>document.documentElement.style.getPropertyValue('--xtj-visual-top')==='86px');
  await p.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));

@@ -1802,23 +1802,65 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       ev.preventDefault();
       ev.stopPropagation();
       var text = getBubbleText();
-      if (!text) return;
+      var host = bubbleEl.closest && bubbleEl.closest('.ai-msg.assistant');
+      if (!text && !host) return;
       closeCopyMenu();
       var rect = bubbleEl.getBoundingClientRect();
-      var menu = el('div', { class: 'ai-copy-menu' });
-      var btn = el('button', {
-        type: 'button',
-        class: 'ai-copy-btn',
-        text: '复制'
-      });
-      btn.addEventListener('mouseenter', function() { btn.style.background = 'rgba(46,148,101,0.06)'; });
-      btn.addEventListener('mouseleave', function() { btn.style.background = ''; });
-      btn.addEventListener('click', function(ce) {
-        ce.preventDefault(); ce.stopPropagation();
-        doCopy(text);
-        closeCopyMenu();
-      });
-      menu.appendChild(btn);
+      var menu = el('div', { class: 'ai-copy-menu', role: 'dialog', 'aria-label': '回复操作' });
+      var panel = el('div', { class: 'ai-reply-menu-panel' });
+      var grid = el('div', { class: 'ai-reply-menu-grid' });
+      var icons = {
+        copy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>',
+        read: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10v4a2 2 0 0 0 2 2h2l5 4V4L8 8H6a2 2 0 0 0-2 2z"/><path d="M16 9a4 4 0 0 1 0 6"/></svg>',
+        bookmark: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4h10a1 1 0 0 1 1 1v15l-6-3.5L6 20V5a1 1 0 0 1 1-1z"/></svg>',
+        share: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4"/><path d="M8 8l4-4 4 4"/><path d="M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg>',
+        regen: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2 5.3"/><path d="M20 5v6h-6"/></svg>'
+      };
+      function addAction(id, label, className, run) {
+        var button = el('button', { type: 'button', class: 'ai-reply-menu-item' + (className ? ' ' + className : ''), 'data-ai-action': id });
+        var icon = el('span', { class: 'ai-reply-menu-icon', 'aria-hidden': 'true' });
+        icon.innerHTML = icons[id] || '';
+        button.appendChild(icon);
+        button.appendChild(el('span', { class: 'ai-reply-menu-label', text: label }));
+        button.addEventListener('click', function(ce) {
+          ce.preventDefault();
+          ce.stopPropagation();
+          closeCopyMenu();
+          run();
+        });
+        grid.appendChild(button);
+      }
+      if (text) addAction('copy', '复制', 'ai-copy-btn', function() { doCopy(text); });
+      if (host && text) {
+        addAction('read', '朗读', 'ai-msg-act-read', function() {
+          if (!S._voiceConversation) { notify('语音模块未加载，请重开小猫 AI 后重试'); return; }
+          if (S._voiceConversation.isSpeaking()) S._voiceConversation.stopSpeech();
+          else S._voiceConversation.speak(text, false);
+        });
+        addAction('bookmark', '收藏', 'ai-msg-act-bookmark', function() {
+          var message = host._msgRef, identity = customModelIdentity(), life = S.lifecycleId, cid = S.conversationId;
+          if (!message || message._pendingSync || !message.id && !message.client_request_id || !cid) { notify('请等待回复保存后再收藏；未保存的回复可先复制保留'); return; }
+          apiRequest('POST', '/chat/bookmarks', { conversation_id: cid, message_id: message.id, client_request_id: message.client_request_id }).then(function(result) {
+            if (!customModelIdentityCurrent(identity) || life !== S.lifecycleId) return;
+            if (!result.ok) throw Error(result.data && result.data.error || result.error || '收藏失败，请重试');
+            if (result.data && result.data.message_id) message.id = result.data.message_id;
+            notify('已收藏到当前账号，可在历史会话中查看');
+          }).catch(function(error) {
+            if (customModelIdentityCurrent(identity) && life === S.lifecycleId) notify(error.message || '收藏失败，请重试');
+          });
+        });
+        if (typeof navigator !== 'undefined' && navigator.share) {
+          addAction('share', '分享', 'ai-msg-act-share', function() {
+            navigator.share({ title: (S.config && S.config.name) || AI_DISPLAY_NAME + '的回复', text: text }).catch(function(err) { handleShareError(err, text); });
+          });
+        }
+        addAction('regen', '重新生成', 'ai-msg-act-regen', function() {
+          triggerRegenerate(containerEl, host._msgRef);
+        });
+      }
+      if (!grid.childNodes.length) return;
+      panel.appendChild(grid);
+      menu.appendChild(panel);
       document.body.appendChild(menu);
       _copyMenuActive = menu;
       menu._aiCopyOwner = bubbleEl;
@@ -1834,14 +1876,18 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       //   修复：菜单创建后监听 scroll / resize / 视口变化，任一发生即关闭菜单；
       //   同时在定位时对 left 做上下界约束，避免小视口下溢出到屏幕外。
       var menuRect = menu.getBoundingClientRect();
-      var left = Math.min(rect.left, window.innerWidth - menuRect.width - 8);
-      var top = rect.bottom + 4;
-      if (top + menuRect.height > window.innerHeight) top = rect.top - menuRect.height - 4;
-      // 上下界约束：确保菜单始终完整落在视口内（此前只约束了下界 8）
+      var left = Math.min(Math.max(8, rect.left), Math.max(8, window.innerWidth - menuRect.width - 8));
+      var top = rect.top - menuRect.height - 8;
+      if (top < 8) {
+        menu.classList.add('is-below');
+        top = rect.bottom + 8;
+      }
       var maxTop = window.innerHeight - menuRect.height - 8;
       top = Math.min(Math.max(8, top), Math.max(8, maxTop));
-      menu.style.left = Math.max(8, left) + 'px';
+      menu.style.left = left + 'px';
       menu.style.top = top + 'px';
+      var tipX = (ev && ev.clientX) || (rect.left + 24);
+      menu.style.setProperty('--ai-tip-x', Math.min(Math.max(18, tipX - left), Math.max(18, menuRect.width - 18)) + 'px');
       // ★ U3: 用 AbortController 关闭旧的 document 监听器
       if (_menuAbort) { try { _menuAbort.abort(); } catch (e) {} }
       _menuAbort = new AbortController();
@@ -1853,6 +1899,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       };
       window.addEventListener('scroll', _onMenuViewportChange, { signal: _menuSig, passive: true, capture: true });
       window.addEventListener('resize', _onMenuViewportChange, { signal: _menuSig, passive: true });
+      document.addEventListener('keydown', function(keyEvent) {
+        if (keyEvent.key === 'Escape') closeCopyMenu();
+      }, { signal: _menuSig });
       if (window.visualViewport) {
         try { window.visualViewport.addEventListener('resize', _onMenuViewportChange, { signal: _menuSig }); } catch (e) {}
         try { window.visualViewport.addEventListener('scroll', _onMenuViewportChange, { signal: _menuSig, passive: true }); } catch (e) {}
@@ -4024,6 +4073,19 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     panel.appendChild(thinkingBody);
 
     toggle.addEventListener('click', function() {
+      var msg = container.closest('.ai-msg');
+      var rail = msg && msg.querySelector(':scope > .ai-process-rail');
+      var railHas = !!(rail && rail.querySelector('.ai-rail-beat, .ai-tool-step'));
+      if (railHas) {
+        var next = rail.classList.contains('is-folded');
+        rail.classList.toggle('is-folded', !next);
+        container.classList.toggle('is-rail-open', next);
+        container.__userCollapsed = !next;
+        setThinkingExpanded(container, false, messagesEl || S.messagesEl);
+        toggle.setAttribute('aria-expanded', next ? 'true' : 'false');
+        if (next) revealThinking(container, messagesEl || S.messagesEl);
+        return;
+      }
       var open = !container.classList.contains('expanded');
       container.__userCollapsed = !open;
       setThinkingExpanded(container, open, messagesEl || S.messagesEl);
@@ -4032,11 +4094,6 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           if (seg.__rawReasoning) paintReasoningHtml(seg, seg.__rawReasoning);
         });
       }
-      var msg = container.closest('.ai-msg');
-      var rail = msg && msg.querySelector(':scope > .ai-process-rail');
-      if (!rail) return;
-      if (open) rail.classList.remove('is-folded');
-      else if (container.__processSettled) rail.classList.add('is-folded');
     });
 
     container.appendChild(toggle);
@@ -4567,44 +4624,6 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         var historyUsageLine = buildUsageLine(msg.usage);
         if(historyUsageLine) footer.appendChild(el('span', { class: 'ai-msg-usage', text: historyUsageLine }));
       }
-    }
-    // ★ 新增：AI 回复底部「复制 / 分享」显式操作按钮
-    if (role === 'assistant') {
-      var actionRow = el('div', { class: 'ai-msg-actions' });
-      // ★ 2026-10-29：正文为空（thinking-only / 中断且无正文）时不再渲染
-      //   复制 / 分享 / 朗读。这三个动作的取值都是 bubble.textContent，
-      //   空正文会让它们「点了完全没反应」，比不显示更糟。
-      if (bubbleHasBody) {
-        var copyBtn = el('button', { type: 'button', class: 'ai-msg-act ai-msg-act-copy', 'aria-label': '复制回复', text: '复制' });
-        copyBtn.addEventListener('click', function(ev) {
-          ev.preventDefault(); ev.stopPropagation();
-          var t = (bubble.textContent || '').trim();
-          if (!t) return;
-          doCopy(t);
-          copyBtn.textContent = '已复制';
-          setTimeout(function() { copyBtn.textContent = '复制'; }, 2000);
-        });
-        actionRow.appendChild(copyBtn);
-        if (typeof navigator !== 'undefined' && navigator.share) {
-          var shareBtn = el('button', { type: 'button', class: 'ai-msg-act ai-msg-act-share', 'aria-label': '分享回复', text: '分享' });
-          shareBtn.addEventListener('click', function(ev) {
-            ev.preventDefault(); ev.stopPropagation();
-            var t = (bubble.textContent || '').trim();
-            if (!t) return;
-            navigator.share({ title: (S.config && S.config.name) || AI_DISPLAY_NAME + '的回复', text: t }).catch(function(err) { handleShareError(err, t); });
-          });
-          actionRow.appendChild(shareBtn);
-        }
-      }
-      // ★ 重新生成：重新发送本条回复对应的上一条用户消息
-      var regenBtn = el('button', { type: 'button', class: 'ai-msg-act ai-msg-act-regen', 'aria-label': '重新生成回复', text: '重新生成' });
-      regenBtn.addEventListener('click', function(ev) {
-        ev.preventDefault(); ev.stopPropagation();
-        triggerRegenerate(messagesEl, msg);
-      });
-      actionRow.appendChild(regenBtn);
-      if (bubbleHasBody) addReadAloudAction(actionRow,msg.content || bubble.textContent);
-      footer.appendChild(el('div', { class: 'ai-msg-actions-line' }, [actionRow]));
     }
     if (footer.children.length > 0) node.appendChild(footer);
     // 没有正文就不挂推荐追问：追问条挂在 .ai-msg 上，会出现在一条「只有思考」
@@ -10969,14 +10988,23 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             reconcileReasoningBody(body, thinking);
           }
           if (rNode) {
+            var settledRail = node && node.querySelector(':scope > .ai-process-rail');
+            var railHasSteps = !!(settledRail && settledRail.querySelector('.ai-rail-beat, .ai-tool-step'));
             var thinkingOpen = false;
-            if (thinkingOnly || rNode.__userCollapsed === false) thinkingOpen = true;
+            if (railHasSteps) thinkingOpen = false;
+            else if (thinkingOnly || rNode.__userCollapsed === false) thinkingOpen = true;
             else if (rNode.__userCollapsed === true) thinkingOpen = false;
             else if (evt && evt.interrupted === true) thinkingOpen = rNode.classList.contains('expanded');
-            else if (rNode.querySelector('.ai-tool-step.is-error')) thinkingOpen = true;
+            else if (node && node.querySelector('.ai-tool-step.is-error')) thinkingOpen = true;
             setThinkingExpanded(rNode, thinkingOpen, messagesEl);
-            var settledRail = node && node.querySelector(':scope > .ai-process-rail');
-            if (settledRail) settledRail.classList.toggle('is-folded', !thinkingOpen && !!rNode.__processSettled);
+            if (railHasSteps) {
+              rNode.__processSettled = true;
+              rNode.__userCollapsed = !thinkingOnly;
+              rNode.classList.toggle('is-rail-open', !!thinkingOnly);
+              settledRail.classList.toggle('is-folded', !thinkingOnly);
+              var railToggle = rNode.querySelector('.ai-thinking-toggle');
+              if (railToggle) railToggle.setAttribute('aria-expanded', thinkingOnly ? 'true' : 'false');
+            } else if (settledRail) settledRail.classList.toggle('is-folded', !thinkingOpen && !!rNode.__processSettled);
             if (thinkingTimer) {
               thinkingTimer.syncFinal(finalThinkingElapsedMs);
             } else {
@@ -11078,68 +11106,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             var usageLine = buildUsageLine(aiMsg.usage);
             if (usageLine) footer.appendChild(el('span', { class: 'ai-msg-usage', text: usageLine }));
           }
-          // ★ 直播回复底部操作按钮：复制 / 分享 / 重新生成
-          // ★ 2026-10-29：thinking-only 时气泡是空的，复制/分享/朗读取值为空串，
-          //   点了完全没反应。与历史渲染保持一致，正文为空时只保留「重新生成」。
-          var actionRow = el('div', { class: 'ai-msg-actions' });
-          var liveHasBody = !!String(content || '').trim();
-          if (liveHasBody) {
-            var copyBtn = el('button', { type: 'button', class: 'ai-msg-act ai-msg-act-copy', 'aria-label': '复制回复', text: '复制' });
-            copyBtn.addEventListener('click', function(ev) {
-              ev.preventDefault(); ev.stopPropagation();
-              var t = (assistantBubble.textContent || '').trim();
-              if (!t) return;
-              doCopy(t);
-              copyBtn.textContent = '已复制';
-              setTimeout(function() { copyBtn.textContent = '复制'; }, 2000);
-            });
-            actionRow.appendChild(copyBtn);
-            addReadAloudAction(actionRow,content);
-            if (typeof navigator !== 'undefined' && navigator.share) {
-              var shareBtn = el('button', { type: 'button', class: 'ai-msg-act ai-msg-act-share', 'aria-label': '分享回复', text: '分享' });
-              shareBtn.addEventListener('click', function(ev) {
-                ev.preventDefault(); ev.stopPropagation();
-                var t = (assistantBubble.textContent || '').trim();
-                if (!t) return;
-                navigator.share({ title: (S.config && S.config.name) || AI_DISPLAY_NAME + '的回复', text: t }).catch(function(err) { handleShareError(err, t); });
-              });
-              actionRow.appendChild(shareBtn);
-            }
-          }
-          var regenBtn = el('button', { type: 'button', class: 'ai-msg-act ai-msg-act-regen', 'aria-label': '重新生成回复', text: '重新生成' });
-          regenBtn.addEventListener('click', function(ev) {
-            ev.preventDefault(); ev.stopPropagation();
-            triggerRegenerate(messagesEl, aiMsg);
-          });
-          actionRow.appendChild(regenBtn);
-          footer.appendChild(el('div', { class: 'ai-msg-actions-line' }, [actionRow]));
           if (footer.children.length > 0) node.appendChild(footer);
-          // ★★★ 2026-09-15 修复（P1-9「内置模型回复后 复制/分享/重新生成 按钮消失」）：
-          //   症状（用户截图实证）：用内置模型回复完成后，消息底部的
-          //   「复制 / 分享 / 重新生成」三个操作按钮不见了。
-          //   根因：`clearAssistantTransientStatus(node)`（本函数开头调用）内部会
-          //   对 `.ai-enhanced-status / .ai-tool-status / .ai-search-supplement`
-          //   等节点执行 `remove()`；当这些"状态容器"在 DOM 上恰好是气泡的**兄弟
-          //   或外层包装**时，移除动作会连带影响 footer 的挂载位置；另外
-          //   `node` 若持有脱离文档的陈旧引用（sanitized_content 替换 innerHTML、
-  //   search_supplement 重建等场景），append 上去的 footer 根本不在可见 DOM 里。
-  //   修复：append 后做一次**强制兜底校验**——若操作行不在文档中或数量不足，
-  //   重新挂载到实际可见的气泡容器上，保证三个按钮始终存在。
           try {
             var _realNode = (node && node.isConnected) ? node
               : (assistantBubble && assistantBubble.closest ? assistantBubble.closest('.ai-msg') : null);
-            if (_realNode) {
-              var _actRow = _realNode.querySelector('.ai-msg-actions');
-              if (!_actRow || !_actRow.isConnected) {
-                // footer 丢失或未连接：重建并挂载
-                if (!footer.isConnected) _realNode.appendChild(footer);
-              }
-              // 极端情况下（footer 被清空但仍在 DOM）：重新补齐按钮行
-              var _foot = _realNode.querySelector('.ai-msg-footer');
-              if (_foot && !_foot.querySelector('.ai-msg-actions')) {
-                _foot.appendChild(el('div', { class: 'ai-msg-actions-line' }, [actionRow]));
-              }
-            }
+            if (_realNode && footer && !footer.isConnected) _realNode.appendChild(footer);
           } catch (eEnsureActs) {}
         }
       }
@@ -11263,8 +11234,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (_sendThinkingMode === 'off') return;
         var thinking = assistantNode.querySelector('.ai-thinking');
         var rail = assistantNode.querySelector(':scope > .ai-process-rail');
-        if (thinking) thinking.__processSettled = true;
-        if (thinking && thinking.__userCollapsed === false) return;
+        clearRailLiveLine();
+        if (thinking) {
+          thinking.__processSettled = true;
+          thinking.__userCollapsed = true;
+          thinking.classList.remove('is-rail-open');
+        }
         if (rail && rail.querySelector('.ai-rail-beat, .ai-tool-step')) rail.classList.add('is-folded');
         if (thinking) setThinkingExpanded(thinking, false, messagesEl);
       }
@@ -11301,26 +11276,16 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       function unfoldRunningProcess() {
         var thinking = assistantNode.querySelector('.ai-thinking');
         var rail = assistantNode.querySelector(':scope > .ai-process-rail');
-        if (thinking) thinking.__processSettled = false;
+        if (thinking) {
+          thinking.__processSettled = false;
+          thinking.__userCollapsed = true;
+          thinking.classList.remove('is-rail-open');
+          setThinkingExpanded(thinking, false, messagesEl);
+        }
         if (rail) rail.classList.remove('is-folded');
       }
       function syncRailLiveLine() {
-        if (_sendThinkingMode === 'off' || answerCommitted) return;
-        var settled = assistantNode.querySelector('.ai-thinking');
-        if (settled && settled.__processSettled) return;
-        var line = latestReasoningLine(aiReasoning.slice(railReasonCursor));
-        if (!line) return;
-        var fold = ensureRailFold();
-        var lastBeat = fold.querySelector(':scope > .ai-rail-beat:last-of-type');
-        if (lastBeat && String(lastBeat.__narration || '').trim() === line) {
-          var same = fold.querySelector(':scope > .ai-rail-live');
-          if (same) same.remove();
-          return;
-        }
-        var live = fold.querySelector(':scope > .ai-rail-live');
-        if (!live) live = el('div', { class: 'ai-rail-live' });
-        if (live.parentNode !== fold || live !== fold.lastElementChild) fold.appendChild(live);
-        if (live.textContent !== line) live.textContent = line;
+        clearRailLiveLine();
       }
       function showProvisionalNarration(text) {
         var value = String(text || '').trim();
@@ -11442,21 +11407,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           activeToolTimeline = el('div', { class: 'ai-tool-timeline ai-tool-status ai-process-timeline', role: 'status', 'aria-live': 'polite' });
           if (_sendThinkingMode !== 'off') {
             var foldHost = ensureRailFold();
-            var freshReason = latestReasoningLine(aiReasoning.slice(railReasonCursor));
             var missingBeat = !activeRailBeat || !activeRailBeat.isConnected || activeRailBeat.classList.contains('is-provisional');
-            var splitBeat = !missingBeat && !!activeRailBeat.querySelector('.ai-tool-step') && !!freshReason && freshReason !== String(activeRailBeat.__narration || '').trim();
-            if (missingBeat || splitBeat) {
+            if (missingBeat) {
               var carried = activeRailBeat && activeRailBeat.classList.contains('is-provisional') ? String(activeRailBeat.__narration || '').trim() : '';
               if (activeRailBeat && activeRailBeat.classList.contains('is-provisional') && activeRailBeat.parentNode) activeRailBeat.remove();
-              var sentence = carried || freshReason;
-              activeRailBeat = createProcessRailBeat(sentence, aiReasoning.slice(railReasonCursor));
-              activeRailBeat.__autoSentence = !carried;
-              railReasonCursor = aiReasoning.length;
+              activeRailBeat = createProcessRailBeat(carried, carried ? aiReasoning.slice(railReasonCursor) : '');
+              activeRailBeat.__autoSentence = false;
+              if (carried) railReasonCursor = aiReasoning.length;
               foldHost.appendChild(activeRailBeat);
-              clearRailLiveLine();
-            } else if (!String(activeRailBeat.__narration || '').trim() && freshReason) {
-              paintRailSentence(activeRailBeat, freshReason, true);
-              railReasonCursor = aiReasoning.length;
               clearRailLiveLine();
             }
             activeRailBeat.querySelector('.ai-rail-tools').appendChild(activeToolTimeline);
@@ -11648,7 +11606,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
                     maBody.appendChild(maEntry);
                     scheduleThoughtScrollBottom(maBody);
                   }
-                  if (maThink) setThinkingExpanded(maThink, true, messagesEl);
+                  if (maThink && maThink.__userCollapsed === false) setThinkingExpanded(maThink, true, messagesEl);
                 }
               } catch (eMa) {}
             }
@@ -12497,14 +12455,6 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               }
             }
             syncRailLiveLine();
-            if (activeRailBeat && activeRailBeat.isConnected && !String(activeRailBeat.__narration || '').trim()) {
-              var filledLine = latestReasoningLine(aiReasoning.slice(railReasonCursor)) || latestReasoningLine(aiReasoning);
-              if (filledLine) {
-                paintRailSentence(activeRailBeat, filledLine, true);
-                railReasonCursor = aiReasoning.length;
-                clearRailLiveLine();
-              }
-            }
             continue;
           }
           
@@ -12577,7 +12527,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           
           if (evt.type === 'done') {
             cancelAnswerPromote();
-            if (_sendThinkingMode !== 'off' && answerCommitted) foldRunningProcess();
+            if (_sendThinkingMode !== 'off') {
+              if (!answerCommitted && String(aiContent || '').trim()) promoteRunningAnswer(evtReceivedAt);
+              foldRunningProcess();
+            }
             if(evt.content && S._newContentPrompt)S._newContentPrompt();
             hideAssistantTyping();
             S.paused = false;

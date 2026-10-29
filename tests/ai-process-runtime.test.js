@@ -210,8 +210,14 @@ for(const model of ['deepseek-flash','deepseek-v4-pro','custom:test-custom']) te
  assert.ok(result.width>200&&result.x+result.width<=390,'mobile results use a readable full-width column '+JSON.stringify({before,after,result}));
  assert.doesNotMatch(await page.locator('.ai-tool-step').textContent(),/查看结果/);
  await page.evaluate(()=>{emit({type:'done',content:'已找到相关资料。',thinking_mode:'off',complete:true,saved:true});stream.close();});await page.waitForFunction(()=>!document.querySelector('.ai-msg.generating'));
- const geometry=await page.evaluate(()=>{const b=document.querySelector('.ai-msg.assistant .ai-msg-bubble').getBoundingClientRect(),a=document.querySelector('.ai-msg-actions').getBoundingClientRect();return{left:a.left-b.left,below:a.top>=b.bottom,width:a.width,view:innerWidth};});
- assert.ok(geometry.below);assert.ok(Math.abs(geometry.left)<10,JSON.stringify(geometry));assert.ok(geometry.width<geometry.view);
+ assert.equal(await page.locator('.ai-msg-actions').count(),0);
+ await page.locator('.ai-msg.assistant .ai-msg-bubble').click({button:'right'});
+ const menu=page.locator('.ai-copy-menu');await menu.waitFor();
+ const actions=await menu.locator('[data-ai-action]').evaluateAll(nodes=>nodes.map(node=>node.getAttribute('data-ai-action')));
+ assert.ok(['copy','read','bookmark','regen'].every(id=>actions.includes(id)),actions.join(','));
+ assert.ok(!actions.includes('reply')&&!actions.includes('delete'));
+ const menuBox=await menu.boundingBox(),bubbleBox=await page.locator('.ai-msg.assistant .ai-msg-bubble').boundingBox();
+ assert.ok(menuBox.y+menuBox.height<=bubbleBox.y+8||menuBox.y>=bubbleBox.y+bubbleBox.height-8);
  await page.evaluate(()=>__xtjAiAgent.close());await page.evaluate(()=>__xtjAiAgent.open());await page.waitForFunction(()=>document.querySelector('.ai-tool-step-status'));
  assert.match(await page.locator('.ai-tool-step-status').textContent(),/找到 5 个网页/);assert.equal(await page.locator('.ai-tool-card--web_search').count(),0);
  const restored=page.locator('.ai-tool-inline-result');assert.match(await restored.locator('button').textContent(),/找到 5 个网页/);
@@ -281,25 +287,31 @@ test('tool rows have a real entrance, nearby result receipts and reversible resu
  await page.evaluate(()=>{emit({type:'done',content:'检索完成。',thinking_mode:'max',complete:true,saved:true});stream.close();});
 });
 
-test('a reasoning-only tool round shows that sentence, and the next thought starts another row',async t=>{
+test('reasoning stays out of the timeline sentence and the finished rail folds into the header',async t=>{
  const page=await fixture(t,'max');
  await page.locator('#aiChatMsgInput').fill('查一下');await page.locator('#aiChatSendBtn').click();await page.waitForFunction(()=>window.stream);
  await page.evaluate(()=>{
-  emit({type:'reasoning',text:'我先核对官方账号。'});
+  emit({type:'reasoning',text:'我先核对官方账号。The user is asking me to search.'});
   emit({type:'tool_calls',tools:[{id:'s1',name:'search_social',args:{query:'Taylorswift'}}]});
-  emit({type:'reasoning',text:'账号对上了，再看认证。'});
-  emit({type:'tool_calls',tools:[{id:'s2',name:'search_web',args:{query:'官方认证'}}]});
+  emit({type:'tool_result',call_id:'s1',tool_name:'search_social',success:true,count:10,items:[{url:'https://example.com/a',title:'结果'}]});
+  emit({type:'done',content:'请给一个更具体的昵称。',thinking_mode:'max',complete:true,saved:true,reasoning:'我先核对官方账号。The user is asking me to search.'});
+  stream.close();
  });
- await page.waitForFunction(()=>document.querySelectorAll('.ai-rail-sentence-text').length>=2);
- const texts=await page.locator('.ai-rail-sentence-text').allTextContents();
- assert.match(texts[0],/我先核对官方账号/);assert.match(texts[1],/再看认证/);
- assert.equal(await page.locator('.ai-rail-beat.no-sentence').count(),0);
- const icon=await page.locator('[data-tool-call-id="s2"]').evaluate(node=>getComputedStyle(node,'::after').backgroundImage);
+ await page.waitForFunction(()=>!document.querySelector('.ai-msg.generating'));
+ assert.equal(await page.locator('.ai-rail-sentence-text').evaluateAll(nodes=>nodes.map(node=>node.textContent).join('')),'');
+ assert.match(await page.locator('.ai-tool-step-detail').textContent(),/Taylorswift/);
+ assert.doesNotMatch(await page.locator('.ai-msg.assistant').evaluate(node=>node.innerText),/The user is asking me to search/);
+ const folded=await page.locator('.ai-process-rail').evaluate(node=>node.classList.contains('is-folded'));
+ const essay=await page.locator('.ai-thinking').evaluate(node=>node.classList.contains('expanded'));
+ assert.equal(folded,true);assert.equal(essay,false);
+ await page.locator('.ai-thinking-toggle').click();
+ const opened=await page.locator('.ai-process-rail').evaluate(node=>node.classList.contains('is-folded'));
+ const stillClosed=await page.locator('.ai-thinking').evaluate(node=>node.classList.contains('expanded'));
+ assert.equal(opened,false);assert.equal(stillClosed,false);
+ const icon=await page.locator('[data-tool-call-id="s1"]').evaluate(node=>getComputedStyle(node,'::after').backgroundImage);
  assert.match(icon,/svg/i);
- const button=await page.evaluate(()=>{const btn=document.createElement('button');btn.className='ai-continue-btn';btn.textContent='继续生成';document.querySelector('.ai-msg.assistant').appendChild(btn);const style=getComputedStyle(btn);return{radius:style.borderRadius,image:style.backgroundImage};});
- assert.equal(button.radius,'16px');assert.equal(button.image,'none');
- const wash=await page.locator('.ai-rail-beat').first().evaluate(node=>getComputedStyle(node).animationName);
- assert.equal(wash,'aiRailWash');
+ const countSize=await page.locator('.ai-tool-result-card-title').evaluate(node=>getComputedStyle(node).fontSize);
+ assert.equal(countSize,'0px');
 });
 
 test('a sanitized final answer keeps the existing prefix and reveals new text in reading order instead of flashing a full replacement',async t=>{
