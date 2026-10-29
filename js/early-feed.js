@@ -15,6 +15,7 @@
     data: null,
     error: null,
     painted: false,
+    bootUser: '',
   };
   window.__xtjEarlyFeed = state;
 
@@ -183,15 +184,10 @@
   // handled while preserving the original rejection for callers that await it.
   window.__xtjEarlyFeedPromise.catch(function () {});
 
-  // A known account must not issue the anonymous early request: core cannot
-  // reuse it (private/visible rows differ) and would fetch /api/feed again.
-  var bootUser = '';
-  try { bootUser = String((window.currentUser || '') || localStorage.getItem('xtj_user') || '').trim(); } catch (_) {}
-  if (bootUser) {
-    state.status = 'skipped';
-    try { resolveEarly(null); } catch (_) {}
-    return;
-  }
+  // Cookie credentials travel with this request, so a returning account can
+  // paint its own first page without waiting for the access-token refresh.
+  // Core reuses the payload only when this same account name is still current.
+  try { state.bootUser = String((window.currentUser || '') || localStorage.getItem('xtj_user') || '').trim(); } catch (_) {}
 
   function finishOk(data) {
     state.status = 'ok';
@@ -206,6 +202,7 @@
       if (first && window.XtjPostMedia) window.XtjPostMedia.getPostMediaItems(first).slice(0,3).forEach(function (item) {
         var url = new URL(item.media_url, location.href);
         if (item.media_type !== 'image' || url.origin !== location.origin || !/^\/api\/post\/[0-9a-f-]{36}\/media\/\d+$/.test(url.pathname)) return;
+        if (!url.searchParams.has('preview')) url.searchParams.set('preview', '1');
         var link = document.createElement('link');
         link.rel = 'preload'; link.as = 'image'; link.href = url.href; link.fetchPriority = 'high';
         document.head.appendChild(link);

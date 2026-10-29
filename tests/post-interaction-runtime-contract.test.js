@@ -152,8 +152,8 @@ test('post card comment patch preserves the root node and updates only stats/com
 });
 
 test('feed page requests use an authenticated keyset cursor after the first page', () => {
-  assert.match(core, /mayReuseAnonymousEarlyFeed = !knownUser && !hasToken/);
-  assert.match(core, /page === 0 && mayReuseAnonymousEarlyFeed/);
+  assert.match(core, /mayReuseEarlyFeed = !searchKeyword && sameEarlyViewer/);
+  assert.match(core, /page === 0 && mayReuseEarlyFeed/);
   assert.match(core, /feedPath \+= '&cursor_created_at=' \+ encodeURIComponent\(requestCursor\.created_at\)/);
   assert.match(core, /'&cursor_id=' \+ encodeURIComponent\(requestCursor\.id\) \+ '&offset=' \+ start/);
   assert.match(server, /cursorTimestampValid = \/\^\\d\{4\}-\\d\{2\}-\\d\{2\}T/);

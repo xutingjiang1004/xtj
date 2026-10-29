@@ -7052,8 +7052,13 @@ function renderProfileActivityList(kind) {
                     var mediaItems = post ? getPostMediaItems(post).filter(function(item) { return item.media_type === 'image' && !!sanitizeUrl(item.media_url); }) : [];
                     if (mediaItems.length) {
                         photos = mediaItems.map(function(item, position) {
-                            return Object.assign({}, photo, { id: 'post_' + photo.__xtjPostId + '_' + (item.id || position), imageUrl: sanitizeUrl(item.media_url),
-                                thumbUrl: sanitizeUrl(item.media_url), width: item.width || null, height: item.height || null, fileSize: item.file_size || null, views: Number(post.views) || 0, __xtjCanDelete: canDeletePost(post), __xtjMediaIndex: position });
+                            var originalUrl = sanitizeUrl(item.media_url);
+                            var thumbUrl = item.preview_url ? sanitizeUrl(item.preview_url) : '';
+                            if (!thumbUrl && originalUrl && window.xtjMediaPreviewUrl) {
+                              try { thumbUrl = window.xtjMediaPreviewUrl(originalUrl); } catch (eThumb) { thumbUrl = ''; }
+                            }
+                            return Object.assign({}, photo, { id: 'post_' + photo.__xtjPostId + '_' + (item.id || position), imageUrl: originalUrl,
+                                thumbUrl: thumbUrl || originalUrl, width: item.width || null, height: item.height || null, fileSize: item.file_size || null, views: Number(post.views) || 0, __xtjCanDelete: canDeletePost(post), __xtjMediaIndex: position });
                         });
                         index = Math.max(0, photos.findIndex(function(item) { return item.imageUrl === photo.imageUrl; }));
                         var clickedIndex = Number(triggerEl && triggerEl.getAttribute('data-post-media-index'));
@@ -8768,7 +8773,13 @@ function renderProfileActivityList(kind) {
                 if (window.xtjMediaPreviewUrl) url = window.xtjMediaPreviewUrl(url);
                 if (!url) return;
                 cell.classList.remove('post-image-failed');
-                img.removeAttribute('src'); img.src = window.xtjRetryOriginalImageUrl ? window.xtjRetryOriginalImageUrl(url) : url;
+                var retryUrl = window.xtjRetryOriginalImageUrl ? window.xtjRetryOriginalImageUrl(url) : url;
+                if (window.xtjPostImageScheduling) {
+                  img.setAttribute('data-post-src', retryUrl);
+                  img.removeAttribute('src');
+                  return;
+                }
+                img.removeAttribute('src'); img.src = retryUrl;
             };
             window.syncPostImageRatio = function(img) {
                 var parent = img && img.closest('.post-media-cell');
@@ -9508,9 +9519,12 @@ function renderProfileActivityList(kind) {
                     } catch (eUser) { knownUser = ''; }
                     var hasToken = false;
                     try { hasToken = !!(typeof getUserToken === 'function' && getUserToken()); } catch (eTok) { hasToken = false; }
-                    var mayReuseAnonymousEarlyFeed = !knownUser && !hasToken && !searchKeyword;
+                    var earlyBootUser = '';
+                    try { earlyBootUser = String((window.__xtjEarlyFeed && window.__xtjEarlyFeed.bootUser) || ''); } catch (eEarlyUser) { earlyBootUser = ''; }
+                    var sameEarlyViewer = knownUser ? earlyBootUser === knownUser : !earlyBootUser;
+                    var mayReuseEarlyFeed = !searchKeyword && sameEarlyViewer;
 
-                    if (page === 0 && mayReuseAnonymousEarlyFeed && start === 0 && !usedApi && window.__xtjEarlyFeed && window.__xtjEarlyFeed.status === 'ok' && window.__xtjEarlyFeed.data) {
+                    if (page === 0 && mayReuseEarlyFeed && start === 0 && !usedApi && window.__xtjEarlyFeed && window.__xtjEarlyFeed.status === 'ok' && window.__xtjEarlyFeed.data) {
                         var early = window.__xtjEarlyFeed.data;
                         posts = normalizePosts(early.posts || []);
                         comments = early.comments || [];
@@ -9520,7 +9534,7 @@ function renderProfileActivityList(kind) {
                         serverNextOffset = early.next_offset != null ? Number(early.next_offset) : null;
                         serverNextCursor = early.next_cursor || null;
                         usedApi = true;
-                    } else if (page === 0 && mayReuseAnonymousEarlyFeed && start === 0 && !usedApi && window.__xtjEarlyFeedPromise) {
+                    } else if (page === 0 && mayReuseEarlyFeed && start === 0 && !usedApi && window.__xtjEarlyFeedPromise) {
                         try {
                             var early2 = await (typeof window.xtjWithTimeout === 'function'
                                 ? window.xtjWithTimeout(window.__xtjEarlyFeedPromise, Math.min(FEED_NET_TIMEOUT_MS, 12000), 'early-feed')
@@ -10858,19 +10872,7 @@ function renderProfileActivityList(kind) {
                     try {
                         if (typeof window.__xtjBatchLoadVipHistory === 'function') {
                             var userNames = feedAllPosts.map(function(p) { return p && p.user_name; }).filter(Boolean);
-                            var vipLoadPromise = window.__xtjBatchLoadVipHistory(userNames);
-                            // 5s 兜底：超过就放行，不阻塞 renderFeed
-                            var vipLoadTimeout = new Promise(function(resolve) { setTimeout(resolve, 5000); });
-                            Promise.race([vipLoadPromise, vipLoadTimeout]).then(function() {
-                                // VIP 历史加载完后，强制 reRender 让 Pro 标志显示出来
-                                if (window.__xtjVipHistoryCache) {
-                                    try {
-                                        if (typeof renderFeed === 'function') {
-                                            renderFeed({ posts: feedAllPosts, comments: feedAllComments, likes: feedAllLikes });
-                                        }
-                                    } catch(e) {}
-                                }
-                            }).catch(function() {});
+                            window.__xtjBatchLoadVipHistory(userNames).catch(function() {});
                         }
                     } catch (e) { console.warn('[VIP history preload]', e); }
                     await renderFeedFromMemoryState();
@@ -15279,8 +15281,25 @@ function renderProfileActivityList(kind) {
                     }
                     orderedNodes.push(node);
                 });
-                var cursor=el.firstChild;
-                orderedNodes.forEach(function(node) { if (node===cursor) cursor=cursor.nextSibling; else el.insertBefore(node,cursor); });
+                var paintToken = (el._dockPaintToken = (el._dockPaintToken || 0) + 1);
+                function placeDockNodes(nodes, anchor) {
+                  var cursor = anchor || el.firstChild;
+                  nodes.forEach(function(node) { if (node === cursor) cursor = cursor.nextSibling; else el.insertBefore(node, cursor); });
+                }
+                var coldSlice = !sameConversation && orderedNodes.length > 48;
+                var recentNodes = coldSlice ? orderedNodes.slice(orderedNodes.length - 48) : orderedNodes;
+                var olderNodes = coldSlice ? orderedNodes.slice(0, orderedNodes.length - 48) : [];
+                placeDockNodes(recentNodes);
+                if (olderNodes.length) {
+                  requestAnimationFrame(function() {
+                    if (el._dockPaintToken !== paintToken || !el.isConnected) return;
+                    var beforeHeight = el.scrollHeight;
+                    var beforeTop = el.scrollTop;
+                    var anchor = el.firstChild;
+                    olderNodes.forEach(function(node) { el.insertBefore(node, anchor); });
+                    if (shouldAutoScroll) el.scrollTop = beforeTop + (el.scrollHeight - beforeHeight);
+                  });
+                }
                 var wanted=new Set(orderedNodes); Array.from(el.children).forEach(function(node) { if (!wanted.has(node)) node.remove(); });
                 el.dataset.chatUser = signatureKey;
                 _chatRenderSignature[signatureKey] = nextSignature;
@@ -22840,7 +22859,11 @@ function renderProfileActivityList(kind) {
                 if (!usedFastSnapshot || skipCache) {
                     return originalInitialLoad.call(this, skipCache);
                 }
-                await loadFeed(true);
+                // The snapshot is already on screen. Refresh behind it so the
+                // first paint does not wait for another full feed round trip.
+                loadFeed(true).catch(function(error) {
+                    console.warn('[feed] background refresh failed:', error);
+                });
             };
             window.initialLoad = initialLoad;
 

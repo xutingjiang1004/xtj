@@ -2449,8 +2449,25 @@
                     }
                     orderedNodes.push(node);
                 });
-                var cursor=el.firstChild;
-                orderedNodes.forEach(function(node) { if (node===cursor) cursor=cursor.nextSibling; else el.insertBefore(node,cursor); });
+                var paintToken = (el._dockPaintToken = (el._dockPaintToken || 0) + 1);
+                function placeDockNodes(nodes, anchor) {
+                  var cursor = anchor || el.firstChild;
+                  nodes.forEach(function(node) { if (node === cursor) cursor = cursor.nextSibling; else el.insertBefore(node, cursor); });
+                }
+                var coldSlice = !sameConversation && orderedNodes.length > 48;
+                var recentNodes = coldSlice ? orderedNodes.slice(orderedNodes.length - 48) : orderedNodes;
+                var olderNodes = coldSlice ? orderedNodes.slice(0, orderedNodes.length - 48) : [];
+                placeDockNodes(recentNodes);
+                if (olderNodes.length) {
+                  requestAnimationFrame(function() {
+                    if (el._dockPaintToken !== paintToken || !el.isConnected) return;
+                    var beforeHeight = el.scrollHeight;
+                    var beforeTop = el.scrollTop;
+                    var anchor = el.firstChild;
+                    olderNodes.forEach(function(node) { el.insertBefore(node, anchor); });
+                    if (shouldAutoScroll) el.scrollTop = beforeTop + (el.scrollHeight - beforeHeight);
+                  });
+                }
                 var wanted=new Set(orderedNodes); Array.from(el.children).forEach(function(node) { if (!wanted.has(node)) node.remove(); });
                 el.dataset.chatUser = signatureKey;
                 _chatRenderSignature[signatureKey] = nextSignature;

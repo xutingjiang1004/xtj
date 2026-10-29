@@ -427,6 +427,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           try { localStorage.setItem('xtj_ai_model', S.selectedModel); } catch (eLs) {}
         }
       }
+      S._customModelsSyncedAt = Date.now();
       return true;
     } catch (e) { return false; }
   }
@@ -885,7 +886,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
   function startQuotaPolling() {
     stopQuotaPolling();
-    fetchAiQuota(true);
+    fetchAiQuota(false);
     S._quotaTimer = setInterval(function() {
       if (!S.active) return;
       fetchAiQuota(false);
@@ -12831,6 +12832,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       S.conversationCursor = r.data.next_cursor || null;
       await refreshConversationMetadata(r.data.conversations.map(function(row){return row.conversation_id;}),current);
       if (!current()) return false;
+      if (!append) S._conversationsFreshUntil = Date.now() + 20000;
       return true;
     } catch (error) {
       if (!current()) return false;
@@ -13299,6 +13301,12 @@ function showChatMessages() {
         return;
       }
       if (S._historyBusy) return; // 并发锁：忽略重复点击
+      if (S._conversationsFreshUntil && Date.now() < S._conversationsFreshUntil && Array.isArray(S.conversations)) {
+        openConversationListPage();
+        syncAiHeaderButtons(histBtn, newBtn);
+        if (S.conversationsEl) renderConversationListStyled(S.conversationsEl);
+        return;
+      }
       S._historyBusy = true;
       var _prevText = histBtn.textContent;
       histBtn.disabled = true;
@@ -15507,6 +15515,12 @@ function showChatMessages() {
     if (S._configRefreshTimer) { try { clearInterval(S._configRefreshTimer); } catch(e) {} }
     S._configRefreshTimer = setInterval(function() { ensureConfig().then(applyConfigToUI).catch(function(){}); }, CONFIG_REFRESH_INTERVAL);
     startQuotaPolling();
+    if (readUserName() && r.messagesEl) {
+      r.messagesEl.innerHTML = '';
+      var openingHistory = buildEmptyState('正在加载聊天记录…');
+      openingHistory.classList.add('ai-history-loading');
+      r.messagesEl.appendChild(openingHistory);
+    }
 
     if (S.viewportCleanup) {
       try { S.viewportCleanup(); } catch (e3) {}
@@ -15514,7 +15528,7 @@ function showChatMessages() {
     S.viewportCleanup = bindVisualViewport(r.messagesEl, r.input, r.inputBar);
 
     // Do not make opening the chat wait for an auth refresh. The shell is useful immediately.
-    ensureUserAuthOrNotify({ allowGuest: true }).then(function(authOk) {
+    ensureUserAuthOrNotify({ allowGuest: true, fastPath: true }).then(function(authOk) {
       if (lifecycleId !== S.lifecycleId || !S.active) return null;
       if (!authOk) {
         S.active = false;
@@ -15546,7 +15560,7 @@ function showChatMessages() {
         // ★ 账号级同步第三方自定义模型（跨设备恢复），完成后刷新模型摘要
         //   （原先还调 r.repopulate() 重建透明 select，但对应 #aiPlusModelSelect
         //    元素全仓不存在，该调用恒为空操作，已随死代码一并移除）
-        syncCustomModelsFromServer().then(function() {
+        (S._customModelsSyncedAt && Date.now() - S._customModelsSyncedAt < 60000 ? Promise.resolve(true) : syncCustomModelsFromServer()).then(function() {
           if (lifecycleId === S.lifecycleId && S.active) {
             try { if (r.updateModelUI) r.updateModelUI(); } catch (eU) {}
           }

@@ -847,7 +847,11 @@
                 if (!usedFastSnapshot || skipCache) {
                     return originalInitialLoad.call(this, skipCache);
                 }
-                await loadFeed(true);
+                // The snapshot is already on screen. Refresh behind it so the
+                // first paint does not wait for another full feed round trip.
+                loadFeed(true).catch(function(error) {
+                    console.warn('[feed] background refresh failed:', error);
+                });
             };
             window.initialLoad = initialLoad;
 

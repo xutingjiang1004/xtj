@@ -214,7 +214,7 @@
     return groups.map(function(group){
       var first = group.photos[0];
       var cover = first && (first.thumbUrl || first.thumb || (window.xtjMediaPreviewUrl ? window.xtjMediaPreviewUrl(first.imageUrl) : first.imageUrl)) || FALLBACK_IMG;
-      return '<button type="button" class="pw-album-card" aria-label="' + esc(group.title) + '，' + group.photos.length + ' 张照片" onclick="openPhotoAlbumGroup(\'' + esc(group.key) + '\')"><span class="pw-album-cover-frame"><img class="pw-album-cover" loading="lazy" decoding="async" src="' + safeUrl(cover) + '" alt=""></span><div class="pw-album-title">' + esc(group.title) + '</div><div class="pw-album-count">' + group.photos.length + ' 张照片</div></button>';
+      return '<button type="button" class="pw-album-card" aria-label="' + esc(group.title) + '，' + group.photos.length + ' 张照片" onclick="openPhotoAlbumGroup(\'' + esc(group.key) + '\')"><span class="pw-album-cover-frame"><img class="pw-album-cover pw-blur-in" loading="lazy" decoding="async" src="' + esc(FALLBACK_IMG) + '" data-src="' + safeUrl(cover) + '" alt=""></span><div class="pw-album-title">' + esc(group.title) + '</div><div class="pw-album-count">' + group.photos.length + ' 张照片</div></button>';
     }).join('');
   }
 
@@ -881,6 +881,7 @@
     if (!window.pwAlbumGroupKey) {
       window.pwCurrentSortedPhotos = photos.slice();
       grid.innerHTML = albumHtml(groups);
+      observeImages(grid);
       // H-33: 相册分组视图也要安装加载哨兵，否则分页失效，只能看到首屏/缓存上限
       installLoadMoreSentinel(grid);
       return;
@@ -891,6 +892,7 @@
       window.pwAlbumGroupKey = '';
       window.pwCurrentSortedPhotos = photos.slice();
       grid.innerHTML = albumHtml(groups);
+      observeImages(grid);
       // H-33: 同上，回到相册视图后重新挂载哨兵
       installLoadMoreSentinel(grid);
       return;
