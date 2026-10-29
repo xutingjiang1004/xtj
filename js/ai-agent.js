@@ -7020,7 +7020,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     bodyEl.textContent = '加载中…'; bodyEl.setAttribute('aria-busy', 'true');
     try {
       var historyRequests = await Promise.allSettled([
-        apiRequest('GET', '/research/history?limit=10', null, {timeoutMs:15000}),
+        apiRequest('GET', '/research/history?limit=50', null, {timeoutMs:15000}),
         apiRequest('GET', '/research/checkpoints', null, {timeoutMs:15000})
       ]);
       var result = historyRequests[0].status === 'fulfilled' ? historyRequests[0].value : null;
@@ -7031,6 +7031,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         (data && Array.isArray(data.data) ? data.data : null));
       if (!result || !result.ok || !items) throw new Error('研究记录暂不可用');
       renderResearchHistoryList(bodyEl, items);
+      bindResearchHistoryMore(bodyEl, data);
       var checkpoints = checkpointResult && checkpointResult.ok && checkpointResult.data && checkpointResult.data.records;
       if (Array.isArray(checkpoints)) renderResearchCheckpoints(bodyEl, checkpoints);
       else if (!checkpointResult || !checkpointResult.ok) bodyEl.prepend(el('div',{class:'ai-checkpoint-note',text:'研究断点暂时无法读取，可关闭后重试。'}));
@@ -7079,6 +7080,63 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     bodyEl.prepend(section);
   }
 
+  function researchHistoryItems(data) {
+    if (Array.isArray(data)) return data;
+    if (data && Array.isArray(data.items)) return data.items;
+    if (data && Array.isArray(data.data)) return data.data;
+    return null;
+  }
+
+  function appendResearchHistoryRows(bodyEl, items) {
+    if (!bodyEl || !items || !items.length) return;
+    var isDark = isDeepThinkDarkTheme();
+    var more = bodyEl.querySelector('.dt-research-history-more');
+    for (var hi = 0; hi < items.length; hi++) {
+      (function(item) {
+        var row = el('button', { type: 'button', class: 'dt-research-history-row', style: 'display:block;width:100%;text-align:left;border:1px solid rgba(140,196,158,.2);border-radius:12px;background:' + (isDark ? 'rgba(28,60,52,.75)' : 'rgba(248,252,250,.85)') + ';padding:9px 11px;margin-bottom:8px;cursor:pointer;font:inherit;' });
+        var qText = String(item.query || '未命名研究');
+        var tText = item.created_at ? fmtTime(item.created_at) : '';
+        var absText = String(item.answer || '').slice(0, 60);
+        row.appendChild(el('div', { text: qText, style: 'font-size:13px;font-weight:600;color:' + (isDark ? 'rgba(226,243,237,.95)' : '#2f4d44') + ';line-height:1.4;' }));
+        row.appendChild(el('div', { text: (tText ? tText + ' · ' : '') + '摘要: ' + absText, style: 'font-size:11px;color:' + (isDark ? 'rgba(185,211,203,.8)' : '#7a918a') + ';margin-top:4px;line-height:1.5;' }));
+        row.addEventListener('click', function() { showResearchHistoryItem(item); });
+        if (more && more.parentNode === bodyEl) bodyEl.insertBefore(row, more);
+        else bodyEl.appendChild(row);
+      })(items[hi]);
+    }
+  }
+
+  function bindResearchHistoryMore(bodyEl, data) {
+    if (!bodyEl || !bodyEl.isConnected) return;
+    bodyEl.querySelectorAll('.dt-research-history-more').forEach(function(node) { node.remove(); });
+    var cursor = data && data.next_cursor ? String(data.next_cursor) : '';
+    if (!data || data.has_more !== true || !cursor) return;
+    var button = el('button', { type: 'button', class: 'ai-history-retry dt-research-history-more', text: '加载更早的研究' });
+    var owner = window.currentUser || '', epoch = readAiAuthEpoch(), lifecycle = S.dtLifecycleId;
+    function current() { return button.isConnected && lifecycle === S.dtLifecycleId && owner === (window.currentUser || '') && epoch === readAiAuthEpoch() && !document.getElementById('panelDeepThink')._dtClosed; }
+    button.addEventListener('click', async function() {
+      if (button.disabled || !current()) return;
+      button.disabled = true;
+      button.textContent = '加载中…';
+      try {
+        var result = await apiRequest('GET', '/research/history?limit=50&before=' + encodeURIComponent(cursor), null, { timeoutMs: 15000 });
+        if (!current()) return;
+        var page = result && result.data;
+        var items = researchHistoryItems(page);
+        if (!result || !result.ok || !items) {
+          button.disabled = false;
+          button.textContent = '加载失败，点击重试';
+          return;
+        }
+        appendResearchHistoryRows(bodyEl, items);
+        bindResearchHistoryMore(bodyEl, page);
+      } catch (error) {
+        if (current()) { button.disabled = false; button.textContent = '加载失败，点击重试'; }
+      }
+    });
+    bodyEl.appendChild(button);
+  }
+
   function renderResearchHistoryList(bodyEl, items) {
     if (!bodyEl || !bodyEl.isConnected) return;
     bodyEl.innerHTML = '';
@@ -7086,19 +7144,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       bodyEl.textContent = '暂无历史研究';
       return;
     }
-    var isDark = isDeepThinkDarkTheme();
-    for (var hi = 0; hi < items.length; hi++) {
-      (function(item) {
-        var row = el('button', { type: 'button', style: 'display:block;width:100%;text-align:left;border:1px solid rgba(140,196,158,.2);border-radius:12px;background:' + (isDark ? 'rgba(28,60,52,.75)' : 'rgba(248,252,250,.85)') + ';padding:9px 11px;margin-bottom:8px;cursor:pointer;font:inherit;' });
-        var qText = String(item.query || '未命名研究');
-        var tText = item.created_at ? fmtTime(item.created_at) : '';
-        var absText = String(item.answer || '').slice(0, 60);
-        row.appendChild(el('div', { text: qText, style: 'font-size:13px;font-weight:600;color:' + (isDark ? 'rgba(226,243,237,.95)' : '#2f4d44') + ';line-height:1.4;' }));
-        row.appendChild(el('div', { text: (tText ? tText + ' · ' : '') + '摘要: ' + absText, style: 'font-size:11px;color:' + (isDark ? 'rgba(185,211,203,.8)' : '#7a918a') + ';margin-top:4px;line-height:1.5;' }));
-        row.addEventListener('click', function() { showResearchHistoryItem(item); });
-        bodyEl.appendChild(row);
-      })(items[hi]);
-    }
+    appendResearchHistoryRows(bodyEl, items);
   }
 
   function showResearchHistoryItem(item) {
@@ -7146,7 +7192,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   //   前端随即渲染「连接中断 / 超过 45 秒未收到新数据」。
   //   阈值放宽到 180 秒：既能容忍 high 思考期的长静默，又仍能在服务端真实挂死时
   //   及时收束（服务端 heartbeat 每 8s 一次，正常情况下该计时器根本不会触发）。
-  var RESEARCH_IDLE_TIMEOUT_MS = 1800000;
+  var RESEARCH_IDLE_TIMEOUT_MS = 180000;
 
   // Tavily Deep Research SSE 调用
   //   resolve({ answer, sources, message_id }); reject(Error) — err.cancelled / err.tavilyTimeout / err.networkError / err.status
@@ -8284,18 +8330,27 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     return fragment;
   }
 
+  function deepThinkHistoryCursor(data) {
+    if (!data) return '';
+    if (data.next_cursor) return String(data.next_cursor);
+    if (data.oldest_id && data.oldest) return JSON.stringify({ at: data.oldest, id: data.oldest_id });
+    if (data.oldest) return String(data.oldest);
+    return '';
+  }
+
   function bindDeepThinkHistoryPagination(msgs, data) {
     var cid = S.dtConversationId, identity = customModelIdentity(), lifecycle = S.dtLifecycleId;
     S.dtHistoryPageData = { cid: cid, identity: identity, data: data };
     msgs.querySelectorAll('.dt-history-more').forEach(function(node) { node.remove(); });
-    if (!data || !data.has_more || !data.next_cursor) return;
+    var cursor = deepThinkHistoryCursor(data);
+    if (!data || !data.has_more || !cursor) return;
     var button = el('button', { type: 'button', class: 'ai-history-retry dt-history-more', text: '加载更早的研究记录' });
     function current() { return button.isConnected && customModelIdentityCurrent(identity) && lifecycle === S.dtLifecycleId && cid === S.dtConversationId && !document.getElementById('panelDeepThink')._dtClosed; }
     button.addEventListener('click', async function() {
       if (button.disabled || !current()) return;
       button.disabled = true; button.textContent = '加载中…';
       try {
-        var result = await apiRequest('GET', '/chat/history?conversation_id=' + encodeURIComponent(cid) + '&limit=30&mode=deep_think&before=' + encodeURIComponent(data.next_cursor), null, { timeoutMs: 15000 });
+        var result = await apiRequest('GET', '/chat/history?conversation_id=' + encodeURIComponent(cid) + '&limit=30&mode=deep_think&before=' + encodeURIComponent(cursor), null, { timeoutMs: 15000 });
         if (!current()) return;
         if (!result || !result.ok || !result.data || !Array.isArray(result.data.messages)) {
           button.textContent = describeError(result, '加载失败，点击重试');
@@ -8376,17 +8431,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           if (!currentPage()) return;
           if (!hist || !hist.ok || !hist.data || !Array.isArray(hist.data.messages)) throw new Error('深入研究记录暂不可用');
           var hasMessages = hist && hist.ok && Array.isArray(hist.data && hist.data.messages) && hist.data.messages.length > 0;
-          if (!hasMessages) {
-            S.dtConversationId = null;
-            saveDtConvId();
-            resetDeepThinkPageEmpty();
-            var newConversation = await apiRequest('POST', '/chat/new', null);
-            if (!currentPage()) return;
-            if (newConversation && newConversation.ok && newConversation.data && newConversation.data.conversation_id) {
-              S.dtConversationId = newConversation.data.conversation_id;
-              saveDtConvId();
-            }
-          }
+          // An empty page is still this conversation. Replacing the id before a
+          // new one exists drops the only handle, including when the server
+          // answers 200 with no messages because the row is not in the list yet.
+          if (!hasMessages) resetDeepThinkPageEmpty();
           if (hasMessages) {
             msgs.innerHTML = '';
             msgs.appendChild(buildDeepThinkHistoryFragment(hist.data.messages, msgs));
@@ -8404,14 +8452,23 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       } else {
         // 首次打开，创建新会话
         resetDeepThinkPageEmpty();
+        var createdResearchId = '';
         try {
           var r = await apiRequest('POST', '/chat/new', null);
           if (!currentPage()) return;
-          if (r && r.ok && r.data && r.data.conversation_id) {
-            S.dtConversationId = r.data.conversation_id;
-            saveDtConvId();
-          }
+          if (r && r.ok && r.data && r.data.conversation_id) createdResearchId = r.data.conversation_id;
         } catch (e) {}
+        if (!currentPage()) return;
+        if (createdResearchId) {
+          S.dtConversationId = createdResearchId;
+          saveDtConvId();
+        } else {
+          msgs.replaceChildren(el('div', { class: 'dt-history-error', text: '新研究创建失败，请重试' }));
+          var createRetry = el('button', { type: 'button', class: 'ai-history-retry', text: '重新创建' });
+          createRetry.addEventListener('click', function() { msgs.replaceChildren(); openDeepThinkPage(); });
+          msgs.appendChild(createRetry);
+          return;
+        }
       }
 
       if (!currentPage()) return;
@@ -9218,6 +9275,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           if (r2 && r2.ok && r2.data && r2.data.conversation_id) {
             S.dtConversationId = r2.data.conversation_id;
             saveDtConvId();
+          } else {
+            notify('研究已删除，新研究创建失败，请点「新对话」重试');
           }
         } else {
           notify('删除失败');
@@ -10574,6 +10633,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var aiContent = '';
       var aiReasoning = '';
       var sealedContents = [];
+      var answerCommitted = false;
+      var answerPromoteTimer = null;
       var contentTruncated = false;
       var reasoningStarted = false;
       // P5: using assistantNode (single DOM node)
@@ -10934,6 +10995,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           try { reasoningContainer.remove(); } catch (e) {}
           reasoningContainer = null;
         }
+        cancelAnswerPromote();
+        if (node && _sendThinkingMode !== 'off' && (hasContent || hasSealed)) {
+          var provisionalLeft = node.querySelectorAll('.ai-rail-beat.is-provisional');
+          for (var pli = 0; pli < provisionalLeft.length; pli++) provisionalLeft[pli].remove();
+          foldRunningProcess();
+          dropEmptyProcessRail(node);
+        }
         
         var searchCount = evt ? evt.search_count : 0;
         var searchQuery = evt ? evt.search_query : '';
@@ -11184,6 +11252,36 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (rail && rail.querySelector('.ai-rail-beat, .ai-tool-step')) rail.classList.add('is-folded');
         if (thinking) setThinkingExpanded(thinking, false, messagesEl);
       }
+      function dropEmptyProcessRail(node) {
+        var rail = (node || assistantNode) && (node || assistantNode).querySelector(':scope > .ai-process-rail');
+        if (rail && !rail.querySelector('.ai-rail-beat, .ai-tool-step, .ai-rail-live')) rail.remove();
+      }
+      function cancelAnswerPromote() {
+        if (answerPromoteTimer) { clearTimeout(answerPromoteTimer); answerPromoteTimer = null; }
+      }
+      // A sentence can still be narration until the next event. Hold it on the
+      // rail, and only start the answer once a pause shows no tool is coming.
+      function promoteRunningAnswer(evtReceivedAt) {
+        if (_sendThinkingMode === 'off' || answerCommitted) return;
+        if (!String(aiContent || '').trim() || !assistantNode || assistantNode.isConnected === false) return;
+        answerCommitted = true;
+        cancelAnswerPromote();
+        var stale = assistantNode.querySelectorAll('.ai-rail-beat.is-provisional');
+        for (var si = 0; si < stale.length; si++) stale[si].remove();
+        foldRunningProcess();
+        dropEmptyProcessRail(assistantNode);
+        ensureAssistantBubbleReady();
+        if (contentRenderer) contentRenderer.append(aiContent, evtReceivedAt);
+      }
+      function scheduleAnswerPromote(evtReceivedAt) {
+        if (_sendThinkingMode === 'off' || answerCommitted || answerPromoteTimer) return;
+        var scheduledReq = reqId;
+        answerPromoteTimer = setTimeout(function() {
+          answerPromoteTimer = null;
+          if (scheduledReq !== S._currentReqId || !customModelIdentityCurrent(sendIdentity)) return;
+          promoteRunningAnswer(evtReceivedAt);
+        }, 280);
+      }
       function unfoldRunningProcess() {
         var thinking = assistantNode.querySelector('.ai-thinking');
         var rail = assistantNode.querySelector(':scope > .ai-process-rail');
@@ -11191,7 +11289,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (rail) rail.classList.remove('is-folded');
       }
       function syncRailLiveLine() {
-        if (_sendThinkingMode === 'off') return;
+        if (_sendThinkingMode === 'off' || answerCommitted) return;
+        var settled = assistantNode.querySelector('.ai-thinking');
+        if (settled && settled.__processSettled) return;
         var line = latestReasoningLine(aiReasoning.slice(railReasonCursor));
         if (!line) return;
         var fold = ensureRailFold();
@@ -11592,6 +11692,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           }
           
           if (evt.type === 'tool_calls') {
+            cancelAnswerPromote();
+            answerCommitted = false;
             unfoldRunningProcess();
             var toolList = evt.tools || [];
             streamToolCount += toolList.length;
@@ -12411,16 +12513,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               } catch (eThinkSettle) {}
             }
             if (accepted) {
-              var hasRealBeat = _sendThinkingMode !== 'off' && !!assistantNode.querySelector('.ai-rail-beat:not(.is-provisional)');
-              var answerMature = !hasRealBeat || aiContent.indexOf('\n') >= 0 || aiContent.trim().length >= 80;
-              if (hasRealBeat && !answerMature) {
+              if (_sendThinkingMode !== 'off' && !answerCommitted) {
                 showProvisionalNarration(aiContent.trim());
+                if (aiContent.indexOf('\n') >= 0 || aiContent.trim().length >= 80) scheduleAnswerPromote(evtReceivedAt);
                 continue;
-              }
-              if (hasRealBeat) {
-                var staleNarration = assistantNode.querySelector('.ai-rail-beat.is-provisional');
-                if (staleNarration) staleNarration.remove();
-                foldRunningProcess();
               }
               ensureAssistantBubbleReady();
               if (contentRenderer) contentRenderer.append(hadBodyRenderer ? accepted : aiContent, evtReceivedAt);
@@ -12429,9 +12525,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           }
           
           if (evt.type === 'done') {
-            var danglingNarration = assistantNode.querySelector('.ai-rail-beat.is-provisional');
-            if (danglingNarration) danglingNarration.remove();
-            if (_sendThinkingMode !== 'off') foldRunningProcess();
+            cancelAnswerPromote();
+            if (_sendThinkingMode !== 'off' && answerCommitted) foldRunningProcess();
             if(evt.content && S._newContentPrompt)S._newContentPrompt();
             hideAssistantTyping();
             S.paused = false;
@@ -12572,6 +12667,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       }
       
       try { clearInterval(_idleCheckTimer); } catch (e) {}
+      cancelAnswerPromote();
       // Normal done/EOF path: release the reader/body instead of waiting for GC.
       try { if (reader && typeof reader.cancel === 'function') reader.cancel(); } catch (eReaderDone) {}
 
@@ -12964,6 +13060,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   }
 
   // 获取会话列表（普通聊天只显示普通会话，深入研究会话分开管理）
+  function invalidateConversationListCache() {
+    S._conversationsFreshUntil = 0;
+  }
+
   async function fetchConversations(append) {
     var seq = ++S.conversationRequestId, life = S.lifecycleId;
     var owner = window.currentUser || '', epoch = readAiAuthEpoch();
@@ -13451,7 +13551,7 @@ function showChatMessages() {
         return;
       }
       if (S._historyBusy) return; // 并发锁：忽略重复点击
-      if (S._conversationsFreshUntil && Date.now() < S._conversationsFreshUntil && Array.isArray(S.conversations)) {
+      if (S._conversationsFreshUntil && Date.now() < S._conversationsFreshUntil && S.conversations && S.conversations.length) {
         openConversationListPage();
         syncAiHeaderButtons(histBtn, newBtn);
         if (S.conversationsEl) renderConversationListStyled(S.conversationsEl);
@@ -13521,6 +13621,7 @@ function showChatMessages() {
         if (dr && dr.ok) {
           S.conversationRequestId += 1;
           S.conversations = (S.conversations || []).filter(function(row) { return row.conversation_id !== deleteCid; });
+          invalidateConversationListCache();
           if (S._forgetAiComposerDraft) S._forgetAiComposerDraft(deleteCid);
           clearAiConversationHistoryCache(deleteCid, 'normal');
           if (!currentDelete()) return;
@@ -13597,6 +13698,7 @@ function showChatMessages() {
         if (fileInput) fileInput.value = '';
         S.conversationId = '';
         writeConvId('');
+        invalidateConversationListCache();
         S.messages = [];
         if (S._updateContextCapacity) S._updateContextCapacity();
         S.oldestCursor = null;
@@ -13642,6 +13744,7 @@ function showChatMessages() {
 
           S.conversationId = r.data.conversation_id;
           writeConvId(r.data.conversation_id);
+          invalidateConversationListCache();
           S.messages = [];
           if (S._updateContextCapacity) S._updateContextCapacity();
           S.oldestCursor = null;
@@ -15858,6 +15961,7 @@ function showChatMessages() {
     if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
     S.messages = [];
     S.conversations = [];
+    S._conversationsFreshUntil = 0;
     S.conversationHasMore = false; S.conversationCursor = null;
     S.oldestCursor = null;
     S.hasMore = false;

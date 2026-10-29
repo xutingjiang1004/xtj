@@ -26600,11 +26600,20 @@ app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, 
   safeEnd();
 });
 
-// GET /api/agent/research/history - 当前用户最近的研究记录（content JSON type=tavily_research，最多 10 条）
+// GET /api/agent/research/history - 当前用户的研究记录（content JSON type=tavily_research）
+// 每页最多 50 条。before 是 {at,id} 游标；旧数据库函数没有该参数时，第一页仍可用。
 app.get('/api/agent/research/history', authenticateUser, rateLimit(60000, 30), async (req, res) => {
   try {
     var limit = Math.min(Math.max(parseInt(req.query && req.query.limit, 10) || 10, 1), 50);
-    var result = await supabase.rpc('list_ai_research_records', { p_user_name: req.userName, p_limit: limit });
+    var before;
+    try { before = parseAiHistoryCursor(String(req.query && req.query.before || '').trim()); }
+    catch (_) { return res.status(400).json({ ok: false, code: 'invalid_history_cursor', error: '历史分页参数无效' }); }
+    var args = { p_user_name: req.userName, p_limit: limit };
+    if (before) {
+      args.p_before = before.at;
+      if (before.id) args.p_before_id = before.id;
+    }
+    var result = await supabase.rpc('list_ai_research_records', args);
     if (!result || result.error || !result.data || result.data.ok !== true) throw new Error('research_history_failed');
     return res.json(result.data);
   } catch (e) {
@@ -27033,12 +27042,14 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
       return A.roleWeight - B.roleWeight;
     });
 
+    var oldestRow = pageRows.length ? pageRows[pageRows.length - 1] : null;
     return res.json({
       ok: true,
       conversation_id: convId,
       has_more: hasMore,
-      oldest: pageRows.length ? pageRows[pageRows.length - 1].created_at : null,
-      oldest_id: pageRows.length ? pageRows[pageRows.length - 1].id : null,
+      oldest: oldestRow ? oldestRow.created_at : null,
+      oldest_id: oldestRow ? oldestRow.id : null,
+      next_cursor: (hasMore && oldestRow && oldestRow.created_at) ? JSON.stringify({ at: oldestRow.created_at, id: oldestRow.id }) : null,
       messages: sortedRows.map(function(r) {
         var m = parseMsgMeta(r);
         var content = r.content || '';

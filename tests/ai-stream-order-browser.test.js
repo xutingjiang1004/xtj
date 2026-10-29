@@ -7,7 +7,8 @@ test('tool narration stays with the process while CJK paragraphs, a table and te
  try{
   await p.locator('#aiChatMsgInput').fill('核对两个来源后给我一张对比表');await p.locator('#aiChatSendBtn').click();await p.waitForFunction(()=>aiPolish.streams.length===1);
   await emit(p,{type:'reasoning_start'});await emit(p,{type:'reasoning',text:'先核实原始材料。'});await emit(p,{type:'content',text:'我先核对两个来源。'});
-  await p.waitForFunction(()=>document.querySelector('.ai-msg.assistant .ai-msg-bubble')?.textContent.includes('核对两个来源'));
+  await p.waitForFunction(()=>document.querySelector('.ai-rail-sentence-text')?.textContent.includes('核对两个来源'));
+  assert.equal(await p.evaluate(()=>!!document.querySelector('.ai-msg.assistant .ai-msg-bubble')?.textContent.includes('核对两个来源')), false);
   await emit(p,{type:'tool_calls',tools:[{id:'verify-one',name:'search_web',args:{query:'原始来源'}}]});
   await p.waitForSelector('.ai-rail-sentence');
   assert.equal(await p.locator('.ai-rail-sentence-text').textContent(),'我先核对两个来源。');

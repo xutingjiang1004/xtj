@@ -327,7 +327,7 @@ for(const model of ['deepseek-flash','custom:test-custom'])test(model+': sending
  const page=await fixture(t,'max',model);
  await page.locator('#aiChatMsgInput').fill('旧问题');await page.locator('#aiChatSendBtn').click();await page.waitForFunction(()=>window.turns?.length===1);
  await page.evaluate(()=>{emit({type:'reasoning',text:'未完成的思考过程。'});emit({type:'content',text:'旧回复的部分内容。'});});
- await page.waitForFunction(()=>document.querySelector('.ai-msg.assistant .ai-msg-bubble').textContent.includes('旧回复'));
+ await page.waitForFunction(()=>document.querySelector('.ai-rail-sentence-text')?.textContent.includes('旧回复'));
  assert.equal(await page.locator('#aiChatSendBtn').isEnabled(),true);
  await page.locator('#aiChatMsgInput').fill('改成回答新问题');await page.locator('#aiChatSendBtn').click();await page.waitForFunction(()=>turns.length===2);
  assert.equal(await page.evaluate(()=>turns[0].signal.aborted&&turns[0].cancelled),true);

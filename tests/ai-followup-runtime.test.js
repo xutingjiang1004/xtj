@@ -23,7 +23,7 @@ test('an empty composer reset during account initialization does not depend on t
 function researchClient(response, extra = {}) {
   const timers = [], identity = { scope: 'alice', epoch: 1 }, S = { dtConversationId: 'ORIGINAL1', dtResearchModel: 'pro' };
   const c = { S, API_BASE: 'https://isolated.test/api/agent', AbortController, TextDecoder, Promise,
-    AI_CONTENT_MAX_LEN: 500000, RESEARCH_IDLE_TIMEOUT_MS: 1800000, notify() {},
+    AI_CONTENT_MAX_LEN: 500000, RESEARCH_IDLE_TIMEOUT_MS: 180000, notify() {},
     customModelIdentity: () => ({ ...identity }), customModelIdentityCurrent: i => i.scope === identity.scope && i.epoch === identity.epoch,
     getUserAuthPayload: async () => ({ headers: { Authorization: 'Bearer test-only-token' } }),
     setTimeout(fn, ms) { const timer = { fn, ms, active: true }; timers.push(timer); return timer; },
@@ -64,7 +64,8 @@ test('native research starts a deadline before response headers arrive', async (
   const f = researchClient(null, { fetch: (_url, options) => new Promise((_resolve, reject) => options.signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })), { once: true })) });
   const pending = f.run('question'); const rejected = assert.rejects(pending, e => e.tavilyTimeout === true);
   await new Promise(r => setImmediate(r));
-  const timer = f.timers.find(t => t.active && t.ms === 1800000); assert.ok(timer, 'waiting for headers is part of the idle timeout');
+  const timer = f.timers.find(t => t.active && t.ms === 180000); assert.ok(timer, 'waiting for headers is part of the idle timeout');
+  assert.match(frontend, /var RESEARCH_IDLE_TIMEOUT_MS = 180000;/);
   timer.fn(); await rejected; assert.ok(f.timers.every(t => !t.active));
 });
 test('a successful native research terminal retains actual persistence and conversation metadata', async () => {
