@@ -38,13 +38,13 @@
     if (!slot || !slot.owner) return;
     var animation = slot.animation;
     try { if (CSS.highlights.get(slot.name) === slot.highlight) CSS.highlights.delete(slot.name); } catch (_) {}
-    slot.owner = null; slot.highlight = null; slot.animation = null;
+    slot.owner = null; slot.highlight = null; slot.animation = null; slot.range = null;
     if (animation) { animation.onfinish = null; animation.oncancel = null; try { animation.cancel(); } catch (_) {} }
   }
   function createInkReveal(target, options) {
     options = options || {};
     if (!target || !(options.inkReveal === true || (target.matches && target.matches('.ai-msg-bubble,.ai-reasoning-segment,.ai-think-answer')))) return null;
-    var pending = [], theme = null, owner = {}, lastInkAt = -Infinity;
+    var pending = [], theme = null, owner = {}, lastInkAt = -Infinity, shownChars = 0;
     function motionOff() {
       try { return document.hidden || document.documentElement.getAttribute('data-xtj-motion') === 'off' ||
         !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); }
@@ -71,25 +71,49 @@
       pending = [];
       inkSlots.forEach(function(slot) { if (slot.owner === owner) releaseInkSlot(slot); });
     }
+    function extendLiveInk(changes, lite) {
+      var slot = null;
+      for (var i = 0; i < inkSlots.length; i++) {
+        var item = inkSlots[i];
+        if (item.owner === owner && item.range && item.animation && item.animation.playState === 'running') { slot = item; break; }
+      }
+      if (!slot) return false;
+      var last = changes[changes.length - 1], node = last && last.node;
+      if (!node || node.nodeType !== 3 || !node.isConnected || !target.contains(node)) return false;
+      if (!slot.range.startContainer || slot.range.startContainer.parentNode !== node.parentNode) return false;
+      try {
+        slot.range.setEnd(node, last.end);
+        var cap = lite ? 48 : 96;
+        if (slot.range.startContainer !== node || last.end - slot.range.startOffset > cap) {
+          var start = Math.max(last.start, last.end - cap);
+          if (start > last.start && /[\uDC00-\uDFFF]/.test(node.data.charAt(start))) start++;
+          slot.range.setStart(node, start);
+        }
+        // The range is already in the highlight. Moving its edges updates the
+        // wash; clearing and re-adding it would restyle on every token.
+        return !slot.range.collapsed && slot.highlight && slot.highlight.size > 0;
+      } catch (_) { return false; }
+    }
     function commit() {
       try {
       var changes = pending; pending = [];
       if (!changes.length) return;
       if (motionOff()) { clear(); return; }
       if (!prepareInk()) return;
-      // Starting a 120ms animation for every SSE packet makes the whole target
-      // re-resolve its inherited ink custom property on every frame. Cap the
-      // decorative effect to a few starts per second; the text itself still
-      // lands on the next display frame.
+      // One short wash stays running and simply grows to cover characters that
+      // arrive while it fades. Restarting it every packet (or dropping those
+      // packets for 200ms) either re-resolves the inherited ink property or
+      // lets new text pop in at full strength. The text itself is never delayed.
       var now = (window.performance && performance.now) ? performance.now() : Date.now();
       var lite = liteDevice();
       var isReasoning = !!(target.matches && target.matches('.ai-reasoning-segment'));
-      if (now - lastInkAt < (lite ? 300 : 200)) return;
-      // Long reasoning blocks are the most expensive target: every animated
-      // inherited property resolves style for the whole segment. Keep the wash
-      // only while the block is small; the text itself is never delayed.
+      var added = 0;
+      for (var ci = 0; ci < changes.length; ci++) added += Math.max(0, changes[ci].end - changes[ci].start);
+      shownChars += added;
       var maxChars = isReasoning ? (lite ? 4000 : 10000) : (lite ? 12000 : 30000);
-      if (target.textContent && target.textContent.length > maxChars) return;
+      if (shownChars > maxChars) return;
+      if (extendLiveInk(changes, lite)) return;
+      if (lite && now - lastInkAt < 300) return;
       // One bounded range per changed text node is enough to create a soft
       // ink wash. Per-grapheme ranges multiply style and animation work for
       // every packet without making text arrive any sooner.
@@ -98,7 +122,7 @@
         var node = change.node;
         if (!node.isConnected || !target.contains(node)) return;
         // Cap paint work per text node and keep UTF-16 surrogate pairs intact.
-        var start = Math.max(change.start, change.end - 96);
+        var start = Math.max(change.start, change.end - (lite ? 48 : 96));
         if (start > change.start && /[\uDC00-\uDFFF]/.test(node.data.charAt(start))) start++;
         try {
           var range = document.createRange();
@@ -126,6 +150,7 @@
       slot = inkSlots.find(function(item) { return !item.owner; });
       if (!slot) return;
       slot.owner = owner; slot.highlight = new Highlight();
+      slot.range = ranges[ranges.length - 1].range;
       ranges.forEach(function(entry) { try { if (slot.highlight.size < 12) slot.highlight.add(entry.range); } catch (_) {} });
       if (!slot.highlight.size) { releaseInkSlot(slot); return; }
       try {
@@ -157,12 +182,84 @@
     return div.innerHTML;
   }
 
+  function decodeBasicEntities(s) {
+    return String(s || '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
+  }
+  function streamContentTail(target) {
+    var node = target && target.lastElementChild;
+    if (node && node.classList && node.classList.contains('ai-stream-cursor')) node = node.previousElementSibling;
+    return node;
+  }
+  function streamEditTarget(el) {
+    if (!el) return null;
+    if (el.tagName === 'UL' || el.tagName === 'OL') {
+      var li = el.lastElementChild;
+      return li && li.tagName === 'LI' ? li : el;
+    }
+    if (el.tagName === 'PRE') {
+      var code = el.querySelector('code');
+      return code || el;
+    }
+    return el;
+  }
+  function lastTextNode(el) {
+    var node = el;
+    while (node && node.nodeType === 1) node = node.lastChild;
+    return node && node.nodeType === 3 ? node : null;
+  }
+  // Already-rendered Markdown grows by a text suffix or one new list item.
+  // Extend that node directly so a long answer is not parsed again each frame.
+  function tryExtendStreamHtml(target, prev, next, ink) {
+    if (!prev || !next || next.length <= prev.length) return false;
+    var i = 0, max = prev.length;
+    while (i < max && prev.charCodeAt(i) === next.charCodeAt(i)) i++;
+    var j = 0;
+    while (j < max - i && prev.charCodeAt(max - 1 - j) === next.charCodeAt(next.length - 1 - j)) j++;
+    if (!j || i + j < 4) return false;
+    var delta = next.slice(i, next.length - j);
+    if (!delta) return false;
+    var tail = streamContentTail(target);
+    if (!tail) return false;
+    if (delta.charAt(0) === '<') {
+      if ((tail.tagName !== 'UL' && tail.tagName !== 'OL') || !/^<li>[\s\S]*<\/li>$/.test(delta)) return false;
+      var holder = document.createElement('div');
+      holder.innerHTML = delta;
+      if (!holder.firstChild || holder.childNodes.length !== 1 || holder.firstChild.tagName !== 'LI') return false;
+      var item = holder.firstChild;
+      tail.appendChild(item);
+      if (ink) ink.inserted(item);
+      return true;
+    }
+    if (/</.test(delta)) return false;
+    var added = decodeBasicEntities(delta);
+    if (!added) return false;
+    var edit = streamEditTarget(tail);
+    if (!edit) return false;
+    if (next.charAt(i - 1) === '>') {
+      var created = document.createTextNode(added);
+      edit.appendChild(created);
+      if (ink) ink.record(created, 0, created.length);
+      return true;
+    }
+    var textNode = lastTextNode(edit);
+    if (!textNode) return false;
+    var start = textNode.length;
+    textNode.appendData(added);
+    if (ink) ink.record(textNode, start, textNode.length);
+    return true;
+  }
+
   /* Rich Markdown uses the parser + node diff path because unfinished inline
      syntax can change meaning as the answer grows. It preserves stable nodes,
      but parsing/traversal can still scale with the open block. Plain prose is
-     appended directly by the bounded fast path in createStreamRenderer. */
+     appended directly by the bounded fast path in createStreamRenderer.
+     A pure suffix or a new list item extends the existing nodes instead. */
   function patchInnerHTML(targetEl, html, ink) {
     if (!targetEl) return;
+    if (targetEl.__xtjStreamHtml && tryExtendStreamHtml(targetEl, targetEl.__xtjStreamHtml, html, ink)) {
+      targetEl.__xtjStreamHtml = html;
+      return;
+    }
     function children(parent, wanted, depth) {
       var old = Array.from(parent.childNodes).filter(function(n) { return !(n.nodeType === 1 && n.classList.contains('ai-stream-cursor')); });
       var pos = 0;
@@ -187,20 +284,89 @@
       var holder = document.createElement('div'); holder.innerHTML = html;
       children(targetEl, holder, 0);
     } catch (_) { targetEl.innerHTML = html; }
+    targetEl.__xtjStreamHtml = html;
+  }
+
+  // Closed blocks stay in the caller's block cache. This only bounds the open
+  // tail: a long list re-renders the current line, and a long paragraph
+  // re-renders its plain suffix, once the result has matched a full render.
+  function createTailAccelerator(render) {
+    var listKey = '', listHtml = '', listVerified = '', frozenHead = '', frozenHtml = '';
+    function reset() { listKey = ''; listHtml = ''; listVerified = ''; frozenHead = ''; frozenHtml = ''; }
+    function joinHtml(base, extra) {
+      if (!extra) return base || '';
+      if (!base) return extra;
+      var openBase = /^<(\w+)>/.exec(base), openExtra = /^<(\w+)>/.exec(extra);
+      if (!openBase || !openExtra || openBase[1] !== openExtra[1]) return null;
+      var tag = openBase[1], close = '</' + tag + '>';
+      if (base.slice(-close.length) !== close || extra.slice(-close.length) !== close) return null;
+      if (tag === 'ul' || tag === 'ol') return base.slice(0, -close.length) + extra.slice(tag.length + 2);
+      if (tag === 'p') return base.slice(0, -4) + extra.slice(3, -4) + '</p>';
+      return null;
+    }
+    function plainSuffix(text) { return !!text && text.indexOf('\n') < 0 && !/[*`#\[\]|<>]/.test(text); }
+    function renderTail(tail) {
+      if (!tail) return '';
+      if (tail.length < 240 || /```|\||<|>/.test(tail) || /\n[ \t]*\n/.test(tail)) return render(tail);
+      if (/^(?:[-*+] |\d+\. )/m.test(tail) && tail.indexOf('\n') > 0) {
+        var end = tail.lastIndexOf('\n'), complete = tail.slice(0, end), partial = tail.slice(end + 1);
+        var lines = complete.split('\n'), ok = true;
+        for (var li = 0; li < lines.length; li++) if (lines[li] && !/^(?:[-*+] |\d+\. )/.test(lines[li])) ok = false;
+        if (!ok) return render(tail);
+        if (!listKey || complete.indexOf(listKey) !== 0) { listKey = ''; listHtml = ''; listVerified = ''; }
+        if (complete !== listKey) {
+          var built = '';
+          if (listKey && listHtml && complete.indexOf(listKey + '\n') === 0) {
+            built = listHtml;
+            var extraLines = complete.slice(listKey.length + 1).split('\n');
+            for (var ei = 0; ei < extraLines.length; ei++) {
+              built = joinHtml(built, render(extraLines[ei]));
+              if (!built) break;
+            }
+          } else built = render(complete);
+          if (!built) { listKey = ''; listHtml = ''; listVerified = ''; return render(tail); }
+          listHtml = built; listKey = complete;
+        }
+        var listed = partial ? joinHtml(listHtml, render(partial)) : listHtml;
+        if (!listed) { listKey = ''; listHtml = ''; listVerified = ''; return render(tail); }
+        if (listVerified !== complete) {
+          if (listed !== render(tail)) { listKey = ''; listHtml = ''; listVerified = ''; return render(tail); }
+          listVerified = complete;
+        }
+        return listed;
+      }
+      if (tail.indexOf('\n') >= 0 || /^(?:[-*+] |\d+\. )/.test(tail)) return render(tail);
+      var restLen = frozenHead && tail.indexOf(frozenHead) === 0 ? tail.length - frozenHead.length : tail.length;
+      if (!frozenHead || tail.indexOf(frozenHead) !== 0 || !plainSuffix(tail.slice(frozenHead.length)) || restLen > 220) {
+        var cut = tail.length - 120;
+        if (cut < 40) return render(tail);
+        if (/[\uDC00-\uDFFF]/.test(tail.charAt(cut))) cut++;
+        var head = tail.slice(0, cut), rest = tail.slice(cut);
+        if (!plainSuffix(rest)) return render(tail);
+        var headHtml = frozenHtml && frozenHead && head.indexOf(frozenHead) === 0 ? joinHtml(frozenHtml, render(head.slice(frozenHead.length))) : render(head);
+        var joined = headHtml && joinHtml(headHtml, render(rest));
+        if (!joined || joined !== render(tail)) return render(tail);
+        frozenHead = head; frozenHtml = headHtml;
+        return joined;
+      }
+      return joinHtml(frozenHtml, render(tail.slice(frozenHead.length))) || render(tail);
+    }
+    return { reset: reset, render: renderTail };
   }
 
   function createStreamRenderer(targetEl, options) {
     options = options || {};
     var ink = CORE.InkReveal.create(targetEl, options);
     var prefix = '', markup = '', cacheVerified = false, cacheDisabled = false, blockCache = new Map();
+    var tailAccel = createTailAccelerator(renderRich);
     var cachedMarkdown = getMarkdown() && getMarkdown().render;
     function renderStreamMarkdown(text) {
       var currentMarkdown = getMarkdown() && getMarkdown().render;
       if (currentMarkdown !== cachedMarkdown) {
-        cachedMarkdown = currentMarkdown; prefix = ''; markup = ''; cacheVerified = false; cacheDisabled = false; blockCache.clear();
+        cachedMarkdown = currentMarkdown; prefix = ''; markup = ''; cacheVerified = false; cacheDisabled = false; blockCache.clear(); tailAccel.reset();
       }
       if (cacheDisabled) return renderRich(text);
-      if (prefix && text.indexOf(prefix) !== 0) { prefix = ''; markup = ''; cacheVerified = false; blockCache.clear(); }
+      if (prefix && text.indexOf(prefix) !== 0) { prefix = ''; markup = ''; cacheVerified = false; blockCache.clear(); tailAccel.reset(); }
       var tail = text.slice(prefix.length), breaks = /\n[ \t]*\n+/g, match, committed = 0;
       while ((match = breaks.exec(tail))) {
         var block = tail.slice(committed, match.index);
@@ -217,10 +383,10 @@
         committed = breaks.lastIndex;
       }
       if (committed) prefix += tail.slice(0, committed);
-      var result = markup + renderRich(tail.slice(committed));
+      var result = markup + tailAccel.render(tail.slice(committed));
       if (!cacheVerified && prefix) {
         var full = renderRich(text);
-        if (result !== full) { cacheDisabled = true; prefix = ''; markup = ''; blockCache.clear(); return full; }
+        if (result !== full) { cacheDisabled = true; prefix = ''; markup = ''; blockCache.clear(); tailAccel.reset(); return full; }
         cacheVerified = true;
       }
       return result;
@@ -382,7 +548,7 @@
         if (!appendPlainMarkdown(next)) {
           patchInnerHTML(targetEl, renderStreamMarkdown(rendered), ink);
           resumePlainMarkdownTail();
-        }
+        } else delete targetEl.__xtjStreamHtml;
       }
       if (ink) ink.commit();
       ensureCursor();
@@ -395,7 +561,9 @@
           renderMs: renderedAt - renderStartedAt, packetChars: next.length, outputChars: rendered.length }); } catch (_) {}
       }
       if (!pending) {
-        if (streamClass) targetEl.classList.remove(streamClass);
+        // Leave the streaming class in place between frames. Adding and
+        // removing it on every packet dirties style just as the scroller reads layout.
+        if (finished && streamClass) targetEl.classList.remove(streamClass);
         if (finished && typeof options.onDone === 'function') {
           try { options.onDone(); } catch (e) {}
         }
@@ -525,7 +693,7 @@
         removeCursor();
         pending = '';
         if (!finished) {
-          try { if (targetEl) targetEl.innerHTML = ''; } catch (e) {}
+          try { if (targetEl) { delete targetEl.__xtjStreamHtml; targetEl.innerHTML = ''; } } catch (e) {}
         }
         if (streamClass && targetEl) targetEl.classList.remove(streamClass);
         // ★ 保留 targetEl 引用（cancelled 标志已使 append/flush/finish 短路）
@@ -547,7 +715,7 @@
         plainMarkdownParagraph = plainMarkdownTextNode = null;
         plainTextBuffer = '';
         removeCursor();
-        if (targetEl) targetEl.replaceChildren();
+        if (targetEl) { delete targetEl.__xtjStreamHtml; targetEl.replaceChildren(); }
         plainTextNode = null;
         if (streamClass && targetEl) targetEl.classList.remove(streamClass);
       }
