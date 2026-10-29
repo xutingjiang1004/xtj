@@ -591,6 +591,7 @@
    与"已思考 Xs"的静态终态形成明确区分。
    用 background-clip:text 实现文字流动，不改变布局、不触发重排。 */
 .ai-thinking.is-thinking .ai-thinking-label {
+  contain: paint;
   background-image: linear-gradient(
     100deg,
     rgba(95, 114, 117, 0.92) 0%,
