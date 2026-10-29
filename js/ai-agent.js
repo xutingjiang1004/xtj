@@ -3760,13 +3760,17 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     if (!force && !follows) return;
     if (container._dtScrollRaf) return;
     container._dtScrollRaf = true;
+    var run = function() {
+      container._dtScrollRaf = false;
+      if (container.isConnected === false) return;
+      if(!force && (container.id==='dtMessages'?container._aiFollow===false:!S.autoScrollPinned))return;
+      try { container.scrollTop = container.scrollHeight; } catch (e) {}
+    };
+    // Scroll before paint of this frame. A later animation frame lets the new
+    // text appear, then the view jumps down to catch it.
     try {
-      requestAnimationFrame(function() {
-        container._dtScrollRaf = false;
-        if (container.isConnected === false) return;
-        if(!force && (container.id==='dtMessages'?container._aiFollow===false:!S.autoScrollPinned))return;
-        try { container.scrollTop = container.scrollHeight; } catch (e) {}
-      });
+      if (typeof queueMicrotask === 'function') queueMicrotask(run);
+      else Promise.resolve().then(run);
     } catch (e2) {
       container._dtScrollRaf = false;
       try { container.scrollTop = container.scrollHeight; } catch (e3) {}
@@ -4555,14 +4559,84 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     return pending.slice(0, maxChunk);
   }
 
-  /* ── 流式 Markdown 补丁 ──────────────────────────────────────────────
-     Rich Markdown remains on the full parser + node diff path because an
-     unfinished link/emphasis/table can change meaning as more text arrives.
-     That path preserves stable DOM nodes, but parsing/traversing can still
-     scale with the open block. Plain prose uses the bounded direct-append
-     path below, so common answers do not repeatedly parse their whole body. */
+  function decodeBasicEntities(s) {
+    return String(s || '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
+  }
+  function streamContentTail(target) {
+    var node = target && target.lastElementChild;
+    if (node && node.classList && node.classList.contains('ai-stream-cursor')) node = node.previousElementSibling;
+    return node;
+  }
+  function streamEditTarget(el) {
+    if (!el) return null;
+    if (el.tagName === 'UL' || el.tagName === 'OL') {
+      var li = el.lastElementChild;
+      return li && li.tagName === 'LI' ? li : el;
+    }
+    if (el.tagName === 'PRE') {
+      var code = el.querySelector('code');
+      return code || el;
+    }
+    return el;
+  }
+  function lastTextNode(el) {
+    var node = el;
+    while (node && node.nodeType === 1) node = node.lastChild;
+    return node && node.nodeType === 3 ? node : null;
+  }
+  // Already-rendered Markdown grows by a text suffix or one new list item.
+  // Extend that node directly so a long answer is not parsed again each frame.
+  function tryExtendStreamHtml(target, prev, next, ink) {
+    if (!prev || !next || next.length <= prev.length) return false;
+    var i = 0, max = prev.length;
+    while (i < max && prev.charCodeAt(i) === next.charCodeAt(i)) i++;
+    var j = 0;
+    while (j < max - i && prev.charCodeAt(max - 1 - j) === next.charCodeAt(next.length - 1 - j)) j++;
+    if (!j || i + j < 4) return false;
+    var delta = next.slice(i, next.length - j);
+    if (!delta) return false;
+    var tail = streamContentTail(target);
+    if (!tail) return false;
+    if (delta.charAt(0) === '<') {
+      if ((tail.tagName !== 'UL' && tail.tagName !== 'OL') || !/^<li>[\s\S]*<\/li>$/.test(delta)) return false;
+      var holder = document.createElement('div');
+      holder.innerHTML = delta;
+      if (!holder.firstChild || holder.childNodes.length !== 1 || holder.firstChild.tagName !== 'LI') return false;
+      var item = holder.firstChild;
+      tail.appendChild(item);
+      if (ink) ink.inserted(item);
+      return true;
+    }
+    if (/</.test(delta)) return false;
+    var added = decodeBasicEntities(delta);
+    if (!added) return false;
+    var edit = streamEditTarget(tail);
+    if (!edit) return false;
+    if (next.charAt(i - 1) === '>') {
+      var created = document.createTextNode(added);
+      edit.appendChild(created);
+      if (ink) ink.record(created, 0, created.length);
+      return true;
+    }
+    var textNode = lastTextNode(edit);
+    if (!textNode) return false;
+    var start = textNode.length;
+    textNode.appendData(added);
+    if (ink) ink.record(textNode, start, textNode.length);
+    return true;
+  }
+
+  /* Rich Markdown uses the parser + node diff path because unfinished inline
+     syntax can change meaning as the answer grows. It preserves stable nodes,
+     but parsing/traversal can still scale with the open block. Plain prose is
+     appended directly by the bounded fast path in createStreamRenderer.
+     A pure suffix or a new list item extends the existing nodes instead. */
   function patchInnerHTML(targetEl, html, ink) {
     if (!targetEl) return;
+    if (targetEl.__xtjStreamHtml && tryExtendStreamHtml(targetEl, targetEl.__xtjStreamHtml, html, ink)) {
+      targetEl.__xtjStreamHtml = html;
+      return;
+    }
     function children(parent, wanted, depth) {
       var old = Array.from(parent.childNodes).filter(function(n) { return !(n.nodeType === 1 && n.classList.contains('ai-stream-cursor')); });
       var pos = 0;
@@ -4587,6 +4661,113 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var holder = document.createElement('div'); holder.innerHTML = html;
       children(targetEl, holder, 0);
     } catch (_) { targetEl.innerHTML = html; }
+    targetEl.__xtjStreamHtml = html;
+  }
+
+  // Closed blocks stay in the caller's block cache. This only bounds the open
+  // tail: a long list re-renders the current line, and a long paragraph
+  // re-renders its plain suffix, once the result has matched a full render.
+  function createTailAccelerator(render) {
+    var listKey = '', listHtml = '', listVerified = '', frozenHead = '', frozenHtml = '';
+    function reset() { listKey = ''; listHtml = ''; listVerified = ''; frozenHead = ''; frozenHtml = ''; }
+    function joinHtml(base, extra) {
+      if (!extra) return base || '';
+      if (!base) return extra;
+      var openBase = /^<(\w+)>/.exec(base), openExtra = /^<(\w+)>/.exec(extra);
+      if (!openBase || !openExtra || openBase[1] !== openExtra[1]) return null;
+      var tag = openBase[1], close = '</' + tag + '>';
+      if (base.slice(-close.length) !== close || extra.slice(-close.length) !== close) return null;
+      if (tag === 'ul' || tag === 'ol') return base.slice(0, -close.length) + extra.slice(tag.length + 2);
+      if (tag === 'p') return base.slice(0, -4) + extra.slice(3, -4) + '</p>';
+      return null;
+    }
+    function plainSuffix(text) { return !!text && text.indexOf('\n') < 0 && !/[*`#\[\]|<>]/.test(text); }
+    function renderTail(tail) {
+      if (!tail) return '';
+      if (tail.length < 240 || /```|\||<|>/.test(tail) || /\n[ \t]*\n/.test(tail)) return render(tail);
+      if (/^(?:[-*+] |\d+\. )/m.test(tail) && tail.indexOf('\n') > 0) {
+        var end = tail.lastIndexOf('\n'), complete = tail.slice(0, end), partial = tail.slice(end + 1);
+        var lines = complete.split('\n'), ok = true;
+        for (var li = 0; li < lines.length; li++) if (lines[li] && !/^(?:[-*+] |\d+\. )/.test(lines[li])) ok = false;
+        if (!ok) return render(tail);
+        if (!listKey || complete.indexOf(listKey) !== 0) { listKey = ''; listHtml = ''; listVerified = ''; }
+        if (complete !== listKey) {
+          var built = '';
+          if (listKey && listHtml && complete.indexOf(listKey + '\n') === 0) {
+            built = listHtml;
+            var extraLines = complete.slice(listKey.length + 1).split('\n');
+            for (var ei = 0; ei < extraLines.length; ei++) {
+              built = joinHtml(built, render(extraLines[ei]));
+              if (!built) break;
+            }
+          } else built = render(complete);
+          if (!built) { listKey = ''; listHtml = ''; listVerified = ''; return render(tail); }
+          listHtml = built; listKey = complete;
+        }
+        var listed = partial ? joinHtml(listHtml, render(partial)) : listHtml;
+        if (!listed) { listKey = ''; listHtml = ''; listVerified = ''; return render(tail); }
+        if (listVerified !== complete) {
+          if (listed !== render(tail)) { listKey = ''; listHtml = ''; listVerified = ''; return render(tail); }
+          listVerified = complete;
+        }
+        return listed;
+      }
+      if (tail.indexOf('\n') >= 0 || /^(?:[-*+] |\d+\. )/.test(tail)) return render(tail);
+      var restLen = frozenHead && tail.indexOf(frozenHead) === 0 ? tail.length - frozenHead.length : tail.length;
+      if (!frozenHead || tail.indexOf(frozenHead) !== 0 || !plainSuffix(tail.slice(frozenHead.length)) || restLen > 220) {
+        var cut = tail.length - 120;
+        if (cut < 40) return render(tail);
+        if (/[\uDC00-\uDFFF]/.test(tail.charAt(cut))) cut++;
+        var head = tail.slice(0, cut), rest = tail.slice(cut);
+        if (!plainSuffix(rest)) return render(tail);
+        var headHtml = frozenHtml && frozenHead && head.indexOf(frozenHead) === 0 ? joinHtml(frozenHtml, render(head.slice(frozenHead.length))) : render(head);
+        var joined = headHtml && joinHtml(headHtml, render(rest));
+        if (!joined || joined !== render(tail)) return render(tail);
+        frozenHead = head; frozenHtml = headHtml;
+        return joined;
+      }
+      return joinHtml(frozenHtml, render(tail.slice(frozenHead.length))) || render(tail);
+    }
+    return { reset: reset, render: renderTail };
+  }
+
+  /* ── 流式 Markdown 补丁 ──────────────────────────────────────────────
+     Rich Markdown remains on the full parser + node diff path because an
+     unfinished link/emphasis/table can change meaning as more text arrives.
+     That path preserves stable DOM nodes, but parsing/traversing can still
+     scale with the open block. Plain prose uses the bounded direct-append
+     path below, so common answers do not repeatedly parse their whole body. */
+  function patchInnerHTML(targetEl, html, ink) {
+    if (!targetEl) return;
+    if (targetEl.__xtjStreamHtml && tryExtendStreamHtml(targetEl, targetEl.__xtjStreamHtml, html, ink)) {
+      targetEl.__xtjStreamHtml = html;
+      return;
+    }
+    function children(parent, wanted, depth) {
+      var old = Array.from(parent.childNodes).filter(function(n) { return !(n.nodeType === 1 && n.classList.contains('ai-stream-cursor')); });
+      var pos = 0;
+      Array.from(wanted.childNodes).forEach(function(want) {
+        var have = old[pos++];
+        if (!have) { var added = want.cloneNode(true); parent.insertBefore(added, parent.querySelector(':scope > .ai-stream-cursor')); if (ink) ink.inserted(added); return; }
+        if (have.nodeType === want.nodeType && (want.nodeType === 3 ? have.data === want.data : have.isEqualNode(want))) return;
+        if (have.nodeType === 3 && want.nodeType === 3) {
+          var before = have.data;
+          if (want.data.indexOf(before) === 0) { have.appendData(want.data.slice(before.length)); if (ink) ink.record(have, before.length, have.length); }
+          else have.data = want.data;
+          return;
+        }
+        var same = have.nodeType === 1 && want.nodeType === 1 && have.tagName === want.tagName && depth < 32 && have.attributes.length === want.attributes.length;
+        if (same) same = Array.from(want.attributes).every(function(a) { return have.getAttribute(a.name) === a.value; });
+        if (same) children(have, want, depth + 1);
+        else parent.replaceChild(want.cloneNode(true), have);
+      });
+      for (; pos < old.length; pos++) if (old[pos].parentNode === parent) old[pos].remove();
+    }
+    try {
+      var holder = document.createElement('div'); holder.innerHTML = html;
+      children(targetEl, holder, 0);
+    } catch (_) { targetEl.innerHTML = html; }
+    targetEl.__xtjStreamHtml = html;
   }
 
   // Closed ordinary paragraphs cannot change when a later chunk arrives.
@@ -4596,6 +4777,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   function createStreamingMarkdownCache(render) {
     var prefix = '', markup = '', verified = false, disabled = false;
     var blocks = new Map();
+    var tailAccel = createTailAccelerator(function(text) { return render(text, true); });
     function safeBlock(text) {
       if (/```|\||<|>|^[ \t]*(?:[-*+] |\d+\. )/m.test(text)) return false;
       var rest = text.replace(/`[^`\n]*`/g, '')
@@ -4605,7 +4787,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }
     return function(text) {
       if (disabled) return render(text, true);
-      if (prefix && text.indexOf(prefix) !== 0) { prefix = ''; markup = ''; verified = false; blocks.clear(); }
+      if (prefix && text.indexOf(prefix) !== 0) { prefix = ''; markup = ''; verified = false; blocks.clear(); tailAccel.reset(); }
       var tail = text.slice(prefix.length), breaks = /\n[ \t]*\n+/g, match, committed = 0;
       while ((match = breaks.exec(tail))) {
         var block = tail.slice(committed, match.index);
@@ -4619,10 +4801,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         committed = breaks.lastIndex;
       }
       if (committed) prefix += tail.slice(0, committed);
-      var result = markup + render(tail.slice(committed), true);
+      var result = markup + tailAccel.render(tail.slice(committed));
       if (!verified && prefix) {
         var full = render(text, true);
-        if (result !== full) { disabled = true; prefix = ''; markup = ''; blocks.clear(); return full; }
+        if (result !== full) { disabled = true; prefix = ''; markup = ''; blocks.clear(); tailAccel.reset(); return full; }
         verified = true;
       }
       return result;
@@ -4833,7 +5015,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           if (!appendPlainMarkdown(next)) {
             patchInnerHTML(targetEl, renderStreamMarkdown(rendered), ink);
             resumePlainMarkdownTail();
-          }
+          } else delete targetEl.__xtjStreamHtml;
         } else if (!selectionRetryHandler) {
           // Consumed text must not be lost while the user has a selection.
           // Re-render the accumulated text once the selection clears.
@@ -4863,7 +5045,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         }); } catch (_) {}
       }
       if (!pending) {
-        if (streamClass) targetEl.classList.remove(streamClass);
+        // Keep the class until the reply finishes. Toggling it every frame
+        // dirties style in the same turn the scroller measures layout.
+        if (finished && streamClass) targetEl.classList.remove(streamClass);
         if (finished && typeof options.onDone === 'function') {
           try { options.onDone(); } catch (e) {}
         }
@@ -5003,7 +5187,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         rendered = '';
         // 如果已经 finish（正常完成），不要清空目标元素，避免把最终内容抹掉
         if (!finished) {
-          try { if (targetEl) targetEl.innerHTML = ''; } catch (e) {}
+          try { if (targetEl) { delete targetEl.__xtjStreamHtml; targetEl.innerHTML = ''; } } catch (e) {}
         }
         if (streamClass && targetEl) targetEl.classList.remove(streamClass);
         targetEl = null;
