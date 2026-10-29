@@ -9,16 +9,18 @@ test('tool narration stays with the process while CJK paragraphs, a table and te
   await emit(p,{type:'reasoning_start'});await emit(p,{type:'reasoning',text:'先核实原始材料。'});await emit(p,{type:'content',text:'我先核对两个来源。'});
   await p.waitForFunction(()=>document.querySelector('.ai-msg.assistant .ai-msg-bubble')?.textContent.includes('核对两个来源'));
   await emit(p,{type:'tool_calls',tools:[{id:'verify-one',name:'search_web',args:{query:'原始来源'}}]});
-  await p.waitForSelector('.ai-tool-narration');assert.equal(await p.locator('.ai-tool-narration').textContent(),'我先核对两个来源。');
+  await p.waitForSelector('.ai-content-segment');
+  assert.equal(await p.locator('.ai-content-segment').textContent(),'我先核对两个来源。');
+  assert.equal(await p.evaluate(()=>!!document.querySelector('.ai-content-segment')?.closest('.ai-thinking')), false);
   await emit(p,{type:'tool_result',call_id:'verify-one',tool_name:'search_web',success:true,count:2,summary:'已核对两个来源'});
   await emit(p,{type:'reasoning',text:'再对照不同统计口径。'});
   const prefix='第一段：已经核对原始材料。\n\n',tail='| 项目 | 结论 |\n| --- | --- |\n| 日期 | 一致 |\n\n最后一段：保留原文顺序。';
-  await emit(p,{type:'content',text:prefix});await p.waitForFunction(()=>document.querySelector('.ai-msg.assistant .ai-msg-bubble p')?.textContent==='第一段：已经核对原始材料。');
-  await p.evaluate(()=>window.keptReplyParagraph=document.querySelector('.ai-msg.assistant .ai-msg-bubble p'));
+  await emit(p,{type:'content',text:prefix});await p.waitForFunction(()=>document.querySelector('.ai-msg.assistant .ai-msg-bubble:not(.ai-content-segment) p')?.textContent==='第一段：已经核对原始材料。');
+  await p.evaluate(()=>window.keptReplyParagraph=document.querySelector('.ai-msg.assistant .ai-msg-bubble:not(.ai-content-segment) p'));
   await emit(p,{type:'content',text:tail});await emit(p,{type:'done',content:prefix+tail,reasoning:'先核实原始材料。再对照不同统计口径。',thinking_elapsed_ms:1234,thinking_mode:'max',complete:true,saved:true,conversation_id:'POLISH01'});
   await p.waitForFunction(()=>{const n=document.querySelector('.ai-msg.assistant');return n&&!n.classList.contains('generating')&&n._msgRef;});
-  const result=await p.evaluate(()=>{const n=document.querySelector('.ai-msg.assistant'),b=n.querySelector('.ai-msg-bubble');return{stable:b.querySelector('p')===keptReplyParagraph,children:Array.from(b.children).filter(x=>!x.classList.contains('ai-stream-cursor')).map(x=>[x.tagName,x.textContent]),reasoning:n._msgRef.reasoning,time:n._msgRef.thinking_elapsed_ms,label:n.querySelector('.ai-thinking-label')?.textContent};});
-  assert.equal(result.stable,true);assert.deepEqual(result.children.map(x=>x[0]),['P','TABLE','P']);assert.match(result.children[2][1],/^最后一段/);assert.equal(result.reasoning,'先核实原始材料。再对照不同统计口径。');assert.equal(result.time,1234);assert.match(result.label,/已思考/);assert.deepEqual(f.errors,[]);
+  const result=await p.evaluate(()=>{const n=document.querySelector('.ai-msg.assistant'),b=n.querySelector('.ai-msg-bubble:not(.ai-content-segment)');return{stable:b.querySelector('p')===keptReplyParagraph,children:Array.from(b.children).filter(x=>!x.classList.contains('ai-stream-cursor')).map(x=>[x.tagName,x.textContent]),reasoning:n._msgRef.reasoning,time:n._msgRef.thinking_elapsed_ms,label:n.querySelector('.ai-thinking-label')?.textContent,narrationInsideThinking:!!n.querySelector('.ai-thinking .ai-content-segment')};});
+  assert.equal(result.stable,true);assert.deepEqual(result.children.map(x=>x[0]),['P','TABLE','P']);assert.match(result.children[2][1],/^最后一段/);assert.equal(result.reasoning,'先核实原始材料。再对照不同统计口径。');assert.equal(result.time,1234);assert.match(result.label,/已思考/);assert.equal(result.narrationInsideThinking,false);assert.deepEqual(f.errors,[]);
  }finally{await f.close();}
 });
 

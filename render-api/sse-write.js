@@ -145,6 +145,20 @@ function writeSseRaw(res, payload, eventName) {
   return false;
 }
 
+function writeSseComment(res, text) {
+  try {
+    if (!res || res.writableEnded || res.destroyed || !res.headersSent) return false;
+    const state = sseState(res);
+    if (state.ending || state.closed) return false;
+    const data = ': ' + String(text || 'ping').replace(/[\r\n]/g, ' ') + '\n\n';
+    res._sseLastWriteAt = Date.now();
+    res._sseBuffer.push(data);
+    res._sseBufferBytes += Buffer.byteLength(data, 'utf8');
+    state.pump();
+    return !state.closed;
+  } catch (e) { return false; }
+}
+
 function writeSse(res,payload,eventName){
   if(!res||!payload)return writeSseRaw(res,payload,eventName);
   if(!res._aiFollowupEnabled||eventName)return writeSseNow(res,payload,eventName);
@@ -171,6 +185,7 @@ function writeSse(res,payload,eventName){
 
 module.exports = {
   writeSse: writeSse,
+  writeSseComment: writeSseComment,
   endSse,
   MAX_SSE_BUFFER_BYTES: MAX_SSE_BUFFER_BYTES
 };

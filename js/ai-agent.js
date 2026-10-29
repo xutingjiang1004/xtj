@@ -1181,6 +1181,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   }
 
   // 清理模型 reasoning 内容里常见的整段括号包裹，提升可读性
+  function paintReasoningHtml(node, text) {
+    if (!node) return;
+    var clean = cleanReasoningText(text);
+    if (!clean) { node.textContent = ''; return; }
+    try { node.innerHTML = renderMarkdown(clean); }
+    catch (ePaint) { node.textContent = clean; }
+  }
+
   function cleanReasoningText(txt) {
     if (!txt) return '';
     return String(txt).split('\n').map(function(line) {
@@ -3856,7 +3864,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   }
 
   function formatThinkingElapsed(ms) {
-    var totalSeconds = Math.max(0, Math.floor((Number(ms) || 0) / 1000));
+    var elapsed = Number(ms) || 0;
+    // 不足 1 秒仍显示 1s，避免「已思考 0s」。真正的 0 只留给未开始的计时。
+    if (elapsed > 0 && elapsed < 1000) return '1s';
+    var totalSeconds = Math.max(0, Math.floor(elapsed / 1000));
     if (totalSeconds < 60) return totalSeconds + 's';
     var minutes = Math.floor(totalSeconds / 60);
     var seconds = totalSeconds % 60;
@@ -3953,7 +3964,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     toggle.appendChild(el('span', { class: 'ai-thinking-caret', text: '\u25be', 'aria-hidden': 'true' }));
 
     var panel = el('div', { class: 'ai-thinking-panel' });
-    panel.appendChild(el('div', { class: 'ai-thinking-body', text: cleanReasoningText(reasoning) }));
+    var thinkingBody = el('div', { class: 'ai-thinking-body' });
+    paintReasoningHtml(thinkingBody, reasoning);
+    panel.appendChild(thinkingBody);
 
     toggle.addEventListener('click', function() {
       container.__userCollapsed = container.classList.contains('expanded');
@@ -4188,7 +4201,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   // ★ O 修复 Bug 4: 格式化 think_duration_ms
   function formatThinkDuration(ms) {
     if (!ms || ms <= 0) return '0s';
-    var sec = Math.round(ms / 1000);
+    var sec = Math.max(1, Math.round(ms / 1000));
     var min = Math.floor(sec / 60);
     var s = sec % 60;
     return min > 0 ? (min + 'm ' + s + 's') : (s + 's');
@@ -4200,7 +4213,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var events = [], room = 64000, toolRoom = 128;
     hosts.slice(0, 128).forEach(function(host) {
       if (host.classList.contains('ai-reasoning-segment')) {
-        var text = host.textContent.slice(0, room); room -= text.length;
+        var text = String(host.__rawReasoning || host.textContent || '').slice(0, room); room -= text.length;
         if (text) events.push({ type: 'reasoning', text: text });
       } else if (host.classList.contains('ai-process-timeline')) {
         var tools = Array.from(host.querySelectorAll('.ai-tool-step')).slice(0, Math.min(32, toolRoom)).map(function(step) {
@@ -4223,12 +4236,18 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   function reconcileReasoningBody(body, reasoning) {
     if (!body || !reasoning) return;
     var text = cleanReasoningText(reasoning);
-    if (!body.__orderedProcess) { body.textContent = text; return; }
+    if (!body.__orderedProcess) { paintReasoningHtml(body, text); return; }
+    if (body.__streamedReasoning && (text === body.__streamedReasoning || text === cleanReasoningText(body.__streamedReasoning))) return;
     var segments = Array.from(body.querySelectorAll('.ai-reasoning-segment'));
-    var shown = segments.map(function(segment){return segment.textContent;}).join('');
-    if (text === shown) return;
-    if (!shown) body.insertBefore(el('div', {class:'ai-reasoning-segment',text:text}), body.firstChild);
-    else if (text.indexOf(shown) === 0) body.appendChild(el('div', {class:'ai-reasoning-segment',text:text.slice(shown.length)}));
+    var shown = segments.map(function(segment){ return segment.__rawReasoning || segment.textContent || ''; }).join('');
+    if (!shown || text === shown) return;
+    if (text.indexOf(shown) !== 0) return;
+    var extra = text.slice(shown.length);
+    if (!extra) return;
+    var seg = el('div', { class: 'ai-reasoning-segment' });
+    seg.__rawReasoning = extra;
+    paintReasoningHtml(seg, extra);
+    body.appendChild(seg);
   }
 
   function buildOrderedProcessNode(msg, messagesEl) {
@@ -4241,7 +4260,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     (msg.process_events || []).slice(0, 128).forEach(function(event) {
       if (event.type === 'reasoning' && reasoning) {
         var text = String(event.text || '').slice(0, room); room -= text.length;
-        if (text) body.appendChild(el('div', { class: 'ai-reasoning-segment', text: cleanReasoningText(text) }));
+        if (text) {
+          var reasoningSeg = el('div', { class: 'ai-reasoning-segment' });
+          reasoningSeg.__rawReasoning = cleanReasoningText(text);
+          paintReasoningHtml(reasoningSeg, text);
+          body.appendChild(reasoningSeg);
+        }
       } else if (event.type === 'tools' && Array.isArray(event.tools)) {
         var group = el('div', { class: 'ai-tool-timeline ai-process-timeline' });
         event.tools.slice(0, 32).forEach(function(tool) {
@@ -6920,7 +6944,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   //   前端随即渲染「连接中断 / 超过 45 秒未收到新数据」。
   //   阈值放宽到 180 秒：既能容忍 high 思考期的长静默，又仍能在服务端真实挂死时
   //   及时收束（服务端 heartbeat 每 8s 一次，正常情况下该计时器根本不会触发）。
-  var RESEARCH_IDLE_TIMEOUT_MS = 180000;
+  var RESEARCH_IDLE_TIMEOUT_MS = 1800000;
 
   // Tavily Deep Research SSE 调用
   //   resolve({ answer, sources, message_id }); reject(Error) — err.cancelled / err.tavilyTimeout / err.networkError / err.status
@@ -8496,7 +8520,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (!isCurrentDeepSend()) return;
       try { controller.abort('timeout'); } catch (e) {}
       controller._abortReason = 'timeout';
-    }, 300000);
+    }, 1800000);
     S._dtFetchTimeoutTimer = dtFetchTimeoutTimer;
     if (dtFetchTimeoutTimer && dtFetchTimeoutTimer.unref) dtFetchTimeoutTimer.unref();
 
@@ -10021,11 +10045,38 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     scrollToBottom(messagesEl, true);
 
     var interruptedFinalizer = null;
+    var turnSettled = false;
+    var stopNoteKind = 'stopped';
+    function keepInterruptedPlaceholder(kind) {
+      if (!assistantNode || assistantNode.isConnected === false) return false;
+      var earlyThinking = assistantNode.querySelector('.ai-thinking');
+      var pendingReply = !!(assistantBubble && (assistantBubble.textContent === '正在回复…' || assistantBubble.classList.contains('ai-reply-pending')));
+      var hasSegment = !!assistantNode.querySelector('.ai-content-segment, .ai-process-timeline');
+      var bubbleText = assistantBubble && String(assistantBubble.textContent || '').trim();
+      var hasAnswer = !!(bubbleText && bubbleText !== '正在回复…' && bubbleText !== '正在思考中');
+      if (!earlyThinking && !pendingReply && !hasSegment && !hasAnswer) return false;
+      assistantNode.classList.remove('generating');
+      var earlyLabel = earlyThinking && earlyThinking.querySelector('.ai-thinking-label');
+      if (earlyLabel && /^正在思考/.test(String(earlyLabel.textContent || ''))) earlyLabel.textContent = '已停止';
+      if (earlyThinking) { try { setThinkingActive(earlyThinking, false); } catch (eAct) {} }
+      if (pendingReply && assistantBubble) {
+        assistantBubble.textContent = '';
+        assistantBubble.style.display = 'none';
+      }
+      if (!assistantNode.querySelector('.ai-stop-note')) {
+        try {
+          assistantNode.appendChild(el('div', { class: 'ai-error-note ai-stop-note' }, kind === 'timeout' ? '请求超时，可点击继续' : '已停止，可点击继续'));
+        } catch (eNote) {}
+      }
+      try { if (typeof attachContinueGenerateBtn === 'function') attachContinueGenerateBtn(assistantNode, messagesEl); } catch (eBtn) {}
+      turnSettled = true;
+      return true;
+    }
     function preserveInterruptedTurn() {
       if ((S._currentReqId !== reqId || !customModelIdentityCurrent(sendIdentity)) || assistantNode.isConnected === false) return;
       userMsg.interrupted = true;
       if (interruptedFinalizer) interruptedFinalizer();
-      else {
+      else if (!keepInterruptedPlaceholder(stopNoteKind)) {
         assistantNode.classList.remove('generating');
         assistantNode.remove();
       }
@@ -10034,10 +10085,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     S._interruptChat = { reqId: reqId, stop: preserveInterruptedTurn };
 
     function preserveFailedTurn() {
+      if (turnSettled) return;
       if ((S._currentReqId !== reqId || !customModelIdentityCurrent(sendIdentity))) return;
       userMsg.interrupted = true;
-      if (interruptedFinalizer && (aiContent || aiReasoning || assistantNode.querySelector('.ai-process-timeline'))) interruptedFinalizer();
-      else {
+      if (interruptedFinalizer && (aiContent || aiReasoning || assistantNode.querySelector('.ai-thinking, .ai-process-timeline, .ai-content-segment'))) interruptedFinalizer();
+      else if (!keepInterruptedPlaceholder(stopNoteKind)) {
         try { assistantNode.remove(); } catch (eFailedNode) {}
         try { setAiHistoryCache(S.conversationId, S.messages); } catch (eFailedCache) {}
       }
@@ -10125,7 +10177,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         clientRequestId: 'cr_' + S.clientRequestId,
         // ★ 优化：后端深入研究/长思考最长 5 分钟，前端 120s 会提前掐断，
         // 对齐为 300s（SSE idle 看门狗 45s/120s 仍负责真正的假死检测）。
-        timeoutMs: 300000
+        timeoutMs: 1800000
       });
       sharedCtrl.start();
       window.XtjAiCore.RequestController.registerInFlight('cat_ai', sharedCtrl);
@@ -10190,7 +10242,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         // ★ 修复：自定义模型通道此前漏发 attachments，文件内容无法传给模型
         attachments: attachmentPayload || undefined,
         client_request_id: reqId,
-        timeout_ms: 240000
+        timeout_ms: 1800000
       });
     } else {
       // ★★★ 2026-09-17 修复（P0「内置模型上下文丢失」）：
@@ -10336,6 +10388,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var buffer = '';
       var aiContent = '';
       var aiReasoning = '';
+      var sealedContents = [];
       var contentTruncated = false;
       var reasoningStarted = false;
       // P5: using assistantNode (single DOM node)
@@ -10497,6 +10550,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         } catch (eSettleTimeline) {}
       }
 
+      function appendStoppedNote(node, kind) {
+        if (!node || node.querySelector('.ai-stop-note')) return;
+        var text = kind === 'timeout' ? '请求超时，可点击继续' : '已停止，可点击继续';
+        try { node.appendChild(el('div', { class: 'ai-error-note ai-stop-note' }, text)); } catch (eNote) {}
+      }
+
       function attachContinueGenerateBtn(node, msgHost) {
         if (!node || node.querySelector('.ai-continue-btn')) return;
         var btn = el('button', { type: 'button', class: 'ai-continue-btn', text: '继续生成' });
@@ -10581,17 +10640,27 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
         // 判断是否有有效正文；没有时给出兜底提示，避免气泡完全空白
         var hasContent = !!(content && String(content).trim().length > 0);
+        var hasSealed = sealedContents.some(function(part) { return String(part || '').trim(); });
         var hasThinking = !!(thinking && String(thinking).trim().length > 0);
+        var stoppedEarly = !!(evt && evt.interrupted === true);
         var fallbackText = hasThinking ? 'AI 只返回了思考过程，没有生成正文回复。' : 'AI 暂无回复，请重试。';
-        if (evt && evt.interrupted === true) fallbackText = '已停止回复';
+        if (!hasContent && assistantBubble) {
+          var keptBubble = String(assistantBubble.textContent || '').trim();
+          if (keptBubble && keptBubble !== '正在回复…' && keptBubble !== '正在思考中') {
+            content = keptBubble;
+            hasContent = true;
+          }
+        }
 
         if (contentRenderer && !contentRenderer.isCancelled) {
           if (hasContent) {
             contentRenderer.finish(content);
-          } else {
+          } else if (!stoppedEarly && !hasSealed) {
             contentRenderer.finish(fallbackText);
+          } else {
+            try { contentRenderer.stop(); } catch (eStopRender) {}
           }
-        } else {
+        } else if (!stoppedEarly && !hasSealed) {
           // P4 修复: 无 contentRenderer，或渲染器已被 cancel()（done 收尾前的
           // resetActiveRenderersByChannel('chat') 会清掉整段流式文本）。此时
           // finish() 因 cancelled 直接 return，必须回退到直接以最终 content 重绘，
@@ -10600,6 +10669,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             createSmoothTextRenderer(assistantBubble).finish(hasContent ? content : fallbackText);
           }
         }
+        turnSettled = true;
         cleanupRenderers();
         if (node) {
           node.classList.remove('generating');
@@ -10634,13 +10704,25 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             reconcileReasoningBody(body, thinking);
           }
           if (rNode) {
-            setThinkingExpanded(rNode, !!rNode.classList.contains('expanded') || !!rNode.querySelector('.ai-tool-step.is-error') && rNode.__userCollapsed !== true, messagesEl);
+            var thinkingOpen = false;
+            if (rNode.__userCollapsed === false) thinkingOpen = true;
+            else if (rNode.__userCollapsed === true) thinkingOpen = false;
+            else if (evt && evt.interrupted === true) thinkingOpen = rNode.classList.contains('expanded');
+            else if (rNode.querySelector('.ai-tool-step.is-error')) thinkingOpen = true;
+            setThinkingExpanded(rNode, thinkingOpen, messagesEl);
             if (thinkingTimer) {
               thinkingTimer.syncFinal(finalThinkingElapsedMs);
             } else {
               setThinkingStatus(rNode, '已思考 ' + formatThinkingElapsed(finalThinkingElapsedMs));
             }
           }
+        } else if (stoppedEarly && node) {
+          var stuckThinkLabel = node.querySelector('.ai-thinking-label');
+          if (stuckThinkLabel && /^正在思考/.test(String(stuckThinkLabel.textContent || ''))) {
+            stuckThinkLabel.textContent = finalThinkingElapsedMs > 0 ? ('已思考 ' + formatThinkingElapsed(finalThinkingElapsedMs)) : '已停止';
+          }
+          var stuckThink = node.querySelector('.ai-thinking');
+          if (stuckThink) { try { setThinkingActive(stuckThink, false); } catch (eStuck) {} }
         } else if (reasoningContainer) {
           if (thinkingTimer) thinkingTimer.cancel();
           try { reasoningContainer.remove(); } catch (e) {}
@@ -10655,7 +10737,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         userMsg._historyRequestAtCommit = S.historyRequestId;
         var aiMsg = {
           role: 'assistant',
-          content: content,
+          content: sealedContents.join('') + String(content || ''),
           client_request_id: reqId,
           followups:evt&&Array.isArray(evt.followups)?evt.followups:[],
           context_memory:evt&&evt.context_memory||streamContextMemory,context_budget:evt&&evt.context_budget||streamContextBudget,
@@ -10786,10 +10868,22 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       interruptedFinalizer = function() {
         // Read the complete received buffers, including text still waiting for
         // the animation renderer, and settle timers/tool indicators immediately.
-        if (aiContent || aiReasoning || snapshotAiProcess(assistantNode).length || streamSiteCards.length) {
+        try { if (reasoningRenderer && reasoningRenderer.flush) reasoningRenderer.flush(); } catch (eFlushR) {}
+        try { if (contentRenderer && contentRenderer.flush) contentRenderer.flush(); } catch (eFlushC) {}
+        var keptVisible = !!(aiContent || aiReasoning || sealedContents.length ||
+          (assistantBubble && String(assistantBubble.textContent || '').trim()) ||
+          assistantNode.querySelector('.ai-thinking, .ai-content-segment, .ai-process-timeline, .ai-msg-bubble'));
+        if (keptVisible) {
           finishAiMessage(assistantNode, aiContent, aiReasoning, { interrupted: true });
+          appendStoppedNote(assistantNode, stopNoteKind);
+          var liveThinkLabel = assistantNode.querySelector('.ai-thinking-label');
+          if (liveThinkLabel && /^正在思考/.test(String(liveThinkLabel.textContent || ''))) {
+            liveThinkLabel.textContent = finalThinkingElapsedMs > 0 ? ('已思考 ' + formatThinkingElapsed(finalThinkingElapsedMs)) : '已停止';
+          }
+          try { attachContinueGenerateBtn(assistantNode, messagesEl); } catch (eStopCont) {}
         } else {
           _finalized = true;
+          turnSettled = true;
           assistantNode.remove();
         }
         cleanupRenderers();
@@ -10886,6 +10980,30 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         return thinkingTimer;
       }
 
+      function sealAssistantContent(text) {
+        var value = String(text || '');
+        if (!value.trim()) return;
+        ensureAssistantBubbleReady();
+        if (contentRenderer) {
+          try { contentRenderer.finish(value); } catch (eSealFinish) {}
+          contentRenderer = null;
+        } else if (assistantBubble) {
+          try { assistantBubble.innerHTML = renderMarkdown(value); } catch (eSealHtml) { assistantBubble.textContent = value; }
+        }
+        if (assistantBubble) {
+          assistantBubble.classList.add('ai-content-segment');
+          assistantBubble.classList.remove('ai-typing', 'ai-reply-pending');
+          assistantBubble.style.display = 'block';
+        }
+        sealedContents.push(value);
+        aiContent = '';
+        var nextBubble = el('div', { class: 'ai-msg-bubble' });
+        nextBubble.style.display = 'none';
+        if (assistantBubble && assistantBubble.parentNode) assistantBubble.parentNode.insertBefore(nextBubble, assistantBubble.nextSibling);
+        else assistantNode.appendChild(nextBubble);
+        assistantBubble = nextBubble;
+      }
+
       function ensureAssistantBubbleReady() {
         hideAssistantTyping();
         assistantBubble.classList.remove('ai-reply-pending');
@@ -10924,7 +11042,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var _receivedAny = false;
       var _idleCheckTimer = setInterval(function() {
         if (timedOut || !S.active) return;
-        var idleThreshold = _receivedAny ? 120000 : 45000;
+        // 心跳会刷新 _lastDataTime。这里只判断连接真的没数据，绝对上限由 30 分钟控制器负责。
+        var idleThreshold = _receivedAny ? 180000 : 120000;
         if (Date.now() - _lastDataTime > idleThreshold) {
           timedOut = true;
           if (controller && controller.abort) { try { controller.abort(); } catch (e) {} }
@@ -11123,15 +11242,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             var timeline = ensureToolTimeline(true, evt);
             // Keep a tool round's progress narration with its process. The
             // final answer can then grow without replacing a different prefix.
-            if (aiContent.trim()) {
-              var narration = el('p', {class:'ai-tool-narration',text:aiContent});
-              timeline.insertBefore(narration,timeline.firstChild);
-              if (contentRenderer) { contentRenderer.cancel(); contentRenderer = null; }
-              aiContent = '';
-              assistantBubble.replaceChildren();
-              assistantBubble.style.display = 'none';
-              assistantBubble.classList.remove('ai-typing');
-            }
+            if (aiContent.trim()) sealAssistantContent(aiContent);
             _thinkingSettledOnContent = false;
             if (_sendThinkingMode !== 'off') { reasoningStarted = true; ensureThinkingTimer().resume(); }
             // ★★★ 2026-09-17 重写（P0「工具调用动画全部展开、堆叠占位」）：
@@ -11860,10 +11971,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             }
             var body = reasoningSegment();
             if (body) {
+              var reasoningHost = body.closest ? body.closest('.ai-thinking-body') : null;
+              if (reasoningHost) reasoningHost.__streamedReasoning = aiReasoning;
+              if (chunkText) body.__rawReasoning = (body.__rawReasoning || '') + chunkText;
               if (!reasoningRenderer) {
                 body.textContent = '';
                 reasoningRenderer = createSmoothTextRenderer(body, {
-                  plainStream: true,
+                  plainStream: false,
                   onStreamMetrics: createAiStreamMetricsReporter('reasoning'),
                   onRender: function() { scrollToBottom(messagesEl, false); }
                 });
@@ -11917,11 +12031,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
                   if (thinkingTimer) {
                     finalThinkingElapsedMs = thinkingTimer.stop();
                   }
-                  setThinkingStatus(_tn, '已思考 ' + formatThinkingElapsed(finalThinkingElapsedMs));
-                  setThinkingActive(_tn, false);
-                  // 收尾思考渲染器：把缓冲里剩余字符一次性落定，避免尾部丢字
+                  // 计时在正文开始时停住，面板保持展开，整段回复完成后再折叠。
                   if (reasoningRenderer) { try { reasoningRenderer.flush(); } catch (eRF) {} }
-                  setThinkingExpanded(_tn, _tn.__userCollapsed === false || !!_tn.querySelector('.ai-tool-step.is-error') && _tn.__userCollapsed !== true, messagesEl);
+                  if (_tn.__userCollapsed !== true && !_tn.classList.contains('expanded')) {
+                    setThinkingExpanded(_tn, true, messagesEl);
+                  }
                 }
               } catch (eThinkSettle) {}
             }
@@ -11962,10 +12076,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               // ★ 工作模式：以后端实际回传为准（后端才真正知道这次是否按工作模式跑的）
               if (typeof evt.work_mode === 'boolean') streamWorkMode = evt.work_mode;
               // sanitized_content 优先：后端清洗后的正文
-              if (evt.sanitized_content) {
-                aiContent = evt.sanitized_content;
-              } else if (evt.content) {
-                aiContent = evt.content;
+              if (evt.sanitized_content || evt.content) {
+                var fullAnswer = evt.sanitized_content || evt.content;
+                var sealedPrefix = sealedContents.join('');
+                if (sealedPrefix && String(fullAnswer).indexOf(sealedPrefix) === 0) aiContent = String(fullAnswer).slice(sealedPrefix.length);
+                else aiContent = fullAnswer;
               }
               // 搜索路径若流式 reasoning 丢失，done 包里仍可能带完整 reasoning
               if (typeof evt.reasoning === 'string' && (!aiReasoning.trim() || evt.reasoning.indexOf(aiReasoning) === 0)) {
@@ -11989,7 +12104,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             if (assistantNode) {
               ensureAssistantBubbleReady();
               clearInterval(_idleCheckTimer);
-              var drained = await contentRenderer.drain(aiContent, controller.signal);
+              var drained = true;
+              if (aiContent && !contentRenderer) ensureAssistantBubbleReady();
+              if (contentRenderer) drained = await contentRenderer.drain(aiContent, controller.signal);
               if (S._currentReqId !== reqId || !customModelIdentityCurrent(sendIdentity)) {
                 // Superseded while draining: release this request's controller and
                 // reader even though another turn owns the UI now.
@@ -12075,23 +12192,23 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
       // H-25: 45s 无数据超时 — 清理节点、复位状态并提示，避免永久"处理中"
       if (timedOut) {
-        cleanupRenderers();
         hideAssistantTyping();
-        if (aiContent) {
-          var timeoutNote = el('div', { class: 'ai-error-note' }, '响应超时（45 秒未收到数据），已保留部分回复');
-          try { assistantNode.appendChild(timeoutNote); } catch (e) {}
-          finishAiMessage(assistantNode, aiContent, aiReasoning, null);
+        stopNoteKind = 'timeout';
+        if (aiContent || aiReasoning || (sealedContents && sealedContents.length) || (assistantNode && assistantNode.querySelector('.ai-thinking, .ai-content-segment'))) {
+          if (!_finalized) finishAiMessage(assistantNode, aiContent, aiReasoning, { interrupted: true });
+          appendStoppedNote(assistantNode, 'timeout');
           try { attachContinueGenerateBtn(assistantNode, messagesEl); } catch (eC1) {}
         } else {
           preserveFailedTurn();
           restoreInputText();
-          notify('AI 响应超时（45 秒未收到数据），请重试');
+          notify('请求超时，可点击继续');
         }
+        cleanupRenderers();
         resetSendingIfCurrent();
         return;
       }
 
-      if (((S._currentReqId !== reqId || !customModelIdentityCurrent(sendIdentity)) || aborted) && !_finalized) {
+      if (((S._currentReqId !== reqId || !customModelIdentityCurrent(sendIdentity)) || aborted) && !_finalized && !turnSettled) {
         // 被新请求取代，删除当前创建的任何节点
         // ★ 修复：若 error 事件已 finishAiMessage（_finalized=true，部分回复已保留并写入
         // S.messages），不得再删除节点，否则已渲染的回复会闪现后消失且服务端未保存。
@@ -12120,7 +12237,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         // ★ 2026-09-22：同样需要收敛工具/整理占位动画。
         try { if (assistantNode) clearAssistantTransientStatus(assistantNode); } catch (eOrgE) {}
         cleanupRenderers();
-      } else if (!doneReceived) {
+      } else if (!doneReceived && !turnSettled) {
         cleanupRenderers();
         preserveFailedTurn();
         restoreInputText();
@@ -12134,17 +12251,19 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       try { clearInterval(_idleCheckTimer); } catch (e) {}
       // H-25: 超时中止触发的 AbortError 也走超时清理，避免被误判为"用户主动停止"
       if (timedOut) {
-        cleanupRenderers();
         hideAssistantTyping();
-        if (aiContent) {
-          var timeoutNote2 = el('div', { class: 'ai-error-note' }, '响应超时（45 秒未收到数据），已保留部分回复');
-          try { assistantNode.appendChild(timeoutNote2); } catch (e) {}
-          finishAiMessage(assistantNode, aiContent, aiReasoning, null);
+        if (aiContent || aiReasoning || (sealedContents && sealedContents.length) || (assistantNode && assistantNode.querySelector('.ai-thinking, .ai-content-segment'))) {
+          stopNoteKind = 'timeout';
+          if (!_finalized) finishAiMessage(assistantNode, aiContent, aiReasoning, { interrupted: true });
+          appendStoppedNote(assistantNode, 'timeout');
+          try { attachContinueGenerateBtn(assistantNode, messagesEl); } catch (eC2t) {}
         } else {
+          stopNoteKind = 'timeout';
           preserveFailedTurn();
           restoreInputText();
-          notify('AI 响应超时（45 秒未收到数据），请重试');
+          notify('请求超时，可点击继续');
         }
+        cleanupRenderers();
         resetSendingIfCurrent();
         return;
       }
@@ -12202,17 +12321,15 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         }
         // ★ 300s 绝对超时与用户取消区分：给出明确提示，避免用户误以为
         // AI 未回复而重发导致重复扣费/重复请求。
-        if (timedOut300) notify('思考超时（超过 5 分钟），请重试');
-        if (aiContent) {
-          finishAiMessage(assistantNode, aiContent, aiReasoning, null);
-          if (timedOut300) {
-            try {
-              assistantNode.appendChild(el('div', { class: 'ai-error-note' }, '思考超时，回复可能不完整'));
-            } catch (eTimeoutNote) {}
-          }
+        stopNoteKind = timedOut300 ? 'timeout' : 'stopped';
+        if (aiContent || aiReasoning || (sealedContents && sealedContents.length) || (assistantNode && assistantNode.querySelector('.ai-thinking, .ai-content-segment'))) {
+          if (!_finalized) finishAiMessage(assistantNode, aiContent, aiReasoning, { interrupted: true });
+          appendStoppedNote(assistantNode, stopNoteKind);
+          try { attachContinueGenerateBtn(assistantNode, messagesEl); } catch (eStopLate) {}
         } else {
           hideAssistantTyping();
           preserveFailedTurn();
+          if (timedOut300) notify('请求超时，可点击继续');
         }
       }
     }

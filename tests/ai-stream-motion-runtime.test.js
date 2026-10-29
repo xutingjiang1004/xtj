@@ -268,7 +268,7 @@ for (const implementation of ['main', 'shared']) test(implementation + ': stream
  }finally{await browser.close();}
 });
 
-for (const implementation of ['main', 'shared']) test(implementation + ': a new text segment receives one bounded ink reveal without a typing queue', async () => {
+for (const implementation of ['main', 'shared']) test(implementation + ': a new text segment appears immediately without an ink wash or typing queue', async () => {
  const {browser,page}=await fixture();try{
   const result=await page.evaluate(async kind=>{
    const output=document.getElementById('output');output.className='ai-msg-bubble';
@@ -278,41 +278,37 @@ for (const implementation of ['main', 'shared']) test(implementation + ': a new 
    const node=output.firstChild;renderer.append(suffix);renderer.flush();
    const matching=Array.from(CSS.highlights.entries()).filter(([name])=>name.startsWith('xtj-ai-ink-'));
    const ranges=matching.flatMap(([,highlight])=>Array.from(highlight));
-   const expected=1;
-    const animations=output.getAnimations({subtree:true}).filter(a=>a.effect?.getKeyframes().some(k=>Object.keys(k).some(x=>x.startsWith('--xtj-ai-ink-phase-'))));
-   animations.forEach(a=>{a.pause();a.currentTime=0;});
-   const color=matching.length?getComputedStyle(output,'::highlight('+matching[0][0]+')').color:'';
-   const stable=output.firstChild===node&&ranges.every(r=>r.startContainer===node&&r.startOffset>=prefix.length&&r.endOffset>r.startOffset);
+   const animations=output.getAnimations({subtree:true}).filter(a=>a.effect?.getKeyframes().some(k=>Object.keys(k).some(x=>x.startsWith('--xtj-ai-ink-phase-'))));
+   const stable=output.firstChild===node;
    const immediate=output.textContent;
    renderer.append('继续');renderer.flush();
-   const prefixStillStable=ranges.every(r=>r.startContainer===node&&r.startOffset>=prefix.length&&r.endOffset>r.startOffset);
+   const prefixStillStable=output.firstChild===node&&output.textContent.startsWith(prefix);
    renderer.cancel();const afterCancel=Array.from(CSS.highlights.keys()).filter(name=>name.startsWith('xtj-ai-ink-')).length;
    output.replaceChildren();document.documentElement.setAttribute('data-xtj-motion','off');
    const quiet=make();quiet.append('降低动态效果时立即显示');quiet.flush();
    const reduced={text:output.textContent,highlights:Array.from(CSS.highlights.keys()).filter(name=>name.startsWith('xtj-ai-ink-')).length};quiet.cancel();
-   return{count:ranges.length,expected,animations:animations.length,color,stable,immediate,prefixStillStable,afterCancel,reduced};
+   return{count:ranges.length,animations:animations.length,stable,immediate,prefixStillStable,afterCancel,reduced};
   },implementation);
-  assert.equal(result.count,result.expected,JSON.stringify(result));assert.ok(result.animations>0);assert.match(result.color,/0\.72/);
+  assert.equal(result.count,0,JSON.stringify(result));assert.equal(result.animations,0);
   assert.equal(result.stable,true);assert.equal(result.prefixStillStable,true);assert.equal(result.immediate,'已经清晰的文字。这是一段新的中文🐈');
   assert.equal(result.afterCancel,0);assert.deepEqual(result.reduced,{text:'降低动态效果时立即显示',highlights:0});
  }finally{await browser.close();}
 });
 
-test('research thinking updates keep their text node and apply ink only to the new suffix', async () => {
+test('research thinking updates keep their text node without an ink wash', async () => {
  const {browser,page}=await fixture();try{
   const result=await page.evaluate(async source=>{
    window.eval(source);const output=document.getElementById('output');output.className='ai-thought-chunk';
    updateStreamThought(output,'第一段思考。');await new Promise(r=>setTimeout(r,220));const node=output.firstChild;
    updateStreamThought(output,'第一段思考。继续查证🐈');
-   const ranges=Array.from(CSS.highlights.entries()).filter(([name])=>name.startsWith('xtj-ai-ink-')).flatMap(([,h])=>Array.from(h));
-   const stable=output.firstChild===node&&ranges.length>0&&ranges.every(r=>r.startContainer===node&&r.startOffset>='第一段思考。'.length);
-   return {stable,text:output.textContent};
+   const highlights=Array.from(CSS.highlights.keys()).filter(name=>name.startsWith('xtj-ai-ink-')).length;
+   return {stable:output.firstChild===node,highlights,text:output.textContent};
   },section('  function updateStreamThought(', '  /**'));
-  assert.deepEqual(result,{stable:true,text:'第一段思考。继续查证🐈'});
+  assert.deepEqual(result,{stable:true,highlights:0,text:'第一段思考。继续查证🐈'});
  }finally{await browser.close();}
 });
 
-test('lite devices still show a bounded effect and concurrent streams cannot clear each other', async () => {
+test('lite devices show text immediately and stopping one stream leaves the other intact', async () => {
  const {browser,page}=await fixture();try{
   const result=await page.evaluate(()=>{
    document.documentElement.classList.add('perf-lite');document.documentElement.dataset.xtjPerfProfile='lite';
@@ -321,10 +317,10 @@ test('lite devices still show a bounded effect and concurrent streams cannot cle
    const text='连续生成文字不会被动画排队。'.repeat(20);a.append(text);a.flush();b.append('另一段思考和正文');b.flush();
    const groups=()=>Array.from(CSS.highlights.entries()).filter(([name])=>name.startsWith('xtj-ai-ink-'));
    const rangeCount=groups().flatMap(([,h])=>Array.from(h)).filter(r=>first.contains(r.startContainer)).length;
-   a.stop();const other=groups().flatMap(([,h])=>Array.from(h)).filter(r=>second.contains(r.startContainer)).length;
-   const complete=first.textContent===text;b.cancel();return{rangeCount,other,complete,remaining:groups().length};
+   a.stop();const otherText=second.textContent;
+   const complete=first.textContent===text;b.cancel();return{rangeCount,otherText,complete,remaining:groups().length};
   });
-  assert.equal(result.rangeCount,1);assert.ok(result.other>0);assert.equal(result.complete,true);assert.equal(result.remaining,0);
+  assert.equal(result.rangeCount,0);assert.equal(result.otherText,'另一段思考和正文');assert.equal(result.complete,true);assert.equal(result.remaining,0);
  }finally{await browser.close();}
 });
 test('shared: reset cancels the old drain and cannot modify the next answer', async () => {

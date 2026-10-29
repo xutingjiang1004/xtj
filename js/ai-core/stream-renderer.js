@@ -42,6 +42,9 @@
     if (animation) { animation.onfinish = null; animation.oncancel = null; try { animation.cancel(); } catch (_) {} }
   }
   function createInkReveal(target, options) {
+    // 逐字高光和 text-shadow 会在每个 token 上触发布局外的绘制，思考和正文都会一顿一顿。
+    // 流式更新只走 rAF 合并；这里不再挂晕开动画。
+    return null;
     options = options || {};
     if (!target || !(options.inkReveal === true || (target.matches && target.matches('.ai-msg-bubble,.ai-reasoning-segment,.ai-think-answer')))) return null;
     var pending = [], theme = null, owner = {}, lastInkAt = -Infinity, shownChars = 0;

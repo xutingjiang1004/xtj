@@ -139,7 +139,7 @@ test('stop aborts the upstream connection and saves an interrupted turn',async t
 });
 test('timeout is distinguished from user stop',async t=>{
   configure(t);const f=routeFixture({respond:(_p,_n,init,c)=>new Promise((_resolve,reject)=>{init.signal.addEventListener('abort',()=>reject(Object.assign(Error('aborted'),{name:'AbortError'})));c.setTimeout(()=>{},1);})});
-  const running=f.run();await new Promise(setImmediate);f.timers.find(t=>t.ms===180000).fn();await running;
+  const running=f.run();await new Promise(setImmediate);f.timers.find(t=>t.ms===1800000).fn();await running;
   assert.equal(f.events.find(e=>e.type==='error').code,'OPENROUTER_TIMEOUT');assert.equal(JSON.parse(f.rows[0].media_url).finish_reason,'upstream_error');
 });
 test('tool rounds preserve actual tool results and reasoning details with zero-price policy each time',async t=>{
