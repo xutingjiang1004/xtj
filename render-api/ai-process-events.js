@@ -11,6 +11,10 @@ function appendProcessEvent(res, event) {
   // A later tool/reasoning round can resume after progress narration. Sum its
   // active phases; final prose, persistence and duplicate terminal events do not
   // extend the timer. A genuine zero remains a valid measurement.
+  if (event && event.type === 'content') {
+    const piece = String(event.text || '');
+    if (piece) res._aiPendingNarration = (res._aiPendingNarration || '') + piece;
+  }
   if (event && event.type === 'content' && String(event.text || '').trim() && res._aiThinkingActiveAt != null) {
     res._aiThinkingElapsedMs = (res._aiThinkingElapsedMs || 0) + Math.max(0, Date.now() - res._aiThinkingActiveAt);
     res._aiThinkingActiveAt = null;
@@ -21,6 +25,7 @@ function appendProcessEvent(res, event) {
     const room = MAX_TEXT - (res._aiProcessTextSize || 0);
     const text = String(event.text || '').slice(0, Math.max(0, room));
     if (!text) return;
+    res._aiReasonSinceNarration = (res._aiReasonSinceNarration || '') + text;
     const last = events[events.length - 1];
     if (last && last.type === 'reasoning') last.text += text;
     else if (events.length < MAX_EVENTS) events.push({ type: 'reasoning', text });
@@ -52,6 +57,17 @@ function appendProcessEvent(res, event) {
     group.tools.push(tool); return tool;
   }
   if (event.type === 'tool_calls') {
+    const narration = String(res._aiPendingNarration || '').trim();
+    res._aiPendingNarration = '';
+    if (narration && events.length < MAX_EVENTS) {
+      const room = MAX_TEXT - (res._aiProcessTextSize || 0);
+      const text = narration.slice(0, Math.max(0, room));
+      if (text) {
+        events.push({ type: 'narration', text, reasoning: String(res._aiReasonSinceNarration || '').slice(0, 8000) });
+        res._aiProcessTextSize = (res._aiProcessTextSize || 0) + text.length;
+      }
+    }
+    res._aiReasonSinceNarration = '';
     for (const call of (Array.isArray(event.tools) ? event.tools : []).slice(0, 32)) {
       add(String(call.id || call.call_id || '').slice(0, 160), String(call.name || ''), call.args);
     }
@@ -77,7 +93,9 @@ function appendProcessEvent(res, event) {
 function getProcessEvents(res) {
   return (res._aiProcessEvents || []).map(event => event.type === 'reasoning'
     ? { type: 'reasoning', text: event.text }
-    : { type: 'tools', tools: event.tools.map(tool => Object.assign({}, tool, { status: tool.status === 'running' ? 'interrupted' : tool.status })) });
+    : event.type === 'narration'
+      ? { type: 'narration', text: event.text, reasoning: event.reasoning || '' }
+      : { type: 'tools', tools: event.tools.map(tool => Object.assign({}, tool, { status: tool.status === 'running' ? 'interrupted' : tool.status })) });
 }
 // ★ 2026-10-29：收尾结算。
 //   思考耗时只在「正文 content 到达」时结算（见上面 appendProcessEvent 的 content 分支）。

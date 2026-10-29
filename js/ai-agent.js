@@ -3106,6 +3106,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     diff_text: '对比文本', url_parse: '解析网址', password_tool: '生成密码',
     task_plan: '规划任务'
   };
+  function inProcessRail(node) {
+    return !!(node && node.closest && node.closest('.ai-process-rail'));
+  }
   function toolLabel(name) {
     var key = String(name || '');
     return TOOL_LABELS[key] || key || '工具';
@@ -3426,7 +3429,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     if (settled) {
       activity.classList.remove('is-running');
       activity.classList.add('is-done');
-      var activityCollapsed = typeof activity.__userCollapsed === 'boolean' ? activity.__userCollapsed : totalFailed === 0;
+      var activityCollapsed = inProcessRail(activity) ? false : (typeof activity.__userCollapsed === 'boolean' ? activity.__userCollapsed : totalFailed === 0);
       activity.classList.toggle('is-collapsed', activityCollapsed);
       if (head) { try { head.setAttribute('aria-expanded', activityCollapsed ? 'false' : 'true'); } catch (eArA2) {} }
       // ★ 2026-09-28 修复（失败态视觉缺失）：
@@ -3628,7 +3631,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       roundBox.classList.add('is-done');
       // ★ 2026-09-22：整轮结束后自动折叠为一行（Codex 手感）。
       //   用户仍可点摘要行展开回看明细，屏幕上不再留一坨历史条目。
-      var roundCollapsed = typeof roundBox.__userCollapsed === 'boolean' ? roundBox.__userCollapsed : failed === 0;
+      var roundCollapsed = inProcessRail(roundBox) ? false : (typeof roundBox.__userCollapsed === 'boolean' ? roundBox.__userCollapsed : failed === 0);
       roundBox.classList.toggle('is-collapsed', roundCollapsed);
       var caretHost = roundBox.querySelector('.ai-tool-round-head');
       if (caretHost) {
@@ -4251,29 +4254,128 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     return min > 0 ? (min + 'm ' + s + 's') : (s + 's');
   }
 
-  function snapshotAiProcess(node) {
-    var body = node && node.querySelector('.ai-thinking-body');
-    var hosts = body && body.__orderedProcess ? Array.from(body.children) : Array.from(node.querySelectorAll('.ai-process-timeline'));
-    var events = [], room = 64000, toolRoom = 128;
-    hosts.slice(0, 128).forEach(function(host) {
-      if (host.classList.contains('ai-reasoning-segment')) {
-        var text = String(host.__rawReasoning || host.textContent || '').slice(0, room); room -= text.length;
-        if (text) events.push({ type: 'reasoning', text: text });
-      } else if (host.classList.contains('ai-process-timeline')) {
-        var tools = Array.from(host.querySelectorAll('.ai-tool-step')).slice(0, Math.min(32, toolRoom)).map(function(step) {
-          var detail = step.querySelector('.ai-tool-step-detail');
-          var error = step.querySelector('.ai-tool-result-error');
-          var items = Array.from(step.querySelectorAll('.ai-search-detail-item')).slice(0, 10).map(function(item) {
-            var link = item.querySelector('a'), snippet = item.querySelector('.ai-search-detail-snippet');
-            return { title: link ? link.textContent : '', url: link ? link.getAttribute('href') : '', snippet: snippet ? snippet.textContent : '' };
-          });
-          var feedback=step._aiToolFeedback||{};
-          return { call_id: step.getAttribute('data-tool-call-id') || '', tool_name: step.getAttribute('data-tool-name') || '', detail: detail ? detail.textContent.slice(0, 240) : '', summary: feedback.summary||step.getAttribute('data-tool-summary') || '', status: step.classList.contains('is-done') ? 'done' : step.classList.contains('is-error') ? 'error' : 'interrupted', error: feedback.error||(error ? error.textContent.slice(0, 240) : ''), items: feedback.items||items,retry_token:feedback.retry_token,retry_completed_at:feedback.retry_completed_at };
-        });
-        toolRoom -= tools.length;
-        if (tools.length) events.push({ type: 'tools', tools: tools });
-      }
+  function collectProcessTools(host, toolRoom) {
+    return Array.from(host.querySelectorAll('.ai-tool-step')).slice(0, Math.min(32, toolRoom)).map(function(step) {
+      var detail = step.querySelector('.ai-tool-step-detail');
+      var error = step.querySelector('.ai-tool-result-error');
+      var items = Array.from(step.querySelectorAll('.ai-search-detail-item')).slice(0, 10).map(function(item) {
+        var link = item.querySelector('a'), snippet = item.querySelector('.ai-search-detail-snippet');
+        return { title: link ? link.textContent : '', url: link ? link.getAttribute('href') : '', snippet: snippet ? snippet.textContent : '' };
+      });
+      var feedback = step._aiToolFeedback || {};
+      return { call_id: step.getAttribute('data-tool-call-id') || '', tool_name: step.getAttribute('data-tool-name') || '', detail: detail ? detail.textContent.slice(0, 240) : '', summary: feedback.summary || step.getAttribute('data-tool-summary') || '', status: step.classList.contains('is-done') ? 'done' : step.classList.contains('is-error') ? 'error' : 'interrupted', error: feedback.error || (error ? error.textContent.slice(0, 240) : ''), items: feedback.items || items, retry_token: feedback.retry_token, retry_completed_at: feedback.retry_completed_at };
     });
+  }
+
+  function mountHistoricalTools(host, tools) {
+    var group = el('div', { class: 'ai-tool-timeline ai-process-timeline' });
+    (tools || []).slice(0, 32).forEach(function(tool) {
+      var done = tool.status === 'done';
+      var step = el('div', { class: 'ai-tool-step ' + (done ? 'is-done' : 'is-error'), 'data-tool-name': String(tool.tool_name || ''), 'data-tool-call-id': String(tool.call_id || '') });
+      step._aiToolFeedback = Object.assign({}, tool);
+      step.appendChild(el('span', { class: 'ai-tool-step-icon', 'aria-hidden': 'true' }));
+      var detail = el('div', { class: 'ai-tool-step-body' });
+      detail.appendChild(el('div', { class: 'ai-tool-step-title', text: toolLabel(tool.tool_name) }));
+      if (tool.detail) detail.appendChild(el('div', { class: 'ai-tool-step-detail', text: String(tool.detail).slice(0, 240) }));
+      detail.appendChild(el('div', { class: 'ai-tool-step-status', text: done ? toolResultFeedback(tool) + (tool.retry_completed_at ? ' · 重试已保存' : '') : tool.status === 'interrupted' ? '已中断' : '失败' }));
+      if (tool.error) detail.appendChild(el('div', { class: 'ai-tool-result-error', text: String(tool.error).slice(0, 240) }));
+      if (tool.error && tool.retry_token || Array.isArray(tool.items) && tool.items.length) {
+        var results = populateToolResultDisclosure(el('div', { class: 'ai-tool-result-card' }), tool);
+        detail.appendChild(results);
+      }
+      if (done) step.setAttribute('data-tool-summary', toolResultFeedback(tool));
+      step.appendChild(detail);
+      group.appendChild(step);
+    });
+    host.appendChild(group);
+    return group;
+  }
+
+  function createProcessRailBeat(text, reasoning) {
+    var beat = el('div', { class: 'ai-rail-beat ai-flow-in' });
+    var sentence = el('button', { type: 'button', class: 'ai-rail-sentence', 'aria-expanded': 'false' });
+    sentence.appendChild(el('span', { class: 'ai-rail-mark', 'aria-hidden': 'true' }));
+    var label = el('span', { class: 'ai-rail-sentence-text', text: text || '' });
+    sentence.appendChild(label);
+    sentence.appendChild(el('span', { class: 'ai-rail-caret', text: '\u203a', 'aria-hidden': 'true' }));
+    var reason = el('div', { class: 'ai-rail-reason' });
+    var cleaned = cleanReasoningText(reasoning || '');
+    beat.__narration = String(text || '');
+    beat.__reasoning = cleaned;
+    if (cleaned) reason.textContent = cleaned;
+    else beat.classList.add('no-reason');
+    if (!String(text || '').trim()) beat.classList.add('no-sentence');
+    sentence.addEventListener('click', function() {
+      if (!beat.__reasoning) {
+        var msg = beat.closest && beat.closest('.ai-msg');
+        var toggle = msg && msg.querySelector('.ai-thinking-toggle');
+        if (toggle) toggle.click();
+        return;
+      }
+      var open = !beat.classList.contains('is-open');
+      beat.classList.toggle('is-open', open);
+      sentence.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+    beat.appendChild(sentence);
+    beat.appendChild(reason);
+    beat.appendChild(el('div', { class: 'ai-rail-tools' }));
+    return beat;
+  }
+
+  function stripProcessNarration(content, events) {
+    var text = String(content || '');
+    (events || []).forEach(function(ev) {
+      if (!ev || ev.type !== 'narration') return;
+      var piece = String(ev.text || '').trim();
+      if (!piece) return;
+      var leading = text.match(/^\s*/);
+      var start = leading ? leading[0].length : 0;
+      if (text.slice(start, start + piece.length) === piece) text = text.slice(start + piece.length).replace(/^\s+/, '');
+    });
+    return text;
+  }
+
+  function snapshotAiProcess(node) {
+    var events = [], room = 64000, toolRoom = 128;
+    function pushTools(host) {
+      var tools = collectProcessTools(host, toolRoom);
+      toolRoom -= tools.length;
+      if (tools.length) events.push({ type: 'tools', tools: tools });
+    }
+    var thinkingBody = node && node.querySelector('.ai-thinking-body');
+    if (thinkingBody) {
+      var segments = Array.from(thinkingBody.querySelectorAll('.ai-reasoning-segment')).slice(0, 128);
+      if (segments.length) {
+        segments.forEach(function(host) {
+          var text = String(host.__rawReasoning || host.textContent || '').slice(0, room);
+          room -= text.length;
+          if (text) events.push({ type: 'reasoning', text: text });
+        });
+      } else {
+        var whole = String(thinkingBody.textContent || '').trim().slice(0, room);
+        if (whole) {
+          room -= whole.length;
+          events.push({ type: 'reasoning', text: whole });
+        }
+      }
+    }
+    var beats = node ? Array.from(node.querySelectorAll('.ai-process-rail .ai-rail-beat')).slice(0, 128) : [];
+    if (beats.length) {
+      beats.forEach(function(beat) {
+        var narration = String(beat.__narration || '').trim().slice(0, room);
+        if (narration) {
+          room -= narration.length;
+          events.push({ type: 'narration', text: narration, reasoning: String(beat.__reasoning || '').slice(0, 8000) });
+        }
+        var toolsHost = beat.querySelector('.ai-rail-tools');
+        if (toolsHost && toolsHost.querySelector('.ai-tool-step')) pushTools(toolsHost);
+      });
+    } else if (node) {
+      Array.from(node.querySelectorAll('.ai-process-timeline')).slice(0, 128).forEach(function(host) {
+        if (host.closest('.ai-rail-tools')) return;
+        pushTools(host);
+      });
+    }
     return events;
   }
 
@@ -4301,6 +4403,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     body.textContent = ''; body.__orderedProcess = true;
     node.classList.add('ai-ordered-process');
     var room = 64000;
+    var rail = reasoning ? el('div', { class: 'ai-process-rail' }) : null;
+    var beat = null;
+    function railBeat(text, reasonText) {
+      beat = createProcessRailBeat(text, reasonText);
+      rail.appendChild(beat);
+      return beat;
+    }
     (msg.process_events || []).slice(0, 128).forEach(function(event) {
       if (event.type === 'reasoning' && reasoning) {
         var text = String(event.text || '').slice(0, room); room -= text.length;
@@ -4310,34 +4419,27 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           paintReasoningHtml(reasoningSeg, text);
           body.appendChild(reasoningSeg);
         }
+      } else if (event.type === 'narration' && rail) {
+        railBeat(String(event.text || ''), event.reasoning || '');
       } else if (event.type === 'tools' && Array.isArray(event.tools)) {
-        var group = el('div', { class: 'ai-tool-timeline ai-process-timeline' });
-        event.tools.slice(0, 32).forEach(function(tool) {
-          var done = tool.status === 'done';
-          var step = el('div', { class: 'ai-tool-step ' + (done ? 'is-done' : 'is-error'), 'data-tool-name': String(tool.tool_name || ''), 'data-tool-call-id': String(tool.call_id || '') });
-          step._aiToolFeedback=Object.assign({},tool);
-          step.appendChild(el('span', { class: 'ai-tool-step-icon', 'aria-hidden': 'true' }));
-          var detail = el('div', { class: 'ai-tool-step-body' });
-          detail.appendChild(el('div', { class: 'ai-tool-step-title', text: toolLabel(tool.tool_name) }));
-          if (tool.detail) detail.appendChild(el('div', { class: 'ai-tool-step-detail', text: String(tool.detail).slice(0, 240) }));
-          detail.appendChild(el('div', { class: 'ai-tool-step-status', text: done ? toolResultFeedback(tool)+(tool.retry_completed_at?' · 重试已保存':'') : tool.status === 'interrupted' ? '已中断' : '失败' }));
-          if (tool.error) detail.appendChild(el('div', { class: 'ai-tool-result-error', text: String(tool.error).slice(0, 240) }));
-          if (tool.error&&tool.retry_token || Array.isArray(tool.items) && tool.items.length) {
-            var results = populateToolResultDisclosure(el('div', {class:'ai-tool-result-card'}), tool);
-            detail.appendChild(results);
-          }
-          if (done) step.setAttribute('data-tool-summary', toolResultFeedback(tool));
-          step.appendChild(detail); group.appendChild(step);
-        });
-        body.appendChild(group);
+        if (rail) {
+          if (!beat) railBeat('', '');
+          mountHistoricalTools(beat.querySelector('.ai-rail-tools'), event.tools);
+        } else {
+          mountHistoricalTools(body, event.tools);
+        }
       }
     });
     if (reasoning) {
       reconcileReasoningBody(body, msg.reasoning);
       setThinkingStatus(node, thinkingElapsedLabel(msg.thinking_elapsed_ms, '思考过程'));
-      if (node.querySelector('.ai-tool-step.is-error')) setThinkingExpanded(node,true,messagesEl);
+      if (!rail.childNodes.length && node.querySelector('.ai-tool-step.is-error')) setThinkingExpanded(node, true, messagesEl);
     }
-    return node;
+    if (!rail || !rail.childNodes.length) return node;
+    var wrap = document.createDocumentFragment();
+    wrap.appendChild(node);
+    wrap.appendChild(rail);
+    return wrap;
   }
 
   function assistantFeatures() { return window.XtjAiCore && window.XtjAiCore.AssistantFeatures; }
@@ -4381,7 +4483,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     } else if (role === 'assistant' && shouldRenderReasoning(msg)) {
       node.appendChild(buildReasoningNode(msg.reasoning, messagesEl, msg.thinking_elapsed_ms));
     }
-    var contentForRender = msg.content || '';
+    var contentForRender = stripProcessNarration(msg.content || '', msg.process_events);
     var bubble = el('div', { class: 'ai-msg-bubble' });
     var hasReasoning = !!(msg.reasoning && String(msg.reasoning).trim());
     // ★ 2026-10-29：只有 process_events、没有 msg.reasoning 的消息也要算「有思考」。
@@ -5108,9 +5210,20 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (streamClass) targetEl.classList.add(streamClass);
       var renderStartedAt = measureStream ? (window.performance && performance.now ? performance.now() : Date.now()) : 0;
       var next = pending;
-      pending = '';
+      // Plain prose keeps the search-row rhythm: a short slice each frame,
+      // and a burst still finishes within about a quarter second. Markdown
+      // and reduced motion commit the whole packet so tables stay intact.
+      if (options.flowPace && !reducedMotion && pending.length > 12) {
+        var budget = Math.max(12, Math.ceil(pending.length / 16));
+        if (budget < pending.length) {
+          next = pending.slice(0, budget);
+          var snapped = takeSmoothTextChunk(next, { maxChunk: budget, minChunk: Math.min(6, budget) });
+          if (snapped && snapped.length >= Math.min(6, budget) && snapped.length < next.length) next = snapped;
+          pending = pending.slice(next.length);
+        } else pending = '';
+      } else pending = '';
       var firstReceivedAt = pendingFirstReceivedAt, lastReceivedAt = pendingLastReceivedAt;
-      pendingFirstReceivedAt = pendingLastReceivedAt = 0;
+      if (!pending) pendingFirstReceivedAt = pendingLastReceivedAt = 0;
       if (!next) return;
       var priorLength = rendered.length;
       rendered += next;
@@ -10077,7 +10190,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (earlyLabel) earlyLabel.textContent = '正在思考中';
         earlyRn.dataset.phase = 'preparing';
         earlyRn.classList.add('is-thinking');
-        setThinkingExpanded(earlyRn, true, messagesEl);
+        setThinkingExpanded(earlyRn, false, messagesEl);
         assistantNode.insertBefore(earlyRn, assistantNode.firstChild);
         _earlyThinkingShown = true;
       } catch (eEarly) {}
@@ -10098,11 +10211,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     function keepInterruptedPlaceholder(kind) {
       if (!assistantNode || assistantNode.isConnected === false) return false;
       var earlyThinking = assistantNode.querySelector('.ai-thinking');
+      var thinkingBody = earlyThinking && earlyThinking.querySelector('.ai-thinking-body');
+      var hasThinking = !!(thinkingBody && String(thinkingBody.textContent || '').trim());
       var pendingReply = !!(assistantBubble && (assistantBubble.textContent === '正在回复…' || assistantBubble.classList.contains('ai-reply-pending')));
-      var hasSegment = !!assistantNode.querySelector('.ai-content-segment, .ai-process-timeline');
+      var hasSegment = !!assistantNode.querySelector('.ai-content-segment, .ai-process-timeline, .ai-process-rail');
       var bubbleText = assistantBubble && String(assistantBubble.textContent || '').trim();
       var hasAnswer = !!(bubbleText && bubbleText !== '正在回复…' && bubbleText !== '正在思考中');
-      if (!earlyThinking && !pendingReply && !hasSegment && !hasAnswer) return false;
+      if (!hasThinking && !hasSegment && !hasAnswer) return false;
       assistantNode.classList.remove('generating');
       var earlyLabel = earlyThinking && earlyThinking.querySelector('.ai-thinking-label');
       if (earlyLabel && /^正在思考/.test(String(earlyLabel.textContent || ''))) earlyLabel.textContent = '已停止';
@@ -10942,9 +11057,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         // the animation renderer, and settle timers/tool indicators immediately.
         try { if (reasoningRenderer && reasoningRenderer.flush) reasoningRenderer.flush(); } catch (eFlushR) {}
         try { if (contentRenderer && contentRenderer.flush) contentRenderer.flush(); } catch (eFlushC) {}
-        var keptVisible = !!(aiContent || aiReasoning || sealedContents.length ||
-          (assistantBubble && String(assistantBubble.textContent || '').trim()) ||
-          assistantNode.querySelector('.ai-thinking, .ai-content-segment, .ai-process-timeline, .ai-msg-bubble'));
+        var bubbleText = assistantBubble ? String(assistantBubble.textContent || '').trim() : '';
+        var visibleAnswer = bubbleText && bubbleText !== '正在回复…' && bubbleText !== '正在思考中';
+        var keptVisible = !!(String(aiContent || '').trim() || String(aiReasoning || '').trim() || sealedContents.length ||
+          visibleAnswer ||
+          assistantNode.querySelector('.ai-reasoning-segment, .ai-content-segment, .ai-process-timeline, .ai-process-rail, .ai-tool-step'));
         if (keptVisible) {
           finishAiMessage(assistantNode, aiContent, aiReasoning, { interrupted: true });
           appendStoppedNote(assistantNode, stopNoteKind);
@@ -10994,12 +11111,39 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (!reasoningContainer) {
           reasoningContainer = buildReasoningNode('', messagesEl);
           assistantNode.insertBefore(reasoningContainer, assistantNode.firstChild);
-          setThinkingExpanded(reasoningContainer, !aiContent, messagesEl);
+          if (reasoningContainer.__userCollapsed !== false) setThinkingExpanded(reasoningContainer, false, messagesEl);
         }
         return reasoningContainer;
       }
 
-      var activeToolTimeline = null, activeReasoningSegment = null;
+      var activeToolTimeline = null, activeReasoningSegment = null, activeRailBeat = null, railReasonCursor = 0;
+      function commitNarrationToRail(text) {
+        var value = String(text || '').trim();
+        if (!value) return;
+        if (contentRenderer) {
+          try { contentRenderer.stop(); } catch (eStopNarration) {}
+          contentRenderer = null;
+        }
+        if (assistantBubble) {
+          assistantBubble.textContent = '';
+          assistantBubble.classList.remove('ai-typing', 'ai-content-segment', 'ai-reply-pending', 'ai-streaming-soft', 'ai-flow-in');
+          assistantBubble.__flowShown = false;
+          assistantBubble.style.display = 'none';
+          try { delete assistantBubble.__xtjStreamHtml; } catch (eHtml) { assistantBubble.__xtjStreamHtml = ''; }
+        }
+        var rail = assistantNode.querySelector(':scope > .ai-process-rail');
+        if (!rail) {
+          rail = el('div', { class: 'ai-process-rail' });
+          if (assistantBubble && assistantBubble.parentNode === assistantNode) assistantNode.insertBefore(rail, assistantBubble);
+          else assistantNode.appendChild(rail);
+        }
+        var slice = aiReasoning.slice(railReasonCursor);
+        railReasonCursor = aiReasoning.length;
+        activeRailBeat = createProcessRailBeat(value, slice);
+        rail.appendChild(activeRailBeat);
+        sealedContents.push(value);
+        aiContent = '';
+      }
       function closeReasoningSegment() {
         if (reasoningRenderer) {
           var settledReasoning = activeReasoningSegment && activeReasoningSegment.__rawReasoning;
@@ -11038,8 +11182,20 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (!activeToolTimeline) {
           closeReasoningSegment();
           activeToolTimeline = el('div', { class: 'ai-tool-timeline ai-tool-status ai-process-timeline', role: 'status', 'aria-live': 'polite' });
-          if (_sendThinkingMode !== 'off') processBody().appendChild(activeToolTimeline);
-          else assistantNode.insertBefore(activeToolTimeline, assistantBubble);
+          if (_sendThinkingMode !== 'off') {
+            var railHost = assistantNode.querySelector(':scope > .ai-process-rail');
+            if (!railHost) {
+              railHost = el('div', { class: 'ai-process-rail' });
+              if (assistantBubble && assistantBubble.parentNode === assistantNode) assistantNode.insertBefore(railHost, assistantBubble);
+              else assistantNode.appendChild(railHost);
+            }
+            if (!activeRailBeat || !activeRailBeat.isConnected) {
+              activeRailBeat = createProcessRailBeat('', aiReasoning.slice(railReasonCursor));
+              railReasonCursor = aiReasoning.length;
+              railHost.appendChild(activeRailBeat);
+            }
+            activeRailBeat.querySelector('.ai-rail-tools').appendChild(activeToolTimeline);
+          } else assistantNode.insertBefore(activeToolTimeline, assistantBubble);
         }
         if (newRound) activeToolTimeline.__formalRound = true;
         return activeToolTimeline;
@@ -11095,6 +11251,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (!contentRenderer) {
           contentRenderer = createSmoothTextRenderer(assistantBubble, {
             streamClass: 'ai-streaming-soft',
+            flowPace: true,
             onStreamMetrics: createAiStreamMetricsReporter('answer'),
             onRender: function() { scrollToBottom(messagesEl, false); }
           });
@@ -11315,10 +11472,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           if (evt.type === 'tool_calls') {
             var toolList = evt.tools || [];
             streamToolCount += toolList.length;
+            // Narration becomes a rail sentence before the tools that follow it,
+            // so the search rows hang under that sentence instead of a bubble.
+            if (aiContent.trim()) {
+              if (_sendThinkingMode !== 'off') commitNarrationToRail(aiContent);
+              else sealAssistantContent(aiContent);
+            }
             var timeline = ensureToolTimeline(true, evt);
-            // Keep a tool round's progress narration with its process. The
-            // final answer can then grow without replacing a different prefix.
-            if (aiContent.trim()) sealAssistantContent(aiContent);
             _thinkingSettledOnContent = false;
             if (_sendThinkingMode !== 'off') { reasoningStarted = true; ensureThinkingTimer().resume(); }
             // ★★★ 2026-09-17 重写（P0「工具调用动画全部展开、堆叠占位」）：
@@ -12015,8 +12175,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             reasoningStarted = true;
             // C 修复：用户关闭思考时，仅记录状态、不创建/渲染思考节点
             if (_sendThinkingMode === 'off') continue;
-            var rnStart = ensureReasoningNode();
-            if (rnStart && !aiContent.trim() && rnStart.__userCollapsed !== true) setThinkingExpanded(rnStart, true, messagesEl);
+            ensureReasoningNode();
             ensureThinkingTimer();
             continue;
           }
@@ -12040,11 +12199,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               ensureReasoningNode();
               ensureThinkingTimer();
             }
-            var rn = ensureReasoningNode();
-            // 流式思考过程中强制展开，避免「只见标题、要等回复结束才能看内容」
-            if (rn && !aiContent.trim() && rn.__userCollapsed !== true && !rn.classList.contains('expanded')) {
-              setThinkingExpanded(rn, true, messagesEl);
-            }
+            ensureReasoningNode();
             var body = reasoningSegment();
             if (body) {
               var reasoningHost = body.closest ? body.closest('.ai-thinking-body') : null;
@@ -12078,6 +12233,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             // Empty packets and a leading blank line are not an answer phase.
             // Keep the thinking panel alive and retain whitespace for code.
             if (!accepted || !aiContent.trim()) continue;
+            if (_sendThinkingMode !== 'off' && finalThinkingElapsedMs > 0 && assistantNode.querySelector('.ai-rail-beat')) {
+              var answerHead = assistantNode.querySelector('.ai-thinking');
+              if (answerHead) setThinkingStatus(answerHead, '已思考 ' + formatThinkingElapsed(finalThinkingElapsedMs));
+            }
             var hadBodyRenderer = !!contentRenderer;
             if (!reasoningStarted) settleUnusedEarlyThinkingNode(assistantNode);
             if(S._newContentPrompt)S._newContentPrompt();
@@ -12110,9 +12269,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
                   // 计时在正文开始时停住，面板保持展开，整段回复完成后再折叠。
                   setThinkingActive(_tn, false);
                   if (reasoningRenderer) { try { reasoningRenderer.flush(); } catch (eRF) {} }
-                  if (_tn.__userCollapsed !== true && !_tn.classList.contains('expanded')) {
-                    setThinkingExpanded(_tn, true, messagesEl);
-                  }
+                  if (_tn.__userCollapsed !== false) setThinkingExpanded(_tn, false, messagesEl);
                 }
               } catch (eThinkSettle) {}
             }

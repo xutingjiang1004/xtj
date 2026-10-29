@@ -94,7 +94,8 @@ test('live reasoning and tools remain in chronological order; completed calls st
   });
   await page.waitForFunction(()=>document.querySelectorAll('.ai-tool-step.is-done').length===2);
   assert.equal(await page.locator('.ai-tool-step.is-running').count(),0);
-  assert.deepEqual(await page.locator('.ai-thinking-body').evaluate(body=>Array.from(body.children).map(n=>n.classList.contains('ai-process-timeline')?'tools':'reasoning')),['reasoning','tools','reasoning']);
+  assert.deepEqual(await page.locator('.ai-thinking-body').evaluate(body=>Array.from(body.children).map(n=>n.classList.contains('ai-reasoning-segment')?'reasoning':n.className)),['reasoning','reasoning']);
+  assert.equal(await page.locator('.ai-process-rail .ai-tool-step').count(),2);
   assert.equal(await page.locator('.ai-tool-result-card').count(),2);
   assert.ok(await page.locator('.ai-tool-step').first().isVisible());
   await page.locator('[data-tool-call-id="a"] .ai-tool-result-card > button').click();
@@ -104,10 +105,10 @@ test('live reasoning and tools remain in chronological order; completed calls st
   assert.equal(await page.locator('[data-tool-call-id="b"] .ai-search-detail').isVisible(),true);
   await page.evaluate(()=>{emit({type:'content',text:'两座城市天气如下。'});emit({type:'done',content:'两座城市天气如下。',reasoning:'先比较两座城市。再结合工具结果判断。',thinking_mode:'max',complete:true,saved:true});stream.close();});
   await page.waitForFunction(()=>!document.querySelector('.ai-msg.generating'));
-  assert.equal(await page.locator('.ai-thinking-body .ai-tool-step').count(),2);
+  assert.equal(await page.locator('.ai-process-rail .ai-tool-step').count(),2);
   await page.evaluate(()=>__xtjAiAgent.close()); await page.evaluate(()=>__xtjAiAgent.open());
-  await page.waitForFunction(()=>document.querySelectorAll('.ai-thinking-body .ai-tool-step').length===2);
-  assert.deepEqual(await page.locator('.ai-thinking-body').evaluate(body=>Array.from(body.children).map(n=>n.classList.contains('ai-process-timeline')?'tools':'reasoning')),['reasoning','tools','reasoning']);
+  await page.waitForFunction(()=>document.querySelectorAll('.ai-process-rail .ai-tool-step').length===2);
+  assert.deepEqual(await page.locator('.ai-thinking-body').evaluate(body=>Array.from(body.children).map(n=>n.classList.contains('ai-reasoning-segment')?'reasoning':n.className)),['reasoning','reasoning']);
 });
 test('history list failure offers retry and upload folder is absent', async t => {
   const page=await fixture(t);
@@ -133,7 +134,7 @@ for (const effort of ['low','medium','high','max']) test(effort+': tools appear 
   assert.equal(await page.locator('[data-tool-call-id="y"].is-running').count(),1);
   await page.evaluate(()=>{emit({type:'tool_result',call_id:'y',tool_name:'search_web',success:true});emit({type:'reasoning',text:'继续分析。'});});
   await page.waitForFunction(()=>document.querySelectorAll('.ai-reasoning-segment').length===2);
-  assert.equal(await page.locator('.ai-thinking-body .ai-tool-step').count(),2);
+  assert.equal(await page.locator('.ai-process-rail .ai-tool-step').count(),2);
   assert.equal(await page.locator('.ai-tool-step.is-running').count(),0);
   assert.equal(await page.evaluate(()=>sent.thinking_mode),effort);
   await page.evaluate(()=>{emit({type:'done',content:'结论',thinking_mode:testEffort,complete:true,saved:true});stream.close();});
@@ -174,6 +175,15 @@ test('SSE accepted events persist the same ordered process in assistant metadata
   assert.equal(meta.process_events[1].tools[0].status,'done');
   assert.equal(meta.process_events[1].tools[0].items[0].url,'https://example.com/');
   assert.equal(frames.length,4);
+  const narrated={headersSent:true,writableEnded:false,write(){return true;},flush(){}};
+  writeSse(narrated,{type:'reasoning',text:'先看墙面。'});
+  writeSse(narrated,{type:'content',text:'我先从墙面上的文字反查地点。'});
+  writeSse(narrated,{type:'tool_calls',tools:[{id:'two',name:'search_web',args:{query:'Lennon Wall'}}]});
+  writeSse(narrated,{type:'content',text:'地点已经核对。'});
+  const saved=getProcessEvents(narrated);
+  assert.deepEqual(saved.map(event=>event.type),['reasoning','narration','tools']);
+  assert.equal(saved[1].text,'我先从墙面上的文字反查地点。');
+  assert.match(saved[1].reasoning,/先看墙面/);
 });
 
 for(const model of ['deepseek-flash','deepseek-v4-pro','custom:test-custom']) test(model+': normal chat exposes tools by default and compact result counts survive history',async t=>{
@@ -217,7 +227,7 @@ test('weather feedback has actual facts and optional data stays collapsed in its
   emit({type:'card',call_id:'weather',card:{protocol:'xtj.ai.ui.v1',id:'weather-card',type:'weather',title:'福州天气',data:{city:'福州',condition:'晴',temperature_c:26.7}}});
  });
  await page.waitForSelector('.ai-tool-data-details');assert.match(await page.locator('.ai-tool-step-status').textContent(),/晴.*26.7/);
- assert.equal(await page.locator('.ai-thinking-body [data-tool-call-id="weather"] .ai-tool-data-details').count(),1);assert.equal(await page.locator('.ai-tool-card--weather').isVisible(),false);
+  assert.equal(await page.locator('.ai-process-rail [data-tool-call-id="weather"] .ai-tool-data-details').count(),1);assert.equal(await page.locator('.ai-tool-card--weather').isVisible(),false);
  await page.locator('.ai-tool-data-details > summary').click();assert.equal(await page.locator('.ai-tool-card--weather').isVisible(),true);
  await page.evaluate(()=>{emit({type:'done',content:'福州晴。',reasoning:'',thinking_mode:'max',complete:true,saved:true});stream.close();});
 });

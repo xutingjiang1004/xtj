@@ -262,10 +262,10 @@ test('terminal reasoning after tools and its real duration survive completion an
  // Enqueuing done does not complete the queued body animation. Assert the
  // terminal message only after the real send lifecycle has finalized it.
  await p.waitForFunction(()=>{const n=document.querySelector('.ai-msg.assistant');return n&&!n.classList.contains('generating')&&n._msgRef;});
- await p.getByRole('button',{name:'思考过程',exact:true}).click();assert.match(await p.locator('.ai-thinking-body').textContent(),/我先核对地点/);assert.equal(await p.locator('.ai-thinking-label').textContent(),'已思考 4s');
+ await p.getByRole('button',{name:'思考过程',exact:true}).click();assert.match(await p.locator('.ai-thinking-body').textContent(),/我先核对地点/);assert.match(await p.locator('.ai-process-rail').textContent(),/已取得天气/);assert.equal(await p.locator('.ai-thinking-label').textContent(),'已思考 4s');
  await capture(p,'phone-terminal-thinking-restored','#aiChatRoot');
  await p.evaluate(()=>{const saved=JSON.parse(JSON.stringify(document.querySelector('.ai-msg.assistant')._msgRef));__xtjAiAgent.close();const base=fetch;window.fetch=(url,opts)=>new URL(url,location.href).pathname==='/api/agent/chat/history'?Promise.resolve(new Response(JSON.stringify({ok:true,conversation_id:'POLISH01',messages:[saved],has_more:false}),{headers:{'Content-Type':'application/json'}})):base(url,opts);__xtjAiAgent.open();});
- await p.locator('.ai-thinking-label').waitFor();assert.equal(await p.locator('.ai-thinking-label').textContent(),'已思考 4s');await p.getByRole('button',{name:'思考过程',exact:true}).click();assert.match(await p.locator('.ai-thinking-body').textContent(),/我先核对地点/);assert.match(await p.locator('.ai-thinking-body').textContent(),/已取得天气/);assert.deepEqual(f.errors,[]);
+ await p.locator('.ai-thinking-label').waitFor();assert.equal(await p.locator('.ai-thinking-label').textContent(),'已思考 4s');await p.getByRole('button',{name:'思考过程',exact:true}).click();assert.match(await p.locator('.ai-thinking-body').textContent(),/我先核对地点/);assert.match(await p.locator('.ai-process-rail').textContent(),/已取得天气/);assert.deepEqual(f.errors,[]);
 });
 
 for(const theme of ['light','dark'])test('glass bars and new-content pill expose the scrolling conversation in '+theme,{timeout:60000},async t=>{
