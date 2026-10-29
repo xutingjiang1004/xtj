@@ -79,4 +79,15 @@ function getProcessEvents(res) {
     ? { type: 'reasoning', text: event.text }
     : { type: 'tools', tools: event.tools.map(tool => Object.assign({}, tool, { status: tool.status === 'running' ? 'interrupted' : tool.status })) });
 }
-module.exports = { appendProcessEvent, getProcessEvents };
+// ★ 2026-10-29：收尾结算。
+//   思考耗时只在「正文 content 到达」时结算（见上面 appendProcessEvent 的 content 分支）。
+//   如果整轮只有思考、没有正文（thinking-only / 被中断在思考阶段），_aiThinkingActiveAt
+//   永远不会被清零，_aiThinkingElapsedMs 保持 undefined，最终下发 0，前端就显示
+//   「已思考 0s」。构造 done 事件前补结算一次即可；正文已到达时 activeAt 为 null，
+//   本函数是空操作，不会重复累加。
+function settleThinkingElapsed(res) {
+  if (!res || res._aiThinkingActiveAt == null) return;
+  res._aiThinkingElapsedMs = (res._aiThinkingElapsedMs || 0) + Math.max(0, Date.now() - res._aiThinkingActiveAt);
+  res._aiThinkingActiveAt = null;
+}
+module.exports = { appendProcessEvent, getProcessEvents, settleThinkingElapsed };

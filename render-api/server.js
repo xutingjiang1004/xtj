@@ -86,7 +86,7 @@ const { queryWeather, queryWeatherData, formatWeatherText, CITY_COORDS } = requi
 const { fetchSafeWebPage, assertSafeWebUrl, requestPinnedStream, fetchSafeRaw, fetchSafeBuffer, fetchSafeRedirectBuffer } = require('./web-fetch');
 const { ocrImageBuffer } = require('./image-ocr');
 const { endSse, writeSse } = require('./sse-write');
-const { getProcessEvents } = require('./ai-process-events');
+const { getProcessEvents, settleThinkingElapsed } = require('./ai-process-events');
 const { createChatFeatures } = require('./chat-features');
 const { createDmPrivateStorage, dmStorageBucket, PRIVATE_BUCKET } = require('./dm-private-storage');
 const { sniffDocument } = require('./dm-file-magic');
@@ -22418,10 +22418,14 @@ app.post('/api/agent/custom-chat/stream', guestOpenRouterAuth, aiChatConcurrency
       }
       if(provider==='deepseek' && _safeCheck.parsed.hostname==='api.deepseek.com' && customUsageReported) customUsage=deepSeekPricing.estimate(customUsage,chosenModel);
       customTurnFinished = true;
+      // thinking-only 轮次没有 content 结算点，落库与下发前都先补结算，避免写入/下发 0。
+      settleThinkingElapsed(res);
       var customSaved = await saveCustomChatTurn({ db: supabase, userName: req.userName, convId: customConvId,
         message: customFinalText, content: finalAssistantContent, reasoning: reasoningText, model: chosenModel,
         thinkingMode: _thinkMode, webSearch: _webSearch, processEvents: getProcessEvents(res), cards: customSiteCards,
         visionUrls: customVisionUrls, requestId: reqId, usage:customUsageReported?Object.assign({},customUsage):null,followups: _customParts.followups,contextMemory:res._aiContextMemory,contextBudget:res._aiContextBudget, buildMeta: buildMsgMeta, marker: AI_AGENT_MESSAGE_MARKER, thinkingElapsedMs: res._aiThinkingElapsedMs || 0 });
+      // thinking-only 轮次没有 content 结算点，这里补结算，避免下发 0。
+      settleThinkingElapsed(res);
       writeSse(res, {
         type: 'done',
         conversation_id: customConvId,
@@ -24049,6 +24053,8 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, rateLimit
           console.error('[AI-QUOTA] responses path record failed:', eRq && eRq.message);
         }
       }
+      // thinking-only 轮次没有 content 结算点，这里补结算，避免下发 0。
+      settleThinkingElapsed(res);
       writeSse(res, {
         type: 'done',
         complete: true,
