@@ -132,6 +132,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     { key: 'doubao',  label: '豆包 Doubao',     base: 'https://ark.cn-beijing.volces.com/api/v3',           defaultModel: 'doubao-1-5-pro-32k', models: ['doubao-1-5-pro-32k', 'doubao-1-5-lite-32k', 'doubao-pro-32k'] },
     { key: 'deepseek',label: 'DeepSeek',        base: 'https://api.deepseek.com',                           defaultModel: 'deepseek-flash', models: ['deepseek-flash', 'deepseek-v4-pro'] },
     { key: 'kimi',    label: 'Kimi 月之暗面',    base: 'https://api.moonshot.cn/v1',                         defaultModel: 'moonshot-v1-8k', models: ['moonshot-v1-8k', 'moonshot-v1-32k', 'moonshot-v1-128k'] },
+    // ★ 2026-10-29：补 MiniMax 直连（OpenAI 兼容）。国内账号用 api.minimaxi.com，
+    //   海外账号用 api.minimax.io，两套 Key 不通用；此处按国内端点做默认值，
+    //   用户可在「接口地址」里自行改成海外端点。M2.7/M2.5 系列已对新用户关闭，
+    //   默认模型取当前可用的 MiniMax-M3。
+    { key: 'minimax', label: 'MiniMax',         base: 'https://api.minimaxi.com/v1',                        defaultModel: 'MiniMax-M3', models: ['MiniMax-M3', 'MiniMax-M2.7', 'MiniMax-M2.7-highspeed', 'MiniMax-M2.5', 'MiniMax-M2.5-highspeed', 'MiniMax-M2.1', 'MiniMax-M2.1-highspeed', 'MiniMax-M2'] },
     { key: 'zhipu',   label: '智谱 GLM',        base: 'https://open.bigmodel.cn/api/paas/v4',               defaultModel: 'glm-4-flash', models: ['glm-4-flash', 'glm-4-air', 'glm-4', 'glm-4-plus'] },
     { key: 'openai',  label: 'OpenAI',          base: 'https://api.openai.com/v1',                          defaultModel: 'gpt-4o-mini', models: ['gpt-4o-mini', 'gpt-4o', 'gpt-4.1-mini'] },
     // ★ 托管免费模型的具体标识与展示名由服务端 /custom-models 下发（后端 OPENROUTER_MODEL 可切换），
@@ -628,6 +633,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     thinkMax: true,
     // ★ 小猫AI dock 模式：作为移动端 dock 中间 tab 打开时置为 true，隐藏多余返回按钮
     _dockMode: false,
+    // A tab switch only detaches the visual layer; the live stream keeps running.
+    _tabHidden: false,
+    _tabHiddenResearch: false,
+    // Messages submitted while the previous turn is still streaming.
+    _sendQueue: [],
     selectedModel: resolveInitialModel(),
     _userPickedThinkingMode: false,
     _userPickedModel: false,
@@ -2541,6 +2551,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   }
 
   function interruptCurrentChat() {
+    // ★ 2026-10-29：主动打断（暂停按钮 / 语音打断）必须同时丢弃发送队列。
+    //   此前只有暂停按钮在调用前清队列，语音打断走 onInterrupt 直接进这里，
+    //   结果是「说一句话打断回复」之后，排队中的旧消息会被自动补发出去。
+    //   统一收口到这里，任何打断语义都等于「不再自动发送剩余排队消息」。
+    if (S._sendQueue && S._sendQueue.length) {
+      S._sendQueue = [];
+      try { notify('已停止，排队消息已取消'); } catch (eQueueClear) {}
+    }
     var turn = S._interruptChat;
     S._interruptChat = null;
     // Snapshot the old turn while it still owns the UI, before a new send can
@@ -3931,7 +3949,6 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       'aria-label': '思考过程'
     });
     var label = el('span', { class: 'ai-thinking-label', text: elapsedMs > 0 ? ('已思考 ' + formatThinkingElapsed(elapsedMs)) : reasoning ? '思考过程' : '思考中' });
-    if (typeof elapsedMs === 'number' && elapsedMs === 0) label.textContent = '已思考 0s';
     toggle.appendChild(label);
     toggle.appendChild(el('span', { class: 'ai-thinking-caret', text: '\u25be', 'aria-hidden': 'true' }));
 
@@ -4249,7 +4266,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     });
     if (reasoning) {
       reconcileReasoningBody(body, msg.reasoning);
-      setThinkingStatus(node, typeof msg.thinking_elapsed_ms === 'number' && msg.thinking_elapsed_ms >= 0 ? '已思考 ' + formatThinkingElapsed(msg.thinking_elapsed_ms) : '思考过程');
+      setThinkingStatus(node, typeof msg.thinking_elapsed_ms === 'number' && msg.thinking_elapsed_ms > 0 ? '已思考 ' + formatThinkingElapsed(msg.thinking_elapsed_ms) : '思考过程');
       if (node.querySelector('.ai-tool-step.is-error')) setThinkingExpanded(node,true,messagesEl);
     }
     return node;
@@ -4295,11 +4312,20 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }
     var contentForRender = msg.content || '';
     var bubble = el('div', { class: 'ai-msg-bubble' });
+    var hasReasoning = !!(msg.reasoning && String(msg.reasoning).trim());
+    var reasoningPanel = hasReasoning ? node.querySelector('.ai-thinking') : null;
     if (!contentForRender || !String(contentForRender).trim()) {
-      var hasReasoning = !!(msg.reasoning && String(msg.reasoning).trim());
-      contentForRender = hasReasoning ? 'AI 只返回了思考过程，没有生成正文回复。' : 'AI 暂无回复。';
+      if (reasoningPanel) {
+        // A turn that only produced thinking must not present that thinking as
+        // the answer body; keep it in the reasoning panel and open it.
+        contentForRender = '';
+        try { setThinkingExpanded(reasoningPanel, true, messagesEl); } catch (eReasoningOpen) {}
+      } else {
+        contentForRender = hasReasoning ? 'AI 只返回了思考过程，没有生成正文回复。' : 'AI 暂无回复。';
+      }
     }
     bubble.innerHTML = renderMarkdown(contentForRender);
+    if (!contentForRender) bubble.style.display = 'none';
     node.appendChild(bubble);
     setupBubbleCopy(bubble, messagesEl);
     // 底部信息栏：时间 · 思考程度 · 用量（仅 assistant 有思考标签和用量）
@@ -9673,6 +9699,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var back = document.getElementById('aiSiteSearchBack');
     if (form) form.addEventListener('submit', function(event) { event.preventDefault(); runSiteSearch(); });
     if (back) back.addEventListener('click', closeSiteSearch);
+    document.addEventListener('keydown', function(event) {
+      if (event.key === 'Escape' && panel && panel.classList.contains('active')) {
+        event.preventDefault();
+        closeSiteSearch();
+      }
+    });
     panel.addEventListener('click', function(event) {
       var button = event.target.closest('[data-ai-search-source]');
       if (!button) return;
@@ -9746,7 +9778,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     });
   }
 
-  async function handleSendMessage(input, sendBtn, messagesEl, fileData, onAccepted) {
+  async function handleSendMessage(input, sendBtn, messagesEl, fileData, onAccepted, options) {
     var text = String(input.value || '').trim();
     var originalUserText = text;
     if (S._newChatBusy) { notify('正在创建新对话，请稍候'); return; }
@@ -9766,7 +9798,19 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     if (!text && !fileList.some(function(f) { return f && f.dataUrl; })) return;
     if (!S.active) { notify('聊天面板未就绪，请重新打开或登录后再发送'); return; }
     if (text.length > 50000) { notify('消息过长，最多 50000 字符，请精简后重试'); return; }
-    if (S.sending || S._interruptChat) interruptCurrentChat();
+    if (S.sending || S._interruptChat) {
+      // A new send used to interrupt the active reply. Queue it instead so
+      // rapid consecutive sends all reach the model in order.
+      if (options && options.queued) {
+        S._sendQueue.unshift({ text: text, files: fileList.slice(0, 10), owner: currentUser, conversation: S.conversationId || '' });
+        return;
+      }
+      if (typeof S._enqueueAiSend === 'function') {
+        S._enqueueAiSend(text, fileList);
+        return;
+      }
+      interruptCurrentChat();
+    }
     S.lastSendFingerprint = sendFingerprint;
     S.lastSendAt = Date.now();
     // ★ 修复（H5/并发重复请求）：认证/配额窗口期间第二个请求不会中止第一个（此时
@@ -9851,21 +9895,33 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         resetActiveRenderersByChannel('chat');
         if(S._contextCapacity)S._contextCapacity.settle();
         if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
+        setTimeout(function() {
+          try { if (typeof S._drainSendQueue === 'function') S._drainSendQueue(); } catch (eDrain) {}
+        }, 0);
       }
     }
 
     var originalText = originalUserText;
     var draftFileVersion = null;
     function restoreInputText() {
-      if ((S._currentReqId !== reqId || !customModelIdentityCurrent(sendIdentity)) || String(input.value || '').trim()) return;
+      if (S._currentReqId !== reqId || !customModelIdentityCurrent(sendIdentity)) return;
+      var queuedRestore = !!(options && options.queued);
+      var targetInput = queuedRestore && S.inputEl && S.inputEl.isConnected ? S.inputEl : input;
+      if (!queuedRestore && String(targetInput.value || '').trim()) return;
       if (draftFileVersion !== null && S._aiChatFileSelectionVersion && S._aiChatFileSelectionVersion() !== draftFileVersion) return;
-      input.value = originalText;
-      input.style.height = 'auto';
+      var existingText = String(targetInput.value || '');
+      if (originalText) {
+        targetInput.value = existingText.trim() ? (originalText + '\n' + existingText) : originalText;
+      }
+      targetInput.style.height = 'auto';
       try {
-        input.style.height = Math.min(input.scrollHeight, 120) + 'px';
-        if (!_isTouchMobile) input.focus();
+        targetInput.style.height = Math.min(targetInput.scrollHeight, 120) + 'px';
+        if (!_isTouchMobile) targetInput.focus();
       } catch (e) {}
       updateInputMetrics();
+      if (queuedRestore && originalText) {
+        try { notify('排队消息发送失败，已放回输入框'); } catch (eQueuedRestore) {}
+      }
       // ★ 2026-09-29（审计 M5「发送失败只回填文字，已选附件不可恢复」）：
       //   现象：选好图片/PDF 后发送，遇到鉴权失败/HTTP 错误/断网/45s 超时，
       //   输入框文字回来了但附件预览已经没了，用户必须重新选一遍文件。
@@ -9873,7 +9929,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       //   而所有失败路径只有本函数在恢复文字，没有对应的附件恢复。
       //   修法：回填文字的同时把本次附件副本交还输入区重新渲染预览。
       try {
-        if (typeof S._restoreAiChatFiles === 'function' && fileList && fileList.length) {
+        if (typeof S._restoreAiChatFiles === 'function' && fileList && fileList.length && !(S._aiChatFiles && S._aiChatFiles.length)) {
           S._restoreAiChatFiles(fileList.slice(0, 10));
         }
       } catch (eRestoreFiles) {}
@@ -12623,6 +12679,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     hideConversationListPage();
     if (_histBtn) syncAiHeaderButtons(_histBtn, _newBtn);
     if (cid === S.conversationId && S.messages.length > 0) return;
+    if (S._sendQueue && S._sendQueue.length) {
+      S._sendQueue = [];
+      notify('会话已切换，排队消息已取消');
+    }
     if (S._switchAiComposerDraft) S._switchAiComposerDraft(cid);
     if (S._aiChatFilesCleanup) S._aiChatFilesCleanup();
     abortCurrentRequest('chat');
@@ -13026,6 +13086,10 @@ function showChatMessages() {
       //   旧实现只有 S.sending 守卫，点击后要等 /chat/new 网络往返才有视觉变化，
       //   期间按钮无 loading 态、无并发锁，用户重复点击会并发创建多个会话。
       if (S._newChatBusy) return; // 并发锁：忽略重复点击
+      if (S._sendQueue && S._sendQueue.length) {
+        S._sendQueue = [];
+        notify('已开始新对话，排队消息已取消');
+      }
       S._newChatBusy = true;
       var createSeq = S._newChatRequestId = (S._newChatRequestId || 0) + 1;
       var createLifecycle = S.lifecycleId, createCid = S.conversationId;
@@ -14365,7 +14429,22 @@ function showChatMessages() {
         resetForm();
         setTimeout(function() { if (modalOwner.current()) { try { apiKeyInput.focus(); } catch (e) {} } }, 0);
       });
-      modal.addEventListener('click', function(e) { if (e.target === modal) close(); });
+      // ★ 2026-10-29：自定义模型弹窗不再「点遮罩即关闭」。
+      //   现象：手机上弹窗卡片只占 92vw，左右各留约 15px 的遮罩区，用户瞄准输入框
+      //   或滚动时手指稍微偏一点就命中遮罩，弹窗瞬间消失、已填的 API Key 与模型名
+      //   全部丢失，表现为「添加模型时反复闪退、根本配不完」。
+      //   修法：遮罩点击一律忽略，只保留「取消 / 放弃编辑 / Esc」三种显式关闭方式；
+      //   同时忽略「按下在卡片内、抬起在遮罩上」的滑动误判。
+      var _backdropDownOnMask = false;
+      modal.addEventListener('pointerdown', function(e) {
+        _backdropDownOnMask = (e.target === modal);
+      }, true);
+      modal.addEventListener('click', function(e) {
+        if (e.target !== modal || !_backdropDownOnMask) return;
+        _backdropDownOnMask = false;
+        // 保留轻微提示，避免用户以为按钮失灵
+        try { notify('点「取消」可退出配置'); } catch (eMask) {}
+      });
       modal.addEventListener('keydown', function(e) { if (e.key === 'Escape') close(); });
 
       saveBtn.addEventListener('click', async function() {
@@ -14667,6 +14746,51 @@ function showChatMessages() {
       //   发送后立即清理预览（保证不阻塞连续发送）
       handleSendMessage(input, sendBtn, messagesEl, fileList, clearAiChatFilePreview);
     }
+
+    function enqueueAiSend(text, files) {
+      if (!S._sendQueue) S._sendQueue = [];
+      if (S._sendQueue.length >= 5) {
+        notify('排队消息过多，请等当前回复完成');
+        return false;
+      }
+      S._sendQueue.push({
+        text: text,
+        files: (files || []).slice(0, 10),
+        owner: currentUser,
+        // ★ 2026-10-29：入队时可能仍是「草稿会话」（首条消息还没拿到服务端
+        //   conversation_id），这里如实记录空值；drain 时把空值当作通配，
+        //   否则首条消息一返回真实 id，排队消息就会被误判成「会话已切换」丢掉。
+        conversation: S.conversationId || ''
+      });
+      input.value = '';
+      input.style.height = 'auto';
+      updateInputMetrics();
+      if (_aiChatFiles.length) clearAiChatFilePreview();
+      notify('已排队，当前回复完成后自动发送');
+      return true;
+    }
+
+    function drainAiSendQueue() {
+      if (!S.active || S.sending || S._interruptChat) return;
+      if (!S._sendQueue || !S._sendQueue.length) return;
+      var next = S._sendQueue[0];
+      var sameOwner = !!next && String(next.owner || '') === String(currentUser || '');
+      // 空 conversation 代表「入队时还在草稿会话」：首条消息收到 meta 事件后
+      // S.conversationId 会从空变成真实 id，这属于同一次会话的自然升格，
+      // 不能算切换。真正切会话/新建对话/关闭面板都会显式清空队列。
+      var draftConversation = !!next && !next.conversation;
+      var sameConversation = draftConversation || String(next.conversation || '') === String(S.conversationId || '');
+      if (!sameOwner || !sameConversation) {
+        S._sendQueue.shift();
+        notify('会话已切换，排队消息已取消');
+        return drainAiSendQueue();
+      }
+      S._sendQueue.shift();
+      var draft = nodeForAuxiliarySend(next.text);
+      return handleSendMessage(draft, sendBtn, messagesEl, next.files, null, { queued: true });
+    }
+    S._enqueueAiSend = enqueueAiSend;
+    S._drainSendQueue = drainAiSendQueue;
     // ★ 重新生成：把指定文本（及可选附件）填入输入框并发起发送。
     //   供 assistant 消息上的「重新生成」按钮调用，复用现有发送与附件预览机制。
     S._resendFn = function(resendText, resendAttachments) {
@@ -14730,6 +14854,10 @@ function showChatMessages() {
     sendBtn.addEventListener('click', doSend);
     pauseBtn.addEventListener('click', function() {
       if (!S.sending && !S.paused) return;
+      if (S._sendQueue && S._sendQueue.length) {
+        S._sendQueue = [];
+        notify('已停止，排队消息已取消');
+      }
       interruptCurrentChat();
     });
     // ★★ 2026-09-29（审计 M10「输入区没有 compositionstart / compositionend」）：
@@ -14914,9 +15042,71 @@ function showChatMessages() {
     };
   }
 
+  // Detach the AI surface for a Dock tab switch without aborting the stream.
+  // The request, renderer and DOM stay alive; only visibility changes.
+  function hideAiChatForTabSwitch() {
+    if (!S.active || S._tabHidden) return false;
+    S._tabHidden = true;
+    S._tabHiddenResearch = document.body.classList.contains('xtj-research-open');
+    var panel = document.getElementById('panelAiChat');
+    if (panel) {
+      panel.classList.remove('active', 'is-entering', 'is-leaving');
+      panel.classList.add('hidden');
+      panel.setAttribute('aria-hidden', 'true');
+    }
+    var researchPanel = document.getElementById('panelDeepThink');
+    if (S._tabHiddenResearch && researchPanel) {
+      researchPanel.classList.add('hidden');
+      researchPanel.classList.remove('active');
+      researchPanel.setAttribute('aria-hidden', 'true');
+    }
+    document.body.classList.remove('xtj-research-open');
+    document.body.classList.remove('xtj-ai-page-open');
+    try { document.body.style.overflow = ''; } catch (eOverflow) {}
+    window.__xtjAiChatActive = false;
+    updateSecondaryPageState(false, 'ai-chat');
+    return true;
+  }
+
+  function restoreHiddenAiChat(opts) {
+    if (!S._tabHidden) return false;
+    S._tabHidden = false;
+    S._dockMode = !!(opts && opts.dock);
+    window.__xtjAiChatActive = true;
+    var researchPanel = document.getElementById('panelDeepThink');
+    if (S._tabHiddenResearch && researchPanel) {
+      researchPanel.classList.remove('hidden');
+      researchPanel.classList.add('active');
+      researchPanel.inert = false;
+      researchPanel.setAttribute('aria-hidden', 'false');
+      document.body.classList.add('xtj-research-open');
+      updateSecondaryPageState(true);
+      requestAnimationFrame(function() {
+        try { scrollToBottom(document.getElementById('dtMessages'), true); } catch (eDtScroll) {}
+      });
+    } else {
+      var panel = document.getElementById('panelAiChat');
+      if (!panel) return false;
+      panel.classList.remove('hidden', 'is-entering', 'is-leaving');
+      panel.classList.add('active');
+      panel.inert = false;
+      panel.setAttribute('aria-hidden', 'false');
+      document.body.classList.add('xtj-ai-page-open');
+      updateSecondaryPageState(true, 'ai-chat');
+      requestAnimationFrame(function() {
+        try { scrollToBottom(S.messagesEl, true); } catch (eScroll) {}
+      });
+    }
+    S._tabHiddenResearch = false;
+    return true;
+  }
+
   async function openAiChat(opts) {
     ensureAiAccountState();
-    if (S.active) return;
+    if (S.active) {
+      if (restoreHiddenAiChat(opts)) return;
+      return;
+    }
     S._dockMode = !!(opts && opts.dock);
     // ★ 小猫AI 页面始终可打开（即使未登录也进入独立页面；随后 ensureUserAuthOrNotify
     //   会在未登录/凭证失效时提示登录并在面板内给出提示，而不是什么都不发生）。
@@ -15098,6 +15288,11 @@ function showChatMessages() {
     var panelIsVisible = !!(activePanel && activePanel.classList.contains('active') && !activePanel.classList.contains('hidden'));
     if (!S.active && !panelIsVisible && force !== true) return;
     S._dockMode = false;
+    S._tabHidden = false;
+    S._tabHiddenResearch = false;
+    S._sendQueue = [];
+    S._enqueueAiSend = null;
+    S._drainSendQueue = null;
     S.active = false;
     S.lifecycleId += 1;
     S._newChatRequestId = (S._newChatRequestId || 0) + 1;
@@ -15283,16 +15478,15 @@ function showChatMessages() {
     var original = window.switchDockTab;
     window.switchDockTab = function(tab, skipReturn, options) {
       var result = original.apply(this, arguments);
-      // ★ 修复：切到小猫AI 自身 tab（ai-chat）时保持 AI 页面打开。
-      //   original 已负责打开/恢复 AI 页面（S.active 同步置 true），
-      //   若此处不排除 ai-chat，会在打开后立刻被 closeAiChat() 关掉，
-      //   表现为移动端点击小猫AI「无反应」。
-      if (tab !== 'chat' && tab !== 'ai-chat' && S.active) {
-        try { closeAiChat(); } catch (e) {}
-      }
-      // 切换出聊天 tab 时一并关闭深入研究二级页面（ai-chat 属于 AI 页面子级，需保留）
-      if (tab !== 'chat' && tab !== 'ai-chat') {
-        try { closeDeepThinkPage(); } catch (e) {}
+      // A tab switch detaches the AI surface but must not abort a live reply.
+      // closeAiChat stays reserved for logout/account cleanup.
+      if (tab !== 'ai-chat' && S.active) {
+        try { hideAiChatForTabSwitch(); } catch (eHide) { try { closeAiChat(); } catch (eClose) {} }
+      } else if (tab !== 'ai-chat') {
+        var researchPanel = document.getElementById('panelDeepThink');
+        if (researchPanel && !researchPanel.classList.contains('hidden')) {
+          try { closeDeepThinkPage(); } catch (eDeep) {}
+        }
       }
       return result;
     };
@@ -15367,6 +15561,7 @@ function showChatMessages() {
   };
   window.__xtjOpenAiChat = openAiChat;
   window.__xtjCloseAiChat = closeAiChat;
+  window.__xtjHideAiChat = hideAiChatForTabSwitch;
   // ★ 小猫AI dock 入口（移动端 dock 中间 tab）：隐藏多余返回按钮
   window.__xtjOpenAiChatFromDock = function() {
     return openAiChat({ dock: true });

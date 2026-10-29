@@ -7,6 +7,8 @@ var path = require('path');
 var { SECURITY_HEADERS_LOCAL } = require("../render-api/security-headers");
 
 var root = path.resolve(__dirname, '..');
+// Client-side Dock routes share the single SPA shell.
+var SPA_ROUTES = { '/photos': 1, '/chat': 1, '/profile': 1, '/ai': 1, '/posts': 1 };
 var mime = {
   '.css': 'text/css; charset=utf-8',
   '.html': 'text/html; charset=utf-8',
@@ -123,7 +125,17 @@ var server = http.createServer(function (req, res) {
     res.writeHead(403, SECURITY_HEADERS_LOCAL).end('Forbidden');
     return;
   }
-  var relative = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
+  // ★ 2026-10-29：Dock 路由的尾斜杠先 301 到规范路径。
+  //   index.html 用相对路径引用 js/、css/，在 /photos/ 下会解析成 /photos/js/… 而 404，
+  //   本地预览会直接白屏；与 render-api 线上行为保持一致。
+  if (pathname.length > 1 && /\/+$/.test(pathname) && SPA_ROUTES[pathname.replace(/\/+$/, '')]) {
+    var trailingSearch = req.url.indexOf('?') >= 0 ? req.url.slice(req.url.indexOf('?')) : '';
+    res.writeHead(301, Object.assign({ Location: pathname.replace(/\/+$/, '') + trailingSearch }, SECURITY_HEADERS_LOCAL));
+    res.end();
+    return;
+  }
+  var routePath = pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname;
+  var relative = routePath === '/' ? 'index.html' : (SPA_ROUTES[routePath] ? 'index.html' : routePath.replace(/^\/+/, ''));
   var file = path.resolve(root, relative);
   if (file !== root && file.indexOf(root + path.sep) !== 0) {
     res.writeHead(403, SECURITY_HEADERS_LOCAL).end('Forbidden');

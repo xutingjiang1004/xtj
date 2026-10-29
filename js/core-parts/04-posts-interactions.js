@@ -2127,8 +2127,7 @@
                 const feed = document.getElementById('feed');
                 const observer = new IntersectionObserver((entries) => {
                     entries.forEach(entry => {
-                        if (entry.isIntersecting && !feedLoadMoreFailed &&
-                            (!feedEndReached || getFeedRenderedSliceStart() < getFilteredPosts(feedAllPosts, feedAllComments).length)) {
+                        if (entry.isIntersecting && !feedLoadMoreFailed) {
                             loadMoreFeedPosts();
                         }
                     });
@@ -2254,8 +2253,8 @@
                     return '<img class="avatar-image" src="' + escapeHtml(sanitizeUrl(avatarUrl)) +
                         '" alt="' + escapeHtml(safeUser) + '" data-user-name="' + escapeHtml(safeUser) +
                         '" loading="lazy" decoding="async" style="opacity:0;transition:opacity 0.2s"' +
-                        ' onload="var p=this.closest(\'.avatar\');if(p){p.classList.add(\'has-image\');this.style.opacity=\'1\'}"' +
-                        ' onerror="var p=this.closest(\'.avatar\');if(p){p.classList.remove(\'has-image\');this.remove();var f=p.querySelector(\'.avatar-fallback\');if(f)f.style.visibility=\'visible\'};var u=this.getAttribute(\'data-user-name\');if(u&&window.__xtjInvalidateAvatarCache)window.__xtjInvalidateAvatarCache(u)">' +
+                        ' onload="this.style.opacity=\'1\';var p=this.closest(\'.avatar\')||this.closest(\'.profile-detail-avatar\');if(p){p.classList.add(\'has-image\');}"' +
+                        ' onerror="var p=this.closest(\'.avatar\')||this.closest(\'.profile-detail-avatar\');if(p){p.classList.remove(\'has-image\');this.remove();var f=p.querySelector(\'.avatar-fallback\');if(f)f.style.visibility=\'visible\'};var u=this.getAttribute(\'data-user-name\');if(u&&window.__xtjInvalidateAvatarCache)window.__xtjInvalidateAvatarCache(u)">' +
                         fallbackSpan;
                 }
                 return fallbackSpan;
@@ -5032,7 +5031,11 @@
             }
 
             window.doPublish = async function () {
-                if (!currentUser) { showToast("请先登录"); return; }
+                if (!currentUser) {
+                    if (typeof window.openAuthModal === 'function') window.openAuthModal('login');
+                    showToast("请先登录");
+                    return;
+                }
                 var btn = document.getElementById("pubBtn");
                 if (!btn || btn.disabled || btn.getAttribute('aria-busy') === 'true') return;
                 if (isUserMuted()) { showToast("您已被禁言，无法发布内容"); return; }
@@ -5487,10 +5490,34 @@
                 feed.appendChild(button);
             }
 
+            function ensureFeedNoMoreNotice() {
+                var feed = document.getElementById("feed");
+                if (!feed || document.getElementById("feedNoMore")) return;
+                var noMore = document.createElement("div");
+                noMore.id = "feedNoMore";
+                noMore.className = "loading";
+                noMore.textContent = "没有更多帖子";
+                noMore.style.padding = "30px";
+                noMore.style.textAlign = "center";
+                var sentinel = document.getElementById("feedSentinel");
+                feed.insertBefore(noMore, sentinel || null);
+            }
+
             loadMoreFeedPosts = async function() {
                 if (feedPageFetchPending || feedLoadMoreFailed) return;
                 var feed = document.getElementById("feed");
                 if (!feed) return;
+                // ★ 2026-10-29：终态短路。feedEndReached 之后哨兵每次重新进入视口都会
+                //   再次调用本函数，旧实现仍会插入"正在加载更多帖子"占位、再移除并返回，
+                //   造成无意义的 DOM churn 和列表高度抖动（长列表滚动到底部时最明显）。
+                //   已经到底且当前过滤结果全部渲染完，只补提示，直接返回。
+                if (feedEndReached) {
+                    var terminalPosts = getFilteredPosts(feedAllPosts, feedAllComments);
+                    if (getFeedRenderedSliceStart() >= terminalPosts.length) {
+                        ensureFeedNoMoreNotice();
+                        return;
+                    }
+                }
                 var requestId = feedLoadRequestId;
                 var continueButton = document.getElementById('feedContinueSearch');
                 if (continueButton) continueButton.remove();
@@ -5566,16 +5593,7 @@
                 // 此时不能因为切片末尾超过 filteredPosts 就提前终止无限滚动——继续滚动应
                 // 继续用 feedNextOffset 拉取，让更多可匹配筛选的帖子进入内存后再渲染。
                 if (feedEndReached && startIdx >= filteredPosts.length) {
-                    var noMore = document.getElementById("feedNoMore");
-                    if (!noMore) {
-                        noMore = document.createElement("div");
-                        noMore.id = "feedNoMore";
-                        noMore.className = "loading";
-                        noMore.textContent = "没有更多帖子";
-                        noMore.style.padding = "30px";
-                        noMore.style.textAlign = "center";
-                        feed.appendChild(noMore);
-                    }
+                    ensureFeedNoMoreNotice();
                     return;
                 }
                 if (startIdx < filteredPosts.length) {
@@ -5584,6 +5602,9 @@
                     var scopedComments = getRenderableComments(feedAllComments, filteredPosts);
                     var scopedLikes = (feedAllLikes || []).filter(function(l) { return filteredPostIds.has(String(l.post_id)); });
                     appendMorePosts(filteredPosts.slice(startIdx, endIdx), scopedComments, scopedLikes);
+                    // The final page is appended after the early check above; without
+                    // this second check the terminal notice never renders.
+                    if (feedEndReached && endIdx >= filteredPosts.length) ensureFeedNoMoreNotice();
                 }
                 if (getFeedRenderedSliceStart() >= filteredPosts.length && !feedEndReached) {
                     // A permanently visible sentinel emits no second intersection event.

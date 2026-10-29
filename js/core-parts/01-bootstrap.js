@@ -716,17 +716,23 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                                 _lastRefreshAuthResult = { ok: false, reason: 'invalid_response', status: res.status };
                                 return { token: '', user_name: '' };
                             }
-                            if (res.status === 401 || res.status === 403) {
-                                clearPendingRefreshRequest(refreshRequestId);
-                                // 服务端确证：没有有效 refresh 会话
-                                _lastRefreshAuthResult = {
-                                    ok: false,
-                                    reason: res.status === 401 ? 'expired' : 'forbidden',
-                                    status: res.status
-                                };
-                                // ★ 修复：401/403（未登录或会话失效）进入冷却期，抑制短时间内的重复刷新请求
-                                _refreshCooldownUntil = Date.now() + 30000;
-                                return { token: '', user_name: '' };
+                            if (res.status === 401 || res.status === 403 || res.status === 409) {
+                                if (res.status === 401 || res.status === 403) {
+                                    clearPendingRefreshRequest(refreshRequestId);
+                                    // 服务端确证：没有有效 refresh 会话
+                                    _lastRefreshAuthResult = {
+                                        ok: false,
+                                        reason: res.status === 401 ? 'expired' : 'forbidden',
+                                        status: res.status
+                                    };
+                                    // ★ 修复：401/403（未登录或会话失效）进入冷却期，抑制短时间内的重复刷新请求
+                                    _refreshCooldownUntil = Date.now() + 30000;
+                                    return { token: '', user_name: '' };
+                                }
+                                // 409 = 轮换并发/回执尚未落地。必须保留同一个
+                                // refresh_request_id 重试：服务端只在 request_hash
+                                // 匹配轮换回执时才能补发 successor；清掉 nonce 会把
+                                // “响应丢失但已轮换”的唯一恢复凭据一起删掉。
                             }
                             // 5xx / 409 / 429 → 可恢复，标记 retryable 后重试
                             _lastRefreshAuthResult = { ok: false, reason: 'retryable', status: res.status };
@@ -739,6 +745,11 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                     }
                     // 两次都失败：仍**不主动登出**——可能只是后端暂时不可用，
                     // 保留本地会话，下次交互/可见性变化时自然重试。
+                    // 409 连续失败时做 3 秒短冷却，避免后台轮询每秒重放同一个
+                    // 正在轮换的会话（用户主动操作会清零冷却，不阻塞恢复）。
+                    if (_lastRefreshAuthResult && _lastRefreshAuthResult.status === 409) {
+                        _refreshCooldownUntil = Date.now() + 3000;
+                    }
                     return { token: '', user_name: '' };
                 });
                 // ★ 审计修复（P1）：Promise settle 后必须清空缓存变量。旧实现从不
@@ -1559,8 +1570,9 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
             if (typeof API_BASE !== 'undefined' && API_BASE) {
                 try {
                     var userToken = getUserToken();
+                    if (!userToken) return;
                     var headers = { 'Content-Type': 'application/json' };
-                    if (userToken) headers['Authorization'] = 'Bearer ' + userToken;
+                    headers['Authorization'] = 'Bearer ' + userToken;
                     var body = { user_name: userName };
                     fetch(API_BASE + '/api/log-user-visit', {
                         method: 'POST', headers: headers, body: JSON.stringify(body)
@@ -2217,11 +2229,7 @@ function isAdmin() {
 
                 _aiChatOpenPromise = ensureAiAgentLoaded().then(function() {
                     if (openGeneration !== _aiChatOpenGeneration) return;
-                    if (loadingEl) loadingEl.textContent = '正在恢复登录状态...';
-                    return ensureUserToken().then(function(token) {
-                        if (openGeneration !== _aiChatOpenGeneration) return;
-                        if (!token) { errorState.auth = true; throw new Error('auth_expired'); }
-                        if (loadingEl) loadingEl.textContent = '正在加载 AI 配置...';
+                    var proceedToOpen = function() {
                         if (typeof window.__xtjOpenAiChat === 'function' && window.__xtjOpenAiChat !== lazyAiChatLauncher._realOpen) {
                             if (openGeneration !== _aiChatOpenGeneration) return;
                             window.__xtjOpenAiChat();
@@ -2230,6 +2238,14 @@ function isAdmin() {
                         }
                         errorState.config = true;
                         throw new Error('ai_module_not_ready');
+                    };
+                    if (!currentUser) {
+                        return proceedToOpen();
+                    }
+                    if (loadingEl) loadingEl.textContent = '正在恢复登录状态...';
+                    return ensureUserToken().then(function(token) {
+                        if (openGeneration !== _aiChatOpenGeneration) return;
+                        return proceedToOpen();
                     });
                 }).catch(function(err) {
                     if (openGeneration !== _aiChatOpenGeneration) return;
@@ -2613,14 +2629,21 @@ function isAdmin() {
         function showToast(message, type) {
             const container = document.getElementById('toastContainer');
             if (!container) { console.warn("showToast: toastContainer not found"); return; }
+            var msgStr = message == null ? '' : String(message);
+            if (typeof window.__xtjUiTextRepair === 'function') {
+                try { var _repaired = window.__xtjUiTextRepair(msgStr); if (_repaired != null) msgStr = _repaired; } catch (e) {}
+            }
+            // 防重复堆叠：已有相同文本且处于可见状态时直接忽略
+            var existingToasts = container.querySelectorAll('.toast');
+            for (var ti = 0; ti < existingToasts.length; ti++) {
+                if (existingToasts[ti].textContent === msgStr && !existingToasts[ti].classList.contains('is-fading')) return;
+            }
             const toast = document.createElement('div');
             toast.className = 'toast' + (type === 'error' ? ' toast-error' : '');
-            if (typeof window.__xtjUiTextRepair === 'function') {
-                try { var _repaired = window.__xtjUiTextRepair(message); if (_repaired != null) message = _repaired; } catch (e) {}
-            }
-            toast.textContent = message == null ? '' : String(message);
+            toast.textContent = msgStr;
             container.appendChild(toast);
             setTimeout(() => {
+                toast.classList.add('is-fading');
                 toast.style.animation = 'toastFade 0.3s ease-out forwards';
                 setTimeout(() => toast.remove(), 300);
             }, type === 'error' ? 4000 : 2500);

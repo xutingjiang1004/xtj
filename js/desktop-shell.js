@@ -12,8 +12,12 @@
     var aiPanel = document.getElementById('panelAiChat');
     var aiVisible = !!(aiPanel && aiPanel.classList.contains('active') && !aiPanel.classList.contains('hidden'));
     if (aiVisible && window.XTJHaptics) window.XTJHaptics.play('selection');
-    if ((window.__xtjAiChatActive || aiVisible) && typeof window.__xtjCloseAiChat === 'function') {
-      window.__xtjCloseAiChat();
+    if (window.__xtjAiChatActive || aiVisible) {
+      if (typeof window.__xtjHideAiChat === 'function') {
+        try { window.__xtjHideAiChat(); } catch (eHide) {}
+      } else if (typeof window.__xtjCloseAiChat === 'function') {
+        window.__xtjCloseAiChat();
+      }
     }
     if (typeof window.switchDockTab === 'function') {
       window.switchDockTab(tab, true, { animate: true, source: 'desktop-sidebar' });

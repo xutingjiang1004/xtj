@@ -400,14 +400,21 @@
             var _regEmailInp = document.getElementById('regEmailInp');
             // 判空保护：任一注册表单元素缺失不得中断 core.js 后续全部逻辑
             if (_regSubmitBtn) _regSubmitBtn.addEventListener('click', doRegister);
-            if (_regPwInp) _regPwInp.addEventListener('keydown', function (e) {
-                if (e.key === 'Enter') {
-                    // ★ 审计修复：与登录路径对称，防止连按 Enter 并发重复注册
-                    //   （并发走 saveUserInfo 可能插入两条 __user_info__ 记录）。
-                    if (_regSubmitBtn && _regSubmitBtn.disabled) return;
-                    doRegister();
-                }
-            });
+            if (_regPwInp) {
+                _regPwInp.addEventListener('blur', function() {
+                    if (_regPwInp.value && _regPwInp.value.length < 6) {
+                        showToast("密码至少6位", "error");
+                    }
+                });
+                _regPwInp.addEventListener('keydown', function (e) {
+                    if (e.key === 'Enter') {
+                        // ★ 审计修复：与登录路径对称，防止连按 Enter 并发重复注册
+                        //   （并发走 saveUserInfo 可能插入两条 __user_info__ 记录）。
+                        if (_regSubmitBtn && _regSubmitBtn.disabled) return;
+                        doRegister();
+                    }
+                });
+            }
             if (_regNickInp) _regNickInp.addEventListener('keydown', function (e) {
                 if (e.key === 'Enter') { var _email = document.getElementById('regEmailInp'); if (_email) _email.focus(); }
             });
@@ -422,8 +429,8 @@
                 if (!name) { showToast("请输入昵称"); return; }
                 if (name.length < 2 || name.length > 20) { showToast("昵称长度2-20个字符"); return; }
                 if (!/^[\u4e00-\u9fa5a-zA-Z0-9_]+$/.test(name)) { showToast("昵称仅支持中英文、数字和下划线"); return; }
-                if (!pw) { showToast("请输入密码"); return; }
-                if (pw.length < 6) { showToast("密码至少6位"); return; }
+                if (!pw) { showToast("请输入密码", "error"); if (_regPwInp) _regPwInp.focus(); return; }
+                if (pw.length < 6) { showToast("密码至少6位", "error"); if (_regPwInp) _regPwInp.focus(); return; }
                 if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showToast("邮箱格式不正确"); return; }
 
                 const btn = document.getElementById("registerSubmitBtn");

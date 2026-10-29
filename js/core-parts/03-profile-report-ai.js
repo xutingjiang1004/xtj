@@ -440,7 +440,6 @@
                 var els = [
                     document.getElementById('profileAvatar'),
                     document.getElementById('myAvatar'),
-                    document.getElementById('profileDetailAvatar'),
                     document.getElementById('upcAvatar')
                 ];
                 els.forEach(function(el) {
@@ -448,6 +447,17 @@
                         el.innerHTML = avatarContent;
                     }
                 });
+                var pda = document.getElementById('profileDetailAvatar');
+                if (pda && avatarUrl) {
+                    var dImg = document.createElement('img');
+                    dImg.src = sanitizeUrl(avatarUrl);
+                    dImg.alt = '头像';
+                    dImg.style.width = '100%';
+                    dImg.style.height = '100%';
+                    dImg.style.objectFit = 'cover';
+                    dImg.style.borderRadius = '50%';
+                    pda.replaceChildren(dImg);
+                }
                 document.querySelectorAll('#feed .post .avatar').forEach(function(el) {
                     var header = el.closest('.post-header');
                     if (header) {
@@ -2082,6 +2092,10 @@ function renderProfileActivityList(kind) {
                     // 更新"我的"页面显示（未登录状态）
                     profileName.textContent = "未登录";
                     profileStatus.textContent = "点击登录";
+                    var myNameEl = document.getElementById("myName");
+                    if (myNameEl) myNameEl.textContent = "";
+                    var myAvatarEl = document.getElementById("myAvatar");
+                    if (myAvatarEl) { myAvatarEl.textContent = "?"; myAvatarEl.className = "avatar"; }
                     
                     // 隐藏发布区域
                     if (publishBox) publishBox.style.display = "none";

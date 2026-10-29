@@ -722,17 +722,23 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                                 _lastRefreshAuthResult = { ok: false, reason: 'invalid_response', status: res.status };
                                 return { token: '', user_name: '' };
                             }
-                            if (res.status === 401 || res.status === 403) {
-                                clearPendingRefreshRequest(refreshRequestId);
-                                // 服务端确证：没有有效 refresh 会话
-                                _lastRefreshAuthResult = {
-                                    ok: false,
-                                    reason: res.status === 401 ? 'expired' : 'forbidden',
-                                    status: res.status
-                                };
-                                // ★ 修复：401/403（未登录或会话失效）进入冷却期，抑制短时间内的重复刷新请求
-                                _refreshCooldownUntil = Date.now() + 30000;
-                                return { token: '', user_name: '' };
+                            if (res.status === 401 || res.status === 403 || res.status === 409) {
+                                if (res.status === 401 || res.status === 403) {
+                                    clearPendingRefreshRequest(refreshRequestId);
+                                    // 服务端确证：没有有效 refresh 会话
+                                    _lastRefreshAuthResult = {
+                                        ok: false,
+                                        reason: res.status === 401 ? 'expired' : 'forbidden',
+                                        status: res.status
+                                    };
+                                    // ★ 修复：401/403（未登录或会话失效）进入冷却期，抑制短时间内的重复刷新请求
+                                    _refreshCooldownUntil = Date.now() + 30000;
+                                    return { token: '', user_name: '' };
+                                }
+                                // 409 = 轮换并发/回执尚未落地。必须保留同一个
+                                // refresh_request_id 重试：服务端只在 request_hash
+                                // 匹配轮换回执时才能补发 successor；清掉 nonce 会把
+                                // “响应丢失但已轮换”的唯一恢复凭据一起删掉。
                             }
                             // 5xx / 409 / 429 → 可恢复，标记 retryable 后重试
                             _lastRefreshAuthResult = { ok: false, reason: 'retryable', status: res.status };
@@ -745,6 +751,11 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                     }
                     // 两次都失败：仍**不主动登出**——可能只是后端暂时不可用，
                     // 保留本地会话，下次交互/可见性变化时自然重试。
+                    // 409 连续失败时做 3 秒短冷却，避免后台轮询每秒重放同一个
+                    // 正在轮换的会话（用户主动操作会清零冷却，不阻塞恢复）。
+                    if (_lastRefreshAuthResult && _lastRefreshAuthResult.status === 409) {
+                        _refreshCooldownUntil = Date.now() + 3000;
+                    }
                     return { token: '', user_name: '' };
                 });
                 // ★ 审计修复（P1）：Promise settle 后必须清空缓存变量。旧实现从不
@@ -1565,8 +1576,9 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
             if (typeof API_BASE !== 'undefined' && API_BASE) {
                 try {
                     var userToken = getUserToken();
+                    if (!userToken) return;
                     var headers = { 'Content-Type': 'application/json' };
-                    if (userToken) headers['Authorization'] = 'Bearer ' + userToken;
+                    headers['Authorization'] = 'Bearer ' + userToken;
                     var body = { user_name: userName };
                     fetch(API_BASE + '/api/log-user-visit', {
                         method: 'POST', headers: headers, body: JSON.stringify(body)
@@ -2223,11 +2235,7 @@ function isAdmin() {
 
                 _aiChatOpenPromise = ensureAiAgentLoaded().then(function() {
                     if (openGeneration !== _aiChatOpenGeneration) return;
-                    if (loadingEl) loadingEl.textContent = '正在恢复登录状态...';
-                    return ensureUserToken().then(function(token) {
-                        if (openGeneration !== _aiChatOpenGeneration) return;
-                        if (!token) { errorState.auth = true; throw new Error('auth_expired'); }
-                        if (loadingEl) loadingEl.textContent = '正在加载 AI 配置...';
+                    var proceedToOpen = function() {
                         if (typeof window.__xtjOpenAiChat === 'function' && window.__xtjOpenAiChat !== lazyAiChatLauncher._realOpen) {
                             if (openGeneration !== _aiChatOpenGeneration) return;
                             window.__xtjOpenAiChat();
@@ -2236,6 +2244,14 @@ function isAdmin() {
                         }
                         errorState.config = true;
                         throw new Error('ai_module_not_ready');
+                    };
+                    if (!currentUser) {
+                        return proceedToOpen();
+                    }
+                    if (loadingEl) loadingEl.textContent = '正在恢复登录状态...';
+                    return ensureUserToken().then(function(token) {
+                        if (openGeneration !== _aiChatOpenGeneration) return;
+                        return proceedToOpen();
                     });
                 }).catch(function(err) {
                     if (openGeneration !== _aiChatOpenGeneration) return;
@@ -2619,14 +2635,21 @@ function isAdmin() {
         function showToast(message, type) {
             const container = document.getElementById('toastContainer');
             if (!container) { console.warn("showToast: toastContainer not found"); return; }
+            var msgStr = message == null ? '' : String(message);
+            if (typeof window.__xtjUiTextRepair === 'function') {
+                try { var _repaired = window.__xtjUiTextRepair(msgStr); if (_repaired != null) msgStr = _repaired; } catch (e) {}
+            }
+            // 防重复堆叠：已有相同文本且处于可见状态时直接忽略
+            var existingToasts = container.querySelectorAll('.toast');
+            for (var ti = 0; ti < existingToasts.length; ti++) {
+                if (existingToasts[ti].textContent === msgStr && !existingToasts[ti].classList.contains('is-fading')) return;
+            }
             const toast = document.createElement('div');
             toast.className = 'toast' + (type === 'error' ? ' toast-error' : '');
-            if (typeof window.__xtjUiTextRepair === 'function') {
-                try { var _repaired = window.__xtjUiTextRepair(message); if (_repaired != null) message = _repaired; } catch (e) {}
-            }
-            toast.textContent = message == null ? '' : String(message);
+            toast.textContent = msgStr;
             container.appendChild(toast);
             setTimeout(() => {
+                toast.classList.add('is-fading');
                 toast.style.animation = 'toastFade 0.3s ease-out forwards';
                 setTimeout(() => toast.remove(), 300);
             }, type === 'error' ? 4000 : 2500);
@@ -3227,14 +3250,21 @@ function isAdmin() {
             var _regEmailInp = document.getElementById('regEmailInp');
             // 判空保护：任一注册表单元素缺失不得中断 core.js 后续全部逻辑
             if (_regSubmitBtn) _regSubmitBtn.addEventListener('click', doRegister);
-            if (_regPwInp) _regPwInp.addEventListener('keydown', function (e) {
-                if (e.key === 'Enter') {
-                    // ★ 审计修复：与登录路径对称，防止连按 Enter 并发重复注册
-                    //   （并发走 saveUserInfo 可能插入两条 __user_info__ 记录）。
-                    if (_regSubmitBtn && _regSubmitBtn.disabled) return;
-                    doRegister();
-                }
-            });
+            if (_regPwInp) {
+                _regPwInp.addEventListener('blur', function() {
+                    if (_regPwInp.value && _regPwInp.value.length < 6) {
+                        showToast("密码至少6位", "error");
+                    }
+                });
+                _regPwInp.addEventListener('keydown', function (e) {
+                    if (e.key === 'Enter') {
+                        // ★ 审计修复：与登录路径对称，防止连按 Enter 并发重复注册
+                        //   （并发走 saveUserInfo 可能插入两条 __user_info__ 记录）。
+                        if (_regSubmitBtn && _regSubmitBtn.disabled) return;
+                        doRegister();
+                    }
+                });
+            }
             if (_regNickInp) _regNickInp.addEventListener('keydown', function (e) {
                 if (e.key === 'Enter') { var _email = document.getElementById('regEmailInp'); if (_email) _email.focus(); }
             });
@@ -3249,8 +3279,8 @@ function isAdmin() {
                 if (!name) { showToast("请输入昵称"); return; }
                 if (name.length < 2 || name.length > 20) { showToast("昵称长度2-20个字符"); return; }
                 if (!/^[\u4e00-\u9fa5a-zA-Z0-9_]+$/.test(name)) { showToast("昵称仅支持中英文、数字和下划线"); return; }
-                if (!pw) { showToast("请输入密码"); return; }
-                if (pw.length < 6) { showToast("密码至少6位"); return; }
+                if (!pw) { showToast("请输入密码", "error"); if (_regPwInp) _regPwInp.focus(); return; }
+                if (pw.length < 6) { showToast("密码至少6位", "error"); if (_regPwInp) _regPwInp.focus(); return; }
                 if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showToast("邮箱格式不正确"); return; }
 
                 const btn = document.getElementById("registerSubmitBtn");
@@ -3771,7 +3801,6 @@ function isAdmin() {
                 var els = [
                     document.getElementById('profileAvatar'),
                     document.getElementById('myAvatar'),
-                    document.getElementById('profileDetailAvatar'),
                     document.getElementById('upcAvatar')
                 ];
                 els.forEach(function(el) {
@@ -3779,6 +3808,17 @@ function isAdmin() {
                         el.innerHTML = avatarContent;
                     }
                 });
+                var pda = document.getElementById('profileDetailAvatar');
+                if (pda && avatarUrl) {
+                    var dImg = document.createElement('img');
+                    dImg.src = sanitizeUrl(avatarUrl);
+                    dImg.alt = '头像';
+                    dImg.style.width = '100%';
+                    dImg.style.height = '100%';
+                    dImg.style.objectFit = 'cover';
+                    dImg.style.borderRadius = '50%';
+                    pda.replaceChildren(dImg);
+                }
                 document.querySelectorAll('#feed .post .avatar').forEach(function(el) {
                     var header = el.closest('.post-header');
                     if (header) {
@@ -5413,6 +5453,10 @@ function renderProfileActivityList(kind) {
                     // 更新"我的"页面显示（未登录状态）
                     profileName.textContent = "未登录";
                     profileStatus.textContent = "点击登录";
+                    var myNameEl = document.getElementById("myName");
+                    if (myNameEl) myNameEl.textContent = "";
+                    var myAvatarEl = document.getElementById("myAvatar");
+                    if (myAvatarEl) { myAvatarEl.textContent = "?"; myAvatarEl.className = "avatar"; }
                     
                     // 隐藏发布区域
                     if (publishBox) publishBox.style.display = "none";
@@ -7587,8 +7631,7 @@ function renderProfileActivityList(kind) {
                 const feed = document.getElementById('feed');
                 const observer = new IntersectionObserver((entries) => {
                     entries.forEach(entry => {
-                        if (entry.isIntersecting && !feedLoadMoreFailed &&
-                            (!feedEndReached || getFeedRenderedSliceStart() < getFilteredPosts(feedAllPosts, feedAllComments).length)) {
+                        if (entry.isIntersecting && !feedLoadMoreFailed) {
                             loadMoreFeedPosts();
                         }
                     });
@@ -7714,8 +7757,8 @@ function renderProfileActivityList(kind) {
                     return '<img class="avatar-image" src="' + escapeHtml(sanitizeUrl(avatarUrl)) +
                         '" alt="' + escapeHtml(safeUser) + '" data-user-name="' + escapeHtml(safeUser) +
                         '" loading="lazy" decoding="async" style="opacity:0;transition:opacity 0.2s"' +
-                        ' onload="var p=this.closest(\'.avatar\');if(p){p.classList.add(\'has-image\');this.style.opacity=\'1\'}"' +
-                        ' onerror="var p=this.closest(\'.avatar\');if(p){p.classList.remove(\'has-image\');this.remove();var f=p.querySelector(\'.avatar-fallback\');if(f)f.style.visibility=\'visible\'};var u=this.getAttribute(\'data-user-name\');if(u&&window.__xtjInvalidateAvatarCache)window.__xtjInvalidateAvatarCache(u)">' +
+                        ' onload="this.style.opacity=\'1\';var p=this.closest(\'.avatar\')||this.closest(\'.profile-detail-avatar\');if(p){p.classList.add(\'has-image\');}"' +
+                        ' onerror="var p=this.closest(\'.avatar\')||this.closest(\'.profile-detail-avatar\');if(p){p.classList.remove(\'has-image\');this.remove();var f=p.querySelector(\'.avatar-fallback\');if(f)f.style.visibility=\'visible\'};var u=this.getAttribute(\'data-user-name\');if(u&&window.__xtjInvalidateAvatarCache)window.__xtjInvalidateAvatarCache(u)">' +
                         fallbackSpan;
                 }
                 return fallbackSpan;
@@ -10492,7 +10535,11 @@ function renderProfileActivityList(kind) {
             }
 
             window.doPublish = async function () {
-                if (!currentUser) { showToast("请先登录"); return; }
+                if (!currentUser) {
+                    if (typeof window.openAuthModal === 'function') window.openAuthModal('login');
+                    showToast("请先登录");
+                    return;
+                }
                 var btn = document.getElementById("pubBtn");
                 if (!btn || btn.disabled || btn.getAttribute('aria-busy') === 'true') return;
                 if (isUserMuted()) { showToast("您已被禁言，无法发布内容"); return; }
@@ -10947,10 +10994,34 @@ function renderProfileActivityList(kind) {
                 feed.appendChild(button);
             }
 
+            function ensureFeedNoMoreNotice() {
+                var feed = document.getElementById("feed");
+                if (!feed || document.getElementById("feedNoMore")) return;
+                var noMore = document.createElement("div");
+                noMore.id = "feedNoMore";
+                noMore.className = "loading";
+                noMore.textContent = "没有更多帖子";
+                noMore.style.padding = "30px";
+                noMore.style.textAlign = "center";
+                var sentinel = document.getElementById("feedSentinel");
+                feed.insertBefore(noMore, sentinel || null);
+            }
+
             loadMoreFeedPosts = async function() {
                 if (feedPageFetchPending || feedLoadMoreFailed) return;
                 var feed = document.getElementById("feed");
                 if (!feed) return;
+                // ★ 2026-10-29：终态短路。feedEndReached 之后哨兵每次重新进入视口都会
+                //   再次调用本函数，旧实现仍会插入"正在加载更多帖子"占位、再移除并返回，
+                //   造成无意义的 DOM churn 和列表高度抖动（长列表滚动到底部时最明显）。
+                //   已经到底且当前过滤结果全部渲染完，只补提示，直接返回。
+                if (feedEndReached) {
+                    var terminalPosts = getFilteredPosts(feedAllPosts, feedAllComments);
+                    if (getFeedRenderedSliceStart() >= terminalPosts.length) {
+                        ensureFeedNoMoreNotice();
+                        return;
+                    }
+                }
                 var requestId = feedLoadRequestId;
                 var continueButton = document.getElementById('feedContinueSearch');
                 if (continueButton) continueButton.remove();
@@ -11026,16 +11097,7 @@ function renderProfileActivityList(kind) {
                 // 此时不能因为切片末尾超过 filteredPosts 就提前终止无限滚动——继续滚动应
                 // 继续用 feedNextOffset 拉取，让更多可匹配筛选的帖子进入内存后再渲染。
                 if (feedEndReached && startIdx >= filteredPosts.length) {
-                    var noMore = document.getElementById("feedNoMore");
-                    if (!noMore) {
-                        noMore = document.createElement("div");
-                        noMore.id = "feedNoMore";
-                        noMore.className = "loading";
-                        noMore.textContent = "没有更多帖子";
-                        noMore.style.padding = "30px";
-                        noMore.style.textAlign = "center";
-                        feed.appendChild(noMore);
-                    }
+                    ensureFeedNoMoreNotice();
                     return;
                 }
                 if (startIdx < filteredPosts.length) {
@@ -11044,6 +11106,9 @@ function renderProfileActivityList(kind) {
                     var scopedComments = getRenderableComments(feedAllComments, filteredPosts);
                     var scopedLikes = (feedAllLikes || []).filter(function(l) { return filteredPostIds.has(String(l.post_id)); });
                     appendMorePosts(filteredPosts.slice(startIdx, endIdx), scopedComments, scopedLikes);
+                    // The final page is appended after the early check above; without
+                    // this second check the terminal notice never renders.
+                    if (feedEndReached && endIdx >= filteredPosts.length) ensureFeedNoMoreNotice();
                 }
                 if (getFeedRenderedSliceStart() >= filteredPosts.length && !feedEndReached) {
                     // A permanently visible sentinel emits no second intersection event.
@@ -12769,7 +12834,55 @@ function renderProfileActivityList(kind) {
  * Lines from original core.js: 10044-13870
  * DO NOT edit js/core.js directly — edit this file, then run: node scripts/assemble-core.js
  */
+            // ========== Dock routes (History API) ==========
+            function xtjRoutePathForTab(tab) {
+                if (tab === 'ai') return '/photos';
+                if (tab === 'chat') return '/chat';
+                if (tab === 'profile') return '/profile';
+                if (tab === 'ai-chat') return '/ai';
+                return '/';
+            }
+            function xtjTabFromPath(pathname) {
+                var p = String(pathname || '/');
+                if (p.length > 1) p = p.replace(/\/+$/, '');
+                if (p === '/photos') return 'ai';
+                if (p === '/chat') return 'chat';
+                if (p === '/profile') return 'profile';
+                if (p === '/ai') return 'ai-chat';
+                if (p === '/' || p === '/index.html' || p === '/posts') return 'posts';
+                return '';
+            }
+            function xtjPushDockRoute(tab, replace) {
+                var path = xtjRoutePathForTab(tab);
+                if (!path) return;
+                // ★ 2026-10-29：保留 query string。此前只拼 hash，任何带参数的入口
+                //   （如 ?chat_peer=、?post=、推广参数）在切一次 tab 后参数就被抹掉，
+                //   刷新或分享出去的链接会丢失上下文。
+                var next = path + (location.search || '') + (location.hash || '');
+                if (location.pathname + location.search + location.hash === next) return;
+                try {
+                    history[replace ? 'replaceState' : 'pushState']({ xtjTab: tab }, '', next);
+                } catch (eRoute) {}
+            }
+            window.__xtjRoutePathForTab = xtjRoutePathForTab;
+            window.__xtjTabFromPath = xtjTabFromPath;
+
+            window.addEventListener('popstate', function() {
+                var tab = xtjTabFromPath(location.pathname);
+                if (!tab) return;
+                if (tab === 'ai-chat') {
+                    if (currentDockTab !== 'ai-chat' || !window.__xtjAiChatActive) {
+                        window.switchDockTab('ai-chat', true, { source: 'history', skipHistory: true, animate: false });
+                    }
+                    return;
+                }
+                if (tab !== currentDockTab) {
+                    window.switchDockTab(tab, true, { source: 'history', skipHistory: true, animate: false });
+                }
+            });
+
             window.switchDockTab = function(tab, skipReturn, options) {
+                var routePreviousTab = currentDockTab;
                 if (tab !== 'chat') _chatContextSeq++;
                 options = options || {};
                 // Restoring saved tabs and background state must stay silent.
@@ -12783,6 +12896,7 @@ function renderProfileActivityList(kind) {
                     if (aicBtn) aicBtn.classList.add('active');
                     currentDockTab = 'ai-chat';
                     window.safeStorage.set('xtj_current_tab', 'ai-chat');
+                    if (routePreviousTab !== 'ai-chat' && !options.skipHistory && options.source !== 'history') xtjPushDockRoute('ai-chat');
                     requestAnimationFrame(syncDockIndicator);
                     var _opener = window.__xtjOpenAiChatFromDock || window.__xtjOpenAiChat;
                     if (typeof _opener === 'function') { try { _opener(); } catch (eDock) { console.warn('[dock] open ai-chat failed', eDock); } }
@@ -12801,9 +12915,11 @@ function renderProfileActivityList(kind) {
                     }
                     return;
                 }
-                // 离开小猫AI 到其它 tab → 关闭小猫AI 浮层
+                // 离开小猫AI 到其它 tab → 只隐藏浮层，保留在途回复与 DOM。
                 if (currentDockTab === 'ai-chat') {
-                    if (typeof window.__xtjCloseAiChat === 'function') {
+                    if (typeof window.__xtjHideAiChat === 'function') {
+                        try { window.__xtjHideAiChat(); } catch (eHide) {}
+                    } else if (typeof window.__xtjCloseAiChat === 'function') {
                         try { window.__xtjCloseAiChat(); } catch (eClose) {}
                     }
                 }
@@ -12954,6 +13070,7 @@ function renderProfileActivityList(kind) {
                 if (window.currentUser) startDMPolling(30000, true);
                 currentDockTab = tab;
                 window.safeStorage.set('xtj_current_tab', tab);
+                if (tab !== routePreviousTab && !options.skipHistory && options.source !== 'history') xtjPushDockRoute(tab);
                 document.querySelectorAll('.dock-tab').forEach(t => t.classList.remove('active'));
                 const panel = document.getElementById('panel' + tab.charAt(0).toUpperCase() + tab.slice(1));
                 if (dockPanelTransitionTimer) clearTimeout(dockPanelTransitionTimer);
@@ -13180,7 +13297,7 @@ function renderProfileActivityList(kind) {
                 cancelDmAiAsk();
                 if(_chatSendFlight){_chatSendFlight.controller.abort();_chatSendFlight=null;}
                 if (_chatSocialPanels) _chatSocialPanels.clear();
-                resetChatAttachmentQueue();_chatAttachmentDrafts.clear();_chatBatchFlight=null;_chatBatchSending=false;dockChatSending=false;_chatContextSeq++;
+                resetChatAttachmentQueue();_chatAttachmentDrafts.clear();_chatBatchFlight=null;_chatBatchSending=false;dockChatSending=false;_dockChatSendQueue=[];_chatContextSeq++;
                 var gallery=document.getElementById('chatGallery');if(gallery)gallery.__close ? gallery.__close() : gallery.remove();
                 _chatPushOwner='';_chatPushEnabled=false;
                 setTimeout(function(){window.__xtjSyncChatPush?.();},0);
@@ -13512,10 +13629,15 @@ function renderProfileActivityList(kind) {
                 if (conversationButton) conversationButton.hidden = true;
                 dockChatActiveUser = null;
                 dockChatSending = false;
+                _dockChatSendQueue = [];
                 _dockChatLoadSeq += 1;
-                // 如果当前处于 AI 聊天状态，优先关闭 AI 并恢复标准 UI
+                // 如果当前处于 AI 聊天状态，优先隐藏 AI 并恢复标准 UI（保留在途回复）
                 if (window.__xtjAiChatActive) {
-                    if (typeof window.__xtjCloseAiChat === 'function') window.__xtjCloseAiChat();
+                    if (typeof window.__xtjHideAiChat === 'function') {
+                        try { window.__xtjHideAiChat(); } catch (eHideAi) {}
+                    } else if (typeof window.__xtjCloseAiChat === 'function') {
+                        window.__xtjCloseAiChat();
+                    }
                     var chatInputArea2 = document.querySelector('.chat-input-area');
                     if (chatInputArea2) chatInputArea2.style.display = '';
                     var chatMessages2 = document.getElementById('dockChatMessages');
@@ -15460,6 +15582,18 @@ function renderProfileActivityList(kind) {
             }
 
             var _chatSendFlight = null;
+            var _dockChatSendQueue = [];
+            function drainDockChatSendQueue() {
+                if (dockChatSending || _chatBatchSending || !_dockChatSendQueue.length) return;
+                var next = _dockChatSendQueue[0];
+                if (!next || next.owner !== window.currentUser || next.epoch !== _authStateEpoch || next.peer !== dockChatActiveUser) {
+                    _dockChatSendQueue.shift();
+                    showToast('会话已切换，排队消息已取消');
+                    return drainDockChatSendQueue();
+                }
+                _dockChatSendQueue.shift();
+                return sendDockChatMessageSingle(null, next.content, { queued: true });
+            }
             async function sendDockChatMessageSingle(queuedFile, queuedText, retryOptions) {
                 _chatContextSeq++;
                 _chatHistoryFocus = '';
@@ -15469,12 +15603,13 @@ function renderProfileActivityList(kind) {
                 if (!inp) return;
                 const content = queuedText != null ? queuedText : inp.value.trim();
                 var retrying = !!(retryOptions && retryOptions.isRetry);
+                var queuedSend = !!(retryOptions && retryOptions.queued);
                 const fileInput = document.getElementById('dockChatFileInp');
-                let file = queuedFile || (!retrying && (_chatRecordedFile || (fileInput && fileInput.files[0]))) || null;
+                let file = queuedFile || (!queuedSend && !retrying && (_chatRecordedFile || (fileInput && fileInput.files[0]))) || null;
                 if (file) file = normalizeDockChatMediaFile(file);
                 if (_chatVoice) { showToast('请先结束录音'); return; }
                 if (_chatEditDraft && !retrying) { await sendChatEditedMessage(content); return; }
-                var replyDraftSource = retrying ? null : _chatReplyDraft;
+                var replyDraftSource = (retrying || queuedSend) ? null : _chatReplyDraft;
                 var replyDraft = replyDraftSource ? Object.assign({}, replyDraftSource) : null;
                 if (retrying && retryOptions.replyDraft) replyDraft = Object.assign({}, retryOptions.replyDraft);
                 if (!content && !file) return;
@@ -15483,9 +15618,22 @@ function renderProfileActivityList(kind) {
                     return;
                 }
                 if (dockChatSending) {
+                    if (queuedSend) {
+                        _dockChatSendQueue.unshift({ content: content, peer: dockChatActiveUser, owner: currentUser, epoch: _authStateEpoch });
+                        return;
+                    }
+                    if (!file && content) {
+                        if (_dockChatSendQueue.length >= 5) { showToast('排队消息过多，请等当前消息发送完成'); return; }
+                        _dockChatSendQueue.push({ content: content, peer: dockChatActiveUser, owner: currentUser, epoch: _authStateEpoch });
+                        inp.value = '';
+                        try { inp.dispatchEvent(new Event('input', { bubbles: true })); } catch (eQueueInput) {}
+                        try { persistDockChatDraft(dockChatActiveUser, ''); } catch (eQueueDraft) {}
+                        showToast('已排队，上一条发送完成后自动发出');
+                        return;
+                    }
                     // ★ 2026-09-25 修复（审计 M-4）：旧实现把 dockChatSending 与"无内容"
                     //   合并在同一个 return 里，发送中再次回车会被静默吞掉（无提示、不排队）。
-                    //   这里给出明确反馈；输入框内容保持不变，用户可直接再回车。
+                    //   文本消息现在会排队；带附件的连发仍明确提示。
                     showToast('上一条消息正在发送，请稍候');
                     return;
                 }
@@ -15508,7 +15656,7 @@ function renderProfileActivityList(kind) {
                 var sendOriginal=isDmOriginalSendEnabled();
                 var sendOrigin = captureDockChatSendOrigin(file);
                 var flight={controller:new AbortController(),owner:sendOwner,epoch:sendEpoch};_chatSendFlight=flight;
-                dockChatSending = true; if (!retrying && (!queuedFile || inp.value.trim()===content)) inp.value = '';
+                dockChatSending = true; if (!retrying && !queuedSend && (!queuedFile || inp.value.trim()===content)) inp.value = '';
                 if (!retrying) rememberDockChatDraft(targetUser,inp.value);
                 sendDockChatTyping(false);
                 if (_dockChatDraftTimer && !retrying) { clearTimeout(_dockChatDraftTimer); _dockChatDraftTimer = null; }
@@ -15791,9 +15939,12 @@ function renderProfileActivityList(kind) {
                 }
                 finally {
                     if(_chatSendFlight!==flight || !sameSender())return;
-                    _chatSendFlight=null;dockChatSending = false;
+                    _chatSendFlight=null;dockChatSending=false;
                     if (window.currentUser === sendOwner && !inp.value) persistDockChatDraft(targetUser,'');
                     try { if (typeof window.__xtjNotifyChatSending === 'function') window.__xtjNotifyChatSending(false); } catch (e) {}
+                    setTimeout(function() {
+                        try { drainDockChatSendQueue(); } catch (eDrainQueue) {}
+                    }, 0);
                 }
                 return { queued: true, tempId: tempId };
             }
@@ -18135,7 +18286,7 @@ function renderProfileActivityList(kind) {
             }
 
             window.openProfileBlocks = function() {
-                if (window.__xtjAiChatActive && window.__xtjCloseAiChat) window.__xtjCloseAiChat();
+                if (window.__xtjAiChatActive && window.__xtjHideAiChat) window.__xtjHideAiChat();
                 switchDockTab('chat',true,{animate:true});
                 openDockChatSocialSheet('blocks');
             };
@@ -18932,11 +19083,14 @@ function renderProfileActivityList(kind) {
                         })
                         .catch(function(e) { console.warn('[ann_read_sync_boot]', e); });
                 }
-                // 恢复/停止保存当前 tab
-                const savedTab = window.safeStorage.get('xtj_current_tab');
-                if (savedTab && savedTab !== 'posts') {
-                    switchDockTab(savedTab, true);
+                // 恢复 tab：显式 URL 路由优先，其余沿用上次停留的 tab。
+                const savedTab = window.safeStorage.get('xtj_current_tab') || 'posts';
+                const routeTab = xtjTabFromPath(location.pathname);
+                const initialTab = (routeTab && routeTab !== 'posts') ? routeTab : savedTab;
+                if (initialTab && initialTab !== 'posts') {
+                    switchDockTab(initialTab, true, { source: 'boot', skipHistory: true });
                 }
+                xtjPushDockRoute(initialTab || 'posts', true);
             });
 
             // ========== 主题切换 ==========
