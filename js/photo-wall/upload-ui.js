@@ -109,7 +109,27 @@
   //   （render-api/photo-create.js 的 IMAGE_MIME_TYPE 是精确白名单），
   //   用户却只看到一次无意义的失败上传。此处与服务端完全对齐。
   var PHOTO_WALL_ALLOWED_IMAGE_MIME = /^image\/(?:jpeg|png|webp|gif|avif|heic|heif|bmp|tif|tiff|x-ms-bmp)$/i;
-  function isImage(file){ return !!(file && PHOTO_WALL_ALLOWED_IMAGE_MIME.test(String(file.type || ''))); }
+  var PHOTO_EXT_MIME = { '.jpg':'image/jpeg', '.jpeg':'image/jpeg', '.png':'image/png', '.webp':'image/webp', '.gif':'image/gif', '.avif':'image/avif', '.bmp':'image/bmp', '.heic':'image/heic', '.heif':'image/heif', '.tif':'image/tiff', '.tiff':'image/tiff' };
+  function fileExtension(file){
+    var match = String(file && file.name || '').match(/(\.[a-z0-9]{1,8})$/i);
+    return match ? match[1].toLowerCase() : '';
+  }
+  function photoMime(file){
+    var type = String(file && file.type || '').toLowerCase();
+    if (type) return type;
+    return PHOTO_EXT_MIME[fileExtension(file)] || '';
+  }
+  // HEIC/TIFF 在能解码的浏览器里会按原文件上传，换到不能解码的浏览器全屏就是破图。
+  // 和帖子发布一样明确拒绝，不把原图悄悄转码。
+  function needsPhotoConversion(file){
+    var type = photoMime(file);
+    var ext = fileExtension(file);
+    return /^image\/(?:heic|heif|tiff?)$/i.test(type) || /^\.(?:heic|heif|tiff?)$/.test(ext);
+  }
+  function isImage(file){
+    if (!file || needsPhotoConversion(file)) return false;
+    return PHOTO_WALL_ALLOWED_IMAGE_MIME.test(photoMime(file));
+  }
   function isVideo(file){ return !!(file && /^video\//i.test(file.type || '')); }
   function isMedia(file){ return isImage(file) || isVideo(file); }
   function isPhotoWallImage(file){ return isImage(file); }
@@ -804,6 +824,7 @@
     var totalBytes = 0;
     for (var i = 0; i < files.length; i++) {
       var f = files[i];
+      if (needsPhotoConversion(f)) { skipped.push({ file: f, reason: '暂不支持 HEIC/HEIF/TIFF，请转换为 JPG 或 PNG' }); continue; }
       if (!isPhotoWallImage(f)) { skipped.push({ file: f, reason: '文件类型不支持' }); continue; }
       var size = Number(f.size) || 0;
       if (size > MAX_PHOTO_UPLOAD_BYTES) { skipped.push({ file: f, reason: '超过单张 50MB 限制' }); continue; }
@@ -991,7 +1012,7 @@
     var uploadFile = file;
     job.phase = 'preparing';
     if (job.onProgress) job.onProgress();
-    var type = isImage(file) && file.type ? file.type : 'image/jpeg';
+    var type = photoMime(file) || 'image/jpeg';
     uploadFile = await preprocessImageFile(file, signal);
     assertPhotoIdentity(identity);
     if (state.cancelRequested || (signal && signal.aborted)) throw createPhotoUploadError('cancelled');

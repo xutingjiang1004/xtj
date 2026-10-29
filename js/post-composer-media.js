@@ -98,7 +98,8 @@
     entries.forEach(function(entry, index) {
       var node = document.createElement('div'); node.className = 'post-media-preview-thumb';
       entry.node = node;
-      var isVideo = entry.file.type.startsWith('video/'), isAudio = entry.file.type.startsWith('audio/');
+      var fileType = window.XtjPostMedia && window.XtjPostMedia.effectiveType ? window.XtjPostMedia.effectiveType(entry.file) : String(entry.file.type || '');
+      var isVideo = fileType.startsWith('video/'), isAudio = fileType.startsWith('audio/');
       var media = document.createElement(isVideo ? 'video' : (isAudio ? 'audio' : 'img'));
       media.src = entry.url;
       if (isVideo) { media.muted = true; media.playsInline = true; media.preload = 'metadata'; }
@@ -110,7 +111,8 @@
       node.append(media, remove); grid.appendChild(node);
       if (!isVideo && !isAudio) { media.draggable = false; node.classList.add('is-sortable'); bindReorder(node, entry); }
     });
-    if (count) count.textContent = entries.length && entries[0].file.type.startsWith('image/')
+    var firstType = entries[0] && window.XtjPostMedia && window.XtjPostMedia.effectiveType ? window.XtjPostMedia.effectiveType(entries[0].file) : (entries[0] ? String(entries[0].file.type || '') : '');
+    if (count) count.textContent = entries.length && firstType.startsWith('image/')
       ? '已选择 ' + entries.length + ' / ' + mediaApi.MAX_POST_IMAGES + ' 张图片' : '已选择 ' + entries.length + ' 个文件';
     wrap.style.display = entries.length ? '' : 'none'; wrap.classList.toggle('is-active', !!entries.length);
   }
@@ -140,7 +142,7 @@
     input.__xtjPostSelectionBound = true; input.multiple = true;
     input.addEventListener('change', function() { append(input.files); input.value = ''; });
     var owner = window.currentUser || '';
-    window.addEventListener('auth-ready', function() { var next = window.currentUser || ''; if (next !== owner) clear(); owner = next; });
+    window.addEventListener('auth-ready', function() { var next = window.currentUser || ''; if (owner && owner !== next) clear(); owner = next; });
     window.addEventListener('pagehide', function(e) { if (!e.persisted) clear(); });
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();

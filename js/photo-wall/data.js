@@ -41,6 +41,14 @@
   var cacheEpoch = window.__xtjGetAuthEpoch ? window.__xtjGetAuthEpoch() : 0;
 
   function resetPhotoWallAccess() {
+    var nextOwner = String(window.currentUser || '');
+    var previousOwner = '';
+    try { previousOwner = String(readJson(CACHE_OWNER_KEY, '') || ''); } catch (_) {}
+    // 墓碑按账号保留。换号或退出才清掉，避免上一账号的删除记录藏住当前账号仍能看到的照片。
+    // 同一账号的登录代次变化不清，否则刚删的照片会从滞后的接口快照里冒回来。
+    if (previousOwner && previousOwner !== nextOwner) {
+      try { window.safeStorage.remove(DELETED_KEY); } catch (_) {}
+    }
     if (window.__xtjResetPhotoWallInitialization) window.__xtjResetPhotoWallInitialization();
     photoLoadGeneration++;
     if (activePhotoLoadController) activePhotoLoadController.abort();
@@ -916,7 +924,11 @@
           });
         })
         .subscribe(function(status){
-          if (status === 'SUBSCRIBED') setPhotoWallSyncStatus('synced', '已同步');
+          if (status !== 'SUBSCRIBED') return;
+          var wrap = byId('pwSyncStatus');
+          // 列表刷新失败后的错误态不能被频道连上这一下盖成「已同步」。
+          if (window.photoWallLoadError || (wrap && wrap.classList.contains('is-error'))) return;
+          setPhotoWallSyncStatus('synced', '已同步');
         });
     } catch (err) {
       console.warn('[PhotoWall] realtime subscribe failed', err);

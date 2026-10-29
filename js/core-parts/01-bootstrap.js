@@ -2570,7 +2570,7 @@ function isAdmin() {
                 if (!canViewPost(post)) return false;
                 if (onlyMine && (!currentUser || post.user_name !== currentUser)) return false;
                 if (visibilityFilter !== "all" && post.visibility !== visibilityFilter) return false;
-                if (userFilter && String(post.user_name || "").toLowerCase().indexOf(userFilter) < 0) return false;
+                if (userFilter && String(post.user_name || "").toLowerCase() !== userFilter) return false;
                 if ((state.startDate || state.endDate) && !isPostInDateRange(post, state.startDate, state.endDate)) return false;
                 if (!keyword) return true;
                 if (post.__searchKeyword === keyword) return true;

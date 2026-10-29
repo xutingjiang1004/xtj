@@ -1805,6 +1805,7 @@ function renderProfileActivityList(kind) {
                 var existingInFeed = (feedAllComments || []).some(function(item) {
                     return item && item.id != null && String(item.id) === aiIdStr;
                 });
+                var insertedNewComment = !existingInFeed;
                 var existingInDom = document.querySelector('.comment-item[data-comment-id="' + catAiCssValue(aiIdStr) + '"]');
                 if (existingInFeed && existingInDom) return; // 已存在，跳过
                 // 加入 feedAllComments
@@ -1812,6 +1813,13 @@ function renderProfileActivityList(kind) {
                     return !(item && item.id != null && String(item.id) === aiIdStr);
                 });
                 feedAllComments.push(aiComment);
+                if (insertedNewComment) {
+                    (feedAllPosts || []).forEach(function(post) {
+                        if (String(post && post.id) !== String(postId)) return;
+                        var total = Number(post.comment_count);
+                        if (Number.isFinite(total)) post.comment_count = total + 1;
+                    });
+                }
                 // Phase 3-P0-3: 修复缓存写入顺序——先插入 DOM，成功后再写缓存。
                 // 原代码在 DOM 插入前写缓存，若 insertCatAiCommentIntoDOM 返回
                 // source_comment_missing，AI 回复已写入缓存却不在 DOM，产生孤儿缓存。

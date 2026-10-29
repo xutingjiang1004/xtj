@@ -34,13 +34,20 @@
       file_size: meta.fileSize || null }];
   }
   function gridColumns(count) { return count === 1 ? 1 : (count === 2 || count === 4 ? 2 : 3); }
+  var EXT_TYPE = { '.jpg':'image/jpeg', '.jpeg':'image/jpeg', '.png':'image/png', '.gif':'image/gif', '.webp':'image/webp', '.avif':'image/avif', '.bmp':'image/bmp', '.mp4':'video/mp4', '.webm':'video/webm', '.mov':'video/quicktime', '.m4v':'video/mp4', '.mp3':'audio/mpeg', '.m4a':'audio/mp4', '.wav':'audio/wav', '.aac':'audio/aac', '.ogg':'audio/ogg' };
+  function effectiveType(file) {
+    var type = String(file && file.type || '').toLowerCase();
+    if (type) return type;
+    var ext = (String(file && file.name || '').match(/(\.[a-z0-9]+)$/i) || ['', ''])[1].toLowerCase();
+    return EXT_TYPE[ext] || '';
+  }
   function validateSelection(files) {
     var list = Array.from(files || []);
     if (!list.length) return list;
-    if (list.some(function(f) { return !f || !/^(image|video|audio)\//.test(f.type || '') || /\.(svgz?|html?|xml|swf)$/i.test(f.name || '') || /^image\/svg\+xml/i.test(f.type || ''); })) throw new Error('仅支持图片、视频或音频，不支持可执行文件');
-    if (list.some(function(f) { return /^image\/(heic|heif|tiff?)$/i.test(f.type || '') || /\.(heic|heif|tiff?)$/i.test(f.name || ''); })) throw new Error('暂不支持 HEIC/HEIF/TIFF 图片，请转换为 JPG 或 PNG 后再上传');
+    if (list.some(function(f) { var type = effectiveType(f); return !f || !/^(image|video|audio)\//.test(type) || /\.(svgz?|html?|xml|swf)$/i.test(f.name || '') || /^image\/svg\+xml/i.test(type); })) throw new Error('仅支持图片、视频或音频，不支持可执行文件');
+    if (list.some(function(f) { return /^image\/(heic|heif|tiff?)$/i.test(effectiveType(f)) || /\.(heic|heif|tiff?)$/i.test(f.name || ''); })) throw new Error('暂不支持 HEIC/HEIF/TIFF 图片，请转换为 JPG 或 PNG 后再上传');
     if (list.some(function(f) { return f.size > MAX_POST_FILE_BYTES; })) throw new Error('每个文件不能超过50MB');
-    var images = list.every(function(f) { return f.type.startsWith('image/'); });
+    var images = list.every(function(f) { return effectiveType(f).startsWith('image/'); });
     if (!images && list.length > 1) throw new Error('视频或音频只能选择一个，不能与图片混合');
     if (images && list.length > MAX_POST_IMAGES) throw new Error('最多选择' + MAX_POST_IMAGES + '张图片');
     return list;
@@ -61,5 +68,5 @@
     return result;
   }
   return { MAX_POST_IMAGES: MAX_POST_IMAGES, MAX_POST_FILE_BYTES: MAX_POST_FILE_BYTES, getPostMediaItems: getPostMediaItems,
-    gridColumns: gridColumns, validateSelection: validateSelection, mapUploads: mapUploads };
+    gridColumns: gridColumns, validateSelection: validateSelection, mapUploads: mapUploads, effectiveType: effectiveType };
 });

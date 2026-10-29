@@ -1432,6 +1432,8 @@
       // 输入框/文本域内不劫持方向键
       var tag = event.target && event.target.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || (event.target && event.target.isContentEditable)) return;
+      var commentsPanel = document.getElementById('ppCommentsPanel');
+      if (commentsPanel && !commentsPanel.hidden && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) return;
       if (event.key === 'Escape') {
         event.preventDefault();
         event.stopPropagation();

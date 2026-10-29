@@ -119,4 +119,5 @@
   var panels = new MutationObserver(pump);
   document.querySelectorAll('.dock-panel').forEach(function (panel) { panels.observe(panel, { attributes: true, attributeFilter: ['class'] }); });
   mutations.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
+  window.xtjPumpPostImages = pump;
 })();

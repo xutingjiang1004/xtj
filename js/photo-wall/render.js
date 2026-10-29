@@ -214,7 +214,7 @@
     return groups.map(function(group){
       var first = group.photos[0];
       var cover = first && (first.thumbUrl || first.thumb || (window.xtjMediaPreviewUrl ? window.xtjMediaPreviewUrl(first.imageUrl) : first.imageUrl)) || FALLBACK_IMG;
-      return '<button type="button" class="pw-album-card" aria-label="' + esc(group.title) + '，' + group.photos.length + ' 张照片" onclick="openPhotoAlbumGroup(\'' + esc(group.key) + '\')"><span class="pw-album-cover-frame"><img class="pw-album-cover pw-blur-in" loading="lazy" decoding="async" src="' + esc(FALLBACK_IMG) + '" data-src="' + safeUrl(cover) + '" alt=""></span><div class="pw-album-title">' + esc(group.title) + '</div><div class="pw-album-count">' + group.photos.length + ' 张照片</div></button>';
+      return '<button type="button" class="pw-album-card" aria-label="' + esc(group.title) + '，' + group.photos.length + ' 张照片" onclick="openPhotoAlbumGroup(\'' + esc(group.key) + '\')" onkeydown="if((event.key===\'Enter\'||event.key===\' \')&&this.querySelector(\'img.pw-load-error\')){event.preventDefault();this.querySelector(\'img\').click();}"><span class="pw-album-cover-frame"><img class="pw-album-cover pw-blur-in" loading="lazy" decoding="async" src="' + esc(FALLBACK_IMG) + '" data-src="' + safeUrl(cover) + '" alt=""></span><div class="pw-album-title">' + esc(group.title) + '</div><div class="pw-album-count">' + group.photos.length + ' 张照片</div></button>';
     }).join('');
   }
 
@@ -773,6 +773,7 @@
     if (!newOnes.length) {
       refreshBatchNavigation(grid, list);
       refreshLoadMoreSentinel(grid);
+      syncAlbumDetailCount(list);
       return;
     }
     var html = photoCardHtml(newOnes, photoBatchStart + existingCount);
@@ -791,6 +792,13 @@
     observeAppendedImages(grid);
     refreshBatchNavigation(grid, list);
     refreshLoadMoreSentinel(grid);
+    syncAlbumDetailCount(list);
+  }
+
+  function syncAlbumDetailCount(list){
+    if (!window.pwAlbumGroupKey) return;
+    var count = document.querySelector('#photoGrid .pw-album-toolbar-meta span');
+    if (count) count.textContent = (list ? list.length : 0) + ' 张照片';
   }
 
   function appendPhotoWallMore(){

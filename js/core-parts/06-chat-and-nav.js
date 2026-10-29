@@ -315,6 +315,7 @@
                                 grid.innerHTML =
                                     '<div class="photo-wall-empty">' +
                                     '<div>照片墙模块加载失败，请重试</div>' +
+                                    '<button type="button" onclick="window.initPhotoWall(true)">重新加载</button>' +
                                     '</div>';
                             }
                             console.error('[PhotoWall] module load failed:', error);
