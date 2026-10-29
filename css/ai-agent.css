@@ -539,11 +539,11 @@
 }
 
 .ai-thinking {
-  display: inline-flex;
+  display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  width: fit-content;
-  max-width: min(92%, 720px);
+  align-items: stretch;
+  width: 100%;
+  max-width: min(100%, 720px);
   margin: 0 0 3px;
   gap: 4px;
   border: none;
@@ -553,6 +553,7 @@
 }
 
 .ai-thinking-toggle {
+  align-self: flex-start;
   width: auto;
   min-height: unset;
   padding: 0;
@@ -633,8 +634,8 @@
   visibility: hidden;
   pointer-events: none;
   transform: translateY(-4px);
-  width: fit-content;
-  max-width: min(82vw, 680px);
+  width: 100%;
+  max-width: 100%;
   box-sizing: border-box;
   overflow: hidden;
   /* ★★ 2026-09-22（二次改）：思考面板改为「自上而下的流动揭示」。
@@ -681,8 +682,8 @@
 }
 
 .ai-thinking.expanded {
-  width: fit-content;
-  max-width: min(92%, 720px);
+  width: 100%;
+  max-width: min(100%, 720px);
 }
 
 .ai-thinking.expanded .ai-thinking-toggle {
@@ -742,8 +743,10 @@ html[data-xtj-motion=weak] .ai-thinking.is-thinking.expanded .ai-thinking-panel 
   overflow: hidden;
 }
 
-.ai-thinking.expanded .ai-thinking-body {
-  overflow-y: auto;
+.ai-thinking.expanded .ai-thinking-body,
+.ai-thinking.expanded .ai-thinking-panel > .ai-thinking-body {
+  overflow: visible;
+  min-height: auto;
 }
 
 .ai-thinking.expanded .ai-thinking-caret {
@@ -751,25 +754,27 @@ html[data-xtj-motion=weak] .ai-thinking.is-thinking.expanded .ai-thinking-panel 
   color: rgba(72, 153, 129, 0.88);
 }
 
-.ai-reasoning-segment { white-space: normal; }
-.ai-reasoning-segment p { margin: 0 0 0.35em; }
+.ai-reasoning-segment { white-space: normal; overflow-wrap: break-word; word-break: normal; }
+.ai-reasoning-segment p { margin: 0 0 0.65em; }
 .ai-reasoning-segment p:last-child { margin-bottom: 0; }
 .ai-reasoning-segment strong { font-weight: 650; }
+.ai-thinking-body > * + * { margin-top: 0.65em; }
 
 .ai-thinking-body {
   min-height: 0;
   overflow: hidden;
   margin-top: 4px;
-  padding: 6px 0;
+  padding: 2px 0 6px;
   border-radius: 0;
   border: none;
   background: transparent;
   box-shadow: none;
   color: rgba(88, 108, 106, 0.95);
   font-size: 13px;
-  line-height: 1.65;
-  white-space: pre-wrap;
-  word-break: break-word;
+  line-height: 1.7;
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 .ai-msg.typing {
@@ -2909,6 +2914,49 @@ html[data-xtj-motion="off"] .ai-chat-input-bar {
   text-align: center;
   font-size: 12px;
   color: rgba(104, 119, 126, 0.76);
+}
+
+.ai-conv-list-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 8px;
+  padding: 2px 4px 8px;
+}
+
+.ai-conv-list-bar strong {
+  font-size: 13px;
+  font-weight: 700;
+  color: #2f4b45;
+}
+
+.ai-conv-list-close {
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 4px 12px;
+  border: 1px solid rgba(140, 196, 158, 0.45);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #2f4b45;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.ai-conv-page-shell .ai-conv-list-bar {
+  display: none;
+}
+
+[data-theme="dark"] .ai-conv-list-bar strong,
+[data-theme="dark"] .ai-conv-list-close {
+  color: #d5ebe3;
+}
+
+[data-theme="dark"] .ai-conv-list-close {
+  background: rgba(28, 52, 45, 0.92);
+  border-color: rgba(140, 196, 158, 0.28);
 }
 
 .ai-chat-root.showing-history .ai-chat-messages {
@@ -6548,7 +6596,8 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
     box-shadow: none;
   }
 
-  .ai-secondary-panel #aiChatRoot:has(.ai-conv-item, .ai-no-history) {
+  /* 历史列表只在浮层里出现。会话数据留在 DOM 里不能把聊天挤成无法关闭的左栏。 */
+  .ai-secondary-panel #aiChatRoot.showing-history:has(> .ai-conversation-list) {
     grid-template-columns: var(--ai-desktop-history) minmax(0, 1fr);
   }
 
@@ -6615,7 +6664,7 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
     grid-template-columns: minmax(0, 1fr) minmax(0, var(--ai-desktop-context));
   }
 
-  .ai-secondary-panel #aiChatRoot:has(.ai-conv-item, .ai-no-history) > .ai-chat-messages {
+  .ai-secondary-panel #aiChatRoot.showing-history:has(> .ai-conversation-list) > .ai-chat-messages {
     grid-column: 2;
   }
 
@@ -6703,7 +6752,6 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
     line-height: 1.78;
   }
 
-  .ai-secondary-panel #aiChatRoot > .ai-chat-messages > .ai-msg .ai-thinking-body,
   .ai-secondary-panel #aiChatRoot > .ai-chat-messages > .ai-msg .ai-think-answer,
   .ai-secondary-panel #aiChatRoot > .ai-chat-messages > .ai-msg .ai-tool-card,
   .ai-secondary-panel #aiChatRoot > .ai-chat-messages > .ai-msg .ai-search-detail,
@@ -6712,6 +6760,12 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
     max-width: 100%;
     overflow-wrap: anywhere;
     word-break: break-word;
+  }
+
+  .ai-secondary-panel #aiChatRoot > .ai-chat-messages > .ai-msg .ai-thinking-body {
+    max-width: 100%;
+    overflow-wrap: break-word;
+    word-break: normal;
   }
 
   .ai-secondary-panel #aiChatRoot > .ai-chat-messages pre,
@@ -6754,7 +6808,7 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
     scrollbar-color: rgba(91, 151, 131, .32) transparent;
   }
 
-  .ai-secondary-panel #aiChatRoot:has(.ai-conv-item, .ai-no-history) > .ai-conversation-list {
+  .ai-secondary-panel #aiChatRoot.showing-history > .ai-conversation-list {
     display: flex !important;
     flex-direction: column;
   }
@@ -6811,7 +6865,7 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
     -webkit-backdrop-filter: blur(32px) saturate(180%);
   }
 
-  .ai-secondary-panel #aiChatRoot:has(.ai-conv-item, .ai-no-history) > .ai-chat-input-bar {
+  .ai-secondary-panel #aiChatRoot.showing-history:has(> .ai-conversation-list) > .ai-chat-input-bar {
     grid-column: 2;
   }
 
@@ -7498,12 +7552,13 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
 .ai-tool-step-status { overflow-wrap:anywhere; }
 
 /* Search counts share the invocation row; expanded results use the full width. */
-.ai-process-timeline { width:100%; max-width:560px; box-sizing:border-box; align-self:stretch; }
+.ai-process-timeline { width:100%; max-width:100%; box-sizing:border-box; align-self:stretch; }
 .ai-process-timeline .ai-tool-activity, .ai-process-timeline .ai-tool-activity-body,
 .ai-process-timeline .ai-tool-round, .ai-process-timeline .ai-tool-round-list-wrap { min-width:0; width:100%; box-sizing:border-box; }
 .ai-process-timeline .ai-tool-step-body { min-width:0; flex:1; }
 .ai-process-timeline .ai-tool-step-body:has(> .ai-tool-inline-result:not([hidden])),
-.ai-process-timeline .ai-tool-step-body:has(> .ai-tool-data-details) { display:grid; grid-template-columns:auto minmax(0,max-content) auto minmax(0,1fr); gap:3px 4px; align-items:baseline; }
+.ai-process-timeline .ai-tool-step-body:has(> .ai-tool-data-details) { display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:3px 8px; align-items:baseline; }
+.ai-process-timeline .ai-tool-step-detail { min-width:0; overflow-wrap:break-word; word-break:normal; white-space:normal; }
 .ai-process-timeline .ai-tool-step-body:has(> .ai-tool-inline-result:not([hidden])) > .ai-tool-step-title,
 .ai-process-timeline .ai-tool-step-body:has(> .ai-tool-data-details) > .ai-tool-step-title { grid-column:1; grid-row:1; }
 .ai-process-timeline .ai-tool-step-body:has(> .ai-tool-inline-result:not([hidden])) > .ai-tool-step-detail,
