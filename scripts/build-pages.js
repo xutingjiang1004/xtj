@@ -40,6 +40,22 @@ function buildPages() {
   }
   // A top-level 404 prevents Pages treating missing APIs/assets as the SPA shell.
   fs.writeFileSync(path.join(OUT, '404.html'), '<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>404</title><h1>页面不存在</h1></html>\n');
+  // Dock routes are client-side; only these exact paths fall back to the shell.
+  // 尾斜杠路径先 301 到规范路径：index.html 用相对路径引用 js/、css/，
+  // /photos/ 会被浏览器解析成 /photos/js/… 而 404 白屏。_redirects 按先匹配先生效，
+  // 因此规范跳转必须排在 200 回退之前。
+  fs.writeFileSync(path.join(OUT, '_redirects'), [
+    '/photos/ /photos 301',
+    '/chat/ /chat 301',
+    '/profile/ /profile 301',
+    '/ai/ /ai 301',
+    '/posts/ /posts 301',
+    '/photos /index.html 200',
+    '/chat /index.html 200',
+    '/profile /index.html 200',
+    '/ai /index.html 200',
+    '/posts /index.html 200'
+  ].join('\n') + '\n');
   const headers = Object.entries(SECURITY_HEADERS).map(([key, value]) => `  ${key}: ${value}`).join('\n');
   fs.writeFileSync(path.join(OUT, '_headers'), `/*\n${headers}\n  Cache-Control: no-cache\n  X-Robots-Tag: noindex, nofollow\n`);
   // Only the public URL is copied from tracked frontend configuration. Runtime

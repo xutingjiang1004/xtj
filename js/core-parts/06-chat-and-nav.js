@@ -4,7 +4,55 @@
  * Lines from original core.js: 10044-13870
  * DO NOT edit js/core.js directly — edit this file, then run: node scripts/assemble-core.js
  */
+            // ========== Dock routes (History API) ==========
+            function xtjRoutePathForTab(tab) {
+                if (tab === 'ai') return '/photos';
+                if (tab === 'chat') return '/chat';
+                if (tab === 'profile') return '/profile';
+                if (tab === 'ai-chat') return '/ai';
+                return '/';
+            }
+            function xtjTabFromPath(pathname) {
+                var p = String(pathname || '/');
+                if (p.length > 1) p = p.replace(/\/+$/, '');
+                if (p === '/photos') return 'ai';
+                if (p === '/chat') return 'chat';
+                if (p === '/profile') return 'profile';
+                if (p === '/ai') return 'ai-chat';
+                if (p === '/' || p === '/index.html' || p === '/posts') return 'posts';
+                return '';
+            }
+            function xtjPushDockRoute(tab, replace) {
+                var path = xtjRoutePathForTab(tab);
+                if (!path) return;
+                // ★ 2026-10-29：保留 query string。此前只拼 hash，任何带参数的入口
+                //   （如 ?chat_peer=、?post=、推广参数）在切一次 tab 后参数就被抹掉，
+                //   刷新或分享出去的链接会丢失上下文。
+                var next = path + (location.search || '') + (location.hash || '');
+                if (location.pathname + location.search + location.hash === next) return;
+                try {
+                    history[replace ? 'replaceState' : 'pushState']({ xtjTab: tab }, '', next);
+                } catch (eRoute) {}
+            }
+            window.__xtjRoutePathForTab = xtjRoutePathForTab;
+            window.__xtjTabFromPath = xtjTabFromPath;
+
+            window.addEventListener('popstate', function() {
+                var tab = xtjTabFromPath(location.pathname);
+                if (!tab) return;
+                if (tab === 'ai-chat') {
+                    if (currentDockTab !== 'ai-chat' || !window.__xtjAiChatActive) {
+                        window.switchDockTab('ai-chat', true, { source: 'history', skipHistory: true, animate: false });
+                    }
+                    return;
+                }
+                if (tab !== currentDockTab) {
+                    window.switchDockTab(tab, true, { source: 'history', skipHistory: true, animate: false });
+                }
+            });
+
             window.switchDockTab = function(tab, skipReturn, options) {
+                var routePreviousTab = currentDockTab;
                 if (tab !== 'chat') _chatContextSeq++;
                 options = options || {};
                 // Restoring saved tabs and background state must stay silent.
@@ -18,6 +66,7 @@
                     if (aicBtn) aicBtn.classList.add('active');
                     currentDockTab = 'ai-chat';
                     window.safeStorage.set('xtj_current_tab', 'ai-chat');
+                    if (routePreviousTab !== 'ai-chat' && !options.skipHistory && options.source !== 'history') xtjPushDockRoute('ai-chat');
                     requestAnimationFrame(syncDockIndicator);
                     var _opener = window.__xtjOpenAiChatFromDock || window.__xtjOpenAiChat;
                     if (typeof _opener === 'function') { try { _opener(); } catch (eDock) { console.warn('[dock] open ai-chat failed', eDock); } }
@@ -36,9 +85,11 @@
                     }
                     return;
                 }
-                // 离开小猫AI 到其它 tab → 关闭小猫AI 浮层
+                // 离开小猫AI 到其它 tab → 只隐藏浮层，保留在途回复与 DOM。
                 if (currentDockTab === 'ai-chat') {
-                    if (typeof window.__xtjCloseAiChat === 'function') {
+                    if (typeof window.__xtjHideAiChat === 'function') {
+                        try { window.__xtjHideAiChat(); } catch (eHide) {}
+                    } else if (typeof window.__xtjCloseAiChat === 'function') {
                         try { window.__xtjCloseAiChat(); } catch (eClose) {}
                     }
                 }
@@ -189,6 +240,7 @@
                 if (window.currentUser) startDMPolling(30000, true);
                 currentDockTab = tab;
                 window.safeStorage.set('xtj_current_tab', tab);
+                if (tab !== routePreviousTab && !options.skipHistory && options.source !== 'history') xtjPushDockRoute(tab);
                 document.querySelectorAll('.dock-tab').forEach(t => t.classList.remove('active'));
                 const panel = document.getElementById('panel' + tab.charAt(0).toUpperCase() + tab.slice(1));
                 if (dockPanelTransitionTimer) clearTimeout(dockPanelTransitionTimer);
@@ -415,7 +467,7 @@
                 cancelDmAiAsk();
                 if(_chatSendFlight){_chatSendFlight.controller.abort();_chatSendFlight=null;}
                 if (_chatSocialPanels) _chatSocialPanels.clear();
-                resetChatAttachmentQueue();_chatAttachmentDrafts.clear();_chatBatchFlight=null;_chatBatchSending=false;dockChatSending=false;_chatContextSeq++;
+                resetChatAttachmentQueue();_chatAttachmentDrafts.clear();_chatBatchFlight=null;_chatBatchSending=false;dockChatSending=false;_dockChatSendQueue=[];_chatContextSeq++;
                 var gallery=document.getElementById('chatGallery');if(gallery)gallery.__close ? gallery.__close() : gallery.remove();
                 _chatPushOwner='';_chatPushEnabled=false;
                 setTimeout(function(){window.__xtjSyncChatPush?.();},0);
@@ -747,10 +799,15 @@
                 if (conversationButton) conversationButton.hidden = true;
                 dockChatActiveUser = null;
                 dockChatSending = false;
+                _dockChatSendQueue = [];
                 _dockChatLoadSeq += 1;
-                // 如果当前处于 AI 聊天状态，优先关闭 AI 并恢复标准 UI
+                // 如果当前处于 AI 聊天状态，优先隐藏 AI 并恢复标准 UI（保留在途回复）
                 if (window.__xtjAiChatActive) {
-                    if (typeof window.__xtjCloseAiChat === 'function') window.__xtjCloseAiChat();
+                    if (typeof window.__xtjHideAiChat === 'function') {
+                        try { window.__xtjHideAiChat(); } catch (eHideAi) {}
+                    } else if (typeof window.__xtjCloseAiChat === 'function') {
+                        window.__xtjCloseAiChat();
+                    }
                     var chatInputArea2 = document.querySelector('.chat-input-area');
                     if (chatInputArea2) chatInputArea2.style.display = '';
                     var chatMessages2 = document.getElementById('dockChatMessages');
@@ -2695,6 +2752,18 @@
             }
 
             var _chatSendFlight = null;
+            var _dockChatSendQueue = [];
+            function drainDockChatSendQueue() {
+                if (dockChatSending || _chatBatchSending || !_dockChatSendQueue.length) return;
+                var next = _dockChatSendQueue[0];
+                if (!next || next.owner !== window.currentUser || next.epoch !== _authStateEpoch || next.peer !== dockChatActiveUser) {
+                    _dockChatSendQueue.shift();
+                    showToast('会话已切换，排队消息已取消');
+                    return drainDockChatSendQueue();
+                }
+                _dockChatSendQueue.shift();
+                return sendDockChatMessageSingle(null, next.content, { queued: true });
+            }
             async function sendDockChatMessageSingle(queuedFile, queuedText, retryOptions) {
                 _chatContextSeq++;
                 _chatHistoryFocus = '';
@@ -2704,12 +2773,13 @@
                 if (!inp) return;
                 const content = queuedText != null ? queuedText : inp.value.trim();
                 var retrying = !!(retryOptions && retryOptions.isRetry);
+                var queuedSend = !!(retryOptions && retryOptions.queued);
                 const fileInput = document.getElementById('dockChatFileInp');
-                let file = queuedFile || (!retrying && (_chatRecordedFile || (fileInput && fileInput.files[0]))) || null;
+                let file = queuedFile || (!queuedSend && !retrying && (_chatRecordedFile || (fileInput && fileInput.files[0]))) || null;
                 if (file) file = normalizeDockChatMediaFile(file);
                 if (_chatVoice) { showToast('请先结束录音'); return; }
                 if (_chatEditDraft && !retrying) { await sendChatEditedMessage(content); return; }
-                var replyDraftSource = retrying ? null : _chatReplyDraft;
+                var replyDraftSource = (retrying || queuedSend) ? null : _chatReplyDraft;
                 var replyDraft = replyDraftSource ? Object.assign({}, replyDraftSource) : null;
                 if (retrying && retryOptions.replyDraft) replyDraft = Object.assign({}, retryOptions.replyDraft);
                 if (!content && !file) return;
@@ -2718,9 +2788,22 @@
                     return;
                 }
                 if (dockChatSending) {
+                    if (queuedSend) {
+                        _dockChatSendQueue.unshift({ content: content, peer: dockChatActiveUser, owner: currentUser, epoch: _authStateEpoch });
+                        return;
+                    }
+                    if (!file && content) {
+                        if (_dockChatSendQueue.length >= 5) { showToast('排队消息过多，请等当前消息发送完成'); return; }
+                        _dockChatSendQueue.push({ content: content, peer: dockChatActiveUser, owner: currentUser, epoch: _authStateEpoch });
+                        inp.value = '';
+                        try { inp.dispatchEvent(new Event('input', { bubbles: true })); } catch (eQueueInput) {}
+                        try { persistDockChatDraft(dockChatActiveUser, ''); } catch (eQueueDraft) {}
+                        showToast('已排队，上一条发送完成后自动发出');
+                        return;
+                    }
                     // ★ 2026-09-25 修复（审计 M-4）：旧实现把 dockChatSending 与"无内容"
                     //   合并在同一个 return 里，发送中再次回车会被静默吞掉（无提示、不排队）。
-                    //   这里给出明确反馈；输入框内容保持不变，用户可直接再回车。
+                    //   文本消息现在会排队；带附件的连发仍明确提示。
                     showToast('上一条消息正在发送，请稍候');
                     return;
                 }
@@ -2743,7 +2826,7 @@
                 var sendOriginal=isDmOriginalSendEnabled();
                 var sendOrigin = captureDockChatSendOrigin(file);
                 var flight={controller:new AbortController(),owner:sendOwner,epoch:sendEpoch};_chatSendFlight=flight;
-                dockChatSending = true; if (!retrying && (!queuedFile || inp.value.trim()===content)) inp.value = '';
+                dockChatSending = true; if (!retrying && !queuedSend && (!queuedFile || inp.value.trim()===content)) inp.value = '';
                 if (!retrying) rememberDockChatDraft(targetUser,inp.value);
                 sendDockChatTyping(false);
                 if (_dockChatDraftTimer && !retrying) { clearTimeout(_dockChatDraftTimer); _dockChatDraftTimer = null; }
@@ -3026,9 +3109,12 @@
                 }
                 finally {
                     if(_chatSendFlight!==flight || !sameSender())return;
-                    _chatSendFlight=null;dockChatSending = false;
+                    _chatSendFlight=null;dockChatSending=false;
                     if (window.currentUser === sendOwner && !inp.value) persistDockChatDraft(targetUser,'');
                     try { if (typeof window.__xtjNotifyChatSending === 'function') window.__xtjNotifyChatSending(false); } catch (e) {}
+                    setTimeout(function() {
+                        try { drainDockChatSendQueue(); } catch (eDrainQueue) {}
+                    }, 0);
                 }
                 return { queued: true, tempId: tempId };
             }
@@ -5370,7 +5456,7 @@
             }
 
             window.openProfileBlocks = function() {
-                if (window.__xtjAiChatActive && window.__xtjCloseAiChat) window.__xtjCloseAiChat();
+                if (window.__xtjAiChatActive && window.__xtjHideAiChat) window.__xtjHideAiChat();
                 switchDockTab('chat',true,{animate:true});
                 openDockChatSocialSheet('blocks');
             };
@@ -6167,11 +6253,14 @@
                         })
                         .catch(function(e) { console.warn('[ann_read_sync_boot]', e); });
                 }
-                // 恢复/停止保存当前 tab
-                const savedTab = window.safeStorage.get('xtj_current_tab');
-                if (savedTab && savedTab !== 'posts') {
-                    switchDockTab(savedTab, true);
+                // 恢复 tab：显式 URL 路由优先，其余沿用上次停留的 tab。
+                const savedTab = window.safeStorage.get('xtj_current_tab') || 'posts';
+                const routeTab = xtjTabFromPath(location.pathname);
+                const initialTab = (routeTab && routeTab !== 'posts') ? routeTab : savedTab;
+                if (initialTab && initialTab !== 'posts') {
+                    switchDockTab(initialTab, true, { source: 'boot', skipHistory: true });
                 }
+                xtjPushDockRoute(initialTab || 'posts', true);
             });
 
             // ========== 主题切换 ==========

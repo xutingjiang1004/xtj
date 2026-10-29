@@ -4619,6 +4619,22 @@ app.use(express.static(path.join(__dirname, '..'), {
   }
 }));
 
+// Dock routes are client-side pages backed by the same SPA shell.
+app.get(['/photos', '/chat', '/profile', '/ai', '/posts'], function(req, res, next) {
+  // ★ 2026-10-29：尾斜杠必须 301 到无斜杠规范路径。
+  //   index.html 的资源引用是相对路径（js/…、css/…），在 /photos/ 下会被解析成
+  //   /photos/js/… 而 404，页面直接白屏。Express 的非严格路由会让 /photos/ 命中
+  //   这里，因此在这里就地重定向，既保住 query string 也避免相对路径解析错。
+  if (req.path.length > 1 && /\/+$/.test(req.path)) {
+    var trailingQs = String(req.originalUrl || '').split('?').slice(1).join('?');
+    return res.redirect(301, req.path.replace(/\/+$/, '') + (trailingQs ? '?' + trailingQs : ''));
+  }
+  res.setHeader('Cache-Control', 'no-cache');
+  res.sendFile(path.join(__dirname, '..', 'index.html'), function(err) {
+    if (err) next(err);
+  });
+});
+
 // 频率限制中间件
 const rateLimitStore = new Map();
 // 定期清理过期限流条目（防内存无限增长）
@@ -20227,8 +20243,8 @@ app.get('/api/agent/guest-mode', rateLimit(60000, 60), async function(req, res) 
   return res.json({ ok: true, enabled: enabled });
 });
 
-// GET /api/agent/config - 普通用户获取当前 AI 公共配置（不含 system_prompt）
-app.get('/api/agent/config', authenticateUser, async (req, res) => {
+// GET /api/agent/config - 普通用户与游客获取当前 AI 公共配置（不含 system_prompt）
+app.get('/api/agent/config', guestAiAuth, async (req, res) => {
   try {
     var config = await getAiConfig();
     return res.json({
@@ -21959,6 +21975,7 @@ app.post('/api/agent/custom-chat/stream', guestOpenRouterAuth, aiChatConcurrency
     doubao:  { base: 'https://ark.cn-beijing.volces.com/api/v3',                   defaultModel: 'doubao-1-5-pro-32k' },
     deepseek: { base: 'https://api.deepseek.com',                                 defaultModel: 'deepseek-flash' },
     kimi:    { base: 'https://api.moonshot.cn/v1',                                defaultModel: 'moonshot-v1-8k' },
+    minimax: { base: 'https://api.minimaxi.com/v1',                               defaultModel: 'MiniMax-M3' },
     zhipu:   { base: 'https://open.bigmodel.cn/api/paas/v4',                      defaultModel: 'glm-4-flash' },
     openai:  { base: 'https://api.openai.com/v1',                                 defaultModel: 'gpt-4o-mini' },
     custom:  { base: '' }
@@ -22561,6 +22578,7 @@ app.post('/api/agent/custom-chat/deep-stream', guestOpenRouterAuth, aiChatConcur
     doubao:  { base: 'https://ark.cn-beijing.volces.com/api/v3',                   defaultModel: 'doubao-1-5-pro-32k' },
     deepseek: { base: 'https://api.deepseek.com',                                 defaultModel: 'deepseek-flash' },
     kimi:    { base: 'https://api.moonshot.cn/v1',                                defaultModel: 'moonshot-v1-8k' },
+    minimax: { base: 'https://api.minimaxi.com/v1',                               defaultModel: 'MiniMax-M3' },
     zhipu:   { base: 'https://open.bigmodel.cn/api/paas/v4',                      defaultModel: 'glm-4-flash' },
     openai:  { base: 'https://api.openai.com/v1',                                 defaultModel: 'gpt-4o-mini' },
     custom:  { base: '' }
@@ -22928,7 +22946,7 @@ async function resolveAiModelReference(req,res,next) {
     if(req.aiRequestScope&&req.aiRequestScope.controller.signal.aborted||res.writableEnded||res.destroyed)return;
     var saved=snapshot.models.find(function(item){return item.uid===uid&&snapshot.deletedUids.indexOf(uid)<0;});
     if(!saved)throw Object.assign(Error('模型已删除或不可用，请重新选择'),{status:404,code:'saved_model_missing'});
-    var defaults={qwen:'https://dashscope.aliyuncs.com/compatible-mode/v1',doubao:'https://ark.cn-beijing.volces.com/api/v3',deepseek:'https://api.deepseek.com',kimi:'https://api.moonshot.cn/v1',zhipu:'https://open.bigmodel.cn/api/paas/v4',openai:'https://api.openai.com/v1'};
+    var defaults={qwen:'https://dashscope.aliyuncs.com/compatible-mode/v1',doubao:'https://ark.cn-beijing.volces.com/api/v3',deepseek:'https://api.deepseek.com',kimi:'https://api.moonshot.cn/v1',minimax:'https://api.minimaxi.com/v1',zhipu:'https://open.bigmodel.cn/api/paas/v4',openai:'https://api.openai.com/v1'};
     var base=String(saved.base_url||defaults[saved.provider]||'').replace(/\/+$/,'');
     if(body.provider&&body.provider!==saved.provider||body.model&&body.model!==saved.model||body.base_url&&String(body.base_url).replace(/\/+$/,'')!==base)
       throw Object.assign(Error('模型配置已变化，请刷新模型列表后重试'),{status:409,code:'saved_model_changed'});
@@ -25596,6 +25614,7 @@ var CUSTOM_RESEARCH_ENDPOINTS = {
   doubao:  { base: 'https://ark.cn-beijing.volces.com/api/v3',                defaultModel: 'doubao-1-5-pro-32k' },
   deepseek:{ base: 'https://api.deepseek.com',                                defaultModel: 'deepseek-flash' },
   kimi:    { base: 'https://api.moonshot.cn/v1',                              defaultModel: 'moonshot-v1-8k' },
+  minimax: { base: 'https://api.minimaxi.com/v1',                             defaultModel: 'MiniMax-M3' },
   zhipu:   { base: 'https://open.bigmodel.cn/api/paas/v4',                    defaultModel: 'glm-4-flash' },
   openai:  { base: 'https://api.openai.com/v1',                               defaultModel: 'gpt-4o-mini' },
   custom:  { base: '' }

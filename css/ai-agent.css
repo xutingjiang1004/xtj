@@ -2402,8 +2402,32 @@ html[data-xtj-motion="off"] .ai-chat-input-bar {
 }
 
 /* ── 添加自定义模型弹窗 ─────────────────────────────── */
-.ai-custommodel-box { width: min(92vw, 400px); }
-.ai-custommodel-body { max-height: 76vh; overflow-y: auto; }
+/* ★ 2026-10-29：这个表单弹窗去掉全屏 backdrop-filter 模糊。
+   现象：在长会话的小猫AI 页面上打开「添加自定义模型」，iOS Safari 偶发整页重载
+   （用户感知为「闪退」），已填的 Key 与模型名全部丢失。
+   原因：全屏 fixed 覆盖层再叠一层 backdrop-filter: blur(8px)，WebKit 需要为整屏
+   建立离屏模糊层；会话越长、页面合成层越多，内存压力越大，WebProcess 被系统回收
+   后 Safari 就会重载页面。
+   修法：改用纯半透明遮罩（视觉差异极小），并加 overscroll-behavior 阻断橡皮筋
+   滚动把点击事件传给遮罩。 */
+.ai-custommodel-modal {
+  background: rgba(20, 36, 32, 0.42);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  overscroll-behavior: contain;
+}
+.ai-custommodel-box { width: min(92vw, 400px); max-width: 100%; }
+.ai-custommodel-body {
+  max-height: 76vh;
+  max-height: 76dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+@media (max-width: 420px) {
+  /* 窄屏把左右留白压到 12px，让卡片拿到更多宽度，减少误触遮罩的机会 */
+  .ai-custommodel-modal { padding: 12px; }
+}
 .ai-custommodel-body .ai-cm-select {
   display: block;
   width: 100%;
