@@ -32,16 +32,30 @@
     var button = make('button', 'author-post-entry'); button.type = 'button';
     button.setAttribute('aria-label', '查看动态：' + (textOf(post).slice(0, 80) || '图片动态'));
     var items = media(post).filter(function (item) { return /^(image|photo)$/.test(item.media_type) && safeUrl(item.media_url); });
+    function previewSrc(item) {
+      var raw = item.preview_url || (window.xtjMediaPreviewUrl ? window.xtjMediaPreviewUrl(item.media_url) : item.media_url);
+      return safeUrl(raw) || safeUrl(item.media_url);
+    }
     if (items.length) {
       var mosaic = make('span', 'author-post-mosaic' + (items.length === 1 ? ' is-single' : items.length === 2 ? ' is-pair' : ''));
       items.slice(0, 4).forEach(function (item, index) {
         var cell = make('span', 'author-post-thumb'), img = document.createElement('img');
-        img.src = safeUrl(item.media_url); img.alt = ''; img.loading = 'lazy'; img.decoding = 'async';
+        var src = previewSrc(item);
+        img.src = src; img.alt = ''; img.loading = 'lazy'; img.decoding = 'async';
         if (item.width && item.height) { img.width = item.width; img.height = item.height; }
         img.addEventListener('load', function () { cell.classList.remove('is-unavailable'); img.hidden = false; });
         img.addEventListener('error', function () {
           var failed = function () { cell.classList.add('is-unavailable'); img.hidden = true; };
           if (!window.xtjRecoverMediaImage || !window.xtjRecoverMediaImage(img, img.src, failed)) failed();
+        });
+        cell.addEventListener('click', function (event) {
+          if (!cell.classList.contains('is-unavailable')) return;
+          event.preventDefault();
+          event.stopPropagation();
+          cell.classList.remove('is-unavailable');
+          img.hidden = false;
+          img.removeAttribute('src');
+          img.src = src;
         });
         cell.appendChild(img);
         if (index === Math.min(3, items.length - 1) && items.length > 4) cell.appendChild(make('span', 'author-post-photo-count', '+' + (items.length - 4)));

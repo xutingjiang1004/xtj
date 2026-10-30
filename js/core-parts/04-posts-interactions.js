@@ -1048,14 +1048,52 @@
                 return findBySafePostSelector(postId);
             }
             var deletedPostIds = new Set();
+            function adjustKnownPostTotal(delta) {
+                var known = Number(window._xtjTotalPostCount);
+                if (!Number.isFinite(known) || known < 0) return;
+                window._xtjTotalPostCount = Math.max(0, known + delta);
+            }
             function removeDeletedPostFromFeed(postId) {
-                deletedPostIds.add(String(postId));
-                if (!Array.isArray(feedAllPosts)) return;
+                var id = String(postId);
+                var firstConfirmation = !deletedPostIds.has(id);
+                deletedPostIds.add(id);
+                if (!Array.isArray(feedAllPosts)) {
+                    if (firstConfirmation) adjustKnownPostTotal(-1);
+                    return;
+                }
                 feedAllPosts = feedAllPosts.filter(function(post) {
-                    return String(post.id) !== String(postId);
+                    return String(post.id) !== id;
                 });
-                feedAllComments = (feedAllComments || []).filter(function(row) { return String(row && row.post_id) !== String(postId); });
-                feedAllLikes = (feedAllLikes || []).filter(function(row) { return String(row && row.post_id) !== String(postId); });
+                feedAllComments = (feedAllComments || []).filter(function(row) { return String(row && row.post_id) !== id; });
+                feedAllLikes = (feedAllLikes || []).filter(function(row) { return String(row && row.post_id) !== id; });
+                if (firstConfirmation) adjustKnownPostTotal(-1);
+            }
+            function finishDeletedPostElement(el) {
+                try { if (el && el.parentNode) el.remove(); } catch (e) {}
+                noteFeedEmptyAfterRemoval();
+            }
+            function noteFeedEmptyAfterRemoval() {
+                var feed = document.getElementById('feed');
+                if (!feed || countFeedDomPosts(feed) > 0) return;
+                if ((Number(window._xtjFeedDomTrimmed) || 0) > 0) {
+                    restoreTrimmedFeedPosts(true);
+                    if (countFeedDomPosts(feed) > 0) return;
+                }
+                var filtered = getFilteredPosts(feedAllPosts || [], feedAllComments || []);
+                if (filtered.length) return;
+                var noMore = document.getElementById('feedNoMore');
+                if (noMore && noMore.parentNode) noMore.parentNode.removeChild(noMore);
+                for (var i = 0; i < feed.children.length; i++) {
+                    var child = feed.children[i];
+                    if (child.classList && child.classList.contains('loading') && !child.id) return;
+                }
+                var state = getPostSearchState();
+                var hasFilters = !!(state.keyword || state.user || state.startDate || state.endDate || state.onlyMine || (state.visibility && state.visibility !== 'all'));
+                var placeholder = document.createElement('div');
+                placeholder.className = 'loading';
+                placeholder.textContent = hasFilters ? '暂无匹配的帖子' : '快去发布第一条动态吧~';
+                var sentinel = document.getElementById('feedSentinel');
+                feed.insertBefore(placeholder, sentinel || null);
             }
             async function confirmPostDeleteStatus(postId, identity) {
                 identity = identity || capturePostActionIdentity();
@@ -1101,22 +1139,22 @@
                     var el = session.postEl;
                     var reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
                     if (reducedMotion) {
-                        try { el.remove(); } catch (e) {}
+                        finishDeletedPostElement(el);
                     } else {
                         el.style.transition = 'opacity 180ms ease, transform 180ms cubic-bezier(.2,.7,.25,1)';
                         el.style.opacity = '0';
                         el.style.transform = 'translate3d(0,-6px,0) scale(.99)';
                         el.style.pointerEvents = 'none';
                         var onTransitionEnd = function() {
-                            try { el.remove(); } catch (e) {}
                             el.removeEventListener('transitionend', onTransitionEnd);
+                            finishDeletedPostElement(el);
                         };
                         el.addEventListener('transitionend', onTransitionEnd);
                         // 兜底：transitionend 在后台标签页可能不会触发。
-                        setTimeout(function() {
-                            try { if (el.parentNode) el.remove(); } catch (e) {}
-                        }, 220);
+                        setTimeout(function() { finishDeletedPostElement(el); }, 220);
                     }
+                } else {
+                    noteFeedEmptyAfterRemoval();
                 }
 
                 if (typeof updateFeedStats === 'function') { try { updateFeedStats(); } catch (e) {} }
@@ -2563,10 +2601,19 @@
                 }
             }
 
+            function removeFeedEmptyPlaceholder(feed) {
+                Array.prototype.forEach.call(feed.children, function(node) {
+                    if (!node.classList || !node.classList.contains('loading') || node.id) return;
+                    if (node.classList.contains('feed-page-loading') || node.classList.contains('feed-load-more-error')) return;
+                    var text = (node.textContent || '').trim();
+                    if (text === '暂无匹配的帖子' || text === '快去发布第一条动态吧~') node.remove();
+                });
+            }
             function insertPublishedPostIntoFeed(post, publishingMotion) {
                 if (!post || !post.id) return false;
                 post = normalizePost(post);
                 if (!Array.isArray(feedAllPosts)) feedAllPosts = [];
+                var isNew = !feedAllPosts.some(function(item) { return item && String(item.id) === String(post.id); });
                 feedAllPosts = feedAllPosts.filter(function(item) { return String(item.id) !== String(post.id); });
                 feedAllPosts.unshift(post);
                 feedAllPosts = sortPosts(feedAllPosts);
@@ -2580,6 +2627,42 @@
                 markFeedStateChanged();
                 var feed = document.getElementById('feed');
                 if (!feed) return false;
+                var filtered = getFilteredPosts(feedAllPosts || [], feedAllComments || []);
+                var index = -1;
+                for (var filteredIndex = 0; filteredIndex < filtered.length; filteredIndex++) {
+                    if (filtered[filteredIndex] && String(filtered[filteredIndex].id) === String(post.id)) { index = filteredIndex; break; }
+                }
+                var selector = safePostSelector(post.id);
+                var previous = selector ? feed.querySelector(selector) : null;
+                if (index < 0) {
+                    if (previous) previous.remove();
+                    noteFeedEmptyAfterRemoval();
+                    if (isNew) adjustKnownPostTotal(1);
+                    writeFeedCacheSnapshot();
+                    updateFeedStats();
+                    return true;
+                }
+                if (previous) previous.remove();
+                var anchor = null;
+                var anchorIndex = -1;
+                for (var childIndex = 0; childIndex < feed.children.length; childIndex++) {
+                    var child = feed.children[childIndex];
+                    if (!child.classList || !child.classList.contains('post')) continue;
+                    var childId = String(child.getAttribute('data-post-id') || '');
+                    var childFilteredIndex = -1;
+                    for (var scan = 0; scan < filtered.length; scan++) {
+                        if (filtered[scan] && String(filtered[scan].id) === childId) { childFilteredIndex = scan; break; }
+                    }
+                    if (childFilteredIndex > index) { anchor = child; anchorIndex = childFilteredIndex; break; }
+                }
+                // 顶部卡片已被回收时，新帖属于被回收的前缀。插进当前窗口会在中间留出一段回不来的空洞。
+                if (anchor && anchorIndex > index + 1) {
+                    if (isNew) window._xtjFeedDomTrimmed = Math.max(0, Number(window._xtjFeedDomTrimmed) || 0) + 1;
+                    if (isNew) adjustKnownPostTotal(1);
+                    writeFeedCacheSnapshot();
+                    updateFeedStats();
+                    return true;
+                }
                 var maps = buildPostMaps(feedAllComments || [], feedAllLikes || []);
                 var template = document.createElement('template');
                 template.innerHTML = renderPostCard(post, maps.commentMap, maps.likeMap, maps.likeUserMap).trim();
@@ -2588,11 +2671,14 @@
                 postEl.classList.add('visible');
                 if (!publishingMotion) postEl.classList.add('is-newly-published');
                 postEl.style.setProperty('--post-enter-delay', '0ms');
-                feed.insertBefore(postEl, feed.firstChild);
+                removeFeedEmptyPlaceholder(feed);
+                var tail = anchor || document.getElementById('feedNoMore') || document.getElementById('feedContinueSearch') || document.getElementById('feedStaleNotice') || document.getElementById('feedSentinel') || null;
+                feed.insertBefore(postEl, tail);
                 observePostViewportState([postEl]);
                 var clearPublishedAnimation = function() { postEl.classList.remove('is-newly-published'); };
                 postEl.addEventListener('animationend', clearPublishedAnimation, { once: true });
                 setTimeout(clearPublishedAnimation, 420);
+                if (isNew) adjustKnownPostTotal(1);
                 writeFeedCacheSnapshot();
                 updateFeedStats();
                 return true;
@@ -4776,7 +4862,13 @@
                     }
                     clearFeedCache();
                     showToast(nextVisibility === "private" ? "已设为私密" : "已设为公开");
+                    var visibilityFeed = document.getElementById('feed');
+                    var visibilitySurface = getActualScrollSurface(visibilityFeed);
+                    var visibilityScrollTop = visibilitySurface === window ? window.scrollY : (visibilitySurface && visibilitySurface.scrollTop) || 0;
                     await loadFeed(true);
+                    assertPostActionIdentity(identity);
+                    if (visibilitySurface === window) window.scrollTo(0, visibilityScrollTop);
+                    else if (visibilitySurface && visibilitySurface.isConnected) visibilitySurface.scrollTop = visibilityScrollTop;
                 } catch (e) {
                     if (!postActionIdentityCurrent(identity)) return;
                     handled = true;
@@ -5733,7 +5825,7 @@
             };
 
             var restoringFeedHead = false;
-            function restoreTrimmedFeedPosts() {
+            function restoreTrimmedFeedPosts(force) {
                 if (restoringFeedHead) return;
                 var trimmed = Math.max(0, Number(window._xtjFeedDomTrimmed) || 0);
                 if (!trimmed) return;
@@ -5754,11 +5846,12 @@
                     var viewTop = surface !== window && surface.getBoundingClientRect ? surface.getBoundingClientRect().top : 0;
                     return cardTop >= viewTop - 40 && cardTop <= viewTop + 280;
                 }
-                if (!nearHead()) return;
+                if (!nearHead() && !force) return;
                 restoringFeedHead = true;
+                var forcedBatch = !!force;
                 try {
                     var batches = 0;
-                    while (batches < 4 && trimmed > 0 && nearHead()) {
+                    while (batches < 4 && trimmed > 0 && (nearHead() || forcedBatch)) {
                         var filtered = getFilteredPosts(feedAllPosts || [], feedAllComments || []);
                         var domIds = [];
                         for (var childIndex = 0; childIndex < feed.children.length; childIndex++) {
@@ -5767,10 +5860,10 @@
                             var childId = String(child.getAttribute('data-post-id') || '');
                             if (childId) domIds.push(childId);
                         }
-                        if (!domIds.length) break;
                         var inDom = {};
                         domIds.forEach(function(id) { inDom[id] = true; });
                         var anchor = -1;
+                        if (!domIds.length) anchor = filtered.length;
                         for (var domIndex = 0; domIndex < domIds.length && anchor < 0; domIndex++) {
                             for (var filteredIndex = 0; filteredIndex < filtered.length; filteredIndex++) {
                                 if (filtered[filteredIndex] && String(filtered[filteredIndex].id) === domIds[domIndex]) { anchor = filteredIndex; break; }
@@ -5806,7 +5899,7 @@
                         var scroller = surface === window ? (document.scrollingElement || document.documentElement) : surface;
                         var beforeHeight = scroller.scrollHeight;
                         var beforeTop = readTop();
-                        feed.insertBefore(frag, firstPost);
+                        feed.insertBefore(frag, firstPost || document.getElementById('feedSentinel') || null);
                         trimmed = Math.max(0, trimmed - inserted);
                         window._xtjFeedDomTrimmed = trimmed;
                         var delta = scroller.scrollHeight - beforeHeight;
@@ -5817,6 +5910,7 @@
                         var added = feed.querySelectorAll('.post:not(.visible)');
                         primePostReveal(added);
                         observePostViewportState(added);
+                        forcedBatch = false;
                         batches++;
                     }
                 } finally {

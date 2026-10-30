@@ -44,7 +44,8 @@
 .author-post-thumb { position:relative; min-width:0; min-height:0; }
 .author-post-thumb img { display:block; width:100%; height:100%; object-fit:cover; }
 .author-post-photo-count { position:absolute; inset:0; display:grid; place-items:center; font-size:18px; color:white; background:rgba(20,45,39,.45); }
-.author-post-thumb.is-unavailable::after { content:'图片'; display:grid; place-items:center; height:100%; color:var(--text-muted); font-size:11px; }
+.author-post-thumb.is-unavailable { cursor:pointer; }
+.author-post-thumb.is-unavailable::after { content:'点击重试'; display:grid; place-items:center; height:100%; color:var(--text-muted); font-size:11px; }
 .author-post-copy { display:flex; flex-direction:column; gap:8px; flex:1; min-width:0; }
 .author-post-text { font-size:15px; line-height:1.6; white-space:pre-wrap; overflow-wrap:anywhere; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
 .author-post-meta { font-size:11px; color:var(--text-secondary); line-height:1.5; }
