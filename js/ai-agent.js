@@ -2172,6 +2172,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   function syncAiHeaderButtons(histBtn, newBtn) {
     if (!histBtn || !newBtn) return;
     histBtn.textContent = getHistoryButtonText(!!S.showingHistory);
+    histBtn.setAttribute('data-state', S.showingHistory ? 'back' : 'history');
     newBtn.textContent = getNewButtonText();
   }
 
@@ -13588,6 +13589,13 @@ function showChatMessages() {
       });
       header.appendChild(backBtn);
     }
+    // Title block: line-art cat + name (replaces the old row of text pills as the header's anchor).
+    var headerTitle = el('div', { class: 'ai-chat-header-title' });
+    var headerCat = el('span', { class: 'ai-chat-header-cat', 'aria-hidden': 'true' });
+    headerCat.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9.2V5.6c0-.5.6-.8 1-.4l2.7 2.4a8.2 8.2 0 0 1 6.6 0L18 5.2c.4-.4 1-.1 1 .4v3.6c.7 1.1 1 2.3 1 3.6 0 4-3.6 6.6-8 6.6s-8-2.6-8-6.6c0-1.3.3-2.5 1-3.6Z"/><path d="M9.2 13.4h.01M14.8 13.4h.01" stroke-width="2.4"/><path d="M10.6 16.2c.9.6 1.9.6 2.8 0"/></svg>';
+    headerTitle.appendChild(headerCat);
+    headerTitle.appendChild(el('b', { text: '小猫' }));
+    header.appendChild(headerTitle);
 
     // ★ 2026-09-23 移除头部「头像 + 小猫/在线」：按维护者要求只保留功能入口
     //   （返回、深入研究、Code、历史、新建/删除等），不再显示头像与在线状态。

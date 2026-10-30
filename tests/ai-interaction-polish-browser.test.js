@@ -78,12 +78,13 @@ test('history survives close/reopen during its exit animation and its actions wo
   assert.equal(await p.locator('.ai-conv-page-shell').count(), 1);
   assert.equal(await p.locator('.ai-conv-open').isVisible(), true);
   assert.equal(await p.locator('.ai-conv-rename').evaluate(n => n.tagName === 'BUTTON' && n.tabIndex === 0), true);
-  p.once('dialog', dialog => dialog.accept('键盘重命名'));
   await p.locator('.ai-conv-rename').focus(); await p.keyboard.press('Enter');
+  await p.locator('.xtj-prompt-dialog input').waitFor(); await p.locator('.xtj-prompt-dialog input').fill('键盘重命名'); await p.keyboard.press('Enter');
   await p.locator('.ai-conv-title').filter({hasText:'键盘重命名'}).waitFor();
   assert.equal(await p.locator('.ai-conv-title').textContent(), '键盘重命名');
-  p.once('dialog', dialog => dialog.dismiss());
   await p.locator('.ai-conv-del').focus(); await p.keyboard.press('Enter');
+  await p.waitForSelector('#ppConfirmOverlay.active'); await p.keyboard.press('Escape');
+  await p.waitForSelector('#ppConfirmOverlay:not(.active)');
   assert.equal(await p.locator('.ai-conv-item').count(), 1);
   await p.keyboard.press('Escape');
   assert.equal(await p.locator('#aiChatInputBar').isVisible(), true);

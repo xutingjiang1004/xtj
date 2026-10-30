@@ -20122,7 +20122,7 @@ function renderProfileActivityList(kind) {
                 if (!listEl) return;
 
                 if (!announcements.length) {
-                    listEl.innerHTML = '<div class="announcement-empty"><div class="announcement-empty-icon">📢</div><div>暂无公告</div></div>';
+                    listEl.innerHTML = '<div class="announcement-empty"><div class="announcement-empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 9.2V5.6c0-.5.6-.8 1-.4l2.7 2.4a8.2 8.2 0 0 1 6.6 0L18 5.2c.4-.4 1-.1 1 .4v3.6c.7 1.1 1 2.3 1 3.6 0 4-3.6 6.6-8 6.6s-8-2.6-8-6.6c0-1.3.3-2.5 1-3.6Z"/><path d="M9.2 13.4h.01M14.8 13.4h.01" stroke-width="2.4"/><path d="M10.6 16.2c.9.6 1.9.6 2.8 0"/></svg></div><div>暂无公告</div></div>';
                     return;
                 }
 

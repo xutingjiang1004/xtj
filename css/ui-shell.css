@@ -3260,7 +3260,16 @@ html[data-theme="dark"] #profileDetailModal .profile-detail-info-value { color: 
 html[data-theme="dark"] #profileDetailModal h3 { color: #e6f1ed !important; }
 html[data-theme="dark"] #profileDetailModal .modal-box,
 html[data-theme="dark"] .announcement-modal,
-html[data-theme="dark"] .report-modal { background: rgba(18, 28, 25, .96) !important; }
+html[data-theme="dark"] .report-modal { background: #121c19 !important; }
+/* Light modals and the avatar-opened list: opaque so page text can never show through the card. */
+html body #profileDetailModal .modal-box,
+html body .announcement-modal,
+html body .report-modal,
+html body #userProfileModal .modal-box { background: #fbfdfc !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+html[data-theme="dark"] body #profileDetailModal .modal-box,
+html[data-theme="dark"] body .announcement-modal,
+html[data-theme="dark"] body .report-modal { background: #121c19 !important; }
+html[data-theme="dark"] body #userProfileModal .modal-box { background: #151d1a !important; }
 /* Moments-style list opened from an avatar: the text avatar was white on near-white. */
 #userProfileModal .upc-avatar { background-color: #d3efe2; color: #1f6b52; }
 html[data-theme="dark"] #userProfileModal .upc-avatar { background-color: #1f4d3e; color: #bfebd9; }
@@ -3284,3 +3293,63 @@ html[data-theme="dark"] .xtj-prompt-dialog input, html[data-theme="dark"] .xtj-p
 .modal-overlay:not(.active) .xtj-loading-skeleton *,
 .modal-overlay:not(.active) .xtj-loading-skeleton *::before,
 .modal-overlay:not(.active) .xtj-loading-skeleton *::after { animation-play-state: paused !important; }
+
+/* ---- AI chat header: one tidy bordered row (back, cat + name, research, history, new, delete) ---- */
+html body .ai-chat-header { display: flex !important; align-items: center !important; flex-wrap: nowrap !important; gap: 2px !important; padding: 0 6px !important; min-height: 52px; border: 1px solid rgba(23, 35, 30, .10) !important; border-radius: 18px !important; background: rgba(255, 255, 255, .78) !important; box-shadow: 0 1px 2px rgba(20, 60, 45, .06) !important; }
+html body .ai-chat-header .ai-chat-header-title { order: 1; display: flex; align-items: center; gap: 8px; flex: 1 1 0; min-width: 0; overflow: hidden; color: #17231e; font-size: 16px; }
+html body .ai-chat-header .ai-chat-header-cat { display: grid; place-items: center; width: 28px; height: 28px; flex: 0 0 28px; border-radius: 50%; background: #ddf2e8; color: #0e7a5b; }
+html body .ai-chat-header .ai-chat-header-cat svg { width: 18px; height: 18px; }
+html body .ai-chat-header .ai-chat-back { order: 0; }
+html body .ai-chat-header .ai-deep-think-toggle { order: 2; }
+html body .ai-chat-header .ai-chat-hist-btn { order: 3; }
+html body .ai-chat-header .ai-chat-new-btn { order: 4; }
+html body .ai-chat-header .ai-chat-del-btn { order: 5; }
+html body .ai-chat-header .ai-chat-back,
+html body .ai-chat-header .ai-chat-hist-btn,
+html body .ai-chat-header .ai-chat-new-btn,
+html body .ai-chat-header .ai-chat-del-btn { position: relative; flex: 0 0 36px; width: 36px !important; min-width: 36px !important; height: 36px !important; padding: 0 !important; font-size: 0 !important; line-height: 0; border: none !important; border-radius: 12px !important; background: none !important; box-shadow: none !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important; color: #17231e !important; }
+html body .ai-chat-header .ai-chat-back { font-size: 22px !important; line-height: 1; }
+html body .ai-chat-header .ai-chat-hist-btn::after, html body .ai-chat-header .ai-chat-new-btn::after, html body .ai-chat-header .ai-chat-del-btn::after { display: none !important; }
+html body .ai-chat-header .ai-chat-hist-btn::before, html body .ai-chat-header .ai-chat-new-btn::before, html body .ai-chat-header .ai-chat-del-btn::before { content: ""; position: absolute; inset: 0; margin: auto; width: 20px; height: 20px; background: currentColor; -webkit-mask: var(--xtj-hdr-ic) center / contain no-repeat; mask: var(--xtj-hdr-ic) center / contain no-repeat; }
+html body .ai-chat-header .ai-chat-hist-btn { --xtj-hdr-ic: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 12a8 8 0 1 0 2.5-5.8L4 8.5'/%3E%3Cpath d='M4 4v4.5h4.5M12 8v4.2l2.8 1.7'/%3E%3C/svg%3E"); }
+html body .ai-chat-header .ai-chat-hist-btn[data-state="back"] { --xtj-hdr-ic: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 12H5M11 6l-6 6 6 6'/%3E%3C/svg%3E"); }
+html body .ai-chat-header .ai-chat-new-btn { --xtj-hdr-ic: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.9' stroke-linecap='round'%3E%3Cpath d='M12 5.5v13M5.5 12h13'/%3E%3C/svg%3E"); }
+html body .ai-chat-header .ai-chat-del-btn { --xtj-hdr-ic: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4.5 7h15M9.5 7V4.5h5V7M6.5 7l.8 12.5h9.4L17.5 7M10 11v5M14 11v5'/%3E%3C/svg%3E"); color: #8a3b32 !important; }
+html body .ai-chat-header .ai-deep-think-toggle { flex: 0 0 auto; height: 34px; padding: 0 10px 0 8px !important; border: 1px solid rgba(23, 35, 30, .14) !important; border-radius: 12px !important; background: rgba(255, 255, 255, .7) !important; box-shadow: none !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important; color: #17231e !important; font-size: 13px !important; margin-right: 4px; white-space: nowrap; }
+html body .ai-chat-header .ai-deep-think-toggle.on { background: #ddf2e8 !important; border-color: rgba(14, 122, 91, .35) !important; color: #0e7a5b !important; }
+html body .ai-chat-header button:hover { background-color: rgba(14, 122, 91, .08) !important; }
+html[data-theme="dark"] body .ai-chat-header, html[data-theme="dark"] .ai-chat-header { border-color: rgba(255, 255, 255, .14) !important; background: rgba(21, 27, 24, .82) !important; box-shadow: none !important; }
+html[data-theme="dark"] .ai-chat-header .ai-chat-header-title { color: #e6f1ed; }
+html[data-theme="dark"] .ai-chat-header .ai-chat-header-cat { background: rgba(79, 209, 165, .16); color: #4fd1a5; }
+html[data-theme="dark"] .ai-chat-header .ai-chat-back, html[data-theme="dark"] .ai-chat-header .ai-chat-hist-btn, html[data-theme="dark"] .ai-chat-header .ai-chat-new-btn { color: #e6f1ed !important; }
+html[data-theme="dark"] .ai-chat-header .ai-chat-del-btn { color: #ff9a8d !important; }
+html[data-theme="dark"] .ai-chat-header .ai-deep-think-toggle { border-color: rgba(255, 255, 255, .16) !important; background: rgba(255, 255, 255, .06) !important; color: #e6f1ed !important; }
+html[data-theme="dark"] .ai-chat-header .ai-deep-think-toggle.on { background: rgba(79, 209, 165, .16) !important; color: #4fd1a5 !important; }
+
+/* ---- AI chat bubbles: mint own bubble with dark text (white on mint was 2.2-2.8:1), accent send button ---- */
+html body .ai-msg.user .ai-msg-bubble { background: #a8e6cb !important; background-image: none !important; color: #12251d !important; box-shadow: none !important; border: none !important; }
+html body .ai-msg.user .ai-msg-bubble * { color: #12251d !important; }
+html[data-theme="dark"] .ai-msg.user .ai-msg-bubble { background: #1f4d3e !important; color: #e6f1ed !important; }
+html[data-theme="dark"] .ai-msg.user .ai-msg-bubble * { color: #e6f1ed !important; }
+html body .ai-msg.assistant .ai-msg-bubble { border: 1px solid rgba(23, 35, 30, .08); }
+html[data-theme="dark"] .ai-msg.assistant .ai-msg-bubble { border-color: rgba(255, 255, 255, .1); }
+html body #panelAiChat #aiChatRoot > .ai-chat-input-bar .ai-chat-send { background: #0e7a5b !important; background-image: none !important; color: #fff !important; border: none !important; border-radius: 14px !important; box-shadow: 0 4px 12px rgba(14, 122, 91, .26) !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+html body #panelAiChat #aiChatRoot > .ai-chat-input-bar .ai-chat-send * { color: #fff !important; }
+html[data-theme="dark"] body #panelAiChat #aiChatRoot > .ai-chat-input-bar .ai-chat-send { background: #4fd1a5 !important; color: #062218 !important; box-shadow: 0 4px 12px rgba(0, 0, 0, .3) !important; }
+html[data-theme="dark"] body #panelAiChat #aiChatRoot > .ai-chat-input-bar .ai-chat-send * { color: #062218 !important; }
+html body #panelAiChat #aiChatRoot > .ai-chat-input-bar .ai-plus-btn,
+html body #panelAiChat #aiChatRoot > .ai-chat-input-bar .ai-voice-btn { border-radius: 14px !important; }
+
+/* ---- Announcement / profile modals: line icons instead of emoji, flat tabs, square-ish primary button ---- */
+.xtj-ic { width: 17px; height: 17px; vertical-align: -3px; }
+.xtj-ic-x { width: 16px; height: 16px; display: block; margin: auto; }
+html body .announcement-tab { background: none !important; border: none !important; box-shadow: none !important; color: #4b5e56 !important; font-weight: 550; border-radius: 12px !important; padding: 8px 14px !important; }
+html body .announcement-tab.active { background: #ddf2e8 !important; color: #0e7a5b !important; }
+html[data-theme="dark"] .announcement-tab { color: #9fb3ab !important; }
+html[data-theme="dark"] .announcement-tab.active { background: rgba(79, 209, 165, .16) !important; color: #4fd1a5 !important; }
+html body .announcement-empty-icon { display: grid; place-items: center; width: 64px; height: 64px; margin: 0 auto 10px; border-radius: 50%; background: #ddf2e8; color: #0e7a5b; font-size: 0; }
+html body .announcement-empty-icon svg { width: 36px; height: 36px; }
+html[data-theme="dark"] .announcement-empty-icon { background: rgba(79, 209, 165, .16); color: #4fd1a5; }
+html body .profile-detail-avatar-edit { display: grid; place-items: center; background: #0e7a5b !important; color: #fff !important; font-size: 0; }
+html body #userProfileModal .upc-msg-btn { background: #0e7a5b !important; background-image: none !important; color: #fff !important; border: none !important; border-radius: 12px !important; box-shadow: 0 4px 12px rgba(14, 122, 91, .26) !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important; padding: 9px 18px; }
+html[data-theme="dark"] #userProfileModal .upc-msg-btn { background: #4fd1a5 !important; color: #062218 !important; }
