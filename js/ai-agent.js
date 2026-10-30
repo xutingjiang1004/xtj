@@ -11225,7 +11225,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (!clean) return '';
         var cut = -1;
         for (var i = 0; i < clean.length - 1; i++) {
-          if ('。！？!?'.indexOf(clean.charAt(i)) >= 0) cut = i;
+          var ch = clean.charAt(i);
+          // 中文句末标点，或后跟空格的英文句号，都算一句的结束。
+          if ('。！？!?'.indexOf(ch) >= 0 || (ch === '.' && clean.charAt(i + 1) === ' ')) cut = i;
         }
         var line = (cut >= 0 ? clean.slice(cut + 1) : clean).trim();
         if (!line) line = clean;
@@ -11451,15 +11453,22 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           activeToolTimeline = el('div', { class: 'ai-tool-timeline ai-tool-status ai-process-timeline', role: 'status', 'aria-live': 'polite' });
           if (_sendThinkingMode !== 'off') {
             var foldHost = ensureRailFold();
-            var missingBeat = !activeRailBeat || !activeRailBeat.isConnected || activeRailBeat.classList.contains('is-provisional');
+            var pendingReason = aiReasoning.slice(railReasonCursor);
+            var newAutoLine = latestReasoningLine(pendingReason);
+            // 新一轮工具到来、上一拍已经挂了工具，而模型又写下了新的思考：
+            // 另起一拍，让每一步都有自己的句子，而不是全部堆在第一句下面。
+            var startNewBeat = !!(newRound && activeRailBeat && activeRailBeat.isConnected
+              && activeRailBeat.querySelector('.ai-tool-step')
+              && aiReasoning.length > railReasonCursor && newAutoLine);
+            var missingBeat = !activeRailBeat || !activeRailBeat.isConnected
+              || activeRailBeat.classList.contains('is-provisional') || startNewBeat;
             if (missingBeat) {
               var carried = activeRailBeat && activeRailBeat.classList.contains('is-provisional') ? String(activeRailBeat.__narration || '').trim() : '';
               if (activeRailBeat && activeRailBeat.classList.contains('is-provisional') && activeRailBeat.parentNode) activeRailBeat.remove();
               // 模型没有单独写过渡句时，用它这一步已经写下的思考最后一句补一行，
               // 让时间轴仍然是一句一句的（而不是只剩工具行）。有正式过渡句时
               // 后面的 commitNarrationToRail 会把这句替换掉，不会重复。
-              var pendingReason = aiReasoning.slice(railReasonCursor);
-              var autoLine = carried ? '' : latestReasoningLine(pendingReason);
+              var autoLine = carried ? '' : newAutoLine;
               activeRailBeat = createProcessRailBeat(carried || autoLine, pendingReason);
               activeRailBeat.__autoSentence = !carried && !!autoLine;
               if (carried || autoLine) railReasonCursor = aiReasoning.length;
