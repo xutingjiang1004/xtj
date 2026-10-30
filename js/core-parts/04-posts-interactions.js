@@ -3739,8 +3739,8 @@
                 try {
                     // Fetch current post state directly from DB (only select columns that exist)
                     var fetchRes = await sb.from('posts').select('*').eq('id', postId).maybeSingle();
-                    if (fetchRes.error) { alert('查询失败: ' + fetchRes.error.message); throw fetchRes.error; }
-                    if (!fetchRes.data) { alert('未找到帖子(id=' + postId + ')'); throw new Error('not found'); }
+                    if (fetchRes.error) { showToast('置顶失败，请稍后重试', 'error'); throw fetchRes.error; }
+                    if (!fetchRes.data) { showToast('这条帖子已不存在', 'error'); throw new Error('not found'); }
                     var dbPost = normalizePost(fetchRes.data);
                     // Check permission
                     if (currentUser !== dbPost.user_name && currentUser !== ADMIN_NAME) {
@@ -3760,7 +3760,7 @@
                         body: JSON.stringify({ post_id: postId, is_pinned: nextPinned })
                     });
                     var updResult = await updResp.json();
-                    if (!updResp.ok || !updResult.ok) { alert('更新失败: ' + (updResult.error || '服务器错误')); throw new Error(updResult.error); }
+                    if (!updResp.ok || !updResult.ok) { showToast('更新失败，请稍后重试', 'error'); throw new Error(updResult.error); }
                     clearFeedCache();
                     showToast(nextPinned ? '帖子已置顶' : '已取消置顶');
                     await loadFeed(true);
@@ -5543,7 +5543,16 @@
                     }
                     var cacheFallbackShown = !!(hadLiveFeed && feed && feed.querySelector('.post'));
                     var quotaLimited = e && e.code === 'egress_quota_exceeded';
-                    if (!hadLiveFeed && feed) feed.innerHTML = '<div class="loading" style="color:#ff3b60;">' + escapeHtml(quotaLimited ? e.message : '加载失败，请刷新重试') + '</div>';
+                    if (!hadLiveFeed && feed) {
+                        // A real button: keyboard focusable, announced as actionable, and retries without a full reload.
+                        var failRetry = document.createElement('button');
+                        failRetry.type = 'button';
+                        failRetry.className = 'loading feed-load-more-error';
+                        failRetry.style.color = '#ff3b60';
+                        failRetry.textContent = (quotaLimited ? e.message : '加载失败') + '，点击重试';
+                        failRetry.onclick = function () { loadFeed(true); };
+                        feed.replaceChildren(failRetry);
+                    }
                     try {
                         // The live view contains the newest confirmed mutations.
                         // Only bootstrap from disk when there is no live feed.

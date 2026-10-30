@@ -1107,6 +1107,12 @@ function renderProfileActivityList(kind) {
                 if (!document.getElementById('panelProfile')) return;
                 var username = requestedUser == null ? (currentUser || '') : requestedUser;
                 if (username !== (currentUser || '')) return;
+                if (username && !sb) {
+                    // The Supabase client is created after /api/config/public answers; try again shortly instead of throwing.
+                    if ((profileActivityState.clientWaits = (profileActivityState.clientWaits || 0) + 1) <= 8) setTimeout(function () { loadProfileActivity(forceRefresh); }, 700);
+                    return;
+                }
+                profileActivityState.clientWaits = 0;
                 if (!username) {
                     // Invalidate any in-flight request immediately on logout.
                     profileActivityState.requestGeneration++;
@@ -1367,7 +1373,7 @@ function renderProfileActivityList(kind) {
             };
 
             window.deleteFeedComment = async function(commentId, btn) {
-                if (!confirm('确定要永久删除这条评论吗？')) return;
+                if (!(typeof window.xtjConfirm === 'function' ? await window.xtjConfirm('删除评论', '确定要永久删除这条评论吗？', '删除') : confirm('确定要永久删除这条评论吗？'))) return;
                 if (!currentUser || !commentId || (btn && btn.disabled)) return;
                 var owner = currentUser, epoch = _authStateEpoch;
                 function sameAccount() { return owner === currentUser && epoch === _authStateEpoch; }

@@ -3243,3 +3243,44 @@ html.xtj-ios-viewport.xtj-keyboard-open #registerModal .modal-box {
     overscroll-behavior: contain;
     scroll-behavior: auto;
 }
+
+/* ---- bug fixes (audit 2026-10-30) ---- */
+/* Long legacy user names must not push the visibility badge off screen. */
+#feed .post .post-header-main { min-width: 0; }
+#feed .post .user-info { min-width: 0; }
+#feed .post .user-info .user-name { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* "My" page: profile card text/arrow touched the card border; dark mode painted a square board behind the tiles. */
+html body #panelProfile .profile-user-card { padding-left: 16px !important; padding-right: 16px !important; box-sizing: border-box; }
+html body[data-theme="dark"] #panelProfile .profile-activity-board,
+html[data-theme="dark"] #panelProfile .profile-activity-board { background: transparent !important; box-shadow: none !important; }
+/* Dark modals: rows were light-on-light and the card let page text show through. */
+html[data-theme="dark"] #profileDetailModal .profile-detail-info-item { background: rgba(255, 255, 255, .07) !important; border-color: rgba(255, 255, 255, .1) !important; }
+html[data-theme="dark"] #profileDetailModal .profile-detail-info-label { color: #9fb3ab !important; }
+html[data-theme="dark"] #profileDetailModal .profile-detail-info-value { color: #e6f1ed !important; }
+html[data-theme="dark"] #profileDetailModal h3 { color: #e6f1ed !important; }
+html[data-theme="dark"] #profileDetailModal .modal-box,
+html[data-theme="dark"] .announcement-modal,
+html[data-theme="dark"] .report-modal { background: rgba(18, 28, 25, .96) !important; }
+/* Moments-style list opened from an avatar: the text avatar was white on near-white. */
+#userProfileModal .upc-avatar { background-color: #d3efe2; color: #1f6b52; }
+html[data-theme="dark"] #userProfileModal .upc-avatar { background-color: #1f4d3e; color: #bfebd9; }
+
+/* Text prompt dialog (replaces window.prompt) */
+.xtj-prompt-overlay { position: fixed; inset: 0; z-index: 100200; display: grid; place-items: center; background: rgba(10, 25, 18, .32); padding: 16px; }
+.xtj-prompt-dialog { width: min(420px, 100%); background: #fff; color: #17231e; border-radius: 18px; padding: 20px; box-shadow: 0 18px 48px rgba(20, 60, 45, .22); }
+.xtj-prompt-dialog h3 { margin: 0 0 6px; font-size: 18px; }
+.xtj-prompt-dialog p { margin: 0 0 12px; font-size: 13px; line-height: 1.5; color: #4b5e56; }
+.xtj-prompt-dialog input { width: 100%; box-sizing: border-box; font-size: 16px; padding: 10px 12px; border: 1px solid rgba(23, 35, 30, .18); border-radius: 10px; background: #fff; color: inherit; }
+.xtj-prompt-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.xtj-prompt-actions button { min-height: 40px; padding: 0 16px; border-radius: 10px; border: 1px solid rgba(23, 35, 30, .14); background: #fff; color: inherit; font-size: 15px; }
+.xtj-prompt-actions button.is-primary { background: #0e7a5b; border-color: #0e7a5b; color: #fff; }
+html[data-theme="dark"] .xtj-prompt-dialog { background: #151b18; color: #e6f1ed; }
+html[data-theme="dark"] .xtj-prompt-dialog p { color: #9fb3ab; }
+html[data-theme="dark"] .xtj-prompt-dialog input, html[data-theme="dark"] .xtj-prompt-actions button { background: #1d2723; color: #e6f1ed; border-color: rgba(255, 255, 255, .16); }
+
+/* Hidden surfaces must not keep animating: skeletons inside closed modals and inert dock panels (never the Dock itself) ran forever,
+   forcing style/paint work on every frame of every page (measured while the AI answer was streaming). */
+.dock-panel[inert] *, .dock-panel[inert] *::before, .dock-panel[inert] *::after,
+.modal-overlay:not(.active) .xtj-loading-skeleton *,
+.modal-overlay:not(.active) .xtj-loading-skeleton *::before,
+.modal-overlay:not(.active) .xtj-loading-skeleton *::after { animation-play-state: paused !important; }

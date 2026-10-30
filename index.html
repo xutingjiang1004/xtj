@@ -8,7 +8,9 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <title>xtj</title>
+    <title>xtj · 照片墙与社区</title>
+    <meta name="theme-color" content="#eef7f3" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0b1311" media="(prefers-color-scheme: dark)" />
     <link rel="icon" type="image/svg+xml" href="icon.svg" />
     <link rel="apple-touch-icon" href="icon.svg" />
     <link rel="preconnect" href="https://ithowxqignlhkwaykglt.supabase.co" />
@@ -71,14 +73,14 @@
     <link rel="preload" as="style" href="css/visual-refinements.min.css?v=3fd6a30cd9" />
     <link rel="preload" as="style" href="css/ui-enhance.min.css?v=775c4dc55c" />
     <link rel="stylesheet" href="css/visual-refinements.min.css?v=3fd6a30cd9" media="print" onload="this.media='all'" />
-    <noscript><link rel="stylesheet" href="css/visual-refinements.min.css?v=3fd6a30cd9" /><link rel="stylesheet" href="css/ai-agent.min.css?v=4d7648703a" /><link rel="stylesheet" href="css/ui-enhance.min.css?v=775c4dc55c" /><link rel="stylesheet" href="css/ui-shell.min.css?v=1aeab3187b" /></noscript>
+    <noscript><link rel="stylesheet" href="css/visual-refinements.min.css?v=3fd6a30cd9" /><link rel="stylesheet" href="css/ai-agent.min.css?v=c8589dc0fc" /><link rel="stylesheet" href="css/ui-enhance.min.css?v=775c4dc55c" /><link rel="stylesheet" href="css/ui-shell.min.css?v=b9f157a6aa" /></noscript>
     <!-- ★ 2026-09-22 响应式修复（补完）：desktop.css 自身首条断点就是 @media (min-width: 768px)，
          只按宽度加载会让「横屏手机」（宽 ≥768、高 ≈390）也套上桌面两列栅格，与 ui-shell.css 侧
          已加的 min-height:480px 门禁不一致（会出现"桌面栅格 + 移动外壳"的混合布局）。
          故加载条件补上同一高度门禁，让横屏手机真正落回移动布局。 -->
     <link rel="stylesheet" media="(min-width: 768px) and (min-height: 480px)" href="css/desktop.min.css?v=d872211228" />
     <link rel="stylesheet" href="css/ui-enhance.min.css?v=775c4dc55c" media="print" onload="this.media='all'">
-    <link rel="stylesheet" href="css/ui-shell.min.css?v=1aeab3187b">
+    <link rel="stylesheet" href="css/ui-shell.min.css?v=b9f157a6aa">
     <link rel="stylesheet" href="css/post-feed.min.css?v=e7b8a22594">
     <link rel="stylesheet" href="css/profile-settings.min.css?v=49f1fd0516">
     <link rel="stylesheet" href="css/author-posts.min.css?v=9d1a7a9bb8">
@@ -87,11 +89,11 @@
          DCL 因此推迟到 4s 量级。preload 只提前「下载」，不改变执行顺序
          （defer 仍按文档顺序执行），构建脚本会同步刷新 ?v= 指纹。 -->
     <link rel="preload" as="script" href="js/vendor/supabase.min.js?v=e8c548fa1b" />
-    <link rel="preload" as="script" href="js/core.min.js?v=3ceb0e005a" />
+    <link rel="preload" as="script" href="js/core.min.js?v=e94290d5f2" />
     <!-- 小猫 AI 模块按需加载，但实测它会被首屏图片请求挤在连接队列里几十秒，
          用户点开只看到「正在加载 AI 模块」且无法返回。这里在第一波就把它取下来，
          执行时机仍由模块加载器决定（不会提前执行）。 -->
-    <link rel="preload" as="script" href="js/ai-agent.min.js?v=a6e8620a52" />
+    <link rel="preload" as="script" href="js/ai-agent.min.js?v=735f031923" />
     <!-- 照片墙与图片预览同样是按需模块。实测它们会被首屏图片请求挤住，
          表现为「点照片墙没反应」「点开照片几秒后黑屏」。这几个模块合计约 130KB
          （gzip 后 30KB 上下），提前取下来比让用户卡在空面板里划算。 -->
@@ -100,10 +102,10 @@
     <link rel="preload" as="script" href="js/photo-wall/photo-wall.min.js?v=af904af583" />
     <link rel="preload" as="script" href="js/photo-wall/preview.min.js?v=333c0fb035" />
     <link rel="preload" as="script" href="js/photo-wall/preview-hotfix.min.js?v=89e9e569ff" />
-    <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=4d7648703a">
+    <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=c8589dc0fc">
     <meta name="xtj-module-ai-reading-style" content="css/ai-reading.min.css?v=69f38f78de">
     <meta name="xtj-module-ai-features-style" content="css/ai-assistant-features.min.css?v=ae467cfa0a">
-    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=a6e8620a52">
+    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=735f031923">
     <meta name="xtj-module-photo-preview-style" content="css/photo-preview.min.css?v=85f646c603">
     <meta name="xtj-module-photo-preview" content="js/photo-wall/preview.min.js?v=333c0fb035">
     <meta name="xtj-module-photo-preview-hotfix" content="js/photo-wall/preview-hotfix.min.js?v=89e9e569ff">
@@ -152,7 +154,7 @@
             </filter>
         </defs>
     </svg>
-    <div class="toast-container" id="toastContainer"></div>
+    <div class="toast-container" id="toastContainer" role="status" aria-live="polite" aria-atomic="false"></div>
 
     <div class="notification-container" id="notificationContainer"></div>
 
@@ -341,7 +343,7 @@
                 </div>
                 <!-- 首屏并行拉帖：不依赖 core.js / supabase，避免大包未下载完时永久 skeleton -->
                 <script src="js/post-media.min.js?v=a79404251a"></script>
-                <script src="js/early-feed.min.js?v=d1ad08b74c"></script>
+                <script src="js/early-feed.min.js?v=a95d192dd2"></script>
             </div>
         </div>
 
@@ -1089,7 +1091,7 @@
 
     <!-- 公告模态框 -->
     <div class="announcement-modal-overlay" id="announcementModal" onclick="if(event.target===this)closeAnnouncementModal()">
-        <div class="announcement-modal" onclick="event.stopPropagation()">
+        <div class="announcement-modal" role="dialog" aria-modal="true" aria-label="公告与更新日志" onclick="event.stopPropagation()">
             <div class="announcement-header">
                 <div class="announcement-tab-bar">
                     <button class="announcement-tab active" data-tab="announcements">🔔 公告</button>
@@ -1129,7 +1131,7 @@
 
     <!-- 举报模态框 -->
     <div class="report-modal-overlay" id="reportModal" onclick="if(event.target===this)closeReportModal()">
-        <div class="report-modal" onclick="event.stopPropagation()">
+        <div class="report-modal" role="dialog" aria-modal="true" aria-label="举报" onclick="event.stopPropagation()">
             <div class="report-modal-header">
                 <div class="report-modal-header-left">
                     <button class="report-view-tab active" id="reportViewFormBtn" onclick="switchReportView('form')" aria-selected="true">举报表单</button>
@@ -1248,7 +1250,7 @@
          core.js also listens for `xtj:supabase-ready` as a fallback. -->
     <script defer src="js/vendor/supabase.min.js?v=e8c548fa1b"></script>
     <script defer src="js/config.min.js?v=fcde94254b"></script>
-    <script defer src="js/performance.min.js?v=ac348c42e0"></script>
+    <script defer src="js/performance.min.js?v=8606d6dc9d"></script>
     <script defer src="js/mobile-viewport.min.js?v=3b1b69fbaf"></script>
     <script defer src="js/media-session.min.js?v=2e766b9507"></script>
     <script defer src="js/media-cache.min.js?v=61d2629804"></script>
@@ -1257,18 +1259,18 @@
     <script defer src="js/post-originals.min.js?v=b6ca281d48"></script>
     <script defer src="js/post-publish-progress.min.js?v=3ef713325f"></script>
     <script defer src="js/post-publish-motion.min.js?v=da76b1b6d0"></script>
-    <script defer src="js/profile-settings.min.js?v=c80c4db38b"></script>
+    <script defer src="js/profile-settings.min.js?v=43f278e0ff"></script>
     <script defer src="js/author-posts.min.js?v=e6a3b9f3e4"></script>
     <script src="js/ip-city-data.min.js?v=84becef210"></script>
     <script src="js/ip-location.min.js?v=56f2c41fe8"></script>
     <script defer src="js/core-utils.min.js?v=a376d5219e"></script>
     <script defer src="js/photo-wall/story.min.js?v=167ce053d3"></script>
     <script defer src="js/voice-transcription.min.js?v=6247e4303f"></script>
-    <script defer src="js/core.min.js?v=3ceb0e005a"></script>
+    <script defer src="js/core.min.js?v=e94290d5f2"></script>
     <script defer src="js/login-device.min.js?v=7f402fc787"></script>
     <script defer src="js/theme-toggle.min.js?v=f67dfa81a9"></script>
     <script defer src="js/desktop-shell.min.js?v=8420dc4713"></script>
-    <script defer src="js/ux-features.min.js?v=d2d1987f33"></script>
+    <script defer src="js/ux-features.min.js?v=47a79ee5b9"></script>
 
 <!-- 深入研究二级页面：直接放在 body 下，确保真全屏覆盖 -->
 <div class="dock-panel hidden" id="panelDeepThink">

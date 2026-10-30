@@ -58,11 +58,24 @@
                 _sbConfigOk = false;
                 sb = null;
                 console.error('[XTJ] Supabase 配置缺失或格式不正确，请检查 config.js 或环境变量');
-                document.addEventListener('DOMContentLoaded', function () {
+                function showConfigFailure() {
                     if (_sbConfigOk) return;
                     var feedEl = document.getElementById('feed');
-                    if (feedEl) feedEl.innerHTML = '<div class="loading">服务配置暂不可用，请稍后重新加载</div>';
-                });
+                    // Never replace posts that are already on screen (the early feed does not need this client).
+                    if (feedEl && !feedEl.querySelector('.post')) feedEl.innerHTML = '<div class="loading">服务配置暂不可用，请稍后重新加载</div>';
+                }
+                if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', showConfigFailure, { once: true });
+                else showConfigFailure();
+            }
+            // The build-time key in config.js is a placeholder; the real pair arrives from /api/config/public.
+            // Treat "not ready yet" as loading, and only report failure after the runtime sync had its chance.
+            var _configFailureTimer = null;
+            function _scheduleConfigFailure() {
+                if (_configFailureTimer) return;
+                _configFailureTimer = setTimeout(function () {
+                    _configFailureTimer = null;
+                    if (!_sbConfigOk && !sb) _applySupabaseConfigFailure();
+                }, 20000);
             }
             // URL and public key are one configuration. Even a valid build-time
             // key must be checked against the authoritative public runtime pair.
@@ -125,7 +138,7 @@
                     }
                 });
             }
-            if (!_sbConfigOk) _applySupabaseConfigFailure();
+            if (!_sbConfigOk) _scheduleConfigFailure();
             if (window.supabase && typeof window.supabase.createClient === 'function') {
                 initSupabaseClient();
                 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _healAfterSdkReady, { once: true });
@@ -2726,6 +2739,52 @@ function isAdmin() {
             window._confirmOrigin = null;
         }
         window.showConfirm = showConfirm;
+        // Promise wrapper over the site's own confirm dialog (native confirm() only as a fallback).
+        window.xtjConfirm = function (title, message, okText) {
+            return new Promise(function (resolve) {
+                var overlay = document.getElementById('ppConfirmOverlay');
+                if (!overlay || typeof window.showConfirm !== 'function') { resolve(!!window.confirm(message)); return; }
+                var settled = false;
+                function done(value) { if (!settled) { settled = true; clearInterval(timer); resolve(value); } }
+                window.showConfirm(title, message, okText, function () { done(true); });
+                var timer = setInterval(function () {
+                    if (!overlay.classList.contains('active')) setTimeout(function () { done(false); }, 0);
+                }, 120);
+            });
+        };
+        // Small text-entry dialog replacing window.prompt(); resolves to the text or null when cancelled.
+        window.xtjPrompt = function (title, message, initial, maxLength) {
+            return new Promise(function (resolve) {
+                var previous = document.activeElement;
+                var overlay = document.createElement('div');
+                overlay.className = 'xtj-prompt-overlay';
+                var dialog = document.createElement('div');
+                dialog.className = 'xtj-prompt-dialog';
+                dialog.setAttribute('role', 'dialog');
+                dialog.setAttribute('aria-modal', 'true');
+                var heading = document.createElement('h3'); heading.textContent = title || '请输入';
+                var hint = document.createElement('p'); hint.textContent = message || '';
+                var input = document.createElement('input'); input.type = 'text'; input.value = initial || ''; input.maxLength = maxLength || 200;
+                var row = document.createElement('div'); row.className = 'xtj-prompt-actions';
+                var cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = '取消';
+                var ok = document.createElement('button'); ok.type = 'button'; ok.textContent = '保存'; ok.className = 'is-primary';
+                row.append(cancel, ok); dialog.append(heading, hint, input, row); overlay.appendChild(dialog); document.body.appendChild(overlay);
+                function close(value) {
+                    document.removeEventListener('keydown', onKey, true); overlay.remove();
+                    if (previous && previous.isConnected && typeof previous.focus === 'function') { try { previous.focus({ preventScroll: true }); } catch (_) {} }
+                    resolve(value);
+                }
+                function onKey(event) {
+                    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(null); }
+                    else if (event.key === 'Enter' && document.activeElement === input) { event.preventDefault(); close(input.value); }
+                }
+                document.addEventListener('keydown', onKey, true);
+                cancel.addEventListener('click', function () { close(null); });
+                ok.addEventListener('click', function () { close(input.value); });
+                overlay.addEventListener('click', function (event) { if (event.target === overlay) close(null); });
+                setTimeout(function () { input.focus(); input.select(); }, 30);
+            });
+        };
 
         window.execConfirm = function() {
             var overlay = document.getElementById('ppConfirmOverlay');
@@ -3074,7 +3133,7 @@ function isAdmin() {
                     return;
                 }
                 if (event.key !== 'Escape') return;
-                ['loginModal', 'registerModal'].some(function (id) {
+                var closedAuth = ['loginModal', 'registerModal'].some(function (id) {
                     var modal = document.getElementById(id);
                     if (modal && modal.classList.contains('active')) {
                         window.closeModal(id);
@@ -3082,6 +3141,11 @@ function isAdmin() {
                     }
                     return false;
                 });
+                if (closedAuth) return;
+                // Other plain .modal-overlay dialogs (profile, stats, post detail, ...) never reacted to Escape.
+                var openOverlays = Array.prototype.filter.call(document.querySelectorAll('.modal-overlay.active'), function (el) { return el.id && !/^(announcement|report|ppConfirm)/.test(el.id) && !el.hasAttribute('data-xtj-ai-modal'); });
+                var topOverlay = openOverlays[openOverlays.length - 1];
+                if (topOverlay && typeof window.closeModal === 'function') { event.preventDefault(); window.closeModal(topOverlay.id); }
             });
             var btn = document.getElementById('loginSubmitBtn');
             if (btn) btn.addEventListener('click', doLogin);
@@ -4468,6 +4532,12 @@ function renderProfileActivityList(kind) {
                 if (!document.getElementById('panelProfile')) return;
                 var username = requestedUser == null ? (currentUser || '') : requestedUser;
                 if (username !== (currentUser || '')) return;
+                if (username && !sb) {
+                    // The Supabase client is created after /api/config/public answers; try again shortly instead of throwing.
+                    if ((profileActivityState.clientWaits = (profileActivityState.clientWaits || 0) + 1) <= 8) setTimeout(function () { loadProfileActivity(forceRefresh); }, 700);
+                    return;
+                }
+                profileActivityState.clientWaits = 0;
                 if (!username) {
                     // Invalidate any in-flight request immediately on logout.
                     profileActivityState.requestGeneration++;
@@ -4728,7 +4798,7 @@ function renderProfileActivityList(kind) {
             };
 
             window.deleteFeedComment = async function(commentId, btn) {
-                if (!confirm('确定要永久删除这条评论吗？')) return;
+                if (!(typeof window.xtjConfirm === 'function' ? await window.xtjConfirm('删除评论', '确定要永久删除这条评论吗？', '删除') : confirm('确定要永久删除这条评论吗？'))) return;
                 if (!currentUser || !commentId || (btn && btn.disabled)) return;
                 var owner = currentUser, epoch = _authStateEpoch;
                 function sameAccount() { return owner === currentUser && epoch === _authStateEpoch; }
@@ -9251,8 +9321,8 @@ function renderProfileActivityList(kind) {
                 try {
                     // Fetch current post state directly from DB (only select columns that exist)
                     var fetchRes = await sb.from('posts').select('*').eq('id', postId).maybeSingle();
-                    if (fetchRes.error) { alert('查询失败: ' + fetchRes.error.message); throw fetchRes.error; }
-                    if (!fetchRes.data) { alert('未找到帖子(id=' + postId + ')'); throw new Error('not found'); }
+                    if (fetchRes.error) { showToast('置顶失败，请稍后重试', 'error'); throw fetchRes.error; }
+                    if (!fetchRes.data) { showToast('这条帖子已不存在', 'error'); throw new Error('not found'); }
                     var dbPost = normalizePost(fetchRes.data);
                     // Check permission
                     if (currentUser !== dbPost.user_name && currentUser !== ADMIN_NAME) {
@@ -9272,7 +9342,7 @@ function renderProfileActivityList(kind) {
                         body: JSON.stringify({ post_id: postId, is_pinned: nextPinned })
                     });
                     var updResult = await updResp.json();
-                    if (!updResp.ok || !updResult.ok) { alert('更新失败: ' + (updResult.error || '服务器错误')); throw new Error(updResult.error); }
+                    if (!updResp.ok || !updResult.ok) { showToast('更新失败，请稍后重试', 'error'); throw new Error(updResult.error); }
                     clearFeedCache();
                     showToast(nextPinned ? '帖子已置顶' : '已取消置顶');
                     await loadFeed(true);
@@ -11055,7 +11125,16 @@ function renderProfileActivityList(kind) {
                     }
                     var cacheFallbackShown = !!(hadLiveFeed && feed && feed.querySelector('.post'));
                     var quotaLimited = e && e.code === 'egress_quota_exceeded';
-                    if (!hadLiveFeed && feed) feed.innerHTML = '<div class="loading" style="color:#ff3b60;">' + escapeHtml(quotaLimited ? e.message : '加载失败，请刷新重试') + '</div>';
+                    if (!hadLiveFeed && feed) {
+                        // A real button: keyboard focusable, announced as actionable, and retries without a full reload.
+                        var failRetry = document.createElement('button');
+                        failRetry.type = 'button';
+                        failRetry.className = 'loading feed-load-more-error';
+                        failRetry.style.color = '#ff3b60';
+                        failRetry.textContent = (quotaLimited ? e.message : '加载失败') + '，点击重试';
+                        failRetry.onclick = function () { loadFeed(true); };
+                        feed.replaceChildren(failRetry);
+                    }
                     try {
                         // The live view contains the newest confirmed mutations.
                         // Only bootstrap from disk when there is no live feed.
@@ -19714,16 +19793,8 @@ function renderProfileActivityList(kind) {
                 try {
                     prefersReducedMotion = !!window.matchMedia('(prefers-reduced-motion: reduce)').matches;
                 } catch (_) {}
-                var memory = Number(navigator.deviceMemory || 0);
-                var cores = Number(navigator.hardwareConcurrency || 0);
-                var touchPoints = Number(navigator.maxTouchPoints || 0);
-                var smallScreen = Math.min(window.innerWidth || 0, window.screen && window.screen.width ? window.screen.width : window.innerWidth || 0) <= 1024;
-                var mode = '';
-                if (prefersReducedMotion || (memory && memory <= 4) || (cores && cores <= 4)) {
-                    mode = 'perf-lite';
-                } else if (smallScreen || touchPoints > 0 || (memory && memory <= 8) || (cores && cores <= 8)) {
-                    mode = 'perf-balanced';
-                }
+                // Same experience on every device. Only the user's reduce-motion preference switches to the reduced profile.
+                var mode = prefersReducedMotion ? 'perf-lite' : '';
                 if (mode) rootEl.classList.add(mode);
             }
 

@@ -6610,16 +6610,8 @@
                 try {
                     prefersReducedMotion = !!window.matchMedia('(prefers-reduced-motion: reduce)').matches;
                 } catch (_) {}
-                var memory = Number(navigator.deviceMemory || 0);
-                var cores = Number(navigator.hardwareConcurrency || 0);
-                var touchPoints = Number(navigator.maxTouchPoints || 0);
-                var smallScreen = Math.min(window.innerWidth || 0, window.screen && window.screen.width ? window.screen.width : window.innerWidth || 0) <= 1024;
-                var mode = '';
-                if (prefersReducedMotion || (memory && memory <= 4) || (cores && cores <= 4)) {
-                    mode = 'perf-lite';
-                } else if (smallScreen || touchPoints > 0 || (memory && memory <= 8) || (cores && cores <= 8)) {
-                    mode = 'perf-balanced';
-                }
+                // Same experience on every device. Only the user's reduce-motion preference switches to the reduced profile.
+                var mode = prefersReducedMotion ? 'perf-lite' : '';
                 if (mode) rootEl.classList.add(mode);
             }
 

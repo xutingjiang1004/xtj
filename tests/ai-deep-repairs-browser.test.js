@@ -47,7 +47,7 @@ test('deleting a conversation invalidates an older history page and keeps pagina
   await p.evaluate(() => {
     const previous = fetch;
     window.repairHistoryCount = 0;
-    window.confirm = () => true;
+    window.confirm = () => true; window.xtjConfirm = () => Promise.resolve(true);
     window.fetch = (url, options = {}) => {
       if (!new URL(url, location.href).pathname.endsWith('/chat/conversations')) return previous(url, options);
       const json = data => new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } });
@@ -121,7 +121,7 @@ test('sending while a replacement attachment is reading cannot send the previous
 test('a pending current-conversation deletion blocks a new send and duplicate deletion', { timeout: 45000 }, async t => {
   const f = await fixture(t), p = f.page;
   await p.evaluate(() => {
-    const previous = fetch; window.confirm = () => true; window.repairDeletes = 0;
+    const previous = fetch; window.confirm = () => true; window.xtjConfirm = () => Promise.resolve(true); window.repairDeletes = 0;
     window.fetch = (url, options) => {
       if (!new URL(url, location.href).pathname.endsWith('/chat/delete')) return previous(url, options);
       repairDeletes++;
@@ -161,7 +161,7 @@ test('research waits for all selected files before accepting a send', { timeout:
 test('automatic new-conversation creation after deleting the current chat keeps sends pending until its ID is ready', { timeout: 45000 }, async t => {
   const f = await fixture(t), p = f.page;
   await p.evaluate(() => {
-    const previous = fetch; window.confirm = () => true;
+    const previous = fetch; window.confirm = () => true; window.xtjConfirm = () => Promise.resolve(true);
     window.fetch = (url, options) => {
       if (!new URL(url, location.href).pathname.endsWith('/chat/new')) return previous(url, options);
       return new Promise(resolve => window.releaseRepairNew = () => resolve(new Response('{"ok":true,"conversation_id":"AFTERDELETE01"}', { headers: { 'Content-Type': 'application/json' } })));
@@ -205,7 +205,7 @@ test('attachment names and research settings remain readable in light and dark t
 test('a successful deletion followed by failed creation reports the actual state and allows creating again', { timeout: 45000 }, async t => {
   const f = await fixture(t), p = f.page;
   await p.evaluate(() => {
-    const previous = fetch; window.confirm = () => true; window.repairNewAttempts = 0;
+    const previous = fetch; window.confirm = () => true; window.xtjConfirm = () => Promise.resolve(true); window.repairNewAttempts = 0;
     window.fetch = (url, options) => {
       if (new URL(url, location.href).pathname.endsWith('/chat/new') && ++repairNewAttempts === 1) return Promise.resolve(new Response('{"ok":false,"error":"isolated creation failure","retryable":false}', { status: 400, headers: { 'Content-Type': 'application/json' } }));
       return previous(url, options);

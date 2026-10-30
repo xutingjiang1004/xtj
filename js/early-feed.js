@@ -82,6 +82,31 @@
     if (!el || !stillSkeleton(el)) return;
     var garden = window.xtjFeedLoadingHtml('正在加载帖子');
     if (garden) el.innerHTML = garden;
+    // Free-tier hosts sleep; say so instead of an unexplained spinner, and offer a retry later.
+    setTimeout(function () {
+      var box = feedEl();
+      if (!box || !stillSkeleton(box)) return;
+      var wrap = box.querySelector('.feed-garden-loading');
+      if (!wrap || wrap.querySelector('.xtj-slow-hint')) return;
+      var hint = document.createElement('small');
+      hint.className = 'xtj-slow-hint';
+      hint.style.cssText = 'display:block;margin-top:6px;opacity:.75';
+      hint.textContent = '服务器可能刚被唤醒，通常需要 20–40 秒，请稍候';
+      wrap.appendChild(hint);
+    }, 6000);
+    setTimeout(function () {
+      var box = feedEl();
+      if (!box || !stillSkeleton(box)) return;
+      var wrap = box.querySelector('.feed-garden-loading');
+      if (!wrap || wrap.querySelector('.xtj-slow-retry')) return;
+      var retry = document.createElement('button');
+      retry.type = 'button';
+      retry.className = 'xtj-slow-retry';
+      retry.style.cssText = 'display:block;margin:10px auto 0;background:none;border:none;color:inherit;text-decoration:underline;cursor:pointer;font:inherit;padding:8px 12px';
+      retry.textContent = '重新加载';
+      retry.addEventListener('click', function () { window.location.reload(); });
+      wrap.appendChild(retry);
+    }, 15000);
   }, { once: true });
 
   function showError(error) {

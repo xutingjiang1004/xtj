@@ -86,7 +86,7 @@ test('detail snapshot started before the like ACK is re-read instead of revertin
 test('parent deletion removes descendant rows and counts without waiting for Realtime',{timeout:45000},()=>use(async f=>{
  const parent=f.comments[0],child=f.comments[1];f.posts[0].comment_count=2;await f.page.evaluate(()=>loadFeed(true));
  await f.page.route('**/api/post/comment/*',r=>r.fulfill({json:{ok:true,post_id:parent.post_id,deleted_comment_ids:[parent.id,child.id],comment_count:0}}));
- await f.page.evaluate(x=>{window.confirm=()=>true;return deleteFeedComment(x);},parent.id);
+ await f.page.evaluate(x=>{window.confirm=()=>true;window.xtjConfirm=()=>Promise.resolve(true);return deleteFeedComment(x);},parent.id);
  await f.page.waitForFunction(x=>!document.querySelector('#feed [data-comment-id="'+x+'"]'),child.id);
  assert.equal(await f.page.locator('#feed [data-comment-id="'+parent.id+'"]').count(),0);assert.match(await f.page.locator('#feed .post-stats-text').first().textContent(),/评论 0/);
 }));
@@ -141,7 +141,7 @@ test('detail comment and like pagination has accurate totals and bounded DOM',{t
  await f.page.locator('#postDetailBody').getByRole('button',{name:'评论',exact:true}).click();await f.page.locator('#postDetailBody .inline-comment-inp').fill('visible after a paginated submit');await f.page.locator('#postDetailBody .inline-comment-inp').press('Enter');
  await f.page.waitForFunction(()=>document.querySelector('.post-detail-recent-comments')?.textContent.includes('visible after a paginated submit'));assert.ok(await f.page.locator('#postDetailBody .comment-item').count()<=35);
  await f.page.locator('.post-detail-comments-panel').getByRole('button',{name:'下一页'}).click();await f.page.waitForFunction(()=>document.querySelector('.post-detail-comments-panel').textContent.includes('61–90'));assert.ok(await f.page.locator('#postDetailBody .comment-item').count()<=35);
- await f.page.route('**/api/post/comment/5001',r=>r.fulfill({json:{ok:true,deleted_comment_ids:[5001],comment_count:5000,post_id:f.posts[0].id}}));await f.page.evaluate(()=>{window.confirm=()=>true;return deleteFeedComment('5001');});await f.page.waitForFunction(()=>!document.querySelector('#postDetailBody [data-comment-id="5001"]'));assert.match(await f.page.locator('#postDetailBody .post-stats-text').textContent(),/评论 5000/);
+ await f.page.route('**/api/post/comment/5001',r=>r.fulfill({json:{ok:true,deleted_comment_ids:[5001],comment_count:5000,post_id:f.posts[0].id}}));await f.page.evaluate(()=>{window.confirm=()=>true;window.xtjConfirm=()=>Promise.resolve(true);return deleteFeedComment('5001');});await f.page.waitForFunction(()=>!document.querySelector('#postDetailBody [data-comment-id="5001"]'));assert.match(await f.page.locator('#postDetailBody .post-stats-text').textContent(),/评论 5000/);
 }));
 test('photo keyboard activation, modal Tab containment, focus return and inactive panels',{timeout:45000},()=>use(async f=>{
  await wall(f);const card=f.page.locator('#photoGrid .photo-wall-item').first();await f.page.locator('#photoUploadBtn').focus();await f.page.keyboard.press('Tab');assert.equal(await f.page.evaluate(()=>document.activeElement.closest('.photo-wall-item')!==null),true);

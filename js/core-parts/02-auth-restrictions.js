@@ -224,7 +224,7 @@
                     return;
                 }
                 if (event.key !== 'Escape') return;
-                ['loginModal', 'registerModal'].some(function (id) {
+                var closedAuth = ['loginModal', 'registerModal'].some(function (id) {
                     var modal = document.getElementById(id);
                     if (modal && modal.classList.contains('active')) {
                         window.closeModal(id);
@@ -232,6 +232,11 @@
                     }
                     return false;
                 });
+                if (closedAuth) return;
+                // Other plain .modal-overlay dialogs (profile, stats, post detail, ...) never reacted to Escape.
+                var openOverlays = Array.prototype.filter.call(document.querySelectorAll('.modal-overlay.active'), function (el) { return el.id && !/^(announcement|report|ppConfirm)/.test(el.id) && !el.hasAttribute('data-xtj-ai-modal'); });
+                var topOverlay = openOverlays[openOverlays.length - 1];
+                if (topOverlay && typeof window.closeModal === 'function') { event.preventDefault(); window.closeModal(topOverlay.id); }
             });
             var btn = document.getElementById('loginSubmitBtn');
             if (btn) btn.addEventListener('click', doLogin);

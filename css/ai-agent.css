@@ -1063,15 +1063,15 @@ html[data-xtj-motion=weak] .ai-thinking.is-thinking.expanded .ai-thinking-panel 
   display: inline;
   color: #c44b5a;
 }
-.ai-flow-in { animation: aiRailWash 280ms cubic-bezier(.16, 1, .3, 1) both; }
+.ai-flow-in { animation: aiRailWash 320ms cubic-bezier(.16, 1, .3, 1) both; }
 @media (prefers-reduced-motion: reduce) {
   .ai-process-rail, .ai-process-rail.is-folded, .ai-flow-in,
   .ai-process-rail .ai-tool-step,
   .ai-process-rail .ai-tool-step::after { transition: none; animation: none; filter: none; }
 }
 @keyframes aiRailWash {
-  0% { opacity: 0; filter: blur(6px); transform: translate3d(0, 6px, 0); }
-  100% { opacity: 1; filter: none; transform: none; }
+  0% { opacity: 0; transform: translate3d(0, 6px, 0); }
+  100% { opacity: 1; transform: none; }
 }
 @keyframes aiRailStepIn {
   0% { opacity: 0; transform: translate3d(0, 4px, 0); }
@@ -8236,3 +8236,39 @@ html.xtj-ios-viewport.xtj-keyboard-open .ai-chat-input-bar { padding-bottom:8px!
 body.xtj-research-open #panelAiChat { visibility:hidden!important; pointer-events:none!important; }
 #panelDeepThink .ai-think-thinking[open] > .ai-think-thinking-body { display:block; max-height:280px; overflow:auto; }
 #panelDeepThink .ai-think-answer { white-space:normal; }
+
+/* Chat answers: tables and quotes were unstyled (cells padded 1px, header centered). */
+.ai-msg.assistant .ai-msg-bubble table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: separate;
+  border-spacing: 0;
+  margin: .7em 0;
+  font-size: 14px;
+  line-height: 1.5;
+  border: 1px solid rgba(23, 35, 30, .12);
+  border-radius: 10px;
+  -webkit-overflow-scrolling: touch;
+}
+.ai-msg.assistant .ai-msg-bubble th,
+.ai-msg.assistant .ai-msg-bubble td {
+  padding: 8px 12px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid rgba(23, 35, 30, .08);
+  white-space: nowrap;
+}
+.ai-msg.assistant .ai-msg-bubble th { font-weight: 650; background: rgba(14, 122, 91, .08); }
+.ai-msg.assistant .ai-msg-bubble tr:last-child td { border-bottom: 0; }
+.ai-msg.assistant .ai-msg-bubble blockquote {
+  margin: .7em 0;
+  padding: 2px 0 2px 12px;
+  border-left: 3px solid rgba(14, 122, 91, .45);
+  color: rgba(23, 35, 30, .72);
+}
+[data-theme="dark"] .ai-msg.assistant .ai-msg-bubble table { border-color: rgba(255, 255, 255, .14); }
+[data-theme="dark"] .ai-msg.assistant .ai-msg-bubble th,
+[data-theme="dark"] .ai-msg.assistant .ai-msg-bubble td { border-bottom-color: rgba(255, 255, 255, .1); }
+[data-theme="dark"] .ai-msg.assistant .ai-msg-bubble th { background: rgba(79, 209, 165, .14); }
+[data-theme="dark"] .ai-msg.assistant .ai-msg-bubble blockquote { border-left-color: rgba(79, 209, 165, .55); color: rgba(230, 241, 237, .75); }

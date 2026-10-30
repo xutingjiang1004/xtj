@@ -114,7 +114,12 @@
           return;
         if (input.type === "checkbox")
           input.checked = settings[input.name] !== false;
-        else input.value = settings[input.name] || "";
+        else if (input.tagName === "SELECT") {
+          // A missing or unknown value must keep the default option instead of blanking the select.
+          var wanted = settings[input.name];
+          var hasOption = Array.prototype.some.call(input.options, function (option) { return option.value === wanted; });
+          input.value = hasOption ? wanted : input.options[0] ? input.options[0].value : "";
+        } else input.value = settings[input.name] || "";
       });
   }
   async function load() {

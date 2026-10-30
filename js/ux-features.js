@@ -137,6 +137,17 @@
       if (type === true) type = 'error';
       var container = document.getElementById('toastContainer');
       if (!container) return orig.apply(this, arguments);
+      var msgStr = message == null ? '' : String(message);
+      if (typeof window.__xtjUiTextRepair === 'function') {
+        try { var repaired = window.__xtjUiTextRepair(msgStr); if (repaired != null) msgStr = String(repaired); } catch (e) {}
+      }
+      // Same text already on screen: do not stack a duplicate (this patch used to bypass the original de-dupe).
+      var visible = container.querySelectorAll('.toast');
+      for (var vi = 0; vi < visible.length; vi++) {
+        if (visible[vi].textContent === msgStr && !visible[vi].__xtjLeaving) return;
+      }
+      // At most three at once: drop the oldest.
+      while (visible.length >= 3) { visible[0].remove(); visible = container.querySelectorAll('.toast'); }
       var toast = document.createElement('div');
       var cls = 'toast toast-' + String(type).replace(/[^a-z]/g, '');
       if (type === 'error') cls += ' toast-error';
@@ -144,10 +155,12 @@
       if (type === 'warn' || type === 'warning') cls += ' toast-warn';
       if (type === 'info') cls += ' toast-info';
       toast.className = cls;
-      toast.textContent = message == null ? '' : String(message);
+      toast.textContent = msgStr;
       container.appendChild(toast);
       var hold = type === 'error' ? 4000 : type === 'success' ? 2200 : 2500;
+      hold = Math.min(7000, Math.max(hold, 1400 + msgStr.length * 90));
       setTimeout(function () {
+        toast.__xtjLeaving = true;
         toast.style.animation = 'toastFade 0.3s ease-out forwards';
         setTimeout(function () {
           if (toast.parentNode) toast.remove();

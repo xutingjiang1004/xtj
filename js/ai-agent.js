@@ -37,6 +37,17 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   var DT_CONV_KEY = 'xtj_ai_dt_conversation_id';
   var USER_NAME_KEYS = ['xtj_user', 'xtj_username', 'xtj_user_name'];
   var _isTouchMobile = typeof window !== 'undefined' && 'ontouchstart' in window && 'visualViewport' in window;
+  // Write-if-changed helpers: streaming updates run many times per second, and identical writes still
+  // dirty style/layout (every class add/remove and textContent assignment records a mutation).
+  function setTextOnce(node, value) { if (node && node.textContent !== value) node.textContent = value; }
+  function setClassOnce(node, name, on) { if (node && node.classList.contains(name) !== on) node.classList.toggle(name, on); }
+  // Site dialogs instead of window.confirm()/prompt(); the native ones stay only as a fallback.
+  function askConfirm(title, message, okText) {
+    return typeof window.xtjConfirm === 'function' ? window.xtjConfirm(title, message, okText) : Promise.resolve(confirm(message));
+  }
+  function askText(title, message, initial, maxLength) {
+    return typeof window.xtjPrompt === 'function' ? window.xtjPrompt(title, message, initial, maxLength) : Promise.resolve(prompt(message, initial));
+  }
   var escapeHtml = window.escapeHtml || function(s) { return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g, '&#39;'); };
 
   function cancelAiStreamReader(reader) {
@@ -1723,6 +1734,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     s = s.replace(/^### (.+)$/gm, '<h3>$1</h3>');
     s = s.replace(/^## (.+)$/gm, '<h2>$1</h2>');
     s = s.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+    // Blockquotes: the text is already HTML-escaped, so a quote marker is "&gt;".
+    // Adjacent quote lines merge into one block; before this rule "> text" showed literally.
+    s = s.replace(/^&gt;[ \t]?(.+)$/gm, '<blockquote>$1</blockquote>');
+    s = s.replace(/<\/blockquote>\n<blockquote>/g, '<br>');
     // Markdown tables: convert only blocks with a real separator row. The
     // text has already been HTML-escaped above, so cell contents are safe to
     // place in the generated table markup.
@@ -3484,19 +3499,19 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var head = activity.querySelector('.ai-tool-activity-head');
 
     if (settled) {
-      activity.classList.remove('is-running');
-      activity.classList.add('is-done');
+      setClassOnce(activity, 'is-running', false);
+      setClassOnce(activity, 'is-done', true);
       var activityCollapsed = inProcessRail(activity) ? false : (typeof activity.__userCollapsed === 'boolean' ? activity.__userCollapsed : totalFailed === 0);
-      activity.classList.toggle('is-collapsed', activityCollapsed);
+      setClassOnce(activity, 'is-collapsed', !!(activityCollapsed));
       if (head) { try { head.setAttribute('aria-expanded', activityCollapsed ? 'false' : 'true'); } catch (eArA2) {} }
       // ★ 2026-09-28 修复（失败态视觉缺失）：
       //   CSS 为失败态准备了 `.ai-tool-activity.is-done.is-error .ai-tool-activity-icon::before
       //   {content:'!'}`，但 JS 从来没给容器加过 is-error（is-error 只加在条目上），
       //   而这里写入的 ⚠️ emoji 又被 CSS 的 `font-size:0; text-indent:-999px` 隐身 ——
       //   于是成功失败长得一模一样（都是绿勾），只有文字里能看出差别。
-      if (totalFailed > 0) activity.classList.add('is-error');
-      else activity.classList.remove('is-error');
-      if (icon) icon.textContent = totalFailed > 0 ? '⚠️' : '✅';
+      if (totalFailed > 0) setClassOnce(activity, 'is-error', true);
+      else setClassOnce(activity, 'is-error', false);
+      if (icon) setTextOnce(icon, totalFailed > 0 ? '⚠️' : '✅');
       // ★ 2026-09-28（方案 C）：用时只在**首次**收敛时锁定。
       //   若每次刷新都重算，中途展开/再收敛会让耗时一直涨，与"这次工具花了多久"的语义不符。
       if (activity.__elapsedMs === undefined) {
@@ -3523,9 +3538,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       //     "用时"会回退成首轮快照。故：算、但不用。
       var doneText = toolActivityDoneLabel(activity);
       if (totalFailed > 0) doneText += '（' + totalFailed + ' 个失败）';
-      if (label) label.textContent = doneText;
+      if (label) setTextOnce(label, doneText);
       // count 位清空：不再显示"用时"，也不显示"N/M 完成"这类过程计数
-      if (count) count.textContent = '';
+      if (count) setTextOnce(count, '');
       // ★ 补搬（对应上面①）：正文先到时 content 分支搬了个寂寞（工具区尚未创建），
       //   这里在"工具刚刚全部收敛"这个时机再问一次 —— 此时正文已在，理应归位到下方。
       //   moveToolAreaBelowBubble 是幂等的，重复调用无副作用。
@@ -3550,10 +3565,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         delete activity.__elapsedMs;
         activity.__startedAt = Date.now();
       }
-      activity.classList.add('is-running');
+      setClassOnce(activity, 'is-running', true);
       activity.classList.remove('is-done', 'is-collapsed');
       if (head) { try { head.setAttribute('aria-expanded', 'true'); } catch (eArA3) {} }
-      if (icon) icon.textContent = '⏳';
+      if (icon) setTextOnce(icon, '⏳');
       if (label) {
         // ★ 2026-09-28（D3 续）：文案分工
         //   活动区头 = **状态**，"整理中"占位 = **具体动作**（"整理检索结果并作答"）。
@@ -3566,7 +3581,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (count) {
         // ★ 2026-09-29：运行中也清空计数。原「1/2 完成」这类过程计数偏技术面，
         //   而进度本身已由下方工具行的 spinner 直观表达，再叠一层数字就是噪音。
-        count.textContent = '';
+        setTextOnce(count, '');
       }
     }
   }
@@ -9276,7 +9291,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       ev.preventDefault();
       ev.stopPropagation();
       if (!S.dtConversationId || S._dtOpening || S._dtSending || S._dtCreating || S._dtDeleting) return;
-      if (!confirm('确定删除当前深入研究会话吗？删除后不可恢复。')) return;
+      if (!(await askConfirm('删除研究会话', '确定删除当前深入研究会话吗？删除后不可恢复。', '删除'))) return;
       S._dtDeleting = true;
       var deleteLife = S.dtLifecycleId, deleteCid = S.dtConversationId;
       var deleteOwner = window.currentUser || '', deleteEpoch = readAiAuthEpoch();
@@ -11518,6 +11533,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       }
 
       function ensureAssistantBubbleReady() {
+        // Called for every streamed chunk: once the bubble is live, do not touch its classes again
+        // (add/remove pairs restyled the whole bubble twice per chunk).
+        if (contentRenderer && assistantBubble && assistantBubble.style.display === 'block' &&
+            assistantBubble.classList.contains('ai-typing') && !assistantBubble.classList.contains('ai-reply-pending')) {
+          return assistantBubble;
+        }
         hideAssistantTyping();
         assistantBubble.classList.remove('ai-reply-pending');
         // 清掉发送后占位文案，避免和流式内容拼在一起
@@ -13186,7 +13207,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     if(!conversationMetadata.has(cid))await refreshConversationMetadata([cid],current);
     if(!current())return;
     if(!conversationMetadata.has(cid)){notify('暂时无法读取账号标题，请稍后重试');return;}
-    var next = prompt('输入会话名称（最多 80 字，留空恢复默认；保存到当前账号）：', conversationTitleDrafts.has(cid)?conversationTitleDrafts.get(cid):getConversationTitleOverride(cid)||'');
+    var next = await askText('重命名会话', '输入会话名称（最多 80 字，留空恢复默认；保存到当前账号）', conversationTitleDrafts.has(cid)?conversationTitleDrafts.get(cid):getConversationTitleOverride(cid)||'', 80);
+    if (!current()) return;
     if (next === null) return;
     next=next.trim();if(next.length>80){notify('会话名称最多 80 字');return;}conversationTitleDrafts.set(cid,next);
     var revision=conversationMetadata.get(cid).revision;
@@ -13280,9 +13302,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         // 删除按钮
         var delBtn = el('button', { type: 'button', class: 'ai-conv-del', title: '删除此对话', 'aria-label': '删除对话' }, '×');
         (function(cid, elRef) {
-          delBtn.addEventListener('click', function(ev) {
+          delBtn.addEventListener('click', async function(ev) {
             ev.stopPropagation();
-            if (!confirm('确定删除此对话吗？删除后不可恢复。')) return;
+            if (!(await askConfirm('删除对话', '确定删除此对话吗？删除后不可恢复。', '删除'))) return;
             deleteConversation(cid, elRef);
           });
         })(conv.conversation_id, item);
@@ -13673,7 +13695,7 @@ function showChatMessages() {
       var recreateSeq = 0;
       function currentDeleteOwner() { return deleteLife === S.lifecycleId && deleteOwner === (window.currentUser || '') && deleteEpoch === readAiAuthEpoch(); }
       function currentDelete() { return currentDeleteOwner() && (S.conversationId === deleteCid || !S.conversationId); }
-      if (!confirm('确定删除当前对话吗？删除后不可恢复。')) return;
+      if (!(await askConfirm('删除对话', '确定删除当前对话吗？删除后不可恢复。', '删除'))) return;
       var deletions = S.deletingConversations;
       deletions.add(deleteCid);
       delBtn.disabled = true;
