@@ -3510,7 +3510,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       //   {content:'!'}`，但 JS 从来没给容器加过 is-error（is-error 只加在条目上），
       //   而这里写入的 ⚠️ emoji 又被 CSS 的 `font-size:0; text-indent:-999px` 隐身 ——
       //   于是成功失败长得一模一样（都是绿勾），只有文字里能看出差别。
-      if (totalFailed > 0) setClassOnce(activity, 'is-error', true);
+      if (totalFailed > 0) activity.classList.add('is-error');
       else setClassOnce(activity, 'is-error', false);
       if (icon) setTextOnce(icon, totalFailed > 0 ? '⚠️' : '✅');
       // ★ 2026-09-28（方案 C）：用时只在**首次**收敛时锁定。
@@ -11533,13 +11533,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         assistantBubble = nextBubble;
       }
 
+      // Called for every streamed chunk: once the bubble is live, do not touch its classes again
+      // (add/remove pairs restyled the whole bubble twice per chunk).
+      function isAssistantBubbleLive() {
+        return !!(contentRenderer && assistantBubble && assistantBubble.style.display === 'block' &&
+          assistantBubble.classList.contains('ai-typing') && !assistantBubble.classList.contains('ai-reply-pending'));
+      }
       function ensureAssistantBubbleReady() {
-        // Called for every streamed chunk: once the bubble is live, do not touch its classes again
-        // (add/remove pairs restyled the whole bubble twice per chunk).
-        if (contentRenderer && assistantBubble && assistantBubble.style.display === 'block' &&
-            assistantBubble.classList.contains('ai-typing') && !assistantBubble.classList.contains('ai-reply-pending')) {
-          return assistantBubble;
-        }
+        if (isAssistantBubbleLive()) return assistantBubble;
         hideAssistantTyping();
         assistantBubble.classList.remove('ai-reply-pending');
         // 清掉发送后占位文案，避免和流式内容拼在一起

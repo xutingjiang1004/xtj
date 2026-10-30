@@ -135,7 +135,7 @@ test('a stale refresh cannot resurrect a deleted comment', { timeout: 40000 }, a
     f.comments.splice(0,f.comments.length,...f.comments.filter(c=>!deleted.includes(c.id)));
     return route.fulfill({ json: { ok: true, deleted: true, deleted_comment_ids:deleted,comment_count:f.comments.length,post_id:f.posts[0].id } });
   });
-  f.page.once('dialog', dialog => dialog.accept());
+  await f.page.evaluate(() => { window.xtjConfirm = () => Promise.resolve(true); });
   await f.page.evaluate(id => window.deleteFeedComment(id, document.createElement('button')), id);
   await pending.finish();
   assert.match(await f.page.locator('#feed .post-stats-text').textContent(), /评论 4/);

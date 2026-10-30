@@ -11125,16 +11125,10 @@ function renderProfileActivityList(kind) {
                     }
                     var cacheFallbackShown = !!(hadLiveFeed && feed && feed.querySelector('.post'));
                     var quotaLimited = e && e.code === 'egress_quota_exceeded';
-                    if (!hadLiveFeed && feed) {
-                        // A real button: keyboard focusable, announced as actionable, and retries without a full reload.
-                        var failRetry = document.createElement('button');
-                        failRetry.type = 'button';
-                        failRetry.className = 'loading feed-load-more-error';
-                        failRetry.style.color = '#ff3b60';
-                        failRetry.textContent = (quotaLimited ? e.message : '加载失败') + '，点击重试';
-                        failRetry.onclick = function () { loadFeed(true); };
-                        feed.replaceChildren(failRetry);
-                    }
+                    // A real button: keyboard focusable, announced as actionable, and retries without a full reload.
+                    if (!hadLiveFeed && feed) feed.innerHTML = '<button type="button" class="loading feed-load-more-error" style="color:#ff3b60;">' + escapeHtml((quotaLimited ? e.message : '加载失败') + '，点击重试') + '</button>';
+                    var failRetry = !hadLiveFeed && feed ? feed.querySelector('button.feed-load-more-error') : null;
+                    if (failRetry) failRetry.onclick = function () { loadFeed(true); };
                     try {
                         // The live view contains the newest confirmed mutations.
                         // Only bootstrap from disk when there is no live feed.

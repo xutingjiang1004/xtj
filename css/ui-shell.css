@@ -3351,5 +3351,5 @@ html body .announcement-empty-icon { display: grid; place-items: center; width: 
 html body .announcement-empty-icon svg { width: 36px; height: 36px; }
 html[data-theme="dark"] .announcement-empty-icon { background: rgba(79, 209, 165, .16); color: #4fd1a5; }
 html body .profile-detail-avatar-edit { display: grid; place-items: center; background: #0e7a5b !important; color: #fff !important; font-size: 0; }
-html body #userProfileModal .upc-msg-btn { background: #0e7a5b !important; background-image: none !important; color: #fff !important; border: none !important; border-radius: 12px !important; box-shadow: 0 4px 12px rgba(14, 122, 91, .26) !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important; padding: 9px 18px; }
-html[data-theme="dark"] #userProfileModal .upc-msg-btn { background: #4fd1a5 !important; color: #062218 !important; }
+html body #userProfileModal .upc-msg-btn:not(.is-self):not(:disabled) { background: #0e7a5b !important; background-image: none !important; color: #fff !important; border: none !important; border-radius: 12px !important; box-shadow: 0 4px 12px rgba(14, 122, 91, .26) !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important; padding: 9px 18px; }
+html[data-theme="dark"] #userProfileModal .upc-msg-btn:not(.is-self):not(:disabled) { background: #4fd1a5 !important; color: #062218 !important; }
