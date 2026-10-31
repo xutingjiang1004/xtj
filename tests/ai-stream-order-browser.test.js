@@ -52,3 +52,15 @@ test('a short reply becomes a bubble while streaming and the folded thinking ope
   assert.match(await p.locator('.ai-msg.assistant .ai-thinking-body').textContent(),/用户打招呼/);assert.deepEqual(f.errors,[]);
  }finally{await f.close();}
 });
+
+test('reply long-press menu items share one flat list style instead of the global glass-pill buttons',{timeout:45000},async()=>{
+ const f=await aiPolishFixture(),p=f.page;
+ try{
+  await p.locator('#aiChatMsgInput').fill('你好');await p.locator('#aiChatSendBtn').click();await p.waitForFunction(()=>aiPolish.streams.length===1);
+  await emit(p,{type:'content',text:'行了。'});await emit(p,{type:'done',content:'行了。',complete:true,saved:true,conversation_id:'MENU01'});
+  await p.waitForFunction(()=>{const n=document.querySelector('.ai-msg.assistant');return n&&!n.classList.contains('generating');});
+  await p.locator('.ai-msg.assistant .ai-msg-bubble').last().dispatchEvent('contextmenu');await p.waitForSelector('.ai-copy-menu');
+  const styles=await p.evaluate(()=>[...document.querySelectorAll('.ai-reply-menu-item')].map(x=>{const c=getComputedStyle(x);return[c.backgroundImage,c.backgroundColor,c.borderTopLeftRadius,c.flexDirection,x.offsetHeight].join('|');}));
+  assert.ok(styles.length>=4);assert.equal(new Set(styles).size,1);assert.equal(styles[0],'none|rgba(0, 0, 0, 0)|10px|row|44');assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
