@@ -3172,7 +3172,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     generate_pdf: '生成 PDF', make_chart: '生成图表', markdown_table: '生成表格',
     qr_code: '生成二维码', image_info: '查看图片信息', image_process: '处理图片',
     diff_text: '对比文本', url_parse: '解析网址', password_tool: '生成密码',
-    task_plan: '规划任务'
+    task_plan: '规划任务',
+    save_memory: '记住这件事', list_memories: '回忆已记住的内容', forget_memory: '忘掉这件事', ask_user: '向你确认'
   };
   function inProcessRail(node) {
     return !!(node && node.closest && node.closest('.ai-process-rail'));
@@ -3219,7 +3220,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     generate_pdf: 'PDF 工具', make_chart: '图表工具', markdown_table: '表格生成',
     qr_code: '二维码工具', image_info: '图片分析', image_process: '图片处理',
     diff_text: '文本对比', url_parse: '网址解析', password_tool: '密码工具',
-    task_plan: '任务规划'
+    task_plan: '任务规划',
+    save_memory: '长期记忆', list_memories: '长期记忆', forget_memory: '长期记忆', ask_user: '确认选项'
   };
   // 检索类工具：命中则走"已搜索 N 个网页"句式（用户点名要的形态）
   var TOOL_SEARCH_KINDS = {
@@ -9662,6 +9664,37 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           '⬇ 下载 ' + String(data.filename || '文件')
         ));
       }
+    } else if (type === 'clarify') {
+      // 向用户确认的选项卡片：点一个选项就把它当作用户的下一条消息发出去。
+      shell.classList.add('ai-clarify-card');
+      var cqQuestion = String(data.question || '').slice(0, 200);
+      if (cqQuestion) shell.appendChild(el('div', { class: 'ai-clarify-question', text: cqQuestion }));
+      var cqOptions = (Array.isArray(data.options) ? data.options : []).map(function(o) { return String(o || '').slice(0, 40); }).filter(Boolean).slice(0, 4);
+      var cqGroup = el('div', { class: 'ai-clarify-options', role: 'group', 'aria-label': cqQuestion || '请选择' });
+      cqOptions.forEach(function(option) {
+        var optionButton = el('button', { type: 'button', class: 'ai-clarify-option', text: option });
+        optionButton.addEventListener('click', function() {
+          if (shell.getAttribute('data-answered') === '1') return;
+          if (S.sending) { notify('正在回复中，请稍候'); return; }
+          var composer = S.inputEl;
+          if (!composer) return;
+          if (String(composer.value || '').trim()) { notify('输入框里还有未发送的内容，请先发送或清空后再选择'); return; }
+          shell.setAttribute('data-answered', '1');
+          optionButton.classList.add('is-chosen');
+          cqGroup.querySelectorAll('button').forEach(function(other) { other.disabled = true; });
+          composer.value = option;
+          try { handleSendMessage(composer, S.sendBtnEl, S.messagesEl || messagesEl, null); }
+          catch (eClarify) {
+            shell.removeAttribute('data-answered');
+            cqGroup.querySelectorAll('button').forEach(function(other) { other.disabled = false; });
+            optionButton.classList.remove('is-chosen');
+            composer.value = '';
+            notify('发送失败，请重试');
+          }
+        });
+        cqGroup.appendChild(optionButton);
+      });
+      shell.appendChild(cqGroup);
     } else if (type === 'task_plan') {
       if (data.goal) {
         shell.appendChild(el('div', { class: 'ai-tool-card-page-title', text: String(data.goal).slice(0, 200) }));

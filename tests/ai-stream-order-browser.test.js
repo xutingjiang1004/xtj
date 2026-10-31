@@ -198,3 +198,25 @@ test('interrupting a reply with a new message leaves no empty bubble, and the co
   assert.equal(state.bubble,false);assert.equal(state.radius,'12px');assert.ok(state.height>=36);assert.equal(state.iconBg,'rgba(0, 0, 0, 0)');assert.deepEqual(f.errors,[]);
  }finally{await f.close();}
 });
+
+test('a clarification card sends the chosen option as the next message, locks afterwards, and never overwrites a draft',{timeout:45000},async()=>{
+ const f=await aiPolishFixture(),p=f.page;
+ try{
+  await p.locator('#aiChatMsgInput').fill('帮我订个行程');await p.locator('#aiChatSendBtn').click();await p.waitForFunction(()=>aiPolish.streams.length===1);
+  await emit(p,{type:'tool_calls',tools:[{id:'ask1',name:'ask_user',args:{question:'去哪个城市？',options:['福州','厦门','泉州']}}]});
+  await emit(p,{type:'tool_result',call_id:'ask1',tool_name:'ask_user',success:true,summary:'已向你确认'});
+  await emit(p,{type:'card',card:{protocol:'xtj.ai.ui.v1',id:'clarify1',type:'clarify',title:'需要你确认',tool_call_id:'ask1',data:{question:'去哪个城市？',options:['福州','厦门','泉州']}}});
+  await emit(p,{type:'content',text:'我需要确认一下目的地。'});await emit(p,{type:'done',content:'我需要确认一下目的地。',complete:true,saved:true,conversation_id:'CLR01',thinking_elapsed_ms:500,thinking_mode:'low'});
+  await p.waitForFunction(()=>!document.querySelector('.ai-msg.generating'));await p.waitForSelector('.ai-clarify-card .ai-clarify-option');
+  assert.equal(await p.locator('.ai-clarify-card .ai-clarify-option').count(),3);
+  assert.match(await p.locator('.ai-clarify-question').textContent(),/去哪个城市/);
+  // a draft in the composer is protected
+  await p.locator('#aiChatMsgInput').fill('我正在写的内容');await p.locator('.ai-clarify-option').nth(1).click();
+  assert.equal(await p.locator('#aiChatMsgInput').inputValue(),'我正在写的内容');assert.equal(await p.evaluate(()=>aiPolish.streams.length),1);
+  await p.locator('#aiChatMsgInput').fill('');await p.locator('.ai-clarify-option').nth(1).click();
+  await p.waitForFunction(()=>aiPolish.streams.length===2);
+  assert.equal(await p.evaluate(()=>aiPolish.streams[1].body.message),'厦门');
+  assert.equal(await p.locator('.ai-clarify-option.is-chosen').textContent(),'厦门');
+  assert.equal(await p.locator('.ai-clarify-option:not(:disabled)').count(),0);assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});

@@ -8403,3 +8403,26 @@ html[data-theme="dark"] body .ai-chat-root .ai-msg button.ai-continue-btn:active
   box-shadow: none;
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23c44b5a' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'><path d='M12 3.5 21.5 20h-19z'/><path d='M12 10v4.5M12 17.4v.1'/></svg>");
 }
+
+/* 2026-10-31：向用户确认的选项卡片（ask_user）：问题 + 竖排的圆角矩形选项，点中的选项变实心薄荷。 */
+.ai-tool-card.ai-clarify-card { padding: 12px 14px 14px; }
+.ai-clarify-card .ai-tool-card-title { font-size: 12px; font-weight: 500; color: #6e8a84; margin-bottom: 4px; }
+.ai-clarify-card .ai-clarify-question { font-size: 15px; font-weight: 600; line-height: 1.5; color: #17231e; margin: 0 0 10px; }
+.ai-clarify-card .ai-clarify-options { display: flex; flex-direction: column; gap: 8px; }
+html body .ai-chat-root .ai-clarify-card button.ai-clarify-option {
+  display: flex; align-items: center; justify-content: flex-start; width: 100%; min-height: 44px; padding: 0 14px;
+  border: 1px solid rgba(14, 122, 91, .28); border-radius: 12px; background: #fff; background-image: none; box-shadow: none;
+  -webkit-backdrop-filter: none; backdrop-filter: none; color: #17231e; font-size: 14.5px; font-weight: 500; line-height: 1.3; text-align: left; cursor: pointer; transform: none;
+}
+html body .ai-chat-root .ai-clarify-card button.ai-clarify-option:hover:not(:disabled),
+html body .ai-chat-root .ai-clarify-card button.ai-clarify-option:focus-visible { background: #ddf2e8; border-color: rgba(14, 122, 91, .5); }
+html body .ai-chat-root .ai-clarify-card button.ai-clarify-option:focus-visible { outline: 2px solid rgba(14, 122, 91, .45); outline-offset: 2px; }
+html body .ai-chat-root .ai-clarify-card button.ai-clarify-option:active:not(:disabled) { background: #cdebdd; transform: scale(.99); }
+html body .ai-chat-root .ai-clarify-card button.ai-clarify-option:disabled { opacity: .55; cursor: default; }
+html body .ai-chat-root .ai-clarify-card button.ai-clarify-option.is-chosen { opacity: 1; background: #0e7a5b; border-color: #0e7a5b; color: #fff; }
+html[data-theme="dark"] .ai-clarify-card .ai-clarify-question { color: #e6f1ed; }
+html[data-theme="dark"] .ai-clarify-card .ai-tool-card-title { color: #8eaaa0; }
+html[data-theme="dark"] body .ai-chat-root .ai-clarify-card button.ai-clarify-option { background: rgba(255, 255, 255, .06); border-color: rgba(79, 209, 165, .3); color: #e6f1ed; }
+html[data-theme="dark"] body .ai-chat-root .ai-clarify-card button.ai-clarify-option:hover:not(:disabled),
+html[data-theme="dark"] body .ai-chat-root .ai-clarify-card button.ai-clarify-option:focus-visible { background: rgba(79, 209, 165, .16); }
+html[data-theme="dark"] body .ai-chat-root .ai-clarify-card button.ai-clarify-option.is-chosen { background: #1f4d3e; border-color: #4fd1a5; color: #e6f1ed; }
