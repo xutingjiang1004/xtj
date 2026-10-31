@@ -10,16 +10,23 @@ function commentRequestId(value) {
   return String(value).toLowerCase();
 }
 
-async function createComment(db, postId, owner, content, requestId, kind = 'post') {
-  const result = await db.rpc('xtj_create_comment', {
+async function createComment(db, postId, owner, content, requestId, kind = 'post', parentCommentId = null) {
+  // Only send the parent when replying: plain comments keep the original RPC
+  // arguments, so they work before and after the reply migration.
+  const args = {
     p_post_id: postId, p_owner: owner, p_content: content,
     p_request_id: commentRequestId(requestId), p_kind: kind
-  });
+  };
+  if (parentCommentId != null) args.p_parent_comment_id = parentCommentId;
+  const result = await db.rpc('xtj_create_comment', args);
   if (result.error) throw Object.assign(new Error('评论暂未确认，请重试'), { status: 503, code: 'comment_unavailable' });
   const body = result.data;
-  if (!body || !body.ok) throw Object.assign(new Error(body && body.code === 'idempotency_conflict' ? '这次评论的内容已改变，请重新提交' : '内容不存在、已删除或不可评论'), {
-    status: body && body.code === 'idempotency_conflict' ? 409 : 404, code: body && body.code || 'not_found'
-  });
+  if (!body || !body.ok) {
+    if (body && body.code === 'parent_not_found') throw Object.assign(new Error('要回复的评论不存在或已被删除'), { status: 404, code: 'parent_not_found' });
+    throw Object.assign(new Error(body && body.code === 'idempotency_conflict' ? '这次评论的内容已改变，请重新提交' : '内容不存在、已删除或不可评论'), {
+      status: body && body.code === 'idempotency_conflict' ? 409 : 404, code: body && body.code || 'not_found'
+    });
+  }
   if (!body.comment || String(body.comment.post_id) !== String(postId) || body.comment.user_name !== owner || body.comment.id == null) {
     throw Object.assign(new Error('评论暂未确认，请重试'), { status: 503, code: 'comment_unavailable' });
   }
