@@ -16003,6 +16003,62 @@ function renderProfileActivityList(kind) {
                 return { file: nextFile, converted: true, originalSize: file.size, newSize: nextFile.size, w: tw, h: th };
             }
 
+            // ★ 2026-10-31：Safari 的「Load failed」/ Chrome 的「Failed to fetch」都是请求没拿到回包——
+            //   最常见的原因是服务器正在重启（部署）或网络瞬断，几秒后就恢复。以前这种情况直接变成红色失败气泡。
+            //   现在先等一等再试：重试前先查会话最近消息，确认这条是不是其实已经入库（回包丢了），
+            //   已入库就当成功，没入库才重发；查询本身失败则继续等，绝不在结果未知时盲目重发造成重复消息。
+            function isDmNetworkError(error) {
+                if (!error || error.serverRejected || error.code === 'identity_changed' || error.name === 'AbortError') return false;
+                return error.name === 'TypeError' || /load failed|failed to fetch|networkerror|network request failed|network connection/i.test(String(error.message || ''));
+            }
+            function friendlyDmSendError(error) {
+                return isDmNetworkError(error) ? '网络连接中断，请检查网络后重发' : ((error && error.message) ? error.message : '未知错误');
+            }
+            async function findSentDmMessage(ctx) {
+                var response = await window.xtjProtectedFetch('/api/dm/messages?target=' + encodeURIComponent(ctx.peer) + '&limit=30', {
+                    authOwner: ctx.owner, authEpoch: ctx.epoch, signal: ctx.signal, timeoutMs: 8000
+                });
+                var body = await response.json();
+                if (!response.ok || !body || !body.ok) throw new Error('verify failed');
+                var since = Date.parse(ctx.startedAt) - 5000;
+                var known = ctx.knownIds || {};
+                var rows = Array.isArray(body.data) ? body.data : [];
+                for (var i = rows.length - 1; i >= 0; i--) {
+                    var row = rows[i];
+                    if (!row || row.user_name !== ctx.owner || row.media_url !== ctx.peer || known[row.id]) continue;
+                    if (Date.parse(row.created_at) < since) continue;
+                    if ((getDMMessageText(row) || '').trim() === ctx.text) return row;
+                }
+                return null;
+            }
+            async function sendDmRequestWithRecovery(requestBody, ctx) {
+                var delays = [2000, 4000, 8000];
+                var attempt = 0;
+                for (;;) {
+                    try {
+                        return await window.xtjProtectedFetch('/api/dm/send', {
+                            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(requestBody),
+                            timeoutMs: 60000, authOwner: ctx.owner, authEpoch: ctx.epoch, signal: ctx.signal
+                        });
+                    } catch (error) {
+                        if (!isDmNetworkError(error) || attempt >= delays.length) throw error;
+                        var waitMs = delays[attempt++];
+                        for (;;) {
+                            await new Promise(function(resolve) { setTimeout(resolve, waitMs); });
+                            if (ctx.signal.aborted) throw error;
+                            if (requestBody.storage_path) break; // 附件在服务端按上传对象幂等，可直接重发
+                            try {
+                                var landed = await findSentDmMessage(ctx);
+                                if (landed) return { ok: true, status: 200, json: async function() { return { ok: true, message: landed }; } };
+                                break; // 确认没有入库，重发
+                            } catch (verifyError) {
+                                if (ctx.signal.aborted || attempt >= delays.length) throw error;
+                                waitMs = delays[attempt++]; // 连查询都失败（服务器还没起来），继续等
+                            }
+                        }
+                    }
+                }
+            }
             var _chatSendFlight = null;
             var _dockChatSendQueue = [];
             function drainDockChatSendQueue() {
@@ -16297,11 +16353,10 @@ function renderProfileActivityList(kind) {
                     //   把存储对象删掉；而服务端其实提交成功了 → 消息在、图片 404，
                     //   收件人看到的正是"图片不显示"。现在放宽到 60s，并且只有服务端
                     //   **明确拒绝**（4xx 且重试无意义）时才允许回收媒体。
-                    var sendResp = await window.xtjProtectedFetch('/api/dm/send', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(requestBody),
-                        timeoutMs: 60000,authOwner:sendOwner,authEpoch:sendEpoch,signal:flight.controller.signal
+                    var sendResp = await sendDmRequestWithRecovery(requestBody, {
+                        owner: sendOwner, epoch: sendEpoch, signal: flight.controller.signal, peer: targetUser,
+                        text: String(capturedContent || '').trim(), startedAt: optimisticCreatedAt,
+                        knownIds: (function() { var ids = {}; (_chatCache[getDockChatCacheKey(targetUser)] || []).forEach(function(row) { if (row && row.id) ids[row.id] = 1; }); return ids; })()
                     });
                     assertSender();
                     if (!sendResp.ok) {
@@ -16397,13 +16452,13 @@ function renderProfileActivityList(kind) {
                         __pendingActorKey: actorKey || null,
                         __pendingPayload: mediaPayload || null,
                         __localPreviewUrl: localPreviewUrl,
-                        __failReason: (e && e.message) ? e.message : '未知错误'
+                        __failReason: friendlyDmSendError(e)
                     });
                     upsertDockChatCacheMessage(targetUser, failedMessage);
                     if (dockChatActiveUser === targetUser) renderDockMessages(targetUser, _chatCache[getDockChatCacheKey(targetUser)] || [], true);
                     // 注意：不再把内容回填到输入框 —— 消息已经以失败气泡留在会话里，
                     // 回填会让用户以为没发出去而重复发送。
-                    showToast((forwarding ? '转发失败：' : '发送失败：') + ((e && e.message) ? e.message : '未知错误') + (forwarding ? '' : '（长按该条可重发）'));
+                    showToast((forwarding ? '转发失败：' : '发送失败：') + friendlyDmSendError(e) + (forwarding ? '' : '（长按该条可重发）'));
                 }
                 finally {
                     if(_chatSendFlight!==flight || !sameSender())return;
