@@ -1743,7 +1743,30 @@ function modelFacingToolResult(toolResult, maxChars) {
   return json;
 }
 
+// 单个工具调用的执行时限。以前只有各工具自己的网络超时，没有总时限：一个搜索或网页读取卡住，
+// 整轮工具调用就一直等，用户只能手动打断，AI 也就没有回复了。到时限就当作失败交给模型，
+// 它会按「工具失败」的规则换关键词、换工具，或者基于已有信息直接回答。
 async function executeToolCall(toolCall, context) {
+  var guardName = toolCall && toolCall.function && toolCall.function.name ? String(toolCall.function.name) : '';
+  var guardLimit = 30000;
+  if (/^(search_web|tavily_search|search_social|web_extract|read_web_page|page_meta|extract_links)$/.test(guardName)) guardLimit = 45000;
+  else if (/^(read_document|read_zip|search_document|read_document_section|generate_pdf|make_chart|make_file|image_process)$/.test(guardName)) guardLimit = 60000;
+  else if (guardName === 'run_code') guardLimit = 75000;
+  if (typeof setTimeout !== 'function' || typeof clearTimeout !== 'function') return executeToolCallInner(toolCall, context);
+  var guardTimer = null;
+  var guardSettled = false;
+  var guardTimeout = new Promise(function(resolve) {
+    guardTimer = setTimeout(function() {
+      if (guardSettled) return;
+      resolve({ tool_name: guardName, error: '工具执行超时（' + Math.round(guardLimit / 1000) + ' 秒）：服务响应太慢。请换关键词、换工具，或直接基于已有信息回答，不要重复同样的调用。', code: 'TOOL_TIMEOUT' });
+    }, guardLimit);
+  });
+  var guardRun = executeToolCallInner(toolCall, context);
+  try { return await Promise.race([guardRun, guardTimeout]); }
+  finally { guardSettled = true; clearTimeout(guardTimer); guardRun.catch(function() {}); }
+}
+
+async function executeToolCallInner(toolCall, context) {
   // ★ 配额绕过修复：context 可能是 undefined 或裸 AbortSignal（历史调用方传法），
   // 统一规整为对象并初始化请求级已用搜索计数，防止单请求内多轮工具调用超发。
   context = context || {};
@@ -23500,7 +23523,7 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, rateLimit
     var _currentDateISO = _now.toISOString();
     var _currentDateCN = _now.toLocaleString('zh-CN', {
       timeZone: 'Asia/Shanghai',
-      year: 'numeric', month: '2-digit', day: '2-digit',
+      year: 'numeric', month: '2-digit', day: '2-digit', weekday: 'long',
       hour: '2-digit', minute: '2-digit', hour12: false
     });
 
@@ -23672,12 +23695,10 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, rateLimit
       T_stage.weather_ms = Date.now() - T_stage.weather_start;
     }
 
-    // ★ 时间敏感词检测：仅当用户问"今天/现在/最新/刚刚/当前"等才注入时间，且放在 user 之后
-    var isTimeSensitive = /今天|现在|最新|刚刚|当前|今日|今晚|今早|明天|昨天|本周|本月|今年|几点|什么时候|何时/i.test(message);
-    var timeContext = '';
-    if (isTimeSensitive || isWeatherQuery) {
-      timeContext = '\n\n【当前时间】北京时间：' + _currentDateCN + ' (ISO: ' + _currentDateISO + ')。回答时间相关问题时以此为准，不能编造其他日期。';
-    }
+    // ★ 2026-10-31：每次请求都带上当前日期。以前只有问题里出现「今天/最新/现在」等少数几个词才注入，
+    //   问「某某最近的消息」时模型不知道今天几号：既要多花一轮去调 get_current_time，
+    //   还会拿旧年份去搜（实测搜了「… latest news 2025」）。时间放在 user 消息之后，只改动缓存的尾部。
+    var timeContext = '\n\n【当前时间】北京时间：' + _currentDateCN + ' (ISO: ' + _currentDateISO + ')。今天就是这一天：回答「今天、现在、最新、最近」等问题以此为准，不能编造其他日期，也不必再调用工具查时间；搜索「最新/最近」的内容时，查询里需要年份就用这一年，不要用旧年份。';
 
     // ★ 修复模型切换 bug：此前固定用 DEEPSEEK_MODEL_REASONER（默认 flash），
     // 导致用户切到 V4 Pro 后实际请求仍用 flash。改用 validatedModel（用户选择）。
