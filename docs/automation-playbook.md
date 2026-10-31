@@ -6,20 +6,20 @@
 
 ## 1. 运行方式
 
-时间是按用户的 Pro 套餐安排的：额度每 5 小时重置一次，8 个会话挤在一个窗口里不够用。所以分成两个 5 小时窗口，每个窗口 4 个，相邻会话至少隔 75 分钟，任意 5 小时内最多启动 4 个；整个流程在用户白天开始用之前（约 10:40）结束。
+时间是按用户的 Pro 套餐和 Claude 的高峰时段安排的：额度每 5 小时重置一次，8 个会话挤在一个窗口里不够用，所以分成两个 5 小时窗口，每个窗口 4 个，任意 5 小时内最多启动 4 个，相邻会话隔 65 分钟（模块会话限时 60 分钟）。用户 2026-10-31 要求避开 Claude 的高峰期、每天从凌晨 3:00 开始，所以第一个会话是 03:03；大哥 11:23 开始，全量测试约 70 分钟，预计 12:40 前后结束，已经贴近用户白天开始用的时间（约 12:50），整合不要拖过时间盒。
 
 | 台北时间 | 会话（定时任务名） | 范围（前端 + 对应后端接口） | 产出 |
 | --- | --- | --- | --- |
-| 00:33 | 每日帖子板块巡检与修复 | 帖子、评论、点赞、发布、个人动态页、公告与举报 | 分支 `maint/posts-日期` |
-| 01:48 | 每日照片墙巡检与修复 | 照片墙、上传、预览（与帖子图共用）、照片接口与预览缓存 | 分支 `maint/photos-日期` |
-| 03:03 | 小猫AI每日巡检修复 | 小猫 AI 页、深入研究、`/api/agent/*` 与模型链路 | 分支 `maint/ai-日期` |
-| 04:18 | 每日聊天页巡检与修复 | 私聊、发送队列、图片/语音、未读、通知、`/api/dm/*` | 分支 `maint/chat-日期` |
-| 05:38 | 每日我的设置登录巡检与修复 | 登录注册、个人资料、设置、头像、账户与安全接口 | 分支 `maint/profile-日期` |
-| 06:53 | 每日服务端与管理后台巡检与修复 | `render-api` 基础设施、管理后台、安全头、日志、存储清理 | 分支 `maint/server-日期` |
-| 08:08 | 每日全局弹窗动效巡检与修复 | 弹窗、提示、转场、加载态、桌面外壳、性能、可访问性 | 分支 `maint/global-日期` |
-| 09:23 | 每日大哥整合与推送 | 审查并合并当天所有 `maint/*` 分支，全量验证后推送 `main`，汇报 | 推送 `main` + 每日汇报 |
+| 03:03 | 每日帖子板块巡检与修复 | 帖子、评论、点赞、发布、个人动态页、公告与举报 | 分支 `maint/posts-日期` |
+| 04:08 | 每日照片墙巡检与修复 | 照片墙、上传、预览（与帖子图共用）、照片接口与预览缓存 | 分支 `maint/photos-日期` |
+| 05:13 | 小猫AI每日巡检修复 | 小猫 AI 页、深入研究、`/api/agent/*` 与模型链路 | 分支 `maint/ai-日期` |
+| 06:18 | 每日聊天页巡检与修复 | 私聊、发送队列、图片/语音、未读、通知、`/api/dm/*` | 分支 `maint/chat-日期` |
+| 08:08 | 每日我的设置登录巡检与修复 | 登录注册、个人资料、设置、头像、账户与安全接口 | 分支 `maint/profile-日期` |
+| 09:13 | 每日服务端与管理后台巡检与修复 | `render-api` 基础设施、管理后台、安全头、日志、存储清理 | 分支 `maint/server-日期` |
+| 10:18 | 每日全局弹窗动效巡检与修复 | 弹窗、提示、转场、加载态、桌面外壳、性能、可访问性 | 分支 `maint/global-日期` |
+| 11:23 | 每日大哥整合与推送 | 审查并合并当天所有 `maint/*` 分支，全量验证后推送 `main`，汇报 | 推送 `main` + 每日汇报 |
 
-（00:33–05:33 是第一个窗口：帖子、照片墙、小猫 AI、聊天；05:38–10:38 是第二个窗口：我的·设置·登录、服务端·管理后台、全局、大哥整合。改时间或加会话时守住「任意 5 小时最多 4 次启动、大哥排在所有模块之后至少 60 分钟」，见第 12 节。）
+（03:03–08:03 是第一个窗口：帖子、照片墙、小猫 AI、聊天；08:08–13:08 是第二个窗口：我的·设置·登录、服务端·管理后台、全局、大哥整合。改时间或加会话时守住「任意 5 小时最多 4 次启动、大哥排在所有模块之后至少 60 分钟、第一个会话不早于 03:00」，见第 12 节。）
 
 - 模块会话**只推自己的分支 `maint/<模块>-<日期>`，不合并，不推 `main`**。分支就是交付物，说明写在最后一个提交的提交信息里（不依赖 PR：2026-10-31 试跑发现，新开的定时会话没有 GitHub 的 MCP 工具，也没有推送权限，所以改用常驻会话，见第 12 节）。大哥统一合并，避免多条分支同时改生成文件（`js/core.js`、`*.min.*`、`index.html` 指纹）互相冲突。
 - 当天没发现确认存在的问题：**不造改动、不推分支**，一句话汇报「今天未发现新问题」并写清检查了什么。
@@ -223,16 +223,16 @@ node scripts/maintenance/smoke.js          # 四种配置各点一遍底部标�
 
 | 板块 | 常驻会话 | 定时任务（台北时间） |
 | --- | --- | --- |
-| 帖子 | `session_016rCJpV9uHyxQBhXGixnmtG` | `trig_01A3K7J4jFFUXa3i5bDW9bwg`（00:33） |
-| 照片墙 | `session_016rCJpToc9ExPgcqQ7kQ1EE` | `trig_0111dHj92TjB1VDjSDpdnRtW`（01:48） |
-| 小猫 AI | `session_016rCJpTu3ZtSHnvr98reymJ` | `trig_01Mwxixd6tAsPLrdhPCRGNVq`（03:03） |
-| 聊天 | `session_016rCJpSrYTsmFa2D9xffJCx` | `trig_016cQuJvfDTBSgrG8MoxomA2`（04:18） |
-| 我的 · 设置 · 登录 | `session_016rCJpVBYXPwtRzttDKggex` | `trig_01Vhm8q6W5sVUVuPn325vx5M`（05:38） |
-| 服务端 · 管理后台 | `session_016rCJpUzuooyfsWtDTaXW8T` | `trig_0192GgWEfRviaGqgrXPHYEFe`（06:53） |
-| 全局 | `session_016rCJpRVnGeYT5LhjWx9tLn` | `trig_01NPWRVaEyAnDuYmJ9UbMnYx`（08:08） |
-| 大哥整合 | `session_016rCJpUhcFjKAqWNdrhtBbd` | `trig_01UQM56KP1nsaJeQ9ZCEtguJ`（09:23） |
+| 帖子 | `session_016rCJpV9uHyxQBhXGixnmtG` | `trig_01A3K7J4jFFUXa3i5bDW9bwg`（03:03） |
+| 照片墙 | `session_016rCJpToc9ExPgcqQ7kQ1EE` | `trig_0111dHj92TjB1VDjSDpdnRtW`（04:08） |
+| 小猫 AI | `session_016rCJpTu3ZtSHnvr98reymJ` | `trig_01Mwxixd6tAsPLrdhPCRGNVq`（05:13） |
+| 聊天 | `session_016rCJpSrYTsmFa2D9xffJCx` | `trig_016cQuJvfDTBSgrG8MoxomA2`（06:18） |
+| 我的 · 设置 · 登录 | `session_016rCJpVBYXPwtRzttDKggex` | `trig_01Vhm8q6W5sVUVuPn325vx5M`（08:08） |
+| 服务端 · 管理后台 | `session_016rCJpUzuooyfsWtDTaXW8T` | `trig_0192GgWEfRviaGqgrXPHYEFe`（09:13） |
+| 全局 | `session_016rCJpRVnGeYT5LhjWx9tLn` | `trig_01NPWRVaEyAnDuYmJ9UbMnYx`（10:18） |
+| 大哥整合 | `session_016rCJpUhcFjKAqWNdrhtBbd` | `trig_01UQM56KP1nsaJeQ9ZCEtguJ`（11:23） |
 
-- 暂停某个板块：`update_trigger` 设 `enabled=false`；改成隔天一次：改 cron（例如 `CRON_TZ=Asia/Taipei 33 0 */2 * *`）；改提示词：`update_trigger` 的 `prompt`（要改的是整段，所以细则尽量放在本手册里，提示词只保留摘要）。
+- 暂停某个板块：`update_trigger` 设 `enabled=false`；改成隔天一次：改 cron（例如 `CRON_TZ=Asia/Taipei 3 3 */2 * *`）；改提示词：`update_trigger` 的 `prompt`（要改的是整段，所以细则尽量放在本手册里，提示词只保留摘要）。
 - 常驻会话不能改系统提示；它们靠定时任务里的消息和本手册工作。需要换会话时：`create_session`（带 `source_url`）建新会话，`create_trigger` 的 `persistent_session_id` 指向它，再删旧的定时任务。
-- **额度与时间安排（用户用 Pro 套餐，2026-10-31 定）**：任意 5 小时内最多启动 4 个会话，相邻至少隔 75 分钟；第一个窗口 00:33–05:33（帖子、照片墙、小猫 AI、聊天），第二个窗口 05:38–10:38（我的·设置·登录、服务端·管理后台、全局、大哥整合）。新增、移动或补跑任务前先按这条核对，不要把几个会话叠在同一时段。第一天（2026-11-01）之后用 `get_session` 的 `external_metadata.usage.cost_usd` 汇总每个会话的花费；装不进窗口时，把最耗额度的模块改成隔天（模块分成单双日两批，大哥每天都跑），不要靠缩短检查来省额度。
+- **额度与时间安排（用户用 Pro 套餐，2026-10-31 定；同日用户要求避开 Claude 高峰期，每天从 03:00 之后开始）**：任意 5 小时内最多启动 4 个会话，相邻至少隔 60 分钟（现为 65 分钟）；第一个窗口 03:03–08:03（帖子、照片墙、小猫 AI、聊天），第二个窗口 08:08–13:08（我的·设置·登录、服务端·管理后台、全局、大哥整合）。新增、移动或补跑任务前先按这条核对，不要把几个会话叠在同一时段，也不要排到 03:00 之前。第一天（2026-11-01）之后用 `get_session` 的 `external_metadata.usage.cost_usd` 汇总每个会话的花费；装不进窗口时，把最耗额度的模块改成隔天（模块分成单双日两批，大哥每天都跑），不要靠缩短检查来省额度。
 - 用户白天自己用的交互式会话（帖子、照片墙、小猫AI、聊天、前端网站审计报告）不在这套系统里，它们的改动会随时合进 `main`，所以大哥推送前总要重新 `git fetch`。
