@@ -1877,7 +1877,7 @@
             function buildDockChatBodyMarkup(message) {
                 var payload = getDMMessagePayload(message) || {};
                 if (payload && payload.withdrawn) {
-                    return '<span class="msg-text withdrawn">[此消息已被撤回]</span>';
+                    return '<span class="msg-text withdrawn">此消息已被撤回</span>';
                 }
                 if(payload.flash){var own=message.user_name===currentUser,expired=!own&&(payload.flash.state==='expired'||flashLocallyViewed(currentUser,message.id));return '<button type="button" class="chat-flash-card" '+(expired||message.__optimistic?'disabled':'onclick="openChatFlash(\''+escapeHtml(String(message.id))+'\')"')+' aria-label="'+(expired?'闪图已失效':own?'查看自己发送的闪图，不限次数':'查看一次性闪图，3 秒后失效')+'"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 2-10 12h7l-1 8 10-12h-7z"/></svg><span>'+(expired?'闪图已失效':'闪图 3 秒')+'</span></button>';}
                 var media = resolveDockChatMedia(message);
@@ -5349,8 +5349,8 @@
             }
 
             async function mutateDockChatConversation(peer, action) {
-                if (action === 'clear' && !window.confirm('清空你看到的聊天记录？对方的记录不会删除。')) return;
-                if (action === 'delete' && !window.confirm('删除你列表中的会话？对方的记录不会删除。')) return;
+                if (action === 'clear' && !(await window.xtjConfirm('清空聊天记录', '清空你看到的聊天记录？对方的记录不会删除。', '清空'))) return;
+                if (action === 'delete' && !(await window.xtjConfirm('删除会话', '删除你列表中的会话？对方的记录不会删除。', '删除'))) return;
                 var owner = window.currentUser;
                 try {
                     var data = await requestDockChatSocial('/conversations/' + encodeURIComponent(peer), {
@@ -5907,7 +5907,7 @@
                 if (action === 'friend-mutual') { await showChatMutualFriends(peer); return; }
                 if (action === 'friend-note') {
                     var existingNote = button.getAttribute('data-note') || '';
-                    var nextNote = window.prompt('设置仅自己可见的好友备注（留空可清除）', existingNote);
+                    var nextNote = await window.xtjPrompt('好友备注', '设置仅自己可见的好友备注（留空可清除）', existingNote, 30);
                     if (nextNote === null) return;
                     try {
                         await requestDockChatSocial('/friends/' + encodeURIComponent(peer) + '/note', { method: 'PUT', body: JSON.stringify({ note: nextNote }) });
@@ -5918,7 +5918,7 @@
                     return;
                 }
                 if (action === 'friend-remove') {
-                    if (!window.confirm('删除好友后会保留历史聊天，但需要重新成为好友才能发送新消息。确定删除？')) return;
+                    if (!(await window.xtjConfirm('删除好友', '删除好友后会保留历史聊天，但需要重新成为好友才能发送新消息。确定删除？', '删除'))) return;
                     try {
                         await requestDockChatSocial('/friends/' + encodeURIComponent(peer), { method: 'DELETE' });
                         await refreshChatFriendNotes(true);
@@ -5929,7 +5929,7 @@
                     return;
                 }
                 if (action === 'friend-block' || action === 'request-block') {
-                    if (!window.confirm('拉黑后会解除好友关系，并阻止双方互相申请好友和发送新消息。历史聊天会保留。确定拉黑？')) return;
+                    if (!(await window.xtjConfirm('拉黑用户', '拉黑后会解除好友关系，并阻止双方互相申请好友和发送新消息。历史聊天会保留。确定拉黑？', '拉黑'))) return;
                     try {
                         await requestDockChatSocial('/blocks/' + encodeURIComponent(peer), { method: 'POST', body: '{}' });
                         await refreshChatFriendNotes(true);
