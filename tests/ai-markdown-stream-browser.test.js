@@ -7,23 +7,22 @@ function section(a,b){const start=agent.indexOf(a);assert.ok(start>=0);return ag
 async function rendererFixture(){const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH || (require('node:fs').existsSync('/usr/bin/chromium')?'/usr/bin/chromium':undefined),args:['--no-sandbox']});const page=await browser.newPage();await page.setContent('<div class="ai-chat-messages" style="height:220px;overflow:auto"><div id="output"></div></div>');await page.addStyleTag({content:fs.readFileSync('css/ai-agent.css','utf8')});await page.evaluate(({markdown,stream})=>{window.S={activeRenderers:[],paused:false};window.prefersReducedMotion=()=>false;window.escapeHtml=s=>{const n=document.createElement('span');n.textContent=String(s);return n.innerHTML};window.escapeAttr=s=>escapeHtml(s).replace(/"/g,'&quot;');window.aiDecodeHtmlEntities=s=>{const n=document.createElement('textarea');n.innerHTML=s;return n.value};window.eval(markdown+'\n'+stream);},{markdown:section('  function renderMarkdown(', '  function setupBubbleCopy('),stream:section('  function takeSmoothTextChunk(', '  function bindVisualViewport(')});return{browser,page};}
 test('collapsed provider headings and tables render while literal code and safe links survive',async()=>{const f=await rendererFixture();try{const r=await f.page.evaluate(()=>{output.innerHTML=renderMarkdown('说明 ## 福州对比 | 景点 | 客流 | |---|---| | 福州 | 35 | | 烟台山 | 80 |\n\n```text\n原样 ## 标题 |甲|乙| |---|---|\n```\n\n`原样 ## 标题`\n\n[x](javascript:alert(1))');return{head:output.querySelector('h2')?.textContent,rows:output.querySelectorAll('tbody tr').length,cells:[...output.querySelectorAll('td')].map(n=>n.textContent),code:[...output.querySelectorAll('code')].map(n=>n.textContent),badLinks:output.querySelectorAll('a[href^="javascript:"]').length,text:output.textContent};});assert.equal(r.head,'福州对比');assert.equal(r.rows,2);assert.deepEqual(r.cells,['福州','35','烟台山','80']);assert.ok(r.code.includes('原样 ## 标题'));assert.ok(r.code.some(x=>x.includes('|---|---|')));assert.equal(r.badLinks,0);}finally{await f.browser.close();}});
 test('large packets append strictly in source order and keep the growing text node',async()=>{const f=await rendererFixture();try{const r=await f.page.evaluate(async()=>{const text=Array.from({length:100},(_,i)=>String(i).padStart(3,'0')+'猫').join('');const renderer=createSmoothTextRenderer(output,{onRender(value){window.samples.push(value);}});window.samples=[];renderer.append(text);await new Promise(r=>setTimeout(r,80));const node=output.querySelector('p')?.firstChild;await renderer.drain();renderer.finish();return{final:output.textContent,stable:node===output.querySelector('p')?.firstChild,forward:samples.every((s,i)=>text.startsWith(s)&&(!i||s.startsWith(samples[i-1]))),frames:samples.length,anchor:getComputedStyle(output.parentElement).overflowAnchor};});assert.equal(r.forward,true);assert.equal(r.stable,true);assert.equal(r.frames,2);assert.equal(r.final,Array.from({length:100},(_,i)=>String(i).padStart(3,'0')+'猫').join(''));assert.equal(r.anchor,'none');}finally{await f.browser.close();}});
-test('real chat formats before completion and late reasoning cannot push the answer down', {timeout:30000},async()=>{
+test('real chat formats before completion; the live thinking stays open while the answer streams and folds when the reply completes', {timeout:30000},async()=>{
  const f=await postBrowserFixture({counts:[1]});try{
   await wireAiChat(f.page);await f.page.locator('#aiChatMsgInput').fill('排版与工具过程');await f.page.locator('#aiChatSendBtn').click();await f.page.waitForFunction(()=>!!testStream);
   await f.page.evaluate(()=>{testEmit({type:'reasoning',text:'先核对资料'});testEmit({type:'content',text:'## 结论\n\n|项目|数字|\n|---|---|\n|福州|35|\n\n第一段。'});});
   await f.page.waitForSelector('.ai-msg.assistant table');await f.page.waitForFunction(()=>document.querySelector('.ai-msg.assistant .ai-msg-bubble').textContent.includes('第一段'));
-  // Establish the baseline after the initial intentional 280ms collapse. The
-  // assertion below measures late reasoning, not that already-running motion.
-  await f.page.locator('.ai-thinking').evaluate(async node=>{
-   await new Promise(resolve=>requestAnimationFrame(resolve));
-   await Promise.all(node.getAnimations({subtree:true}).filter(a=>a.effect.getTiming().iterations!==Infinity).map(a=>a.finished.catch(()=>{})));
-  });
-  const before=await f.page.locator('.ai-msg.assistant .ai-msg-bubble').boundingBox();
+  // The thinking is shown directly while the reply is produced, including reasoning that arrives after the answer began.
+  assert.equal(await f.page.locator('.ai-thinking.expanded').count(),1);
   await f.page.evaluate(()=>testEmit({type:'reasoning',text:'补充核对另一个来源'}));
   await f.page.waitForFunction(()=>document.querySelector('.ai-thinking-body').textContent.includes('补充核对'));
-  await f.page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
-  const after=await f.page.locator('.ai-msg.assistant .ai-msg-bubble').boundingBox();assert.ok(Math.abs(after.y-before.y)<2,JSON.stringify({before,after}));assert.equal(await f.page.locator('.ai-thinking.expanded').count(),0);
-  await f.page.locator('.ai-thinking-toggle').first().click();await f.page.waitForFunction(()=>document.querySelector('.ai-thinking-body').textContent.includes('补充核对'));await f.page.locator('#aiChatPauseBtn').click();assert.deepEqual(f.errors,[]);
+  assert.equal(await f.page.locator('.ai-msg.assistant table').count(),1);
+  // When the reply completes the thinking folds into the single header and the answer stays in place.
+  await f.page.evaluate(()=>testEmit({type:'done',complete:true,saved:true,content:'## 结论\n\n|项目|数字|\n|---|---|\n|福州|35|\n\n第一段。',reasoning:'先核对资料补充核对另一个来源',thinking_mode:'max'}));
+  await f.page.waitForFunction(()=>!document.querySelector('.ai-msg.assistant.generating'));
+  assert.equal(await f.page.locator('.ai-thinking.expanded').count(),0);
+  assert.match(await f.page.locator('.ai-msg.assistant .ai-msg-bubble').textContent(),/第一段/);
+  await f.page.locator('.ai-thinking-toggle').first().click();await f.page.waitForFunction(()=>document.querySelector('.ai-thinking-body').textContent.includes('补充核对'));assert.deepEqual(f.errors,[]);
  }finally{await f.close();}
 });
 

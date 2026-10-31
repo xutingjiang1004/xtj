@@ -11281,6 +11281,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         clearRailLiveLine();
         if (thinking) thinking.__processSettled = true;
         if (!final) return;
+        foldReasoningIntoBeat(true);
         if (rail) {
           var openBeats = rail.querySelectorAll('.ai-rail-beat.is-open');
           for (var ob = 0; ob < openBeats.length; ob++) {
@@ -11328,11 +11329,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           assistantBubble.__flowShown = true;
           assistantBubble.classList.add('ai-flow-in');
         }
-        if (contentRenderer) {
-          contentRenderer.append(aiContent, evtReceivedAt);
-          // 这段文字已经在时间轴里逐字出现过一次，换到正文气泡时整段直接落下，不再从头重新逐字生长。
-          if (typeof contentRenderer.flush === 'function') contentRenderer.flush();
-        }
+        if (contentRenderer) contentRenderer.append(aiContent, evtReceivedAt);
       }
       function scheduleAnswerPromote(evtReceivedAt) {
         if (_sendThinkingMode === 'off' || answerCommitted || answerPromoteTimer) return;
@@ -11431,6 +11428,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         }
         sealedContents.push(value);
         aiContent = '';
+        foldReasoningIntoBeat();
       }
       function closeReasoningSegment() {
         if (reasoningRenderer) {
@@ -11448,11 +11446,75 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (!body.__orderedProcess) { body.textContent = ''; body.__orderedProcess = true; rn.classList.add('ai-ordered-process'); }
         return body;
       }
+      // 2026-10-31：时间轴已经有一拍之后，新的思考直接在最新一拍下面实时显示；
+      //   模型写出过渡句或开始调用工具时，这段思考自动折进那一拍，再接着往下写。
+      //   折起来的思考仍留在「已思考」的思考区里（隐藏），历史记录和最终展开看到的内容不变。
+      function liveThoughtHost() {
+        if (_sendThinkingMode === 'off') return null;
+        var rail = assistantNode.querySelector(':scope > .ai-process-rail');
+        if (!rail || !rail.querySelector('.ai-rail-beat')) return null;
+        return ensureRailFold();
+      }
+      function foldSegmentElement(host, done) {
+        if (!host || !host.isConnected || host.classList.contains('is-folded')) { if (done) done(); return; }
+        var instant = false;
+        try { instant = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) || document.documentElement.classList.contains('xtj-reduce-motion'); } catch (eMotion) {}
+        if (instant) { if (done) done(); return; }
+        host.style.maxHeight = host.offsetHeight + 'px';
+        host.style.overflow = 'hidden';
+        host.style.transition = 'max-height 260ms cubic-bezier(.16,1,.3,1), opacity 200ms ease, margin 260ms cubic-bezier(.16,1,.3,1)';
+        requestAnimationFrame(function() {
+          host.style.maxHeight = '0px';
+          host.style.opacity = '0';
+          host.style.marginTop = '0';
+          host.style.marginBottom = '0';
+        });
+        setTimeout(function() { if (done) done(); }, 280);
+      }
+      function stashFoldedSegment(host) {
+        if (!host) return;
+        host.removeAttribute('style');
+        host.classList.remove('ai-rail-thought');
+        host.classList.add('is-folded');
+        var body = processBody();
+        if (body && host.parentNode !== body) body.appendChild(host);
+        var container = assistantNode.querySelector('.ai-thinking');
+        if (container && !body.querySelector('.ai-reasoning-segment:not(.is-folded)')) container.classList.add('is-reasoning-folded');
+      }
+      function foldReasoningIntoBeat(immediate) {
+        closeReasoningSegment();
+        var rail = assistantNode.querySelector(':scope > .ai-process-rail');
+        var live = rail ? Array.from(rail.querySelectorAll('.ai-rail-thought')) : [];
+        live.forEach(function(host) {
+          if (immediate) stashFoldedSegment(host);
+          else foldSegmentElement(host, function() { stashFoldedSegment(host); });
+        });
+        var body = assistantNode.querySelector('.ai-thinking-body');
+        if (body) {
+          Array.from(body.querySelectorAll('.ai-reasoning-segment:not(.is-folded)')).forEach(function(host) {
+            if (immediate) { host.classList.add('is-folded'); host.removeAttribute('style'); }
+            else foldSegmentElement(host, function() { host.removeAttribute('style'); host.classList.add('is-folded'); });
+          });
+          var container = body.closest('.ai-thinking');
+          if (container) {
+            if (immediate) container.classList.add('is-reasoning-folded');
+            else setTimeout(function() { if (container.isConnected && !body.querySelector('.ai-reasoning-segment:not(.is-folded)')) container.classList.add('is-reasoning-folded'); }, 300);
+          }
+        }
+      }
       function reasoningSegment() {
         if (!activeReasoningSegment) {
           activeToolTimeline = null;
           activeReasoningSegment = el('div', { class: 'ai-reasoning-segment' });
-          processBody().appendChild(activeReasoningSegment);
+          var liveHost = liveThoughtHost();
+          if (liveHost) {
+            activeReasoningSegment.classList.add('ai-rail-thought');
+            liveHost.appendChild(activeReasoningSegment);
+          } else {
+            processBody().appendChild(activeReasoningSegment);
+            var thinkingShell = assistantNode.querySelector('.ai-thinking');
+            if (thinkingShell) thinkingShell.classList.remove('is-reasoning-folded');
+          }
         }
         return activeReasoningSegment;
       }
@@ -11498,6 +11560,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               clearRailLiveLine();
             }
             activeRailBeat.querySelector('.ai-rail-tools').appendChild(activeToolTimeline);
+            foldReasoningIntoBeat();
           } else assistantNode.insertBefore(activeToolTimeline, assistantBubble);
         }
         if (newRound) activeToolTimeline.__formalRound = true;
@@ -12520,7 +12583,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             }
             var body = reasoningSegment();
             if (body) {
-              var reasoningHost = body.closest ? body.closest('.ai-thinking-body') : null;
+              var reasoningHost = (body.closest ? body.closest('.ai-thinking-body') : null) || (reasoningContainer && reasoningContainer.querySelector('.ai-thinking-body'));
               if (reasoningHost) reasoningHost.__streamedReasoning = aiReasoning;
               if (chunkText) body.__rawReasoning = (body.__rawReasoning || '') + chunkText;
               var thinkingOpen = !!(reasoningContainer && reasoningContainer.classList.contains('expanded'));

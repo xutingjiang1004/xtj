@@ -94,7 +94,9 @@ test('live reasoning and tools remain in chronological order; completed calls st
   });
   await page.waitForFunction(()=>document.querySelectorAll('.ai-tool-step.is-done').length===2);
   assert.equal(await page.locator('.ai-tool-step.is-running').count(),0);
-  assert.deepEqual(await page.locator('.ai-thinking-body').evaluate(body=>Array.from(body.children).map(n=>n.classList.contains('ai-reasoning-segment')?'reasoning':n.className)),['reasoning','reasoning']);
+  // The first thought has folded into its timeline step; the newest one streams live below the tools.
+  assert.deepEqual(await page.locator('.ai-thinking-body').evaluate(body=>Array.from(body.children).map(n=>n.classList.contains('ai-reasoning-segment')?'reasoning':n.className)),['reasoning']);
+  assert.match(await page.locator('.ai-process-rail .ai-rail-thought').textContent(),/再结合工具结果判断/);
   assert.equal(await page.locator('.ai-process-rail .ai-tool-step').count(),2);
   assert.equal(await page.locator('.ai-tool-result-card').count(),2);
   assert.ok(await page.locator('.ai-tool-step').first().isVisible());
@@ -106,6 +108,9 @@ test('live reasoning and tools remain in chronological order; completed calls st
   await page.evaluate(()=>{emit({type:'content',text:'两座城市天气如下。'});emit({type:'done',content:'两座城市天气如下。',reasoning:'先比较两座城市。再结合工具结果判断。',thinking_mode:'max',complete:true,saved:true});stream.close();});
   await page.waitForFunction(()=>!document.querySelector('.ai-msg.generating'));
   assert.equal(await page.locator('.ai-process-rail .ai-tool-step').count(),2);
+  // Once the reply is complete both thoughts live in the folded thinking area, in order.
+  assert.deepEqual(await page.locator('.ai-thinking-body').evaluate(body=>Array.from(body.children).map(n=>n.classList.contains('ai-reasoning-segment')?'reasoning':n.className)),['reasoning','reasoning']);
+  assert.equal(await page.locator('.ai-process-rail .ai-rail-thought').count(),0);
   await page.evaluate(()=>__xtjAiAgent.close()); await page.evaluate(()=>__xtjAiAgent.open());
   await page.waitForFunction(()=>document.querySelectorAll('.ai-process-rail .ai-tool-step').length===2);
   assert.deepEqual(await page.locator('.ai-thinking-body').evaluate(body=>Array.from(body.children).map(n=>n.classList.contains('ai-reasoning-segment')?'reasoning':n.className)),['reasoning','reasoning']);
@@ -303,11 +308,15 @@ test('reasoning supplies a timeline sentence when the model writes no narration'
  assert.match(await page.locator('.ai-tool-step-detail').textContent(),/Taylorswift/);
  const folded=await page.locator('.ai-process-rail').evaluate(node=>node.classList.contains('is-folded'));
  const essay=await page.locator('.ai-thinking').evaluate(node=>node.classList.contains('expanded'));
- assert.equal(folded,false);assert.equal(essay,false);
+
+ // 回复完成后整条时间轴连同思考一起折叠，只剩顶部的「已思考」。
+ assert.equal(folded,true);assert.equal(essay,false);
  // 已经有句子时，顶部按钮只开合时间轴，思考原文仍收着。
  await page.locator('.ai-thinking-toggle').click();
- assert.equal(await page.locator('.ai-process-rail').evaluate(node=>node.classList.contains('is-folded')),true);
+ assert.equal(await page.locator('.ai-process-rail').evaluate(node=>node.classList.contains('is-folded')),false);
  assert.equal(await page.locator('.ai-thinking').evaluate(node=>node.classList.contains('expanded')),false);
+ await page.locator('.ai-thinking-toggle').click();
+ assert.equal(await page.locator('.ai-process-rail').evaluate(node=>node.classList.contains('is-folded')),true);
  await page.locator('.ai-thinking-toggle').click();
  assert.equal(await page.locator('.ai-process-rail').evaluate(node=>node.classList.contains('is-folded')),false);
  assert.equal(await page.locator('.ai-thinking').evaluate(node=>node.classList.contains('expanded')),false);
@@ -318,7 +327,7 @@ test('reasoning supplies a timeline sentence when the model writes no narration'
  assert.equal(countSize,'0px');
 });
 
-test('the rail stays open after the answer starts; each sentence opens only its own reasoning',async t=>{
+test('the rail stays open while the answer streams and folds with its reasoning when the reply completes; each sentence opens only its own reasoning',async t=>{
  const page=await fixture(t,'max');
  await page.locator('#aiChatMsgInput').fill('这张涂鸦墙在哪里');await page.locator('#aiChatSendBtn').click();await page.waitForFunction(()=>window.stream);
  await page.evaluate(()=>{
@@ -336,24 +345,24 @@ test('the rail stays open after the answer starts; each sentence opens only its 
  assert.ok(await page.locator('.ai-process-rail .ai-tool-step').first().isVisible());
  await page.locator('.ai-rail-sentence').first().click();
  assert.equal(await page.locator('.ai-rail-beat.is-open').count(),0);
- // 正文出现前再展开一句：正文开始时应自动收回。
+ // 正文出现前再展开一句：正文开始时不自动收回，整段回复完成后才一起折叠。
  await page.locator('.ai-rail-sentence').first().click();
  assert.equal(await page.locator('.ai-rail-beat.is-open').count(),1);
  await page.evaluate(()=>emit({type:'content',text:'地点：捷克布拉格的列侬墙。\n墙面上的喷漆和涂鸦还需要继续核对拍摄时间。'}));
  await page.waitForFunction(()=>document.querySelector('.ai-msg.assistant .ai-msg-bubble').textContent.includes('列侬墙'));
- assert.equal(await page.locator('.ai-rail-beat.is-open').count(),0);
- // 正文已经开始：时间轴不自动折叠，思考原文仍收着。
+ assert.equal(await page.locator('.ai-rail-beat.is-open').count(),1);
+ // 正文流式输出期间时间轴保持展开。
  assert.equal(await page.locator('.ai-process-rail').evaluate(node=>node.classList.contains('is-folded')),false);
- assert.equal(await page.locator('.ai-thinking').evaluate(node=>node.classList.contains('expanded')),false);
  // 有过渡句时，顶部按钮只开合时间轴，不摊开思考原文。
  await page.locator('.ai-thinking-toggle').click();
  assert.equal(await page.locator('.ai-process-rail').evaluate(node=>node.classList.contains('is-folded')),true);
- assert.equal(await page.locator('.ai-thinking').evaluate(node=>node.classList.contains('expanded')),false);
  await page.locator('.ai-thinking-toggle').click();
  assert.equal(await page.locator('.ai-process-rail').evaluate(node=>node.classList.contains('is-folded')),false);
  await page.evaluate(()=>{emit({type:'done',content:'地点：捷克布拉格的列侬墙。\n墙面上的喷漆和涂鸦还需要继续核对拍摄时间。',thinking_mode:'max',complete:true,saved:true});stream.close();});
  await page.waitForFunction(()=>!document.querySelector('.ai-msg.generating'));
- assert.equal(await page.locator('.ai-process-rail').evaluate(node=>node.classList.contains('is-folded')),false);
+ // 回复完成：时间轴和单句思考一起折叠。
+ assert.equal(await page.locator('.ai-process-rail').evaluate(node=>node.classList.contains('is-folded')),true);
+ assert.equal(await page.locator('.ai-rail-beat.is-open').count(),0);
  assert.equal(await page.locator('.ai-thinking').evaluate(node=>node.classList.contains('expanded')),false);
 });
 

@@ -3434,7 +3434,7 @@ html body #panelDeepThink :is(#dtSendBtn, .ai-history-retry) { border-radius: 14
 html body #panelDeepThink #dtSendBtn { background: #0e7a5b !important; background-image: none !important; color: #fff !important; border: none !important; box-shadow: 0 4px 12px rgba(14, 122, 91, .26) !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
 html[data-theme="dark"] body #panelDeepThink #dtSendBtn { background: #4fd1a5 !important; color: #062218 !important; box-shadow: none !important; }
 /* 深入研究 input bar: attach, text field and send stay on one row at phone width. */
-html body #panelDeepThink .dt-input-bar { flex-wrap: nowrap !important; align-items: flex-end !important; gap: 8px !important; }
+html body #panelDeepThink .dt-input-bar { align-items: flex-end !important; gap: 8px !important; }
 html body #panelDeepThink .dt-input-bar #dtInput { flex: 1 1 0 !important; min-width: 0 !important; }
 html body #panelDeepThink .dt-input-bar :is(#dtSendBtn, #dtPauseBtn, #dtFileBtn) { flex: 0 0 auto !important; }
 

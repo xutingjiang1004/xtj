@@ -182,11 +182,11 @@ test('new wall upload keeps its local File until verified seeding succeeds and t
  }finally{if(release)release();await f.close();}
 });
 
-test('gallery uses a small botanical loading indicator only while the original image is pending',{timeout:30000},async()=>{
+test('gallery shows a left-to-right light sweep only while the original image is pending',{timeout:30000},async()=>{
  const f=await postBrowserFixture({counts:[3],holdImages:true});try{
   const {page}=f;page.setDefaultTimeout(6000);await page.locator('#feed .post-media-cell').first().click();
   await page.waitForFunction(()=>document.getElementById('photoPreviewImage')?.parentElement.querySelector('.pp-image-loading:not([hidden])'));
-  assert.equal(await page.locator('.pp-slide-slot:has(#photoPreviewImage) .pp-image-loading svg').count(),1);
+  assert.equal(await page.locator('.pp-slide-slot:has(#photoPreviewImage) .pp-image-loading .pp-sweep').count(),1);assert.equal(await page.locator('.pp-slide-slot:has(#photoPreviewImage) .pp-image-loading svg').count(),0);
   assert.equal(await page.locator('.pp-slide-slot:has(#photoPreviewImage)').evaluate(el=>getComputedStyle(el,'::before').content),'none');
   f.releaseImages();await page.waitForFunction(()=>document.getElementById('photoPreviewImage')?.naturalWidth>0&&document.getElementById('photoPreviewImage').parentElement.querySelector('.pp-image-loading').hidden);
   assert.deepEqual(f.errors,[]);

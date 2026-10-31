@@ -63,7 +63,7 @@ test('research upload accepts images and documents without overflowing the mobil
     assert.equal(await f.page.locator('#dtFileBtn').getAttribute('aria-label'), '上传图片或文件');
     assert.match(await f.page.locator('#panelDeepThink').evaluate(e => getComputedStyle(e).backgroundImage), /18, 26, 30/);
     const header = await f.page.locator('.dt-back,.dt-title,.dt-actions').evaluateAll(nodes => nodes.map(e => { const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, right: r.right, bottom: r.bottom }; }));
-    assert.ok(header[1].x >= header[0].right - 1); assert.ok(header[2].y >= header[1].bottom - 1);
+    assert.ok(header[1].x >= header[0].right - 1); assert.ok(header[2].x >= header[1].right - 1 || header[2].y >= header[1].bottom - 1, 'actions must not overlap the title (single row or wrapped)');
     await f.page.locator('#dtBackBtn').click();
     await f.page.waitForSelector('#panelDeepThink.active', { state: 'hidden' });
     assert.deepEqual(f.errors, []);

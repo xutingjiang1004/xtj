@@ -13,7 +13,7 @@ for(const mode of ['low','max'])test(mode+': empty and leading-whitespace conten
  assert.equal(await thought.count(),1,'an empty body packet removed immediate thinking feedback');
  await emit(p,{type:'reasoning',text:'真实思考首段。'});await frames(p);
  await emit(p,{type:'content',text:'  \n'});await frames(p);
- assert.equal(await thought.getAttribute('class').then(value=>value.includes('expanded')),false,'live reasoning stays collapsed until the reader opens it');
+ assert.equal(await thought.getAttribute('class').then(value=>value.includes('expanded')),true,'live reasoning is shown directly while the reply is produced');
  assert.equal(await thought.getAttribute('class').then(value=>value.includes('is-thinking')),true);
  await emit(p,{type:'reasoning',text:'继续核对。'});await frames(p);
  assert.equal(await p.locator('.ai-reasoning-segment').textContent(),'真实思考首段。继续核对。');
@@ -24,9 +24,10 @@ for(const mode of ['low','max'])test(mode+': empty and leading-whitespace conten
 test('manual collapse remains respected when more reasoning packets arrive',{timeout:30000},async t=>{
  const f=await aiPolishFixture();t.after(()=>f.close());const p=f.page;await send(p);
  await emit(p,{type:'reasoning',text:'首段思考。'});await frames(p);
- const toggle=p.locator('.ai-thinking-toggle');assert.equal(await toggle.getAttribute('aria-expanded'),'false');
+ const toggle=p.locator('.ai-thinking-toggle');assert.equal(await toggle.getAttribute('aria-expanded'),'true','live reasoning is shown directly');
+ await toggle.click();assert.equal(await toggle.getAttribute('aria-expanded'),'false');
  await emit(p,{type:'reasoning',text:'后续思考。'});await frames(p);
- assert.equal(await toggle.getAttribute('aria-expanded'),'false','a stream packet opened the panel against the collapsed default');
+ assert.equal(await toggle.getAttribute('aria-expanded'),'false','a stream packet reopened a panel the reader collapsed');
  await toggle.click();assert.equal(await toggle.getAttribute('aria-expanded'),'true');
  assert.equal(await p.locator('.ai-reasoning-segment').textContent(),'首段思考。后续思考。');assert.deepEqual(f.errors,[]);
 });
