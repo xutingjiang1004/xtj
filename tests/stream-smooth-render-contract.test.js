@@ -23,7 +23,7 @@ test('正文流式渲染必须走增量补丁（不得每帧整段替换 innerHT
   assert.ok(i > 0, '必须存在 createSmoothTextRenderer');
   const body = agentSrc.slice(i, i + 15000);
   assert.match(body, /appendPlainMarkdown\(next\)/, '普通正文必须有增量追加快路径');
-  assert.match(body, /patchInnerHTML\(targetEl,\s*renderStreamMarkdown\(rendered\),\s*ink\)/,
+  assert.match(body, /patchInnerHTML\(targetEl,\s*renderStreamMarkdown\(rendered\),\s*ink(?:,\s*renderStreamMarkdown\.stable\(\))?\)/,
     '富 Markdown 必须保留安全解析和节点补丁回退');
 
   // The shared renderer must keep the same split fast/fallback paths.

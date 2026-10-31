@@ -323,8 +323,10 @@ test('reasoning supplies a timeline sentence when the model writes no narration'
  assert.ok(await page.locator('.ai-process-rail .ai-tool-step').first().isVisible());
  const icon=await page.locator('[data-tool-call-id="s1"]').evaluate(node=>getComputedStyle(node,'::after').backgroundImage);
  assert.match(icon,/svg/i);
+ // 2026-10-31：搜到的条数常驻显示，右侧小三角隐藏。
  const countSize=await page.locator('.ai-tool-result-card-title').evaluate(node=>getComputedStyle(node).fontSize);
- assert.equal(countSize,'0px');
+ assert.notEqual(countSize,'0px');
+ assert.equal(await page.locator('.ai-tool-result-card-title .ai-search-toggle').first().evaluate(node=>getComputedStyle(node).display),'none');
 });
 
 test('the rail stays open while the answer streams and folds with its reasoning when the reply completes; each sentence opens only its own reasoning',async t=>{

@@ -49,7 +49,7 @@ test('comment writes derive identity from the authenticated server session', () 
 
 test('comment deletion is rendered only for its author or an administrator and synchronizes realtime deletes', () => {
   // Feed and Detail now share this permission-checked comment renderer.
-  const card = core.slice(core.indexOf('function buildPostCommentsHtml('), core.indexOf('function renderPostCardSafely'));
+  const card = core.slice(core.indexOf('function buildCommentDeleteButtonHtml('), core.indexOf('function renderPostCardSafely'));
   assert.match(card, /isAdmin\(\) \|\| String\(comment\.user_name \|\| ''\) === String\(currentUser\)/);
   assert.match(core, /function subscribeToComments\(\)/);
   assert.match(core, /payload\.eventType === 'DELETE'/);

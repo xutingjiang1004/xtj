@@ -2806,6 +2806,62 @@
                 return { file: nextFile, converted: true, originalSize: file.size, newSize: nextFile.size, w: tw, h: th };
             }
 
+            // ★ 2026-10-31：Safari 的「Load failed」/ Chrome 的「Failed to fetch」都是请求没拿到回包——
+            //   最常见的原因是服务器正在重启（部署）或网络瞬断，几秒后就恢复。以前这种情况直接变成红色失败气泡。
+            //   现在先等一等再试：重试前先查会话最近消息，确认这条是不是其实已经入库（回包丢了），
+            //   已入库就当成功，没入库才重发；查询本身失败则继续等，绝不在结果未知时盲目重发造成重复消息。
+            function isDmNetworkError(error) {
+                if (!error || error.serverRejected || error.code === 'identity_changed' || error.name === 'AbortError') return false;
+                return error.name === 'TypeError' || /load failed|failed to fetch|networkerror|network request failed|network connection/i.test(String(error.message || ''));
+            }
+            function friendlyDmSendError(error) {
+                return isDmNetworkError(error) ? '网络连接中断，请检查网络后重发' : ((error && error.message) ? error.message : '未知错误');
+            }
+            async function findSentDmMessage(ctx) {
+                var response = await window.xtjProtectedFetch('/api/dm/messages?target=' + encodeURIComponent(ctx.peer) + '&limit=30', {
+                    authOwner: ctx.owner, authEpoch: ctx.epoch, signal: ctx.signal, timeoutMs: 8000
+                });
+                var body = await response.json();
+                if (!response.ok || !body || !body.ok) throw new Error('verify failed');
+                var since = Date.parse(ctx.startedAt) - 5000;
+                var known = ctx.knownIds || {};
+                var rows = Array.isArray(body.data) ? body.data : [];
+                for (var i = rows.length - 1; i >= 0; i--) {
+                    var row = rows[i];
+                    if (!row || row.user_name !== ctx.owner || row.media_url !== ctx.peer || known[row.id]) continue;
+                    if (Date.parse(row.created_at) < since) continue;
+                    if ((getDMMessageText(row) || '').trim() === ctx.text) return row;
+                }
+                return null;
+            }
+            async function sendDmRequestWithRecovery(requestBody, ctx) {
+                var delays = [2000, 4000, 8000];
+                var attempt = 0;
+                for (;;) {
+                    try {
+                        return await window.xtjProtectedFetch('/api/dm/send', {
+                            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(requestBody),
+                            timeoutMs: 60000, authOwner: ctx.owner, authEpoch: ctx.epoch, signal: ctx.signal
+                        });
+                    } catch (error) {
+                        if (!isDmNetworkError(error) || attempt >= delays.length) throw error;
+                        var waitMs = delays[attempt++];
+                        for (;;) {
+                            await new Promise(function(resolve) { setTimeout(resolve, waitMs); });
+                            if (ctx.signal.aborted) throw error;
+                            if (requestBody.storage_path) break; // 附件在服务端按上传对象幂等，可直接重发
+                            try {
+                                var landed = await findSentDmMessage(ctx);
+                                if (landed) return { ok: true, status: 200, json: async function() { return { ok: true, message: landed }; } };
+                                break; // 确认没有入库，重发
+                            } catch (verifyError) {
+                                if (ctx.signal.aborted || attempt >= delays.length) throw error;
+                                waitMs = delays[attempt++]; // 连查询都失败（服务器还没起来），继续等
+                            }
+                        }
+                    }
+                }
+            }
             var _chatSendFlight = null;
             var _dockChatSendQueue = [];
             function drainDockChatSendQueue() {
@@ -2813,11 +2869,28 @@
                 var next = _dockChatSendQueue[0];
                 if (!next || next.owner !== window.currentUser || next.epoch !== _authStateEpoch || next.peer !== dockChatActiveUser) {
                     _dockChatSendQueue.shift();
-                    showToast('会话已切换，排队消息已取消');
+                    // 排队时已经显示了气泡；会话切换后不会再发出，要把它撤掉，不能留成永远「发送中」。
+                    if (next && next.tempId && next.owner === window.currentUser && next.epoch === _authStateEpoch) {
+                        try { removeDockChatCacheMessage(next.peer, next.tempId); } catch (eDropQueued) {}
+                        if (dockChatActiveUser === next.peer) {
+                            try { renderDockMessages(next.peer, _chatCache[getDockChatCacheKey(next.peer)] || [], false); } catch (eDropRender) {}
+                        }
+                    }
+                    // 文字不能凭空消失：放回原会话的草稿，回到那个会话时还在。
+                    var restored = false;
+                    if (next && next.content && next.owner === window.currentUser && next.epoch === _authStateEpoch) {
+                        try {
+                            var draftKey = next.owner + '\u0000' + next.peer;
+                            var existingDraft = _dockChatLocalDrafts[draftKey] ? _dockChatLocalDrafts[draftKey].value : '';
+                            persistDockChatDraft(next.peer, existingDraft ? next.content + '\n' + existingDraft : next.content);
+                            restored = true;
+                        } catch (eRestoreDraft) {}
+                    }
+                    showToast(restored ? '会话已切换，未发出的消息已放回草稿' : '会话已切换，排队消息已取消');
                     return drainDockChatSendQueue();
                 }
                 _dockChatSendQueue.shift();
-                return sendDockChatMessageSingle(null, next.content, { queued: true, replyDraft: next.replyDraft || null });
+                return sendDockChatMessageSingle(null, next.content, { queued: true, replyDraft: next.replyDraft || null, tempId: next.tempId, clientMessageId: next.clientMessageId, createdAt: next.createdAt });
             }
             async function sendDockChatMessageSingle(queuedFile, queuedText, retryOptions) {
                 var forwarding = !!(retryOptions && retryOptions.forwardTo);
@@ -2853,18 +2926,35 @@
                 if (dockChatSending || _chatBatchSending) {
                     if (forwarding) { showToast('上一条消息正在发送，请稍候再转发'); return; }
                     if (queuedSend) {
-                        _dockChatSendQueue.unshift({ content: content, peer: dockChatActiveUser, owner: currentUser, epoch: _authStateEpoch, replyDraft: replyDraft });
+                        _dockChatSendQueue.unshift({ content: content, peer: dockChatActiveUser, owner: currentUser, epoch: _authStateEpoch, replyDraft: replyDraft,
+                            tempId: retryOptions.tempId, clientMessageId: retryOptions.clientMessageId, createdAt: retryOptions.createdAt });
                         return;
                     }
                     if (!file && content) {
-                        if (_dockChatSendQueue.length >= 5) { showToast('排队消息过多，请等当前消息发送完成'); return; }
+                        if (_dockChatSendQueue.length >= 50) { showToast('待发送的消息太多，请稍等片刻'); return; }
                         var queuedReply = replyDraft ? Object.assign({}, replyDraft) : null;
-                        _dockChatSendQueue.push({ content: content, peer: dockChatActiveUser, owner: currentUser, epoch: _authStateEpoch, replyDraft: queuedReply });
+                        // ★ 2026-10-31：连发时不再弹「已排队」提示，也不让消息消失一段时间。
+                        //   气泡立刻出现在会话里（带发送中状态），上一条完成后按原顺序自动发出，
+                        //   沿用同一个气泡和幂等键，不会重复也不会乱序。
+                        var queuedTempId = 'temp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+                        var queuedCreatedAt = new Date().toISOString();
+                        var queuedTarget = dockChatActiveUser;
+                        var queuedMessage = {
+                            id: queuedTempId, __tempId: queuedTempId, __clientMessageId: queuedTempId, __optimistic: true, __localPreviewUrl: '',
+                            user_name: currentUser,
+                            content: buildDMMessageContent({ content: content }, Object.assign({ text: content, read_at: null, media: null }, queuedReply ? { reply_to: queuedReply } : {})),
+                            media_type: DM_MARKER, media_url: queuedTarget, actor_key: DM_MARKER, created_at: queuedCreatedAt, views: 0
+                        };
+                        var queuedOrigin = captureDockChatSendOrigin(null);
+                        _dockChatSendQueue.push({ content: content, peer: queuedTarget, owner: currentUser, epoch: _authStateEpoch, replyDraft: queuedReply,
+                            tempId: queuedTempId, clientMessageId: queuedTempId, createdAt: queuedCreatedAt });
                         inp.value = '';
                         try { inp.dispatchEvent(new Event('input', { bubbles: true })); } catch (eQueueInput) {}
-                        try { persistDockChatDraft(dockChatActiveUser, ''); } catch (eQueueDraft) {}
+                        try { persistDockChatDraft(queuedTarget, ''); } catch (eQueueDraft) {}
                         if (queuedReply) clearChatMessageDraft(false);
-                        showToast('已排队，上一条发送完成后自动发出');
+                        renderDockMessages(queuedTarget, upsertDockChatCacheMessage(queuedTarget, queuedMessage), true);
+                        animateDockChatSend(queuedTempId, queuedTarget, queuedOrigin);
+                        applyDockChatConversationPreview(queuedTarget, queuedMessage, 0);
                         return;
                     }
                     // ★ 2026-09-25 修复（审计 M-4）：旧实现把 dockChatSending 与"无内容"
@@ -2899,7 +2989,7 @@
                 // 把真实的发送状态告诉 ux-features 的指示器（它此前是假的 1.8 秒计时）
                 try { if (typeof window.__xtjNotifyChatSending === 'function') window.__xtjNotifyChatSending(true); } catch (e) {}
                 var capturedContent = content;
-                var tempId = 'temp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+                var tempId = queuedSend && retryOptions.tempId || 'temp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
                 // ★ 2026-09-27 修复（审计 S5：发送请求缺幂等键）：
                 //   /api/dm/send 此前只带 target_user + content，服务端无法区分
                 //   「用户真的发了两条一模一样的话」和「同一条消息被重发了一次」。
@@ -2911,7 +3001,7 @@
                 //   现在为每次用户动作生成一个稳定幂等键（同一 tempId 生命周期内不变，
                 //   重发/重试复用同一个值），服务端据此去重即可。
                 var clientMessageId = retryOptions && retryOptions.clientMessageId || tempId;
-                var optimisticCreatedAt = new Date().toISOString();
+                var optimisticCreatedAt = queuedSend && retryOptions.createdAt || new Date().toISOString();
                 var localPreviewUrl = '';
                 var mediaKind = file
                     ? getChatUploadKind(file)
@@ -2949,7 +3039,7 @@
                     views: 0
                 };
                 renderDockMessages(targetUser, upsertDockChatCacheMessage(targetUser, optimisticMessage), true);
-                animateDockChatSend(tempId,targetUser,sendOrigin);
+                if (!queuedSend) animateDockChatSend(tempId,targetUser,sendOrigin);
                 applyDockChatConversationPreview(targetUser, optimisticMessage, 0);
                 if (file && !retrying && !forwarding) clearDockChatFilePreview(false);
                 // 失败重发时复用同一个文件对象（File 在内存里保留，页面刷新后重发不可用）
@@ -3066,11 +3156,10 @@
                     //   把存储对象删掉；而服务端其实提交成功了 → 消息在、图片 404，
                     //   收件人看到的正是"图片不显示"。现在放宽到 60s，并且只有服务端
                     //   **明确拒绝**（4xx 且重试无意义）时才允许回收媒体。
-                    var sendResp = await window.xtjProtectedFetch('/api/dm/send', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(requestBody),
-                        timeoutMs: 60000,authOwner:sendOwner,authEpoch:sendEpoch,signal:flight.controller.signal
+                    var sendResp = await sendDmRequestWithRecovery(requestBody, {
+                        owner: sendOwner, epoch: sendEpoch, signal: flight.controller.signal, peer: targetUser,
+                        text: String(capturedContent || '').trim(), startedAt: optimisticCreatedAt,
+                        knownIds: (function() { var ids = {}; (_chatCache[getDockChatCacheKey(targetUser)] || []).forEach(function(row) { if (row && row.id) ids[row.id] = 1; }); return ids; })()
                     });
                     assertSender();
                     if (!sendResp.ok) {
@@ -3166,13 +3255,13 @@
                         __pendingActorKey: actorKey || null,
                         __pendingPayload: mediaPayload || null,
                         __localPreviewUrl: localPreviewUrl,
-                        __failReason: (e && e.message) ? e.message : '未知错误'
+                        __failReason: friendlyDmSendError(e)
                     });
                     upsertDockChatCacheMessage(targetUser, failedMessage);
                     if (dockChatActiveUser === targetUser) renderDockMessages(targetUser, _chatCache[getDockChatCacheKey(targetUser)] || [], true);
                     // 注意：不再把内容回填到输入框 —— 消息已经以失败气泡留在会话里，
                     // 回填会让用户以为没发出去而重复发送。
-                    showToast((forwarding ? '转发失败：' : '发送失败：') + ((e && e.message) ? e.message : '未知错误') + (forwarding ? '' : '（长按该条可重发）'));
+                    showToast((forwarding ? '转发失败：' : '发送失败：') + friendlyDmSendError(e) + (forwarding ? '' : '（长按该条可重发）'));
                 }
                 finally {
                     if(_chatSendFlight!==flight || !sameSender())return;
@@ -4581,7 +4670,7 @@
                 // 由 sendDockChatMessageSingle 的排队分支把文本排进队列。
                 if(_chatBatchSending && _chatAttachmentQueue.length){showToast('附件正在依次发送');return;}
                 if(!_chatAttachmentQueue.length)return sendDockChatMessageSingle();
-                if(dockChatSending)return;
+                if(dockChatSending){showToast('上一条消息正在发送，请稍候');return;}
                 var files=_chatAttachmentQueue.slice(),peer=dockChatActiveUser,owner=window.currentUser,epoch=_authStateEpoch,text=document.getElementById('dockChatInput').value.trim();
                 if(!peer || !owner || isUserMuted())return sendDockChatMessageSingle();
                 var batch={owner:owner,epoch:epoch,peer:peer,cancelled:false};
@@ -4596,6 +4685,11 @@
                     setTimeout(function() { try { drainDockChatSendQueue(); } catch (eBatchDrain) {} }, 0);
                 }}
             }
+            // 聊天图片下载完成后去掉扫光占位（load 不冒泡，用捕获阶段在文档上统一接）。
+            document.addEventListener('load', function(event) {
+                var node = event.target;
+                if (node && node.tagName === 'IMG' && node.classList && node.classList.contains('msg-img') && node.naturalWidth > 0) node.setAttribute('data-loaded', '1');
+            }, true);
             function bindChatReplyGestures() {
                 var host=document.getElementById('dockChatMessages');
                 host.addEventListener('click',function(event){var quote=event.target.closest('.chat-reply-quote');if(quote){event.stopPropagation();if(quote.dataset.replyId)jumpChatHistory(dockChatActiveUser,quote.dataset.replyId);}});
@@ -5391,6 +5485,7 @@
                 if(existing&&existing.epoch===epoch&&existing.value===value)return existing;
                 return _dockChatLocalDrafts[key]={value:value,epoch:epoch};
             }
+            var _dockChatDraftToastAt = 0;
             function persistDockChatDraft(peer, value) {
                 var owner = window.currentUser,epoch=window._authStateEpoch||0;
                 if (!peer || !owner) return;
@@ -5418,7 +5513,11 @@
                             _dockChatConversationStates[peer] = Object.assign({},state,{ draft_revision:error.draft_revision });
                             _dockChatDraftConflicts[key] = value;
                             showToast('草稿在其他设备已更新，本机输入已保留；请编辑后重试');
-                        } else if (error.code !== 'not_found' && error.code !== 'deleted') showToast('草稿保存失败，本机输入已保留；请编辑后重试');
+                        } else if (error.code !== 'not_found' && error.code !== 'deleted' && Date.now() - _dockChatDraftToastAt > 30000) {
+                            // 草稿同步是后台动作，服务器不稳时每发一条都会失败；30 秒内只提醒一次。
+                            _dockChatDraftToastAt = Date.now();
+                            showToast('草稿保存失败，本机输入已保留；请编辑后重试');
+                        }
                     });
                 });
                 _dockChatDraftWrites[key] = write;

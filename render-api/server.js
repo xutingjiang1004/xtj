@@ -14161,6 +14161,13 @@ app.post('/api/post/comment', authenticateUser, rateLimit(60000, 30), async (req
     if (!postId) return res.status(400).json({ error: 'post_id must be a UUID', code: 'invalid_post_id' });
     if (!content) return res.status(400).json({ error: 'Comment cannot be empty', code: 'empty_comment' });
     if (content.length > 5000) return res.status(400).json({ error: 'Comment is too long', code: 'comment_too_long' });
+    // 回复某条评论：只接受十进制整数字符串；格式错误直接拒绝，不能悄悄变成顶层评论。
+    var parentCommentId = null;
+    var rawParentId = req.body && req.body.parent_comment_id;
+    if (rawParentId != null && rawParentId !== '') {
+      parentCommentId = normalizeInteractionId(rawParentId);
+      if (!parentCommentId || !/^\d{1,19}$/.test(parentCommentId)) return res.status(400).json({ error: 'Invalid parent comment id', code: 'invalid_parent_comment_id' });
+    }
 
     var postResult = await supabase.from('posts').select('id, user_name, visibility, media_type, is_deleted').eq('id', postId).maybeSingle();
     if (postResult.error) return res.status(500).json({ error: sanitizeError(postResult.error), code: 'post_lookup_failed' });
@@ -14172,7 +14179,7 @@ app.post('/api/post/comment', authenticateUser, rateLimit(60000, 30), async (req
       return res.status(403).json({ error: '无法评论私密帖子', code: 'forbidden' });
     }
 
-    var inserted = await createComment(supabase, postId, req.userName, content, req.body && req.body.client_request_id);
+    var inserted = await createComment(supabase, postId, req.userName, content, req.body && req.body.client_request_id, 'post', parentCommentId);
     // Replaying an acknowledged/uncertain submit returns the same comment and
     // never reserves another AI quota or schedules a duplicate reply.
     if (!inserted.created) return res.json({ ok: true, data: inserted.data, comment_count: inserted.comment_count, replayed: true });

@@ -5632,75 +5632,104 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
   box-shadow: none;
   overflow: visible;
 }
-.ai-reply-menu-panel {
+/* 2026-10-31：回复长按/右键菜单改成一列式列表。
+   全站有一条给所有 button 套玻璃胶囊的通用规则，这里用更高的选择器把它压回去，
+   否则朗读/收藏/重新生成会变成深色大胶囊，和「复制」长得不一样。 */
+.ai-copy-menu { width: 188px; max-width: calc(100vw - 20px); }
+.ai-copy-menu .ai-reply-menu-panel {
   position: relative;
-  padding: 8px;
-  border: 1px solid rgba(255,255,255,.82);
-  border-radius: 18px;
-  background: linear-gradient(140deg, rgba(255,255,255,.96), rgba(231,248,242,.93));
-  box-shadow: 0 12px 36px rgba(25,80,60,.19), 0 2px 8px rgba(25,80,60,.08), inset 0 1px rgba(255,255,255,.9);
+  padding: 6px;
+  border: 1px solid rgba(20,70,52,.12);
+  border-radius: 16px;
+  background: #fbfdfc;
+  box-shadow: 0 14px 34px rgba(18,60,45,.18), 0 2px 6px rgba(18,60,45,.08);
+  transform-origin: var(--ai-tip-x, 24px) 100%;
+  animation: aiReplyMenuIn 150ms cubic-bezier(.16,1,.3,1) both;
 }
-.ai-reply-menu-panel::after {
+.ai-copy-menu.is-below .ai-reply-menu-panel { transform-origin: var(--ai-tip-x, 24px) 0; }
+.ai-copy-menu .ai-reply-menu-panel::after {
   content: '';
   position: absolute;
   left: calc(var(--ai-tip-x, 24px) - 6px);
-  bottom: -5px;
+  bottom: -6px;
   width: 11px;
   height: 11px;
   transform: rotate(45deg);
-  background: rgba(232,248,242,.96);
-  border-right: 1px solid rgba(255,255,255,.82);
-  border-bottom: 1px solid rgba(255,255,255,.82);
+  background: #fbfdfc;
+  border-right: 1px solid rgba(20,70,52,.12);
+  border-bottom: 1px solid rgba(20,70,52,.12);
   pointer-events: none;
 }
 .ai-copy-menu.is-below .ai-reply-menu-panel::after {
-  top: -5px;
+  top: -6px;
   bottom: auto;
   transform: rotate(225deg);
 }
-.ai-reply-menu-grid {
-  display: flex;
-  align-items: stretch;
-  gap: 3px;
-}
-.ai-copy-menu .ai-copy-btn,
-.ai-reply-menu-item {
-  flex: 0 0 52px;
+.ai-copy-menu .ai-reply-menu-grid {
   display: flex;
   flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+}
+.ai-copy-menu .ai-reply-menu-panel button.ai-reply-menu-item {
+  flex: none;
+  display: flex;
+  flex-direction: row;
   align-items: center;
-  justify-content: center;
-  gap: 5px;
-  width: 52px;
-  min-width: 52px;
-  min-height: 58px;
-  padding: 5px 1px;
+  justify-content: flex-start;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 12px;
   border: 0;
-  border-radius: 12px;
+  border-radius: 10px;
   background: transparent;
+  background-image: none;
   box-shadow: none;
-  color: #254b3d;
-  font-size: 11px;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  color: #1f332b;
+  font-size: 15px;
+  font-weight: 500;
   line-height: 1.2;
   font-family: inherit;
+  text-align: left;
+  transform: none;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
-.ai-reply-menu-item:hover,
-.ai-reply-menu-item:focus-visible { background: rgba(5,150,105,.11); }
-.ai-reply-menu-item:active { transform: scale(.96); }
-.ai-reply-menu-icon {
+.ai-copy-menu .ai-reply-menu-panel button.ai-reply-menu-item:hover,
+.ai-copy-menu .ai-reply-menu-panel button.ai-reply-menu-item:focus-visible { background: rgba(5,150,105,.09); box-shadow: none; transform: none; }
+.ai-copy-menu .ai-reply-menu-panel button.ai-reply-menu-item:active { background: rgba(5,150,105,.16); transform: none; }
+.ai-copy-menu .ai-reply-menu-panel button.ai-reply-menu-item:focus-visible { outline: 2px solid rgba(5,150,105,.5); outline-offset: -2px; }
+.ai-copy-menu .ai-reply-menu-panel button.ai-msg-act-regen { margin-top: 5px; position: relative; }
+.ai-copy-menu .ai-reply-menu-panel button.ai-msg-act-regen::before {
+  content: '';
+  position: absolute;
+  left: 12px; right: 12px; top: -3px;
+  height: 1px;
+  background: rgba(20,70,52,.1);
+}
+.ai-copy-menu .ai-reply-menu-icon {
   display: grid;
   place-items: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 11px;
-  background: linear-gradient(145deg, rgba(120,218,181,.3), rgba(158,213,230,.18));
-  border: 1px solid rgba(255,255,255,.8);
-  color: #087c5b;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: #1c7a5d;
 }
-.ai-reply-menu-icon svg { width: 18px; height: 18px; }
-.ai-reply-menu-label { white-space: nowrap; }
+.ai-copy-menu .ai-reply-menu-icon svg { width: 20px; height: 20px; }
+.ai-copy-menu .ai-reply-menu-label { white-space: nowrap; }
+@keyframes aiReplyMenuIn {
+  from { opacity: 0; transform: scale(.94); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) { .ai-copy-menu .ai-reply-menu-panel { animation: none; } }
+html.xtj-reduce-motion .ai-copy-menu .ai-reply-menu-panel { animation: none; }
 
 .ai-error-note {
   font-size: 11px;
@@ -5730,14 +5759,18 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
   color: #a82a2a;
 }
 
-[data-theme="dark"] .ai-reply-menu-panel {
-  background: linear-gradient(145deg, rgba(38,57,52,.97), rgba(23,40,38,.96));
-  border-color: rgba(255,255,255,.16);
-  box-shadow: 0 14px 38px rgba(0,0,0,.4), inset 0 1px rgba(255,255,255,.1);
+[data-theme="dark"] .ai-copy-menu .ai-reply-menu-panel {
+  background: #212c29;
+  border-color: rgba(255,255,255,.11);
+  box-shadow: 0 16px 38px rgba(0,0,0,.5), 0 2px 6px rgba(0,0,0,.3);
 }
-[data-theme="dark"] .ai-reply-menu-panel::after { background: #21352f; border-color: rgba(255,255,255,.16); }
-[data-theme="dark"] .ai-reply-menu-item { color: #e1f3eb; }
-[data-theme="dark"] .ai-reply-menu-icon { border-color: rgba(255,255,255,.16); color: #8de5bd; }
+[data-theme="dark"] .ai-copy-menu .ai-reply-menu-panel::after { background: #212c29; border-color: rgba(255,255,255,.11); }
+[data-theme="dark"] .ai-copy-menu .ai-reply-menu-panel button.ai-reply-menu-item { color: #e6f1ed; background: transparent; background-image: none; }
+[data-theme="dark"] .ai-copy-menu .ai-reply-menu-panel button.ai-reply-menu-item:hover,
+[data-theme="dark"] .ai-copy-menu .ai-reply-menu-panel button.ai-reply-menu-item:focus-visible { background: rgba(141,229,189,.1); }
+[data-theme="dark"] .ai-copy-menu .ai-reply-menu-panel button.ai-reply-menu-item:active { background: rgba(141,229,189,.18); }
+[data-theme="dark"] .ai-copy-menu .ai-reply-menu-panel button.ai-msg-act-regen::before { background: rgba(255,255,255,.1); }
+[data-theme="dark"] .ai-copy-menu .ai-reply-menu-icon { color: #8de5bd; border: 0; background: none; }
 
 @keyframes progress-shimmer {
   0%, 100% { opacity: 0; }
@@ -8096,19 +8129,21 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
 .ai-process-rail .ai-process-timeline .ai-tool-inline-result > button.ai-tool-result-card-title,
 .ai-process-rail .ai-process-timeline .ai-tool-data-details > summary { grid-column: auto; }
 .ai-process-rail .ai-process-timeline .ai-tool-step-body:has(> .ai-tool-step-detail) > .ai-tool-step-title { display: none; }
+/* 2026-10-31：搜到的条数直接跟在搜索词后面常驻显示，不用展开才看到；去掉右边的小三角，
+   点搜索词或条数都能展开结果（点搜索词由 messagesEl 上的委托处理）。 */
 .ai-process-rail .ai-process-timeline .ai-tool-inline-result > button.ai-tool-result-card-title {
   order: 2;
-  font-size: 0;
-  color: transparent;
-}
-.ai-process-rail .ai-process-timeline .ai-tool-inline-result > button.ai-tool-result-card-title .ai-search-toggle {
-  font-size: 14px;
+  font-size: 12.5px;
   color: #6e8a84;
 }
-.ai-process-rail .ai-process-timeline .ai-tool-inline-result > button.ai-tool-result-card-title[aria-expanded="true"] {
-  font-size: 12.5px;
-  color: #5d8f80;
-}
+.ai-process-rail .ai-process-timeline .ai-tool-inline-result > button.ai-tool-result-card-title .ai-search-toggle { display: none; }
+.ai-process-rail .ai-process-timeline .ai-tool-inline-result > button.ai-tool-result-card-title[aria-expanded="true"] { color: #5d8f80; }
+.ai-process-rail .ai-tool-step-body:has(> .ai-tool-inline-result:not([hidden])) > .ai-tool-step-detail,
+.ai-process-rail .ai-tool-step-body:has(> .ai-tool-inline-result:not([hidden])) > .ai-tool-step-title { cursor: pointer; }
+[data-theme="dark"] .ai-process-rail .ai-process-timeline .ai-tool-inline-result > button.ai-tool-result-card-title { color: #8eaaa0; }
+[data-theme="dark"] .ai-process-rail .ai-process-timeline .ai-tool-inline-result > button.ai-tool-result-card-title[aria-expanded="true"] { color: #a9d6c4; }
+/* 时间轴里已经有搜索行（带条数）时，不再在正文上下方重复一条「已联网搜索 · N 条 · 展开」。 */
+.ai-msg:has(.ai-process-rail .ai-tool-step[data-tool-name="search_web"], .ai-process-rail .ai-tool-step[data-tool-name="tavily_search"], .ai-process-rail .ai-tool-step[data-tool-name="search_social"]) > .ai-search-status { display: none; }
 .ai-process-timeline .ai-tool-inline-result > button.ai-tool-result-card-title::before,
 .ai-process-timeline .ai-tool-inline-result > button.ai-tool-result-card-title::after { content:none!important; }
 .ai-process-timeline .ai-search-toggle { margin-left:4px; }

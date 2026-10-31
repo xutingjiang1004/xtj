@@ -4107,6 +4107,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       }
       var open = !container.classList.contains('expanded');
       container.__userCollapsed = !open;
+      if (open) {
+        // 回复结束时思考原文被整体折起（is-reasoning-folded / .is-folded 都是 display:none），
+        // 这里没有时间轴可开合，用户点「已思考」就是要看原文，必须把折起标记摘掉。
+        container.classList.remove('is-reasoning-folded');
+        container.querySelectorAll('.ai-reasoning-segment.is-folded').forEach(function(seg) { seg.classList.remove('is-folded'); });
+      }
       setThinkingExpanded(container, open, messagesEl || S.messagesEl);
       if (open) {
         container.querySelectorAll('.ai-reasoning-segment').forEach(function(seg) {
@@ -5015,15 +5021,18 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
      That path preserves stable DOM nodes, but parsing/traversing can still
      scale with the open block. Plain prose uses the bounded direct-append
      path below, so common answers do not repeatedly parse their whole body. */
-  function patchInnerHTML(targetEl, html, ink) {
+  // stable：流式缓存里已经定稿的块的 HTML 前缀（html 以它开头，且它由若干完整的顶层节点组成）。
+  // 传入时只解析、对比它后面的部分，前面的节点原样保留；否则整篇解析并逐节点对比，
+  // 长回答每一帧的代价就会随长度增长。
+  function patchInnerHTML(targetEl, html, ink, stable) {
     if (!targetEl) return;
     if (targetEl.__xtjStreamHtml && tryExtendStreamHtml(targetEl, targetEl.__xtjStreamHtml, html, ink)) {
       targetEl.__xtjStreamHtml = html;
       return;
     }
-    function children(parent, wanted, depth) {
+    function children(parent, wanted, depth, skip) {
       var old = Array.from(parent.childNodes).filter(function(n) { return !(n.nodeType === 1 && n.classList.contains('ai-stream-cursor')); });
-      var pos = 0;
+      var pos = skip || 0;
       Array.from(wanted.childNodes).forEach(function(want) {
         var have = old[pos++];
         if (!have) { var added = want.cloneNode(true); parent.insertBefore(added, parent.querySelector(':scope > .ai-stream-cursor')); if (ink) ink.inserted(added); return; }
@@ -5042,9 +5051,28 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       for (; pos < old.length; pos++) if (old[pos].parentNode === parent) old[pos].remove();
     }
     try {
-      var holder = document.createElement('div'); holder.innerHTML = html;
-      children(targetEl, holder, 0);
-    } catch (_) { targetEl.innerHTML = html; }
+      var holder = document.createElement('div');
+      var known = targetEl.__xtjStable;
+      if (stable && html.indexOf(stable) === 0 && known && stable.indexOf(known.html) === 0 && known.nodes <= targetEl.childNodes.length) {
+        // 沿用已经对齐过的前缀，只解析并对比它后面的部分（含刚定稿的那一块）。
+        holder.innerHTML = html.slice(known.html.length);
+        children(targetEl, holder, 0, known.nodes);
+        if (stable.length > known.html.length) {
+          var grown = document.createElement('div');
+          grown.innerHTML = stable.slice(known.html.length);
+          targetEl.__xtjStable = { html: stable, nodes: known.nodes + grown.childNodes.length };
+        }
+      } else {
+        holder.innerHTML = html;
+        children(targetEl, holder, 0);
+        targetEl.__xtjStable = null;
+        if (stable && html.indexOf(stable) === 0) {
+          var whole = document.createElement('div');
+          whole.innerHTML = stable;
+          targetEl.__xtjStable = { html: stable, nodes: whole.childNodes.length };
+        }
+      }
+    } catch (_) { targetEl.innerHTML = html; targetEl.__xtjStable = null; }
     targetEl.__xtjStreamHtml = html;
   }
 
@@ -5056,20 +5084,34 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var prefix = '', markup = '', verified = false, disabled = false;
     var blocks = new Map();
     var tailAccel = createTailAccelerator(function(text) { return render(text, true); });
-    function safeBlock(text) {
-      if (/```|\||<|>|^[ \t]*(?:[-*+] |\d+\. )/m.test(text)) return false;
+    // 只由「顶格列表项」组成的块。列表项之间隔着空行也会被并成同一个列表，
+    // 所以这种块只有在后面紧跟一个明确不是列表/缩进续行的块时，才能单独冻结。
+    function isFlatList(text) {
+      var lines = text.split('\n'), items = 0;
+      for (var i = 0; i < lines.length; i++) {
+        if (!lines[i]) continue;
+        if (!/^(?:[-*+] |\d+\. )/.test(lines[i])) return false;
+        items++;
+      }
+      return items > 0;
+    }
+    function safeBlock(text, following) {
+      if (/```|\||<|>/.test(text)) return false;
+      if (/^[ \t]*(?:[-*+] |\d+\. )/m.test(text)) {
+        if (!following || !isFlatList(text) || /^[ \t\-*+\d]/.test(following)) return false;
+      }
       var rest = text.replace(/`[^`\n]*`/g, '')
         .replace(/!?\[[^\]\n]*\]\([^\)\n]*\)/g, '')
         .replace(/\*\*[^*]+\*\*/g, '').replace(/\*[^*]+\*/g, '');
       return !/[`*\[\]]/.test(rest);
     }
-    return function(text) {
+    var cache = function(text) {
       if (disabled) return render(text, true);
       if (prefix && text.indexOf(prefix) !== 0) { prefix = ''; markup = ''; verified = false; blocks.clear(); tailAccel.reset(); }
       var tail = text.slice(prefix.length), breaks = /\n[ \t]*\n+/g, match, committed = 0;
       while ((match = breaks.exec(tail))) {
         var block = tail.slice(committed, match.index);
-        if (!safeBlock(block)) break;
+        if (!safeBlock(block, tail.slice(breaks.lastIndex, breaks.lastIndex + 1))) break;
         var html = blocks.get(block);
         if (html === undefined) {
           html = render(block, true);
@@ -5087,6 +5129,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       }
       return result;
     };
+    // 已经核对过与整篇渲染一致、可以原样保留 DOM 的定稿前缀。
+    cache.stable = function() { return verified && !disabled ? markup : ''; };
+    return cache;
   }
 
   // Optional local-only stream timing probe. Enable from the browser console
@@ -5302,9 +5347,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         // precision or clock corrections must not suppress an accepted frame.
         if (!isSelectionInTarget(targetEl)) {
           if (!appendPlainMarkdown(next)) {
-            patchInnerHTML(targetEl, renderStreamMarkdown(rendered), ink);
+            patchInnerHTML(targetEl, renderStreamMarkdown(rendered), ink, renderStreamMarkdown.stable());
             resumePlainMarkdownTail();
-          } else delete targetEl.__xtjStreamHtml;
+          } else { delete targetEl.__xtjStreamHtml; targetEl.__xtjStable = null; }
         } else if (!selectionRetryHandler) {
           // Consumed text must not be lost while the user has a selection.
           // Re-render the accumulated text once the selection clears.
@@ -5312,7 +5357,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             if (isSelectionInTarget(targetEl)) return;
             try { document.removeEventListener('selectionchange', selectionRetryHandler); } catch (_) {}
             selectionRetryHandler = null;
-            try { patchInnerHTML(targetEl, renderStreamMarkdown(rendered), ink); } catch (_) {}
+            try { patchInnerHTML(targetEl, renderStreamMarkdown(rendered), ink, renderStreamMarkdown.stable()); } catch (_) {}
           };
           try { document.addEventListener('selectionchange', selectionRetryHandler); } catch (_) {}
         }
@@ -11331,14 +11376,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         }
         if (contentRenderer) contentRenderer.append(aiContent, evtReceivedAt);
       }
-      function scheduleAnswerPromote(evtReceivedAt) {
+      function scheduleAnswerPromote(evtReceivedAt, delayMs) {
         if (_sendThinkingMode === 'off' || answerCommitted || answerPromoteTimer) return;
         var scheduledReq = reqId;
         answerPromoteTimer = setTimeout(function() {
           answerPromoteTimer = null;
           if (scheduledReq !== S._currentReqId || !customModelIdentityCurrent(sendIdentity)) return;
           promoteRunningAnswer(evtReceivedAt);
-        }, 280);
+        }, delayMs || 280);
       }
       function unfoldRunningProcess() {
         var thinking = assistantNode.querySelector('.ai-thinking');
@@ -12671,7 +12716,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             if (accepted) {
               if (_sendThinkingMode !== 'off' && !answerCommitted) {
                 showProvisionalNarration(aiContent.trim());
-                if (aiContent.indexOf('\n') >= 0 || aiContent.trim().length >= 80) scheduleAnswerPromote(evtReceivedAt);
+                // 任何长度的正文都要排上「升级为气泡」的计时：短回复（「嗯？憋不住了？」）
+                // 以前只挂在时间轴上显示成圆点 + 无气泡文字，直到整条回复结束才变成气泡。
+                scheduleAnswerPromote(evtReceivedAt, aiContent.indexOf('\n') >= 0 || aiContent.trim().length >= 80 ? 280 : 450);
                 continue;
               }
               ensureAssistantBubbleReady();
@@ -12988,6 +13035,38 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     scrollToBottom(messagesEl, false);
   }
 
+  // 「正在加载聊天记录」占位：4 秒还没回来就换成明确的慢网提示，而不是一直原样转下去。
+  function buildHistoryLoadingState() {
+    var node = buildEmptyState('正在加载聊天记录…');
+    node.classList.add('ai-history-loading');
+    setTimeout(function() {
+      if (!node.isConnected) return;
+      var tip = node.querySelector('.ai-chat-empty-tip');
+      if (tip) tip.textContent = '网络有点慢，还在加载…';
+    }, 4000);
+    return node;
+  }
+
+  // 同步把本地缓存的会话画出来；打开页面时不必等鉴权和接口，先有内容可看。
+  function paintCachedHistory(messagesEl, cachedMsgs) {
+    S.messages = cachedMsgs;
+    S._pendingLocalMsgs = cachedMsgs.filter(function(m) { return m && m._pendingSync === true; });
+    messagesEl.innerHTML = '';
+    messagesEl.__xtjAiCardIds = {};
+    var frag = document.createDocumentFragment();
+    var cachedNodes = [];
+    cachedMsgs.forEach(function(m, index) {
+      var cachedNode = historyTurn(m, messagesEl, index, cachedMsgs.length);
+      cachedNodes.push(cachedNode);
+      frag.appendChild(cachedNode);
+    });
+    messagesEl.appendChild(frag);
+    renderAiHistoryCards(messagesEl, cachedMsgs, cachedNodes, []);
+    messagesEl.__xtjCachePainted = cachedMsgs;
+    S.autoScrollPinned = true;
+    scrollToBottom(messagesEl, true);
+  }
+
   async function loadHistory(messagesEl, before) {
     if (S.loading || S.loadingMore) return;
     if (before) S.loadingMore = true;
@@ -13009,30 +13088,17 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       
       if (!S.sending && cachedMsgs && Array.isArray(cachedMsgs) && cachedMsgs.length > 0) {
         hasCache = true;
-        S.messages = cachedMsgs;
-        S._pendingLocalMsgs = cachedMsgs.filter(function(m) { return m && m._pendingSync === true; });
-        messagesEl.innerHTML = '';
-        messagesEl.__xtjAiCardIds = {};
-        var frag = document.createDocumentFragment();
-        var cachedNodes = [];
-        cachedMsgs.forEach(function(m,index) {
-          var cachedNode = historyTurn(m,messagesEl,index,cachedMsgs.length);
-          cachedNodes.push(cachedNode);
-          frag.appendChild(cachedNode);
-        });
-        messagesEl.appendChild(frag);
-        renderAiHistoryCards(messagesEl, cachedMsgs, cachedNodes, []);
-        S.autoScrollPinned = true;
-        scrollToBottom(messagesEl, true);
+        // 打开页面时已经同步画过同一份缓存，就不再整页重画（避免鉴权之后闪一下）。
+        var alreadyPainted = !!(messagesEl.__xtjCachePainted && messagesEl.querySelector('.ai-msg'));
+        messagesEl.__xtjCachePainted = null;
+        if (!alreadyPainted) paintCachedHistory(messagesEl, cachedMsgs);
       } else if (!S.sending && (!messagesEl.children.length
           || messagesEl.querySelector('.ai-history-unavailable')
           // renderAiRoot starts with the welcome empty-state, so checking only
           // children.length skipped the loading indicator on every cold open.
           || messagesEl.querySelector('.ai-chat-empty'))) {
         messagesEl.innerHTML = '';
-        var loadingState = buildEmptyState('正在加载聊天记录…');
-        loadingState.classList.add('ai-history-loading');
-        messagesEl.appendChild(loadingState);
+        messagesEl.appendChild(buildHistoryLoadingState());
       }
     }
 
@@ -13042,14 +13108,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (before) qs += '&before=' + encodeURIComponent(before);
       qs += '&mode=normal';
       // 历史接口偶发慢/弱网：超时放宽并做一次静默重试，减少「缓存记录，刷新失败」误报
-      var r = await apiRequest('GET', '/chat/history' + qs, null, { timeoutMs: 15000, abortController: loadController });
+      var r = await apiRequest('GET', '/chat/history' + qs, null, { timeoutMs: 10000, abortController: loadController });
       if ((!r.ok || !r.data) && !before && r && r.error_code !== 'aborted') {
         var canRetry = r.retryable !== false && (r.status === 0 || r.error_code === 'timeout' || r.error_code === 'network_error' || (r.status >= 500));
         if (canRetry && requestId === S.historyRequestId) {
           try {
             await new Promise(function(resolve) { setTimeout(resolve, 400); });
             if (requestId === S.historyRequestId && (!loadController || !loadController.signal || !loadController.signal.aborted)) {
-              r = await apiRequest('GET', '/chat/history' + qs, null, { timeoutMs: 18000, abortController: loadController });
+              r = await apiRequest('GET', '/chat/history' + qs, null, { timeoutMs: 12000, abortController: loadController });
             }
           } catch (eRetry) {}
         }
@@ -13763,9 +13829,14 @@ function showChatMessages() {
     var delBtn = el('button', {
       type: 'button',
       class: 'ai-chat-del-btn',
+      role: 'menuitem',
       'aria-label': '删除当前对话',
       title: '删除当前对话'
-    }, '删除');
+    });
+    var delIcon = el('span', { class: 'ai-chat-more-icon', 'aria-hidden': 'true' });
+    delIcon.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l.8 12.5h9.4L17.5 7M10 11v5M14 11v5"/></svg>';
+    delBtn.appendChild(delIcon);
+    delBtn.appendChild(el('span', { class: 'ai-chat-more-label', text: '删除这段对话' }));
     delBtn.addEventListener('click', async function(ev) {
       ev.preventDefault();
       ev.stopPropagation();
@@ -13811,7 +13882,7 @@ function showChatMessages() {
           // 开启新对话
           recreateSeq = S._newChatRequestId = (S._newChatRequestId || 0) + 1;
           S._newChatBusy = true;
-          var r2 = await apiRequest('POST', '/chat/new', null);
+          var r2 = await apiRequest('POST', '/chat/new', null, { timeoutMs: 10000 });
           if (!currentDelete()) return;
           if (r2 && r2.ok && r2.data && r2.data.conversation_id) {
             S.conversationId = r2.data.conversation_id;
@@ -13850,7 +13921,8 @@ function showChatMessages() {
       if (S._voiceConversation) S._voiceConversation.setEnabled(false);
       ev.preventDefault();
       ev.stopPropagation();
-      if (S.sending) { notify('正在回复中，请稍候再新建对话'); return; }
+      // 回复进行中点「新对话」：像 ChatGPT / Claude 一样先停掉这条回复（已写出的部分保留在旧对话里），再新建。
+      if (S.sending) interruptCurrentChat();
       // 访客没有服务端会话，直接在本地清空上下文与附件，不请求 /chat/new。
       if (!readUserName()) {
         abortCurrentRequest('chat');
@@ -13882,18 +13954,28 @@ function showChatMessages() {
       // ★ 2026-09-24 修复（课题①「新对话点不动/有延迟」）：
       //   旧实现只有 S.sending 守卫，点击后要等 /chat/new 网络往返才有视觉变化，
       //   期间按钮无 loading 态、无并发锁，用户重复点击会并发创建多个会话。
-      if (S._newChatBusy) return; // 并发锁：忽略重复点击
+      // 并发锁：已有一次创建在途时不再重复请求，但要告诉用户它还在进行，而不是点了没反应。
+      if (S._newChatBusy) { notify('正在创建新对话…'); return; }
+      // 当前已经是一段空的新对话：不再向服务器反复新建空对话（屏幕上也看不出变化），只提示并聚焦输入框。
+      if (!S.loading && S.conversationId && !(S.messages && S.messages.length) && S.messagesEl &&
+          !S.messagesEl.querySelector('.ai-msg, .ai-history-loading, .ai-history-unavailable') &&
+          !(S.inputEl && String(S.inputEl.value || '').trim()) && !(_aiChatFiles && _aiChatFiles.length)) {
+        notify('当前已经是新对话');
+        try { if (S.inputEl) S.inputEl.focus(); } catch (eFocusNew) {}
+        return;
+      }
       S._newChatBusy = true;
       var createSeq = S._newChatRequestId = (S._newChatRequestId || 0) + 1;
       var createLifecycle = S.lifecycleId, createCid = S.conversationId;
       var createOwner = window.currentUser || '', createEpoch = readAiAuthEpoch();
       function currentCreate() { return createSeq === S._newChatRequestId && S.active && createLifecycle === S.lifecycleId &&
         createCid === S.conversationId && createOwner === (window.currentUser || '') && createEpoch === readAiAuthEpoch(); }
-      var _prevLabel = newBtn.textContent;
-      newBtn.disabled = true;
-      newBtn.textContent = '创建中';
+      // 顶栏是纯图标，文字看不见：用旋转的加载图标表示「创建中」，并且不禁用按钮，
+      // 这样慢网时再点还能得到「正在创建」的提示，而不是毫无反应。
+      newBtn.classList.add('is-busy');
+      newBtn.setAttribute('aria-busy', 'true');
       try {
-        var r = await apiRequest('POST', '/chat/new', null);
+        var r = await apiRequest('POST', '/chat/new', null, { timeoutMs: 10000 });
         if (!currentCreate()) return;
         if (r && r.ok && r.data && r.data.conversation_id) {
           if (S._switchAiComposerDraft) S._switchAiComposerDraft(r.data.conversation_id);
@@ -13927,6 +14009,8 @@ function showChatMessages() {
             if (typeof histBtn !== 'undefined' && histBtn) syncAiHeaderButtons(histBtn, newBtn);
           }
           notify('已开始新对话，旧对话仍保留在历史中');
+        } else if (r && r.error_code === 'timeout') {
+          notify('网络较慢，创建新对话超时，请再点一次');
         } else {
           notify(describeError(r, '创建新对话失败'));
         }
@@ -13934,20 +14018,66 @@ function showChatMessages() {
         if (currentCreate()) notify('创建新对话失败，请检查网络后重试');
       } finally {
         if (createSeq === S._newChatRequestId) S._newChatBusy = false;
-        if (newBtn.isConnected) { newBtn.disabled = false; newBtn.textContent = _prevLabel; }
+        if (newBtn.isConnected) { newBtn.classList.remove('is-busy'); newBtn.removeAttribute('aria-busy'); }
       }
     });
     header.appendChild(newBtn);
-    header.insertBefore(delBtn, newBtn);
+    // 删除只留在「⋯」菜单里：顶栏不再放红色删除键，避免和「新对话」挤在一起误触。
+    var moreBtn = el('button', {
+      type: 'button', class: 'ai-chat-more-btn', 'aria-label': '更多操作', title: '更多',
+      'aria-haspopup': 'menu', 'aria-expanded': 'false'
+    });
+    var moreMenu = el('div', { class: 'ai-chat-more-menu', role: 'menu', 'aria-label': '更多操作', hidden: 'hidden' });
+    moreMenu.appendChild(delBtn);
+    var moreAbort = null;
+    function closeMoreMenu(restoreFocus) {
+      if (moreAbort) { try { moreAbort.abort(); } catch (eMoreAbort) {} moreAbort = null; }
+      moreMenu.hidden = true;
+      moreBtn.setAttribute('aria-expanded', 'false');
+      if (restoreFocus && moreBtn.isConnected) { try { moreBtn.focus(); } catch (eMoreFocus) {} }
+    }
+    function openMoreMenu() {
+      moreMenu.style.top = (header.offsetTop + header.offsetHeight + 6) + 'px';
+      moreMenu.hidden = false;
+      moreBtn.setAttribute('aria-expanded', 'true');
+      moreAbort = new AbortController();
+      var sig = moreAbort.signal;
+      document.addEventListener('pointerdown', function(pe) {
+        if (!moreMenu.contains(pe.target) && !moreBtn.contains(pe.target)) closeMoreMenu(false);
+      }, { signal: sig, capture: true });
+      document.addEventListener('keydown', function(ke) {
+        if (ke.key === 'Escape') { ke.stopPropagation(); closeMoreMenu(true); }
+      }, { signal: sig, capture: true });
+      try { delBtn.focus({ preventScroll: true }); } catch (eDelFocus) {}
+    }
+    moreBtn.addEventListener('click', function(ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (moreMenu.hidden) openMoreMenu(); else closeMoreMenu(true);
+    });
+    delBtn.addEventListener('click', function() { closeMoreMenu(false); });
+    header.appendChild(moreBtn);
     if (S.headerButtonsCleanup) {
       try { S.headerButtonsCleanup(); } catch (eCleanup) {}
     }
     S.headerButtonsCleanup = bindAiHeaderButtons(histBtn, newBtn);
     root.appendChild(header);
+    // 菜单放在根容器而不是顶栏里：顶栏为窄屏横向滚动设了 overflow，会把向下弹出的菜单裁掉。
+    root.appendChild(moreMenu);
 
     var messagesEl = el('div', { class: 'ai-chat-messages', id: 'aiChatMessagesArea' });
     var userReadingHistory=false,lastReadTop=0,lastReadHeight=0,touchReadY=null;
     function markReadingHistory(){userReadingHistory=true;S.autoScrollPinned=false;_aiUserPinnedUp=true;}
+    // 点搜索行里的搜索词（或标题）也能展开/收起搜到的网页，不必瞄准条数文字。
+    messagesEl.addEventListener('click', function(event) {
+      var target = event.target;
+      if (!target || !target.closest) return;
+      var part = target.closest('.ai-process-rail .ai-tool-step-detail, .ai-process-rail .ai-tool-step-title');
+      if (!part) return;
+      var stepBody = part.closest('.ai-tool-step-body');
+      var toggle = stepBody && stepBody.querySelector(':scope > .ai-tool-inline-result:not([hidden]) > button.ai-tool-result-card-title');
+      if (toggle) toggle.click();
+    });
     messagesEl.addEventListener('wheel',function(event){if(event.deltaY<0)markReadingHistory();},{passive:true});
     messagesEl.addEventListener('touchstart',function(event){touchReadY=event.touches[0]?event.touches[0].clientY:null;},{passive:true});
     messagesEl.addEventListener('touchmove',function(event){if(touchReadY!==null&&event.touches[0]&&event.touches[0].clientY>touchReadY+4)markReadingHistory();},{passive:true});
@@ -15937,9 +16067,10 @@ function showChatMessages() {
     startQuotaPolling();
     if (readUserName() && r.messagesEl) {
       r.messagesEl.innerHTML = '';
-      var openingHistory = buildEmptyState('正在加载聊天记录…');
-      openingHistory.classList.add('ai-history-loading');
-      r.messagesEl.appendChild(openingHistory);
+      var openingCache = null;
+      try { openingCache = getAiHistoryCache(S.conversationId); } catch (eOpenCache) {}
+      if (!S.sending && openingCache && Array.isArray(openingCache.messages) && openingCache.messages.length) paintCachedHistory(r.messagesEl, openingCache.messages);
+      else r.messagesEl.appendChild(buildHistoryLoadingState());
     }
 
     if (S.viewportCleanup) {
