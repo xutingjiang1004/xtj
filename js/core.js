@@ -2748,7 +2748,9 @@ function isAdmin() {
                 function done(value) { if (!settled) { settled = true; clearInterval(timer); resolve(value); } }
                 window.showConfirm(title, message, okText, function () { done(true); });
                 var timer = setInterval(function () {
-                    if (!overlay.classList.contains('active')) setTimeout(function () { done(false); }, 0);
+                    // execConfirm 先摘掉 active、播放关闭动画，动画结束才回调确认；此时 closing 仍在，
+                    // 不能当作取消，否则点「删除」会在回调之前被判成 false。
+                    if (!overlay.classList.contains('active') && !overlay.classList.contains('closing')) setTimeout(function () { done(false); }, 0);
                 }, 120);
             });
         };
@@ -8518,6 +8520,8 @@ function renderProfileActivityList(kind) {
 
             function formatRelativeTime(dateStr) {
                 var d = window.safeParseDate ? window.safeParseDate(dateStr) : new Date(dateStr);
+                // 坏数据不能显示成字面的 "Invalid Date"。
+                if (!d || !Number.isFinite(d.getTime())) return '';
                 var diff = Math.floor((Date.now() - d.getTime()) / 1000);
                 if (diff < 60) return "刚刚";
                 if (diff < 3600) return Math.floor(diff / 60) + "分钟前";
@@ -8528,7 +8532,8 @@ function renderProfileActivityList(kind) {
 
             function formatPostTime(post) {
                 var normalized = normalizePostForRender(post);
-                var time = normalized.created_at ? window.safeParseDate(normalized.created_at).toLocaleString() : "";
+                var parsedTime = normalized.created_at ? window.safeParseDate(normalized.created_at) : null;
+                var time = parsedTime && Number.isFinite(parsedTime.getTime()) ? parsedTime.toLocaleString() : "";
                 var editedAt = normalized._contentMeta && normalized._contentMeta.edited_at ? normalized._contentMeta.edited_at : null;
                 if (editedAt) return time + " (已编辑)";
                 return time;
@@ -9994,6 +9999,9 @@ function renderProfileActivityList(kind) {
                     return getFeedRecordKey(comment, [comment && comment.post_id, comment && comment.user_name, comment && comment.created_at, comment && comment.content]);
                 });
                 feedAllLikes = mergeFeedRecords((feedAllLikes || []).filter(function(like) { return like && visibleIds.has(String(like.post_id)); }), relationsCurrent ? (chunk.likes || []).filter(function(like) { return like && visibleIds.has(String(like.post_id)); }) : [], function(like) {
+                    // 一个用户对一个帖子只会有一条点赞（数据库唯一约束）。本地乐观记录没有 id、服务端记录有 id，
+                    // 若按 id 作键，刷新后同一个赞会以两条记录并存，缺少 like_count 的回退路径就会多算一个。
+                    if (like && like.post_id != null && like.user_name) return 'like|' + like.post_id + '|' + like.user_name;
                     return getFeedRecordKey(like, [like && like.post_id, like && like.user_name, like && like.created_at]);
                 });
                 var pagePostIds = (chunk.postIds || []).filter(function(postId) { return visibleIds.has(String(postId)); });

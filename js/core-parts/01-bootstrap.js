@@ -2742,7 +2742,9 @@ function isAdmin() {
                 function done(value) { if (!settled) { settled = true; clearInterval(timer); resolve(value); } }
                 window.showConfirm(title, message, okText, function () { done(true); });
                 var timer = setInterval(function () {
-                    if (!overlay.classList.contains('active')) setTimeout(function () { done(false); }, 0);
+                    // execConfirm 先摘掉 active、播放关闭动画，动画结束才回调确认；此时 closing 仍在，
+                    // 不能当作取消，否则点「删除」会在回调之前被判成 false。
+                    if (!overlay.classList.contains('active') && !overlay.classList.contains('closing')) setTimeout(function () { done(false); }, 0);
                 }, 120);
             });
         };
