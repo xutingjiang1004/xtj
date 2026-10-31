@@ -85,3 +85,16 @@ test('queued text is put back into its own draft when the user switches conversa
   assert.equal(calls, 1);
   assert.equal(await p.evaluate(() => document.getElementById('dockChatMessages').textContent.includes('没来得及发的')), false);
 });
+
+test('marking more than 200 unread messages read is sent in batches of 200', { timeout: 30000 }, async t => {
+  const f = await postBrowserFixture({ counts: [1], publicPosts: true });
+  t.after(() => f.close());
+  const p = f.page;
+  p.setDefaultTimeout(7000);
+  await p.waitForFunction(() => window._xtjAuthState === 'authenticated');
+  const batches = [];
+  await p.route('**/api/dm/read', route => { batches.push(route.request().postDataJSON().message_ids.length); route.fulfill({ json: { ok: true, data: [] } }); });
+  await p.route('**/api/chat/**', route => route.fulfill({ json: { ok: true, friends: [], items: [], users: [], state: { status: 'ok', draft_revision: 0 } } }));
+  await p.evaluate(() => window.markMessagesRead('bob', [], Array.from({ length: 450 }, (_, i) => ({ id: '00000000-0000-4000-8000-' + String(i).padStart(12, '0') }))));
+  assert.deepEqual(batches, [200, 200, 50]);
+});

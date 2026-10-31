@@ -32,3 +32,19 @@ test('chat photos show a sweep placeholder until they finish downloading', { tim
   assert.equal(await img(2).evaluate(el => getComputedStyle(el).animationName), 'none');
   assert.deepEqual(f.errors, []);
 });
+
+test('a chat photo whose request never returns is retried, then falls back to a button', { timeout: 30000 }, async t => {
+  const f = await postBrowserFixture({ counts: [1], publicPosts: true });
+  t.after(() => f.close());
+  const p = f.page;
+  p.setDefaultTimeout(15000);
+  await p.waitForFunction(() => window._xtjAuthState === 'authenticated');
+  await p.evaluate(() => { window.__xtjChatImageStallMs = 1500; });
+  await p.route('**/api/chat/**', r => r.fulfill({ json: { ok: true, friends: [], items: [], users: [], relationship: { status: 'friends', can_message: true }, state: { status: 'ok', draft_revision: 0 } } }));
+  await p.route('**/api/dm/messages?**', r => r.fulfill({ json: { ok: true, data: [row(1, '/hang-chat.png')], has_more: false } }));
+  let requests = 0;
+  await p.route('**/hang-chat.png*', () => { requests++; });
+  await p.evaluate(() => openChat('bob'));
+  await p.waitForSelector('#dockChatMessages .msg-media-fallback');
+  assert.ok(requests >= 3, 'initial request plus two retries, got ' + requests);
+});
