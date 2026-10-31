@@ -8336,3 +8336,70 @@ body.xtj-research-open #panelAiChat { visibility:hidden!important; pointer-event
    网页搜索仍只显示搜索词（后面跟条数）。 */
 .ai-process-rail .ai-process-timeline .ai-tool-step:not([data-tool-name^="search_"]):not([data-tool-name="tavily_search"]) > .ai-tool-step-body:has(> .ai-tool-step-detail) > .ai-tool-step-title,
 .ai-process-rail .ai-tool-step:not([data-tool-name^="search_"]):not([data-tool-name="tavily_search"]) > .ai-tool-step-body:has(> .ai-tool-step-detail) > .ai-tool-step-title { display: inline; }
+
+/* 2026-10-31：「已停止，可点击继续」与「继续生成」按钮和网站其余按钮一致：
+   圆角矩形（不是胶囊）、薄荷底、深绿字，带一个续写图标；提示文字用柔和的灰绿，不再是报错红。 */
+html body .ai-chat-root .ai-msg .ai-stop-note {
+  margin: 8px 0 0;
+  padding: 0;
+  background: none;
+  color: #6e8a84;
+  font-size: 12.5px;
+  line-height: 1.5;
+  text-align: left;
+}
+html[data-theme="dark"] body .ai-chat-root .ai-msg .ai-stop-note { color: #8eaaa0; }
+html body .ai-chat-root .ai-msg button.ai-continue-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  width: auto;
+  min-height: 36px;
+  margin-top: 8px;
+  padding: 0 14px 0 12px;
+  border: 1px solid rgba(14, 122, 91, .28);
+  border-radius: 12px;
+  background: #ddf2e8;
+  background-image: none;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  color: #0e7a5b;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0;
+  cursor: pointer;
+  transform: none;
+}
+html body .ai-chat-root .ai-msg button.ai-continue-btn::before {
+  content: "";
+  width: 16px;
+  height: 16px;
+  flex: none;
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 11a8 8 0 1 0-2 5.3'/%3E%3Cpath d='M20 5v6h-6'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 11a8 8 0 1 0-2 5.3'/%3E%3Cpath d='M20 5v6h-6'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+html body .ai-chat-root .ai-msg button.ai-continue-btn:hover,
+html body .ai-chat-root .ai-msg button.ai-continue-btn:focus-visible { background: #cdebdd; border-color: rgba(14, 122, 91, .45); color: #0b6a4f; }
+html body .ai-chat-root .ai-msg button.ai-continue-btn:focus-visible { outline: 2px solid rgba(14, 122, 91, .45); outline-offset: 2px; }
+html body .ai-chat-root .ai-msg button.ai-continue-btn:active { background: #bfe3d1; transform: scale(.98); }
+html body .ai-chat-root .ai-msg button.ai-continue-btn:disabled { opacity: .6; cursor: wait; transform: none; }
+html[data-theme="dark"] body .ai-chat-root .ai-msg button.ai-continue-btn { background: rgba(79, 209, 165, .14); border-color: rgba(79, 209, 165, .3); color: #4fd1a5; }
+html[data-theme="dark"] body .ai-chat-root .ai-msg button.ai-continue-btn:hover,
+html[data-theme="dark"] body .ai-chat-root .ai-msg button.ai-continue-btn:focus-visible { background: rgba(79, 209, 165, .22); color: #7fe0bd; }
+html[data-theme="dark"] body .ai-chat-root .ai-msg button.ai-continue-btn:active { background: rgba(79, 209, 165, .3); }
+/* 被中断、没有任何正文的回复不留下空气泡。 */
+.ai-msg.assistant:not(.generating) .ai-msg-bubble:empty { display: none; }
+
+/* 2026-10-31：失败的工具行在时间轴里不再是一块红色方块盖住图标，改成红色的警示三角。 */
+.ai-process-rail .ai-tool-round-list .ai-tool-step.is-error[data-tool-name]::after,
+.ai-process-rail .ai-tool-step.is-error[data-tool-name]::after,
+.ai-process-rail .ai-tool-step.is-error::after {
+  background-color: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23c44b5a' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'><path d='M12 3.5 21.5 20h-19z'/><path d='M12 10v4.5M12 17.4v.1'/></svg>");
+}

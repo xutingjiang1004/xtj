@@ -186,3 +186,15 @@ test('site search results collapse into one row with a count and expand on click
   assert.deepEqual(f.errors,[]);
  }finally{await f.close();}
 });
+
+test('interrupting a reply with a new message leaves no empty bubble, and the continue button is a rounded rectangle',{timeout:45000},async()=>{
+ const f=await aiPolishFixture(),p=f.page;
+ try{
+  await p.locator('#aiChatMsgInput').fill('泰勒最新消息');await p.locator('#aiChatSendBtn').click();await p.waitForFunction(()=>aiPolish.streams.length===1);
+  await emit(p,{type:'reasoning_start'});await emit(p,{type:'reasoning',text:'先搜索。'});await emit(p,{type:'content',text:'我搜一下。'});
+  await emit(p,{type:'tool_calls',tools:[{id:'s1',name:'search_web',args:{query:'Taylor Swift news'}}]});await p.waitForTimeout(300);
+  await p.locator('#aiChatMsgInput').fill('换个问题');await p.locator('#aiChatSendBtn').click();await p.waitForSelector('.ai-msg.assistant .ai-continue-btn');
+  const state=await p.evaluate(()=>{const n=document.querySelector('.ai-msg.assistant'),b=n.querySelector('.ai-msg-bubble:not(.ai-content-segment)'),btn=n.querySelector('.ai-continue-btn'),cs=getComputedStyle(btn),icon=getComputedStyle(n.querySelector('.ai-tool-step.is-error'),'::after');return{bubble:!!b&&getComputedStyle(b).display!=='none'&&b.getBoundingClientRect().height>0,radius:cs.borderTopLeftRadius,height:btn.getBoundingClientRect().height,iconBg:icon.backgroundColor};});
+  assert.equal(state.bubble,false);assert.equal(state.radius,'12px');assert.ok(state.height>=36);assert.equal(state.iconBg,'rgba(0, 0, 0, 0)');assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});

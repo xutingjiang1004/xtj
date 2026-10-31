@@ -10437,6 +10437,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var hasAnswer = !!(bubbleText && bubbleText !== '正在回复…' && bubbleText !== '正在思考中');
       if (!hasThinking && !hasSegment && !hasAnswer) return false;
       assistantNode.classList.remove('generating');
+      // 中断时还没有任何正文：不要留下一个空白气泡（只剩思考、工具时间轴和「已停止」提示）。
+      if (assistantBubble && !hasAnswer) {
+        assistantBubble.textContent = '';
+        assistantBubble.style.display = 'none';
+        assistantBubble.classList.remove('ai-typing', 'ai-reply-pending', 'ai-streaming-soft', 'ai-flow-in');
+      }
       var earlyLabel = earlyThinking && earlyThinking.querySelector('.ai-thinking-label');
       if (earlyLabel && /^正在思考/.test(String(earlyLabel.textContent || ''))) earlyLabel.textContent = '已停止';
       if (earlyThinking) { try { setThinkingActive(earlyThinking, false); } catch (eAct) {} }
@@ -11247,6 +11253,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           assistantNode.querySelector('.ai-reasoning-segment, .ai-content-segment, .ai-process-timeline, .ai-process-rail, .ai-tool-step'));
         if (keptVisible) {
           finishAiMessage(assistantNode, aiContent, aiReasoning, { interrupted: true });
+          // 被打断时还没有任何正文：把空气泡藏起来，只留思考、工具时间轴和「已停止」提示。
+          try {
+            var interruptedBubble = assistantNode.querySelector('.ai-msg-bubble:not(.ai-content-segment)');
+            if (interruptedBubble && !String(interruptedBubble.textContent || '').trim() && !interruptedBubble.querySelector('img, table, pre')) {
+              interruptedBubble.style.display = 'none';
+              interruptedBubble.classList.remove('ai-typing', 'ai-reply-pending', 'ai-streaming-soft', 'ai-flow-in');
+            }
+          } catch (eEmptyBubble) {}
           appendStoppedNote(assistantNode, stopNoteKind);
           var liveThinkLabel = assistantNode.querySelector('.ai-thinking-label');
           if (liveThinkLabel && /^正在思考/.test(String(liveThinkLabel.textContent || ''))) {
