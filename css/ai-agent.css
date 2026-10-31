@@ -8129,19 +8129,21 @@ html.xtj-reduce-motion .ai-copy-menu .ai-reply-menu-panel { animation: none; }
 .ai-process-rail .ai-process-timeline .ai-tool-inline-result > button.ai-tool-result-card-title,
 .ai-process-rail .ai-process-timeline .ai-tool-data-details > summary { grid-column: auto; }
 .ai-process-rail .ai-process-timeline .ai-tool-step-body:has(> .ai-tool-step-detail) > .ai-tool-step-title { display: none; }
+/* 2026-10-31：搜到的条数直接跟在搜索词后面常驻显示，不用展开才看到；去掉右边的小三角，
+   点搜索词或条数都能展开结果（点搜索词由 messagesEl 上的委托处理）。 */
 .ai-process-rail .ai-process-timeline .ai-tool-inline-result > button.ai-tool-result-card-title {
   order: 2;
-  font-size: 0;
-  color: transparent;
-}
-.ai-process-rail .ai-process-timeline .ai-tool-inline-result > button.ai-tool-result-card-title .ai-search-toggle {
-  font-size: 14px;
+  font-size: 12.5px;
   color: #6e8a84;
 }
-.ai-process-rail .ai-process-timeline .ai-tool-inline-result > button.ai-tool-result-card-title[aria-expanded="true"] {
-  font-size: 12.5px;
-  color: #5d8f80;
-}
+.ai-process-rail .ai-process-timeline .ai-tool-inline-result > button.ai-tool-result-card-title .ai-search-toggle { display: none; }
+.ai-process-rail .ai-process-timeline .ai-tool-inline-result > button.ai-tool-result-card-title[aria-expanded="true"] { color: #5d8f80; }
+.ai-process-rail .ai-tool-step-body:has(> .ai-tool-inline-result:not([hidden])) > .ai-tool-step-detail,
+.ai-process-rail .ai-tool-step-body:has(> .ai-tool-inline-result:not([hidden])) > .ai-tool-step-title { cursor: pointer; }
+[data-theme="dark"] .ai-process-rail .ai-process-timeline .ai-tool-inline-result > button.ai-tool-result-card-title { color: #8eaaa0; }
+[data-theme="dark"] .ai-process-rail .ai-process-timeline .ai-tool-inline-result > button.ai-tool-result-card-title[aria-expanded="true"] { color: #a9d6c4; }
+/* 时间轴里已经有搜索行（带条数）时，不再在正文上下方重复一条「已联网搜索 · N 条 · 展开」。 */
+.ai-msg:has(.ai-process-rail .ai-tool-step[data-tool-name="search_web"], .ai-process-rail .ai-tool-step[data-tool-name="tavily_search"], .ai-process-rail .ai-tool-step[data-tool-name="search_social"]) > .ai-search-status { display: none; }
 .ai-process-timeline .ai-tool-inline-result > button.ai-tool-result-card-title::before,
 .ai-process-timeline .ai-tool-inline-result > button.ai-tool-result-card-title::after { content:none!important; }
 .ai-process-timeline .ai-search-toggle { margin-left:4px; }

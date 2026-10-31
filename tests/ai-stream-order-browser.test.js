@@ -93,3 +93,24 @@ test('new chat during a streaming reply stops that reply and starts the new conv
   assert.equal(await p.locator('#aiChatSendBtn').isDisabled(),false);assert.deepEqual(f.errors,[]);
  }finally{await f.close();}
 });
+
+test('search rows show the result count inline without an arrow, the query toggles the results, and the summary bar is hidden',{timeout:45000},async()=>{
+ const f=await aiPolishFixture(),p=f.page;
+ try{
+  await p.locator('#aiChatMsgInput').fill('搜索');await p.locator('#aiChatSendBtn').click();await p.waitForFunction(()=>aiPolish.streams.length===1);
+  await emit(p,{type:'reasoning_start'});await emit(p,{type:'reasoning',text:'先搜索。'});await emit(p,{type:'content',text:'我去搜一下。'});
+  await emit(p,{type:'tool_calls',tools:[{id:'s1',name:'search_web',args:{query:'泰勒 最新消息'}}]});
+  const items=Array.from({length:20},(_,i)=>({title:'标题'+i,url:'https://example.com/'+i,snippet:'摘要'+i}));
+  await emit(p,{type:'tool_result',call_id:'s1',tool_name:'search_web',success:true,count:20,items});
+  await emit(p,{type:'search',count:20,query:'泰勒',results:items});await emit(p,{type:'content',text:'搜完了。'});
+  await emit(p,{type:'done',content:'我去搜一下。搜完了。',complete:true,saved:true,conversation_id:'SRCH01',thinking_elapsed_ms:2000,thinking_mode:'low'});
+  await p.waitForFunction(()=>{const n=document.querySelector('.ai-msg.assistant');return n&&!n.classList.contains('generating');});
+  await p.locator('.ai-thinking-toggle').first().click();await p.waitForSelector('.ai-process-rail .ai-tool-result-card-title');
+  const state=()=>p.evaluate(()=>{const n=document.querySelector('.ai-msg.assistant'),b=n.querySelector('.ai-tool-result-card-title'),bar=n.querySelector('.ai-search-status');return{count:getComputedStyle(b).fontSize,arrow:getComputedStyle(b.querySelector('.ai-search-toggle')).display,text:b.textContent.replace(/[▸▾]/g,'').trim(),expanded:b.getAttribute('aria-expanded'),bar:bar?getComputedStyle(bar).display:'none',panelVisible:!n.querySelector('.ai-search-detail').hidden};});
+  let s=await state();assert.equal(s.text,'找到 20 个网页');assert.notEqual(s.count,'0px');assert.equal(s.arrow,'none');assert.equal(s.bar,'none');assert.equal(s.expanded,'false');
+  await p.locator('.ai-process-rail .ai-tool-step-detail').first().click();
+  s=await state();assert.equal(s.expanded,'true');assert.equal(s.panelVisible,true);
+  await p.locator('.ai-process-rail .ai-tool-step-detail').first().click();
+  s=await state();assert.equal(s.expanded,'false');assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});

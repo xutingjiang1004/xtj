@@ -14056,6 +14056,16 @@ function showChatMessages() {
     var messagesEl = el('div', { class: 'ai-chat-messages', id: 'aiChatMessagesArea' });
     var userReadingHistory=false,lastReadTop=0,lastReadHeight=0,touchReadY=null;
     function markReadingHistory(){userReadingHistory=true;S.autoScrollPinned=false;_aiUserPinnedUp=true;}
+    // 点搜索行里的搜索词（或标题）也能展开/收起搜到的网页，不必瞄准条数文字。
+    messagesEl.addEventListener('click', function(event) {
+      var target = event.target;
+      if (!target || !target.closest) return;
+      var part = target.closest('.ai-process-rail .ai-tool-step-detail, .ai-process-rail .ai-tool-step-title');
+      if (!part) return;
+      var stepBody = part.closest('.ai-tool-step-body');
+      var toggle = stepBody && stepBody.querySelector(':scope > .ai-tool-inline-result:not([hidden]) > button.ai-tool-result-card-title');
+      if (toggle) toggle.click();
+    });
     messagesEl.addEventListener('wheel',function(event){if(event.deltaY<0)markReadingHistory();},{passive:true});
     messagesEl.addEventListener('touchstart',function(event){touchReadY=event.touches[0]?event.touches[0].clientY:null;},{passive:true});
     messagesEl.addEventListener('touchmove',function(event){if(touchReadY!==null&&event.touches[0]&&event.touches[0].clientY>touchReadY+4)markReadingHistory();},{passive:true});
