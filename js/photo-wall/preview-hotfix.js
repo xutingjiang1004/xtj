@@ -690,8 +690,6 @@
       root.appendChild(toolbar);
     }
     [
-      'ppZoomOutBtn',
-      'ppZoomInBtn',
       'ppDeleteBtn',
       'ppInfoBtn',
       'ppShareBtn',
@@ -702,24 +700,21 @@
         toolbar.appendChild(button);
       }
     });
-    // ★ 修复：隐藏两个不明确的缩放按钮（− / +）——照片在角落里被误认为“不明按钮”，
-    // 缩放仍可通过 双击 / 滚轮 / 双指捏合 使用，工具栏只保留 信息/旋转/分享/删除。
-    //
-    // ★ 2026-09-25 修复（按钮位置错乱 / 隐藏失效）：
-    //   style.css:14051 有一组后置规则
-    //     #photoPreviewOverlay .pp-zoom-btn { … display: flex !important; width:42px !important; … }
-    //   它用 !important 覆盖了这里设置的普通内联 display:none，导致这两个按钮在线上
-    //   始终可见（实测 computed display = flex，而 style.display = none）。
-    //   更糟的是同一文件 7738 行还给了 .pp-zoom-btn { position:absolute; bottom:100px }
-    //   ——于是它们既不隐藏，又被定位到远离底部工具栏的左上角落，正是用户反馈的
-    //   「按钮的位置也不对」。
-    //   这里必须用 setProperty(..., 'important') 才能压过样式表里的 !important。
-    ['ppZoomOutBtn', 'ppZoomInBtn'].forEach(function (id) {
-      var zoomBtn = root.querySelector('#' + id);
+    // 2026-10-31：用户要求把放大／缩小图标放回来（此前为避免「不明按钮」被隐藏）。
+    //   现在它们是右侧的一对 + / −，叠在底部工具栏上方，不再被塞进工具栏，也不会遮住左下角的作者信息。
+    //   必须用 setProperty(..., 'important')：style.css 里还有带 !important 的旧定位规则。
+    [['ppZoomInBtn', 126], ['ppZoomOutBtn', 74]].forEach(function (entry) {
+      var zoomBtn = root.querySelector('#' + entry[0]);
       if (!zoomBtn) return;
-      zoomBtn.style.setProperty('display', 'none', 'important');
-      zoomBtn.setAttribute('aria-hidden', 'true');
-      zoomBtn.setAttribute('tabindex', '-1');
+      if (zoomBtn.parentNode !== root) root.appendChild(zoomBtn);
+      zoomBtn.removeAttribute('aria-hidden');
+      zoomBtn.removeAttribute('tabindex');
+      ['display:flex', 'position:absolute', 'left:auto', 'top:auto', 'margin:0', 'padding:0',
+        'width:44px', 'height:44px', 'min-width:44px', 'min-height:44px', 'border-radius:50%',
+        'align-items:center', 'justify-content:center', 'z-index:46', 'pointer-events:auto',
+        'right:max(14px, env(safe-area-inset-right, 0px))',
+        'bottom:calc(' + entry[1] + 'px + env(safe-area-inset-bottom, 0px))'
+      ].forEach(function (rule) { var i = rule.indexOf(':'); zoomBtn.style.setProperty(rule.slice(0, i), rule.slice(i + 1), 'important'); });
     });
     // ★ 修复：内联固定工具栏/关闭钮/指示器位置——新样式表（photo-preview.css）未加载或
     // 加载失败时，style.css 里的旧版规则会把工具栏挤到错误位置（贴底被裁、关闭钮错位）。
@@ -1537,8 +1532,14 @@
     }
   }
 
+  // Fit is recomputed only when the source, its natural size or the viewport changed; the style observer fires on every
+  // pan/zoom frame and the layout reads below made each of those frames a forced reflow.
+  var fitTick = 0;
   function syncPreviewImageFit(img) {
     var root=overlay(); if (!root || !img || !img.naturalWidth || !img.naturalHeight) return;
+    var fitSig=(img.currentSrc||img.src)+'|'+img.naturalWidth+'x'+img.naturalHeight+'|'+fitTick;
+    if (img.__ppFitSig===fitSig && img.style.getPropertyValue('width') && img.style.getPropertyValue('height')) return;
+    img.__ppFitSig=fitSig;
     var fit=Math.min(root.clientWidth/img.naturalWidth,root.clientHeight/img.naturalHeight);
     var width=(img.naturalWidth*fit)+'px',height=(img.naturalHeight*fit)+'px';
     if(img.style.width!==width)img.style.setProperty('width',width,'important');
@@ -1553,7 +1554,7 @@
       var loader=document.createElement('div'); loader.className='pp-image-loading';
       img.__xtjLoadingElement=loader;
       loader.setAttribute('aria-hidden','true');
-      loader.innerHTML='<svg viewBox="0 0 48 48" fill="none" aria-hidden="true"><path d="M24 36V20"/><path class="pp-leaf pp-leaf-left" d="M24 29C14 29 11 23 12 17C20 17 24 21 24 29Z"/><path class="pp-leaf pp-leaf-right" d="M24 23C24 16 29 12 37 12C37 19 32 24 24 23Z"/><path d="M16 37H32"/></svg><span>正在加载照片…</span>';
+      loader.innerHTML='<span class="pp-sweep"></span>';
       slot.appendChild(loader);
       var delayed = 0;
       loader.hidden = true;
@@ -1575,8 +1576,8 @@
       sync();
     });
   }
-  window.addEventListener('resize',function(){var root=overlay();if(root&&root.classList.contains('active'))root.querySelectorAll('.pp-slide-img').forEach(syncPreviewImageFit);});
-  window.addEventListener('xtj:visual-viewport-change',function(){var root=overlay();if(root&&root.classList.contains('active'))root.querySelectorAll('.pp-slide-img').forEach(syncPreviewImageFit);});
+  window.addEventListener('resize',function(){fitTick++;var root=overlay();if(root&&root.classList.contains('active'))root.querySelectorAll('.pp-slide-img').forEach(syncPreviewImageFit);});
+  window.addEventListener('xtj:visual-viewport-change',function(){fitTick++;var root=overlay();if(root&&root.classList.contains('active'))root.querySelectorAll('.pp-slide-img').forEach(syncPreviewImageFit);});
 
   function afterOpen() {
     clearCloseFallbackTimer();

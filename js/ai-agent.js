@@ -10692,7 +10692,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var answerCommitted = false;
       var answerPromoteTimer = null;
       var contentTruncated = false;
-      var reasoningStarted = false;
+      var reasoningStarted = false, reasoningOpenedLive = false;
       // P5: using assistantNode (single DOM node)
       // P5: using assistantBubble (single DOM node)
       var reasoningContainer = null;
@@ -11037,11 +11037,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             if (railHasSteps) {
               rNode.__processSettled = true;
               rNode.__userCollapsed = !thinkingOnly;
-              // 时间轴在正文之后仍保持展开；收着的只是思考原文。
-              rNode.classList.add('is-rail-open');
-              settledRail.classList.remove('is-folded');
+              // 回复结束：时间轴和思考一起折叠；有工具失败时保持展开，失败明细默认可见。
+              var railKeepOpen = !!(node && node.querySelector('.ai-tool-step.is-error'));
+              rNode.classList.toggle('is-rail-open', railKeepOpen);
+              settledRail.classList.toggle('is-folded', !railKeepOpen);
               var railToggle = rNode.querySelector('.ai-thinking-toggle');
-              if (railToggle) railToggle.setAttribute('aria-expanded', 'true');
+              if (railToggle) railToggle.setAttribute('aria-expanded', railKeepOpen ? 'true' : 'false');
             } else if (settledRail) settledRail.classList.remove('is-folded');
             if (thinkingTimer) {
               thinkingTimer.syncFinal(finalThinkingElapsedMs);
@@ -11065,7 +11066,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (node && _sendThinkingMode !== 'off' && (hasContent || hasSealed)) {
           var provisionalLeft = node.querySelectorAll('.ai-rail-beat.is-provisional');
           for (var pli = 0; pli < provisionalLeft.length; pli++) provisionalLeft[pli].remove();
-          settleRunningProcess();
+          settleRunningProcess(true);
           dropEmptyProcessRail(node);
         }
         
@@ -11270,14 +11271,16 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         }
         return fold;
       }
-      // 正文开始或这一轮结束：思考原文收进顶部，时间轴留在正文上方继续可见。
-      // 时间轴只由用户点「已思考」手动折叠，不再被正文或 done 自动收起。
-      function settleRunningProcess() {
+      // 正文开始：只停掉实时行，思考、过渡句和工具调用继续展开。
+      // 回复结束（final）：思考原文、单句思考和整条时间轴一起折叠成顶部的「已思考」，点开可回看；
+      // 有工具失败时时间轴保持展开，失败明细和重试默认可见。
+      function settleRunningProcess(final) {
         if (_sendThinkingMode === 'off') return;
         var thinking = assistantNode.querySelector('.ai-thinking');
         var rail = assistantNode.querySelector(':scope > .ai-process-rail');
         clearRailLiveLine();
-        // 正文开始或这一轮结束时，把中途点开的单句思考也收回去。
+        if (thinking) thinking.__processSettled = true;
+        if (!final) return;
         if (rail) {
           var openBeats = rail.querySelectorAll('.ai-rail-beat.is-open');
           for (var ob = 0; ob < openBeats.length; ob++) {
@@ -11287,15 +11290,19 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           }
         }
         if (thinking) {
-          thinking.__processSettled = true;
           thinking.__userCollapsed = true;
-          thinking.classList.remove('is-rail-open');
+          setThinkingExpanded(thinking, false, messagesEl);
         }
-        if (rail && rail.querySelector('.ai-rail-beat, .ai-tool-step')) {
-          rail.classList.remove('is-folded');
-          if (thinking) thinking.classList.add('is-rail-open');
+        var railHasSteps = !!(rail && rail.querySelector('.ai-rail-beat, .ai-tool-step'));
+        var keepOpen = railHasSteps && !!assistantNode.querySelector('.ai-tool-step.is-error');
+        if (railHasSteps) {
+          rail.classList.toggle('is-folded', !keepOpen);
+          if (thinking) {
+            thinking.classList.toggle('is-rail-open', keepOpen);
+            var railToggleBtn = thinking.querySelector('.ai-thinking-toggle');
+            if (railToggleBtn) railToggleBtn.setAttribute('aria-expanded', keepOpen ? 'true' : 'false');
+          }
         }
-        if (thinking) setThinkingExpanded(thinking, false, messagesEl);
       }
       function dropEmptyProcessRail(node) {
         var rail = (node || assistantNode) && (node || assistantNode).querySelector(':scope > .ai-process-rail');
@@ -11321,7 +11328,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           assistantBubble.__flowShown = true;
           assistantBubble.classList.add('ai-flow-in');
         }
-        if (contentRenderer) contentRenderer.append(aiContent, evtReceivedAt);
+        if (contentRenderer) {
+          contentRenderer.append(aiContent, evtReceivedAt);
+          // 这段文字已经在时间轴里逐字出现过一次，换到正文气泡时整段直接落下，不再从头重新逐字生长。
+          if (typeof contentRenderer.flush === 'function') contentRenderer.flush();
+        }
       }
       function scheduleAnswerPromote(evtReceivedAt) {
         if (_sendThinkingMode === 'off' || answerCommitted || answerPromoteTimer) return;
@@ -11335,12 +11346,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       function unfoldRunningProcess() {
         var thinking = assistantNode.querySelector('.ai-thinking');
         var rail = assistantNode.querySelector(':scope > .ai-process-rail');
-        if (thinking) {
-          thinking.__processSettled = false;
-          thinking.__userCollapsed = true;
-          thinking.classList.remove('is-rail-open');
-          setThinkingExpanded(thinking, false, messagesEl);
-        }
+        if (thinking) thinking.__processSettled = false;
         if (rail) {
           rail.classList.remove('is-folded');
           if (thinking && rail.querySelector('.ai-rail-beat, .ai-tool-step')) thinking.classList.add('is-rail-open');
@@ -12507,6 +12513,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               ensureThinkingTimer();
             }
             ensureReasoningNode();
+            // 2026-10-31：思考过程一到就直接展开（用户自己收起过的除外），整段回复结束后再和时间轴一起折叠。
+            if (!reasoningOpenedLive && reasoningContainer && reasoningContainer.__userCollapsed !== true) {
+              reasoningOpenedLive = true;
+              setThinkingExpanded(reasoningContainer, true, messagesEl);
+            }
             var body = reasoningSegment();
             if (body) {
               var reasoningHost = body.closest ? body.closest('.ai-thinking-body') : null;
@@ -12590,7 +12601,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
                   // 计时在正文开始时停住，面板保持展开，整段回复完成后再折叠。
                   setThinkingActive(_tn, false);
                   if (reasoningRenderer) { try { reasoningRenderer.flush(); } catch (eRF) {} }
-                  if (_tn.__userCollapsed !== false) setThinkingExpanded(_tn, false, messagesEl);
+                  // 正文开始时不折叠：思考、过渡句、工具调用保持展开，回复结束后再一起折叠。
                 }
               } catch (eThinkSettle) {}
             }
@@ -12610,7 +12621,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             cancelAnswerPromote();
             if (_sendThinkingMode !== 'off') {
               if (!answerCommitted && String(aiContent || '').trim()) promoteRunningAnswer(evtReceivedAt);
-              settleRunningProcess();
+              settleRunningProcess(true);
             }
             if(evt.content && S._newContentPrompt)S._newContentPrompt();
             hideAssistantTyping();

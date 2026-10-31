@@ -3443,3 +3443,25 @@ html body #panelDeepThink .dt-input-bar :is(#dtSendBtn, #dtPauseBtn, #dtFileBtn)
   html body #panelAiChat #aiChatRoot .ai-chat-messages { padding-left: max(20px, calc((100% - 760px) / 2)) !important; padding-right: max(20px, calc((100% - 760px) / 2)) !important; }
   html body #panelAiChat #aiChatRoot > .ai-chat-input-bar { padding-left: max(20px, calc((100% - 780px) / 2)) !important; padding-right: max(20px, calc((100% - 780px) / 2)) !important; }
 }
+
+/* ---- 照片墙: tiles that have no picture yet show a left-to-right light sweep instead of a static dark block ---- */
+html body .photo-wall-item .pw-skeleton { position: absolute; inset: 0; z-index: 1; overflow: hidden; border-radius: inherit; pointer-events: none; background: #e4ece9; }
+html body .photo-wall-item .pw-skeleton::before { content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 70%; background: linear-gradient(100deg, transparent 0%, rgba(255, 255, 255, .78) 50%, transparent 100%); transform: translate3d(-100%, 0, 0); animation: pwSweep 2.2s linear infinite; will-change: transform; }
+html[data-theme="dark"] body .photo-wall-item .pw-skeleton { background: #1e2523; }
+html[data-theme="dark"] body .photo-wall-item .pw-skeleton::before { background: linear-gradient(100deg, transparent 0%, rgba(255, 255, 255, .15) 50%, transparent 100%); }
+/* The right column starts as the left column ends, so the light reads as one sweep across the wall. */
+html body .photo-wall-item:nth-child(even) .pw-skeleton::before { animation-delay: 1.1s; }
+html body .photo-wall-item img.pw-blur-done + .pw-skeleton { display: none; }
+@keyframes pwSweep { 0% { transform: translate3d(-100%, 0, 0); } 45% { transform: translate3d(150%, 0, 0); } 100% { transform: translate3d(150%, 0, 0); } }
+@media (prefers-reduced-motion: reduce) { html body .photo-wall-item .pw-skeleton::before { animation: none; opacity: 0; } }
+
+/* ---- AI chat: no live blur over the streaming text. Every backdrop-filter surface re-blurs the moving text behind it on each frame;
+   the bars get a near-opaque fill instead, which looks the same on the flat page background. ---- */
+html body #panelAiChat, html body #panelDeepThink { --button-glass-blur: none; }
+html body #panelAiChat #aiChatRoot > .ai-chat-header,
+html body #panelAiChat #aiChatRoot > .ai-chat-input-bar { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+html body #panelAiChat #aiChatRoot > .ai-chat-header { background: rgba(255, 255, 255, .94) !important; }
+html body #panelAiChat #aiChatRoot > .ai-chat-input-bar { background: rgba(243, 251, 248, .94) !important; }
+html[data-theme="dark"] body #panelAiChat #aiChatRoot > .ai-chat-header { background: rgba(21, 27, 24, .94) !important; }
+html[data-theme="dark"] body #panelAiChat #aiChatRoot > .ai-chat-input-bar { background: rgba(18, 24, 21, .94) !important; }
+html body #panelAiChat :is(.ai-plus-btn, .ai-context-trigger, .ai-chat-voice, .ai-chat-send, .ai-chat-pause) { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }

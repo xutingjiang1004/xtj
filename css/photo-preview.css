@@ -626,3 +626,25 @@ html[data-xtj-motion="off"] #photoPreviewOverlay .pp-leaf { animation:none; }
   box-shadow: none !important; filter: none !important;
 }
 #photoPreviewOverlay .pp-error-retry:focus-visible { outline: 2px solid #a7d8c6; outline-offset: 2px; }
+
+/* 2026-10-31: zoom +/- are back (a vertical pair above the tool row) and the side arrows get a soft disc so they stay visible on bright photos. */
+html.xtj-photo-preview-ready #photoPreviewOverlay .pp-zoom-btn {
+  background: rgba(0, 0, 0, .38) !important; border: 0 !important; box-shadow: none !important;
+  -webkit-backdrop-filter: none !important; backdrop-filter: none !important; color: #fff !important;
+}
+html.xtj-photo-preview-ready #photoPreviewOverlay .pp-zoom-btn .ui-icon { display: grid; place-items: center; width: 22px; height: 22px; background: none !important; }
+html.xtj-photo-preview-ready #photoPreviewOverlay .pp-zoom-btn svg { width: 22px; height: 22px; }
+html.xtj-photo-preview-ready #photoPreviewOverlay .pp-zoom-btn:active { background: rgba(0, 0, 0, .55) !important; }
+html.xtj-photo-preview-ready #photoPreviewOverlay .pp-nav-arrow { padding: 0 !important; display: flex; align-items: center; justify-content: center; }
+html.xtj-photo-preview-ready #photoPreviewOverlay .pp-nav-arrow svg { flex: 0 0 40px; width: 40px; height: 40px; padding: 6px; box-sizing: border-box; border-radius: 50%; background: rgba(0, 0, 0, .34); }
+@media (prefers-reduced-transparency: reduce) {
+  html.xtj-photo-preview-ready #photoPreviewOverlay .pp-zoom-btn, html.xtj-photo-preview-ready #photoPreviewOverlay .pp-nav-arrow svg { background: rgba(0, 0, 0, .7) !important; }
+}
+
+/* 2026-10-31: the open-photo loader is a left-to-right light sweep (like X's skeletons) instead of the pulsing sprout. */
+#photoPreviewOverlay .pp-image-loading { display: block; overflow: hidden; z-index: 2; color: transparent; font-size: 0; background: rgba(255, 255, 255, .035); }
+#photoPreviewOverlay .pp-image-loading[hidden] { display: none; }
+#photoPreviewOverlay .pp-image-loading svg { display: none; }
+#photoPreviewOverlay .pp-image-loading .pp-sweep { position: absolute; top: 0; bottom: 0; left: 0; width: 60%; background: linear-gradient(100deg, transparent 0%, rgba(255, 255, 255, .16) 50%, transparent 100%); transform: translate3d(-100%, 0, 0); animation: ppSweep 1.3s cubic-bezier(.4, 0, .2, 1) infinite; will-change: transform; }
+@keyframes ppSweep { to { transform: translate3d(190%, 0, 0); } }
+@media (prefers-reduced-motion: reduce) { #photoPreviewOverlay .pp-image-loading .pp-sweep { animation: none; transform: translate3d(30%, 0, 0); opacity: .6; } }

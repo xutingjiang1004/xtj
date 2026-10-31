@@ -844,7 +844,7 @@
             var fullRequestStarted = !1;
             function handleOpenLoad() {
                 if (hasThumb && !fullRequestStarted) return;
-                _._openLoadGen === ee && (cleanupOpenListeners(!0), J.offsetHeight, J.style.opacity = "1", re());
+                _._openLoadGen === ee && (cleanupOpenListeners(!0), J.offsetHeight, J.style.opacity = "1", setTimeout(function() { J.style.backgroundImage = ""; }, 160), re());
             }
             function handleOpenError() {
                 if (hasThumb && !fullRequestStarted) return;
@@ -853,6 +853,7 @@
             _._openLoadGen = ee, _._cleanupOpenListeners && _._cleanupOpenListeners(!0), _._cleanupOpenListeners = cleanupOpenListeners;
             if (J && S && S.imageUrl) {
                 clearPreviewImageLoad(J, !0);
+                J.style.backgroundImage = "";
                 // 清槽会递增图片加载代次；用当前代次绑定本次打开的主图加载。
                 ee = (_._openLoadGen || 0) + 1;
                 _._openLoadGen = ee;
@@ -925,6 +926,8 @@
                             J.addEventListener("load", handleOpenLoad);
                             J.addEventListener("error", handleOpenError);
                             J.style.transition = "none";
+                            // 预览图垫在下面：换源的那一帧如果还没解码完，看到的仍是预览图，不会闪成空白。
+                            if (thumbSrc) { J.style.backgroundImage = "url(" + JSON.stringify(thumbSrc) + ")"; J.style.backgroundSize = "100% 100%"; J.style.backgroundRepeat = "no-repeat"; }
                             J.src = openFullUrl;
                             J.style.opacity = "1";
                             if (J.complete) {
@@ -962,9 +965,21 @@
                             J.naturalWidth > 0 ? handleOpenLoad() : handleOpenError();
                         }
                     };
-                    preImg.src = openFullUrl;
-                    // 若原图已在浏览器缓存中，onload 可能同步触发前就已 complete
-                    if (preImg.complete && preImg.naturalWidth > 0) swapToFull();
+                    // 2026-10-31 先预览、后原图：预览图（约 100KB）和原图（数 MB）同时开始下载时，原图会占满手机带宽，
+                    //   让预览迟迟出不来。预览已在缓存（墙格里加载过）就立刻拉原图；否则等预览到了再拉，最多等 1.5 秒。
+                    var fullStarted = !1;
+                    function startFullLoad() {
+                        if (fullStarted || preDone) return;
+                        fullStarted = !0;
+                        preImg.src = openFullUrl;
+                        // 若原图已在浏览器缓存中，onload 可能同步触发前就已 complete
+                        if (preImg.complete && preImg.naturalWidth > 0) swapToFull();
+                    }
+                    if (J.complete && J.naturalWidth > 0) startFullLoad();
+                    else {
+                        J.addEventListener("load", startFullLoad, { once: !0 });
+                        setTimeout(startFullLoad, 1500);
+                    }
                 } else {
                     J.src = window.XtjPostOriginals ? window.XtjPostOriginals.displayUrl(S.imageUrl) : S.imageUrl;
                     J.addEventListener("load", handleOpenLoad), J.addEventListener("error", handleOpenError), $ = setTimeout(function() {
