@@ -32,7 +32,7 @@ test('history, context, new chat and research header controls stay actionable th
   await p.locator('#aiPlusBtn').click();await p.locator('#aiPlusBtn').click();
   await p.locator('.ai-chat-hist-btn').click();await p.waitForSelector('.ai-conv-page-shell.is-open');await p.locator('.ai-conv-page-close').click();
   await p.locator('.ai-context-trigger').click();await p.locator('body > .ai-context-popup .ai-context-close').click();
-  await p.locator('.ai-chat-new-btn').click();await p.waitForFunction(()=>aiPolish.calls.some(x=>x.path.endsWith('/chat/new')));
+  await p.locator('#aiChatMsgInput').fill('带草稿时新对话要真的新建');await p.locator('.ai-chat-new-btn').click();await p.waitForFunction(()=>aiPolish.calls.some(x=>x.path.endsWith('/chat/new')));
   await p.locator('.ai-deep-think-toggle').click();await p.waitForSelector('#panelDeepThink.active');await p.locator('#dtBackBtn').click();
   await p.waitForSelector('#aiChatMsgInput',{state:'visible'});await p.locator('#aiChatMsgInput').fill('顶栏操作之后仍可输入');assert.equal(await p.locator('#aiChatMsgInput').inputValue(),'顶栏操作之后仍可输入');assert.deepEqual(f.errors,[]);
  }finally{await f.close();}
@@ -112,5 +112,22 @@ test('search rows show the result count inline without an arrow, the query toggl
   s=await state();assert.equal(s.expanded,'true');assert.equal(s.panelVisible,true);
   await p.locator('.ai-process-rail .ai-tool-step-detail').first().click();
   s=await state();assert.equal(s.expanded,'false');assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
+
+test('new chat on an already empty conversation does not create another one, and a slow creation shows a busy state without piling up requests',{timeout:45000},async()=>{
+ const f=await aiPolishFixture(),p=f.page;
+ try{
+  const newCalls=()=>p.evaluate(()=>aiPolish.calls.filter(x=>x.path.endsWith('/chat/new')).length);
+  await p.locator('.ai-chat-new-btn').click();await p.waitForTimeout(300);
+  assert.equal(await newCalls(),0);assert.equal(await p.locator('#aiChatMsgInput').evaluate(n=>n===document.activeElement),true);
+  // slow creation: busy state, extra clicks are acknowledged but do not send more requests
+  await p.evaluate(()=>{const base=window.fetch;window.fetch=async(u,o)=>{if(String(u).includes('/chat/new')){await new Promise(r=>setTimeout(r,1500));}return base(u,o);};});
+  await p.locator('#aiChatMsgInput').fill('草稿');await p.locator('.ai-chat-new-btn').click();
+  await p.waitForSelector('.ai-chat-new-btn.is-busy');
+  await p.locator('.ai-chat-new-btn').click();await p.locator('.ai-chat-new-btn').click();
+  assert.equal(await p.locator('.ai-chat-new-btn').isDisabled(),false);
+  await p.waitForFunction(()=>!document.querySelector('.ai-chat-new-btn.is-busy'));
+  assert.equal(await newCalls(),1);assert.equal(await p.locator('#aiChatMsgInput').inputValue(),'');assert.deepEqual(f.errors,[]);
  }finally{await f.close();}
 });

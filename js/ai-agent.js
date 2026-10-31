@@ -13882,7 +13882,7 @@ function showChatMessages() {
           // 开启新对话
           recreateSeq = S._newChatRequestId = (S._newChatRequestId || 0) + 1;
           S._newChatBusy = true;
-          var r2 = await apiRequest('POST', '/chat/new', null);
+          var r2 = await apiRequest('POST', '/chat/new', null, { timeoutMs: 10000 });
           if (!currentDelete()) return;
           if (r2 && r2.ok && r2.data && r2.data.conversation_id) {
             S.conversationId = r2.data.conversation_id;
@@ -13954,18 +13954,28 @@ function showChatMessages() {
       // ★ 2026-09-24 修复（课题①「新对话点不动/有延迟」）：
       //   旧实现只有 S.sending 守卫，点击后要等 /chat/new 网络往返才有视觉变化，
       //   期间按钮无 loading 态、无并发锁，用户重复点击会并发创建多个会话。
-      if (S._newChatBusy) return; // 并发锁：忽略重复点击
+      // 并发锁：已有一次创建在途时不再重复请求，但要告诉用户它还在进行，而不是点了没反应。
+      if (S._newChatBusy) { notify('正在创建新对话…'); return; }
+      // 当前已经是一段空的新对话：不再向服务器反复新建空对话（屏幕上也看不出变化），只提示并聚焦输入框。
+      if (!S.loading && S.conversationId && !(S.messages && S.messages.length) && S.messagesEl &&
+          !S.messagesEl.querySelector('.ai-msg, .ai-history-loading, .ai-history-unavailable') &&
+          !(S.inputEl && String(S.inputEl.value || '').trim()) && !(_aiChatFiles && _aiChatFiles.length)) {
+        notify('当前已经是新对话');
+        try { if (S.inputEl) S.inputEl.focus(); } catch (eFocusNew) {}
+        return;
+      }
       S._newChatBusy = true;
       var createSeq = S._newChatRequestId = (S._newChatRequestId || 0) + 1;
       var createLifecycle = S.lifecycleId, createCid = S.conversationId;
       var createOwner = window.currentUser || '', createEpoch = readAiAuthEpoch();
       function currentCreate() { return createSeq === S._newChatRequestId && S.active && createLifecycle === S.lifecycleId &&
         createCid === S.conversationId && createOwner === (window.currentUser || '') && createEpoch === readAiAuthEpoch(); }
-      var _prevLabel = newBtn.textContent;
-      newBtn.disabled = true;
-      newBtn.textContent = '创建中';
+      // 顶栏是纯图标，文字看不见：用旋转的加载图标表示「创建中」，并且不禁用按钮，
+      // 这样慢网时再点还能得到「正在创建」的提示，而不是毫无反应。
+      newBtn.classList.add('is-busy');
+      newBtn.setAttribute('aria-busy', 'true');
       try {
-        var r = await apiRequest('POST', '/chat/new', null);
+        var r = await apiRequest('POST', '/chat/new', null, { timeoutMs: 10000 });
         if (!currentCreate()) return;
         if (r && r.ok && r.data && r.data.conversation_id) {
           if (S._switchAiComposerDraft) S._switchAiComposerDraft(r.data.conversation_id);
@@ -13999,6 +14009,8 @@ function showChatMessages() {
             if (typeof histBtn !== 'undefined' && histBtn) syncAiHeaderButtons(histBtn, newBtn);
           }
           notify('已开始新对话，旧对话仍保留在历史中');
+        } else if (r && r.error_code === 'timeout') {
+          notify('网络较慢，创建新对话超时，请再点一次');
         } else {
           notify(describeError(r, '创建新对话失败'));
         }
@@ -14006,7 +14018,7 @@ function showChatMessages() {
         if (currentCreate()) notify('创建新对话失败，请检查网络后重试');
       } finally {
         if (createSeq === S._newChatRequestId) S._newChatBusy = false;
-        if (newBtn.isConnected) { newBtn.disabled = false; newBtn.textContent = _prevLabel; }
+        if (newBtn.isConnected) { newBtn.classList.remove('is-busy'); newBtn.removeAttribute('aria-busy'); }
       }
     });
     header.appendChild(newBtn);

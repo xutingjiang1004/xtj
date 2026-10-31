@@ -73,14 +73,14 @@
     <link rel="preload" as="style" href="css/visual-refinements.min.css?v=3fd6a30cd9" />
     <link rel="preload" as="style" href="css/ui-enhance.min.css?v=140db3ad55" />
     <link rel="stylesheet" href="css/visual-refinements.min.css?v=3fd6a30cd9" media="print" onload="this.media='all'" />
-    <noscript><link rel="stylesheet" href="css/visual-refinements.min.css?v=3fd6a30cd9" /><link rel="stylesheet" href="css/ai-agent.min.css?v=7438939c33" /><link rel="stylesheet" href="css/ui-enhance.min.css?v=140db3ad55" /><link rel="stylesheet" href="css/ui-shell.min.css?v=aa01afe7e5" /></noscript>
+    <noscript><link rel="stylesheet" href="css/visual-refinements.min.css?v=3fd6a30cd9" /><link rel="stylesheet" href="css/ai-agent.min.css?v=7438939c33" /><link rel="stylesheet" href="css/ui-enhance.min.css?v=140db3ad55" /><link rel="stylesheet" href="css/ui-shell.min.css?v=fa7471f7bb" /></noscript>
     <!-- ★ 2026-09-22 响应式修复（补完）：desktop.css 自身首条断点就是 @media (min-width: 768px)，
          只按宽度加载会让「横屏手机」（宽 ≥768、高 ≈390）也套上桌面两列栅格，与 ui-shell.css 侧
          已加的 min-height:480px 门禁不一致（会出现"桌面栅格 + 移动外壳"的混合布局）。
          故加载条件补上同一高度门禁，让横屏手机真正落回移动布局。 -->
     <link rel="stylesheet" media="(min-width: 768px) and (min-height: 480px)" href="css/desktop.min.css?v=d872211228" />
     <link rel="stylesheet" href="css/ui-enhance.min.css?v=140db3ad55" media="print" onload="this.media='all'">
-    <link rel="stylesheet" href="css/ui-shell.min.css?v=aa01afe7e5">
+    <link rel="stylesheet" href="css/ui-shell.min.css?v=fa7471f7bb">
     <link rel="stylesheet" href="css/post-feed.min.css?v=e7b8a22594">
     <link rel="stylesheet" href="css/profile-settings.min.css?v=49f1fd0516">
     <link rel="stylesheet" href="css/author-posts.min.css?v=9d1a7a9bb8">
@@ -93,7 +93,7 @@
     <!-- 小猫 AI 模块按需加载，但实测它会被首屏图片请求挤在连接队列里几十秒，
          用户点开只看到「正在加载 AI 模块」且无法返回。这里在第一波就把它取下来，
          执行时机仍由模块加载器决定（不会提前执行）。 -->
-    <link rel="preload" as="script" href="js/ai-agent.min.js?v=96db304a9d" />
+    <link rel="preload" as="script" href="js/ai-agent.min.js?v=2a15394f03" />
     <!-- 照片墙与图片预览同样是按需模块。实测它们会被首屏图片请求挤住，
          表现为「点照片墙没反应」「点开照片几秒后黑屏」。这几个模块合计约 130KB
          （gzip 后 30KB 上下），提前取下来比让用户卡在空面板里划算。 -->
@@ -105,7 +105,7 @@
     <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=7438939c33">
     <meta name="xtj-module-ai-reading-style" content="css/ai-reading.min.css?v=69f38f78de">
     <meta name="xtj-module-ai-features-style" content="css/ai-assistant-features.min.css?v=d3783cfd11">
-    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=96db304a9d">
+    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=2a15394f03">
     <meta name="xtj-module-photo-preview-style" content="css/photo-preview.min.css?v=bfc8acf65e">
     <meta name="xtj-module-photo-preview" content="js/photo-wall/preview.min.js?v=463f9fd761">
     <meta name="xtj-module-photo-preview-hotfix" content="js/photo-wall/preview-hotfix.min.js?v=552c72b148">
