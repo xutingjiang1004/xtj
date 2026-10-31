@@ -4,3 +4,7 @@
 *.min.js text eol=lf
 *.min.css text eol=lf
 js/vendor/supabase.min.js eol=lf
+
+# Parallel daily sessions each add an entry at the top: keep both sides instead of conflicting.
+CHANGELOG.md merge=union
+docs/current-product-decisions.md merge=union
