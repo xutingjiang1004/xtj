@@ -2748,7 +2748,9 @@ function isAdmin() {
                 function done(value) { if (!settled) { settled = true; clearInterval(timer); resolve(value); } }
                 window.showConfirm(title, message, okText, function () { done(true); });
                 var timer = setInterval(function () {
-                    if (!overlay.classList.contains('active')) setTimeout(function () { done(false); }, 0);
+                    // execConfirm 先摘掉 active、播放关闭动画，动画结束才回调确认；此时 closing 仍在，
+                    // 不能当作取消，否则点「删除」会在回调之前被判成 false。
+                    if (!overlay.classList.contains('active') && !overlay.classList.contains('closing')) setTimeout(function () { done(false); }, 0);
                 }, 120);
             });
         };
@@ -5314,19 +5316,15 @@ function renderProfileActivityList(kind) {
                     repliesContainer.className = 'comment-replies';
                     sourceEl.appendChild(repliesContainer);
                 }
-                // 创建 AI 评论 DOM（与 renderCatAiComment 渲染结构一致）
+                // 创建 AI 评论 DOM（与静态渲染共用 buildCommentRowHtml，结构一致）
                 var aiEl = document.createElement('div');
                 aiEl.className = 'comment-item cat-ai-comment';
                 aiEl.setAttribute('data-comment-id', aiIdStr);
                 aiEl.setAttribute('data-parent-comment-id', srcIdStr);
-                var timeStr = (typeof formatRelativeTime === 'function' ? formatRelativeTime(aiComment.created_at) : (aiComment.created_at || '刚刚'));
-                var delBtn = isAdmin() ? '<button type="button" class="comment-del-btn" onclick="deleteFeedComment(\'' + safeJsStr(aiIdStr) + '\', this)">删除</button>' : '';
-                aiEl.innerHTML = '<div class="comment-item-inner">' +
-                    '<span class="cat-ai-avatar" aria-label="小猫">🐱</span>' +
-                    '<div class="comment-item-body">' +
-                    '<div class="comment-item-header"><b class="cat-ai-name">小猫</b><span class="cat-ai-badge">AI</span><span class="comment-item-time">' + escapeHtml(timeStr) + '</span>' + delBtn + '</div>' +
-                    '<div class="comment-item-content">' + escapeHtml(aiComment.content || '') + '</div>' +
-                    '</div></div>';
+                aiEl.setAttribute('data-user-name', '小猫');
+                // 回复挂在第二层以下的评论上时，用 @ 点名上一条的作者。
+                var nestedUnderReply = sourceEl.closest('.comment-replies');
+                aiEl.innerHTML = buildCommentRowHtml(aiComment, nestedUnderReply ? sourceEl.getAttribute('data-user-name') : '');
                 // ★ 追加到 .comment-replies 容器内，而非源评论的兄弟节点
                 repliesContainer.appendChild(aiEl);
                 return { inserted: true, reason: 'ok' };
@@ -5447,11 +5445,7 @@ function renderProfileActivityList(kind) {
             // ===================== 小猫 AI 评论渲染 =====================
             function renderCatAiComment(comment) {
                 if (!comment || comment.user_name !== 'cat_ai' || !comment.generated_by_ai) return '';
-                var avatarHtml = '<span class="cat-ai-avatar" aria-label="小猫">🐱</span>';
-                var badgeHtml = '<span class="cat-ai-badge">AI</span>';
-                var timeStr = (typeof formatRelativeTime === 'function' ? formatRelativeTime(comment.created_at) : (comment.created_at || '刚刚'));
-                var delBtn = isAdmin() ? '<button type="button" class="comment-del-btn" onclick="deleteFeedComment(\'' + safeJsStr(comment.id) + '\', this)">删除</button>' : '';
-                return '<div class="comment-item cat-ai-comment" data-comment-id="' + escapeHtml(comment.id) + '" data-parent-comment-id="' + escapeHtml(comment.parent_comment_id || '') + '"><div class="comment-item-inner">' + avatarHtml + '<div class="comment-item-body"><div class="comment-item-header"><b class="cat-ai-name">小猫</b>' + badgeHtml + '<span class="comment-item-time">' + escapeHtml(timeStr) + '</span>' + delBtn + '</div><div class="comment-item-content">' + escapeHtml(comment.content || '') + '</div></div></div></div>';
+                return '<div class="comment-item cat-ai-comment" data-comment-id="' + escapeHtml(comment.id) + '" data-parent-comment-id="' + escapeHtml(comment.parent_comment_id || '') + '" data-user-name="小猫">' + buildCommentRowHtml(comment, '') + '</div>';
             }
 
             var __xtjDeferredWarmupQueued = false;
@@ -8526,6 +8520,8 @@ function renderProfileActivityList(kind) {
 
             function formatRelativeTime(dateStr) {
                 var d = window.safeParseDate ? window.safeParseDate(dateStr) : new Date(dateStr);
+                // 坏数据不能显示成字面的 "Invalid Date"。
+                if (!d || !Number.isFinite(d.getTime())) return '';
                 var diff = Math.floor((Date.now() - d.getTime()) / 1000);
                 if (diff < 60) return "刚刚";
                 if (diff < 3600) return Math.floor(diff / 60) + "分钟前";
@@ -8536,7 +8532,8 @@ function renderProfileActivityList(kind) {
 
             function formatPostTime(post) {
                 var normalized = normalizePostForRender(post);
-                var time = normalized.created_at ? window.safeParseDate(normalized.created_at).toLocaleString() : "";
+                var parsedTime = normalized.created_at ? window.safeParseDate(normalized.created_at) : null;
+                var time = parsedTime && Number.isFinite(parsedTime.getTime()) ? parsedTime.toLocaleString() : "";
                 var editedAt = normalized._contentMeta && normalized._contentMeta.edited_at ? normalized._contentMeta.edited_at : null;
                 if (editedAt) return time + " (已编辑)";
                 return time;
@@ -8971,13 +8968,46 @@ function renderProfileActivityList(kind) {
                 window.openPostDetail(postId);
             };
             if (typeof window.addEventListener === 'function') window.addEventListener('auth-ready', function() { if (expandedCommentsOwner !== currentUser) { expandedPostComments.clear(); expandedCommentsOwner = currentUser; } });
+            var COMMENT_CAT_ICON = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 9 6.5 4.5 10 7q2-.4 4 0l3.5-2.5L19 9q1.5 2 1.5 4.5c0 4-3.7 6.5-8.5 6.5s-8.5-2.5-8.5-6.5Q3.5 11 5 9Z"/><circle cx="9.2" cy="13" r=".8" fill="currentColor" stroke="none"/><circle cx="14.8" cy="13" r=".8" fill="currentColor" stroke="none"/><path d="M10.5 16q1.5 1 3 0"/></svg>';
+            function commentAvatarTone(userName) {
+                var text = String(userName || ''), hash = 0;
+                for (var i = 0; i < text.length; i++) hash = (hash * 31 + text.charCodeAt(i)) >>> 0;
+                return hash % 6;
+            }
+            function buildCommentAvatarHtml(userName, isAi) {
+                if (isAi) return '<span class="comment-avatar comment-avatar-ai" aria-label="小猫">' + COMMENT_CAT_ICON + '</span>';
+                var safeUser = String(userName || '').trim();
+                var avatarUrl = getAvatarUrl(safeUser) || '';
+                if (!avatarUrl && safeUser) {
+                    try {
+                        var cachedAvatars = readAvatarCacheFromStorage();
+                        if (cachedAvatars[safeUser] && cachedAvatars[safeUser].url) {
+                            avatarCache[safeUser] = cachedAvatars[safeUser];
+                            avatarUrl = getAvatarUrl(safeUser) || '';
+                        }
+                    } catch (e) {}
+                }
+                // 带 .avatar.clickable：头像异步到达后由 renderFeed 的补图逻辑原地换成图片。
+                return '<span class="avatar clickable comment-avatar comment-tone-' + commentAvatarTone(safeUser) + '" role="button" tabindex="0" aria-label="查看 ' + escapeHtml(safeUser) + ' 的动态" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();this.click();}" onclick="openUserProfile(\'' + safeJsStr(safeUser) + '\')" data-user-name="' + escapeHtml(safeUser) + '">' + renderAvatarContent(safeUser, avatarUrl) + '</span>';
+            }
+            function buildCommentDeleteButtonHtml(comment) {
+                if (!comment || !currentUser || !(isAdmin() || String(comment.user_name || '') === String(currentUser))) return '';
+                return '<button type="button" class="comment-del-btn" onclick="deleteFeedComment(\'' + safeJsStr(comment.id) + '\', this)">删除</button>';
+            }
+            // 头像 + 昵称/时间同一行 + 正文；回复容器由调用方接在这一行下面。
+            function buildCommentRowHtml(comment, replyToName) {
+                var isAi = comment.user_name === 'cat_ai' && !!comment.generated_by_ai;
+                var nameHtml = isAi ? '<b class="cat-ai-name">小猫</b><span class="cat-ai-badge">AI</span>' : '<b class="comment-item-name">' + escapeHtml(comment.user_name) + '</b>';
+                var replyTo = replyToName ? '<span class="comment-reply-to">回复 @' + escapeHtml(replyToName) + '</span> ' : '';
+                return '<div class="comment-row">' + buildCommentAvatarHtml(comment.user_name, isAi) +
+                    '<div class="comment-item-body"><div class="comment-item-header">' + nameHtml +
+                    '<span class="comment-item-time">' + escapeHtml(comment.created_at ? formatRelativeTime(comment.created_at) : '刚刚') + '</span>' +
+                    buildCommentDeleteButtonHtml(comment) + '</div>' +
+                    '<div class="comment-item-content">' + replyTo + escapeHtml(comment.content) + '</div></div></div>';
+            }
             function buildPostCommentsHtml(post, pComms, options) {
                 if (!pComms.length) return '';
                 var limit = options && options.detail ? 30 : 3;
-                function commentDeleteButton(comment) {
-                    if (!comment || !currentUser || !(isAdmin() || String(comment.user_name || '') === String(currentUser))) return '';
-                    return '<button type="button" class="comment-del-btn" onclick="deleteFeedComment(\'' + safeJsStr(comment.id) + '\', this)">删除</button>';
-                }
                       var _byId = {}; var _seen = Object.create(null); var _count = 0;
                       pComms.forEach(function(c) { _byId[String(c.id)] = c; });
                       var _childrenOf = {};
@@ -8990,7 +9020,7 @@ function renderProfileActivityList(kind) {
                           _roots.push(c);
                         }
                       });
-                      function _renderCommentNode(c, depth) {
+                      function _renderCommentNode(c, depth, parent) {
                         depth = typeof depth === 'number' ? depth : 0;
                         if (_seen[String(c.id)] || _count >= limit) return '';
                         _seen[String(c.id)] = true; _count++;
@@ -9000,17 +9030,16 @@ function renderProfileActivityList(kind) {
                             var parentLoaded=(window.__xtjPostDetailComments||[]).some(function(row){return String(row.id)===String(c.parent_comment_id);});
                             replyContext=parentLoaded?'<button type="button" class="comment-reply-context" onclick="__xtjGotoPostComment(\''+safeJsStr(String(c.parent_comment_id))+'\')">查看原评论 #'+escapeHtml(c.parent_comment_id)+'</button>':'<span class="comment-reply-context">回复评论 #'+escapeHtml(c.parent_comment_id)+'</span>';
                         }
-                        if (c.user_name === 'cat_ai' && c.generated_by_ai) {
-                          _node = '<div class="comment-item cat-ai-comment" data-comment-id="' + escapeHtml(c.id) + '" data-parent-comment-id="' + escapeHtml(c.parent_comment_id || '') + '"><div class="comment-item-inner"><span class="cat-ai-avatar" aria-label="小猫">🐱</span><div class="comment-item-body"><div class="comment-item-header"><b class="cat-ai-name">小猫</b><span class="cat-ai-badge">AI</span><span class="comment-item-time">' + escapeHtml(c.created_at ? formatRelativeTime(c.created_at) : '刚刚') + '</span>' + commentDeleteButton(c) + '</div><div class="comment-item-content">' + escapeHtml(c.content) + '</div></div></div></div>';
-                        } else {
-                          _node = '<div class="comment-item" data-comment-id="' + escapeHtml(c.id) + '"><div><b>' + escapeHtml(c.user_name) + ':</b> ' + escapeHtml(c.content) + '</div>' + commentDeleteButton(c) + '</div>';
-                        }
-                        _node=replyContext+_node;
+                        var isAiComment = c.user_name === 'cat_ai' && !!c.generated_by_ai;
+                        // 只有回复的是“回复”（第三层起）才点名：第二层缩进已经表明在回上一条。
+                        var replyToName = depth >= 2 && parent && !(parent.user_name === 'cat_ai' && parent.generated_by_ai) ? parent.user_name : (depth >= 2 && parent ? '小猫' : '');
                         var _kids = _childrenOf[String(c.id)] || [];
+                        var _replies = '';
                         if (_kids.length && depth < 8 && _count < limit) {
-                          _node += '<div class="comment-replies" style="margin-left:24px; margin-top:8px;">' + _kids.map(function(child) { return _renderCommentNode(child, depth + 1); }).join('') + '</div>';
+                          _replies = '<div class="comment-replies">' + _kids.map(function(child) { return _renderCommentNode(child, depth + 1, c); }).join('') + '</div>';
                         }
-                        return _node;
+                        _node = '<div class="comment-item' + (isAiComment ? ' cat-ai-comment' : '') + '" data-comment-id="' + escapeHtml(c.id) + '" data-parent-comment-id="' + escapeHtml(c.parent_comment_id || '') + '" data-user-name="' + escapeHtml(isAiComment ? '小猫' : c.user_name) + '">' + buildCommentRowHtml(c, replyToName) + _replies + '</div>';
+                        return replyContext + _node;
                       }
                 var html = _roots.map(function(c) { return _renderCommentNode(c, 0); }).join('');
                 // Orphan/cyclic/deep historical replies stay readable without unbounded recursion.
@@ -9970,6 +9999,9 @@ function renderProfileActivityList(kind) {
                     return getFeedRecordKey(comment, [comment && comment.post_id, comment && comment.user_name, comment && comment.created_at, comment && comment.content]);
                 });
                 feedAllLikes = mergeFeedRecords((feedAllLikes || []).filter(function(like) { return like && visibleIds.has(String(like.post_id)); }), relationsCurrent ? (chunk.likes || []).filter(function(like) { return like && visibleIds.has(String(like.post_id)); }) : [], function(like) {
+                    // 一个用户对一个帖子只会有一条点赞（数据库唯一约束）。本地乐观记录没有 id、服务端记录有 id，
+                    // 若按 id 作键，刷新后同一个赞会以两条记录并存，缺少 like_count 的回退路径就会多算一个。
+                    if (like && like.post_id != null && like.user_name) return 'like|' + like.post_id + '|' + like.user_name;
                     return getFeedRecordKey(like, [like && like.post_id, like && like.user_name, like && like.created_at]);
                 });
                 var pagePostIds = (chunk.postIds || []).filter(function(postId) { return visibleIds.has(String(postId)); });
@@ -16003,6 +16035,62 @@ function renderProfileActivityList(kind) {
                 return { file: nextFile, converted: true, originalSize: file.size, newSize: nextFile.size, w: tw, h: th };
             }
 
+            // ★ 2026-10-31：Safari 的「Load failed」/ Chrome 的「Failed to fetch」都是请求没拿到回包——
+            //   最常见的原因是服务器正在重启（部署）或网络瞬断，几秒后就恢复。以前这种情况直接变成红色失败气泡。
+            //   现在先等一等再试：重试前先查会话最近消息，确认这条是不是其实已经入库（回包丢了），
+            //   已入库就当成功，没入库才重发；查询本身失败则继续等，绝不在结果未知时盲目重发造成重复消息。
+            function isDmNetworkError(error) {
+                if (!error || error.serverRejected || error.code === 'identity_changed' || error.name === 'AbortError') return false;
+                return error.name === 'TypeError' || /load failed|failed to fetch|networkerror|network request failed|network connection/i.test(String(error.message || ''));
+            }
+            function friendlyDmSendError(error) {
+                return isDmNetworkError(error) ? '网络连接中断，请检查网络后重发' : ((error && error.message) ? error.message : '未知错误');
+            }
+            async function findSentDmMessage(ctx) {
+                var response = await window.xtjProtectedFetch('/api/dm/messages?target=' + encodeURIComponent(ctx.peer) + '&limit=30', {
+                    authOwner: ctx.owner, authEpoch: ctx.epoch, signal: ctx.signal, timeoutMs: 8000
+                });
+                var body = await response.json();
+                if (!response.ok || !body || !body.ok) throw new Error('verify failed');
+                var since = Date.parse(ctx.startedAt) - 5000;
+                var known = ctx.knownIds || {};
+                var rows = Array.isArray(body.data) ? body.data : [];
+                for (var i = rows.length - 1; i >= 0; i--) {
+                    var row = rows[i];
+                    if (!row || row.user_name !== ctx.owner || row.media_url !== ctx.peer || known[row.id]) continue;
+                    if (Date.parse(row.created_at) < since) continue;
+                    if ((getDMMessageText(row) || '').trim() === ctx.text) return row;
+                }
+                return null;
+            }
+            async function sendDmRequestWithRecovery(requestBody, ctx) {
+                var delays = [2000, 4000, 8000];
+                var attempt = 0;
+                for (;;) {
+                    try {
+                        return await window.xtjProtectedFetch('/api/dm/send', {
+                            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(requestBody),
+                            timeoutMs: 60000, authOwner: ctx.owner, authEpoch: ctx.epoch, signal: ctx.signal
+                        });
+                    } catch (error) {
+                        if (!isDmNetworkError(error) || attempt >= delays.length) throw error;
+                        var waitMs = delays[attempt++];
+                        for (;;) {
+                            await new Promise(function(resolve) { setTimeout(resolve, waitMs); });
+                            if (ctx.signal.aborted) throw error;
+                            if (requestBody.storage_path) break; // 附件在服务端按上传对象幂等，可直接重发
+                            try {
+                                var landed = await findSentDmMessage(ctx);
+                                if (landed) return { ok: true, status: 200, json: async function() { return { ok: true, message: landed }; } };
+                                break; // 确认没有入库，重发
+                            } catch (verifyError) {
+                                if (ctx.signal.aborted || attempt >= delays.length) throw error;
+                                waitMs = delays[attempt++]; // 连查询都失败（服务器还没起来），继续等
+                            }
+                        }
+                    }
+                }
+            }
             var _chatSendFlight = null;
             var _dockChatSendQueue = [];
             function drainDockChatSendQueue() {
@@ -16297,11 +16385,10 @@ function renderProfileActivityList(kind) {
                     //   把存储对象删掉；而服务端其实提交成功了 → 消息在、图片 404，
                     //   收件人看到的正是"图片不显示"。现在放宽到 60s，并且只有服务端
                     //   **明确拒绝**（4xx 且重试无意义）时才允许回收媒体。
-                    var sendResp = await window.xtjProtectedFetch('/api/dm/send', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(requestBody),
-                        timeoutMs: 60000,authOwner:sendOwner,authEpoch:sendEpoch,signal:flight.controller.signal
+                    var sendResp = await sendDmRequestWithRecovery(requestBody, {
+                        owner: sendOwner, epoch: sendEpoch, signal: flight.controller.signal, peer: targetUser,
+                        text: String(capturedContent || '').trim(), startedAt: optimisticCreatedAt,
+                        knownIds: (function() { var ids = {}; (_chatCache[getDockChatCacheKey(targetUser)] || []).forEach(function(row) { if (row && row.id) ids[row.id] = 1; }); return ids; })()
                     });
                     assertSender();
                     if (!sendResp.ok) {
@@ -16397,13 +16484,13 @@ function renderProfileActivityList(kind) {
                         __pendingActorKey: actorKey || null,
                         __pendingPayload: mediaPayload || null,
                         __localPreviewUrl: localPreviewUrl,
-                        __failReason: (e && e.message) ? e.message : '未知错误'
+                        __failReason: friendlyDmSendError(e)
                     });
                     upsertDockChatCacheMessage(targetUser, failedMessage);
                     if (dockChatActiveUser === targetUser) renderDockMessages(targetUser, _chatCache[getDockChatCacheKey(targetUser)] || [], true);
                     // 注意：不再把内容回填到输入框 —— 消息已经以失败气泡留在会话里，
                     // 回填会让用户以为没发出去而重复发送。
-                    showToast((forwarding ? '转发失败：' : '发送失败：') + ((e && e.message) ? e.message : '未知错误') + (forwarding ? '' : '（长按该条可重发）'));
+                    showToast((forwarding ? '转发失败：' : '发送失败：') + friendlyDmSendError(e) + (forwarding ? '' : '（长按该条可重发）'));
                 }
                 finally {
                     if(_chatSendFlight!==flight || !sameSender())return;

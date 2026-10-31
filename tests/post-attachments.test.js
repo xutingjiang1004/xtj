@@ -10,7 +10,8 @@ const detail = fs.readFileSync('js/core-parts/06-chat-and-nav.js', 'utf8');
 function between(source, start, end) { const a = source.indexOf(start), b = source.indexOf(end, a + start.length); assert.ok(a >= 0 && b > a); return source.slice(a, b); }
 function renderer() {
   const esc = v => String(v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const ctx = { window: { XtjPostMedia: media, safeParseDate: value => new Date(value) }, normalizePost: p => p,
+  const ctx = { window: { XtjPostMedia: media, safeParseDate: value => new Date(value) }, normalizePost: p => p, normalizePostForRender: p => p,
+    getAvatarUrl: () => '', readAvatarCacheFromStorage: () => ({}), avatarCache: {}, renderAvatarContent: user => '<span class="avatar-fallback">' + String(user)[0] + '</span>',
     escapeHtml: esc, safeJsStr: v => String(v).replace(/'/g, "\\'"), sanitizeUrl: url => /^https?:\/\//.test(url) ? url : '', canDeletePost: p => p.user_name === 'alice',
     currentUser: 'alice', isAdmin: () => false, formatRelativeTime: () => '刚刚', looksLikeSystemTelemetry: () => false,
     isPostLikedByCurrentUser: () => false, buildPostContentHtml: esc, getAvatarHtml: () => '<span class="avatar">A</span>',

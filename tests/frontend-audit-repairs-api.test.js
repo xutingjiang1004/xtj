@@ -63,3 +63,20 @@ test('feed totals and my-like do not derive from capped relation arrays',async()
  const db={rpc:async()=>({data:{posts:[{id,like_count:2500,comment_count:5000,liked_by_me:true}],comments:[{id:1,post_id:id}],likes:[{id:1,post_id:id,user_name:'alice'}]}})};
  const snapshot=await readFeedEngagement(db,[{id,user_name:'alice'}],'alice');assert.equal(snapshot.posts[0].like_count,2500);assert.equal(snapshot.posts[0].comment_count,5000);assert.equal(snapshot.posts[0].liked_by_me,true);assert.equal(snapshot.comments.length,1);assert.equal(snapshot.likes.length,1);
 });
+
+test('replying forwards a validated parent id; plain comments keep the original RPC arguments',async()=>{
+ const f=fixture();
+ const reply=await request(f.app).post('/api/post/comment').set('x-user','bob').send({post_id:id,content:'reply',client_request_id:key,parent_comment_id:'10'}).expect(201);
+ assert.equal(reply.body.data.user_name,'bob');assert.deepEqual(f.calls[0].args,{p_post_id:id,p_owner:'bob',p_content:'reply',p_request_id:key,p_kind:'post',p_parent_comment_id:'10'});
+ for(const bad of ['abc','-1','1.5','12345678901234567890','1 OR 1=1',{}]){
+  const before=f.calls.length;
+  await request(f.app).post('/api/post/comment').set('x-user','bob').send({post_id:id,content:'reply',client_request_id:key,parent_comment_id:bad}).expect(400);
+  assert.equal(f.calls.length,before,'a malformed parent must be rejected before any write');
+ }
+ await request(f.app).post('/api/post/comment').set('x-user','bob').send({post_id:id,content:'plain',client_request_id:key,parent_comment_id:null}).expect(201);
+ assert.equal('p_parent_comment_id' in f.calls.at(-1).args,false);
+});
+test('a missing parent surfaces as 404 parent_not_found, never as a top-level comment',async()=>{
+ const db={async rpc(){return{data:{ok:false,code:'parent_not_found'}};}};
+ await assert.rejects(createComment(db,id,'bob','x',key,'post','10'),error=>error.status===404&&error.code==='parent_not_found'&&/回复的评论/.test(error.message));
+});

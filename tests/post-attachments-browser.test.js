@@ -239,8 +239,8 @@ test('iOS keyboard uses one viewport owner, hides rather than lifts the Dock and
 
 for(const theme of ['light','dark'])test(theme+': Feed comments stay compact and open the paginated detail',{timeout:30000},async()=>{
  const f=await postBrowserFixture({counts:[3],theme});try{
-  const row=f.page.locator('#feed .comment-item').first();const style=await row.evaluate(el=>{const s=getComputedStyle(el);return{background:s.backgroundColor,shadow:s.boxShadow,blur:s.backdropFilter,height:el.offsetHeight,padding:s.paddingTop};});
-  assert.equal(style.background,'rgba(0, 0, 0, 0)');assert.equal(style.shadow,'none');assert.equal(style.blur,'none');assert.ok(style.height<=40,JSON.stringify(style));
+  const row=f.page.locator('#feed .comment-item').first();const style=await row.evaluate(el=>{const s=getComputedStyle(el);return{background:s.backgroundColor,shadow:s.boxShadow,blur:s.backdropFilter,height:el.querySelector('.comment-row').offsetHeight,padding:s.paddingTop};});
+  assert.equal(style.background,'rgba(0, 0, 0, 0)');assert.equal(style.shadow,'none');assert.equal(style.blur,'none');assert.ok(style.height<=80,JSON.stringify(style));
   await f.page.locator('#feed .post-all-comments').click();await f.page.waitForFunction(()=>document.querySelectorAll('#postDetailBody [data-comment-id]').length===6);assert.equal(await f.page.locator('#postDetailModal').evaluate(el=>el.classList.contains('active')),true);assert.equal(await f.page.locator('#feed [data-comment-id]').count(),3);
  }finally{await f.close();}
 });
