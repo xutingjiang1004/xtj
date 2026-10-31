@@ -1288,7 +1288,6 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       else labelText = '联网完成';
       if (expired) labelText += '（过期）';
     }
-    if (opts.provider) labelText += ' · ' + (opts.provider === 'DeepSeek' ? 'DeepSeek 官方搜索' : String(opts.provider).slice(0,40));
     head.appendChild(el('span', { class: 'ai-search-status-label', text: labelText }));
     bar.appendChild(head);
 
@@ -3233,7 +3232,19 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   //   把它们混加进「已搜索 N 个网页」会得到一个似是而非的数字，
   //   所以只有真正的检索引擎结果才参与网页计数。
   var TOOL_WEBSEARCH_KINDS = { search_web: 1, tavily_search: 1, search_social: 1 };
+  // 用户不想知道是哪家搜索服务在搜：服务端 summary 里「· DeepSeek 官方搜索 / Tavily …」这类后缀一律不显示。
+  function stripSearchVendor(text) {
+    return String(text || '').replace(/\s*[·•]\s*(?:DeepSeek(?:\s*官方搜索)?|Tavily|Brave|Serper|CustomApi|BingHtml|SearXNG)\s*$/i, '');
+  }
   function toolResultFeedback(event) {
+    if (TOOL_WEBSEARCH_KINDS[String(event.tool_name || '')]) {
+      var searchCount = Number.isInteger(event.count) && event.count >= 0 ? event.count
+        : Number.isInteger(event.items_total) && event.items_total > 0 ? event.items_total
+        : Array.isArray(event.items) ? event.items.length : null;
+      if (searchCount != null) return '找到 ' + searchCount + ' 个网页';
+      if (event.summary) return stripSearchVendor(String(event.summary).slice(0, 160));
+      return '检索完成，未提供数量';
+    }
     if (event.summary) return String(event.summary).slice(0, 160);
     if (TOOL_WEBSEARCH_KINDS[String(event.tool_name || '')]) {
       var count = Number.isInteger(event.count) && event.count >= 0 ? event.count
@@ -9507,7 +9518,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var shell = el('section', { class: 'ai-tool-card ai-tool-card--' + type });
     if (cardId) shell.setAttribute('data-ai-card-id', cardId);
     if (card.tool_call_id) shell.setAttribute('data-tool-call-id',String(card.tool_call_id));
-    shell.appendChild(el('div', { class: 'ai-tool-card-title', text: String(card.title || 'AI 工具结果') }));
+    var cardTitle = String(card.title || 'AI 工具结果');
+    // 网页搜索卡片标题里的厂家名（「Tavily 搜索」「DeepSeek …」）不显示。
+    if (type === 'web_search') cardTitle = cardTitle.replace(/(?:Tavily|DeepSeek)[^\s·]*\s*搜索|DeepSeek[^\s·]*/gi, '联网搜索');
+    shell.appendChild(el('div', { class: 'ai-tool-card-title', text: cardTitle }));
     var data = card.data || {};
 
     function appendKvGrid(pairs) {
@@ -9846,7 +9860,6 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       }
       if (data.rows) shell.appendChild(el('div', { class: 'ai-tool-card-meta', text: data.rows + ' 行数据' }));
     } else if (type === 'web_search' && Array.isArray(data.results)) {
-      if(data.provider)shell.appendChild(el('div',{class:'ai-tool-card-meta',text:'搜索服务：'+(data.provider==='DeepSeek'?'DeepSeek 官方搜索':String(data.provider).slice(0,40))}));
       if (data.query) {
         shell.appendChild(el('div', { class: 'ai-tool-card-meta', text: '搜索：' + String(data.query).slice(0, 120) }));
       }
@@ -9918,18 +9931,41 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       shell.appendChild(el('div', { class: 'ai-tool-card-summary', text: '操作已完成。' }));
     }
 
-    var compactKinds = { weather:1,time:1,calculate:1,unit_convert:1,exchange_rate:1,stock_quote:1,page_read:1,page_meta:1,task_plan:1,web_search:1 };
+    var compactKinds = { weather:1,time:1,calculate:1,unit_convert:1,exchange_rate:1,stock_quote:1,page_read:1,page_meta:1,task_plan:1,web_search:1,search_results:1 };
     if (compactKinds[type]) {
       var resultDetails = el('details', { class:'ai-tool-data-details' });
-      resultDetails.appendChild(el('summary', { text:type === 'web_search' && Array.isArray(data.results) ? '找到 ' + data.results.length + ' 个网页' : '查看数据' }));
+      // 站内搜索结果和网页搜索一样默认折成一行「找到 N 条…」，点开才展开列表，不再整块铺在对话里占位置。
+      var detailsLabel = '查看数据';
+      if (Array.isArray(data.results)) {
+        if (type === 'web_search') detailsLabel = '找到 ' + data.results.length + ' 个网页';
+        else if (type === 'search_results') detailsLabel = '找到 ' + data.results.length + ' 条站内结果';
+      }
+      resultDetails.appendChild(el('summary', { text: detailsLabel }));
+      // 「查看数据」这类没有信息量的摘要不显示：时间轴里只留「调用了什么」，点这一行直接展开数据。
+      // 有条数的（找到 N 个网页 / N 条站内结果）保留条数文字。
+      resultDetails.classList.add(detailsLabel === '查看数据' ? 'is-silent' : 'has-count');
       resultDetails.appendChild(shell);
       var step = null;
       var toolNames = { weather:'get_weather',time:'get_current_time',calculate:'calculate',unit_convert:'convert_units',exchange_rate:'get_exchange_rate',stock_quote:'get_stock_quote',page_read:'read_web_page',page_meta:'page_meta',task_plan:'task_plan',web_search:'search_web' };
       var candidates = messagesEl.querySelectorAll('.ai-tool-step');
       for (var ci = candidates.length - 1; ci >= 0; ci--) {
-        if (card.tool_call_id ? candidates[ci].getAttribute('data-tool-call-id') === String(card.tool_call_id) : candidates[ci].getAttribute('data-tool-name') === toolNames[type]) { step=candidates[ci];break; }
+        var candidateName = candidates[ci].getAttribute('data-tool-name') || '';
+        var nameMatches = type === 'search_results' ? (/^search_/.test(candidateName) && !TOOL_WEBSEARCH_KINDS[candidateName]) : candidateName === toolNames[type];
+        if (card.tool_call_id ? candidates[ci].getAttribute('data-tool-call-id') === String(card.tool_call_id) : nameMatches) { step=candidates[ci];break; }
       }
-      if (step) step.querySelector('.ai-tool-step-body').appendChild(resultDetails);
+      if (step) {
+        step.querySelector('.ai-tool-step-body').appendChild(resultDetails);
+        // 这一行本身就是展开开关：点调用的内容（如「福州天气」）就能看数据，键盘用 Enter / 空格。
+        resultDetails.classList.add('is-row-toggle');
+        step.classList.add('is-expandable');
+        var rowToggle = step.querySelector('.ai-tool-step-detail') || step.querySelector('.ai-tool-step-title');
+        if (rowToggle) {
+          rowToggle.setAttribute('role', 'button');
+          rowToggle.setAttribute('tabindex', '0');
+          rowToggle.setAttribute('aria-expanded', resultDetails.open ? 'true' : 'false');
+          resultDetails.addEventListener('toggle', function() { rowToggle.setAttribute('aria-expanded', resultDetails.open ? 'true' : 'false'); });
+        }
+      }
       else if (insertBeforeNode && insertBeforeNode.parentNode) insertBeforeNode.parentNode.insertBefore(resultDetails, insertBeforeNode);
       else messagesEl.appendChild(resultDetails);
     } else if (insertBeforeNode && insertBeforeNode.parentNode) {
@@ -12708,17 +12744,18 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
                   }
                   // 计时在正文开始时停住，面板保持展开，整段回复完成后再折叠。
                   setThinkingActive(_tn, false);
-                  if (reasoningRenderer) { try { reasoningRenderer.flush(); } catch (eRF) {} }
+                  // 思考流到此结束：收尾当前这一段（去掉思考末尾那根闪烁的竖线光标），
+                  // 它夹在思考和气泡之间就是多出来的一条。之后若还有新的思考会另起一段。
+                  try { closeReasoningSegment(); } catch (eRF) { if (reasoningRenderer) { try { reasoningRenderer.flush(); } catch (eRF2) {} } }
                   // 正文开始时不折叠：思考、过渡句、工具调用保持展开，回复结束后再一起折叠。
                 }
               } catch (eThinkSettle) {}
             }
             if (accepted) {
               if (_sendThinkingMode !== 'off' && !answerCommitted) {
-                showProvisionalNarration(aiContent.trim());
-                // 任何长度的正文都要排上「升级为气泡」的计时：短回复（「嗯？憋不住了？」）
-                // 以前只挂在时间轴上显示成圆点 + 无气泡文字，直到整条回复结束才变成气泡。
-                scheduleAnswerPromote(evtReceivedAt, aiContent.indexOf('\n') >= 0 || aiContent.trim().length >= 80 ? 280 : 450);
+                // 2026-10-31（用户明确要求）：正文第一个字就直接进气泡，不再先挂成时间轴上的圆点句、
+                // 过一会儿再变成气泡。如果后面紧跟着工具调用，tool_calls 分支会把这段话收回时间轴当过渡句。
+                promoteRunningAnswer(evtReceivedAt);
                 continue;
               }
               ensureAssistantBubbleReady();
@@ -14068,15 +14105,28 @@ function showChatMessages() {
     var messagesEl = el('div', { class: 'ai-chat-messages', id: 'aiChatMessagesArea' });
     var userReadingHistory=false,lastReadTop=0,lastReadHeight=0,touchReadY=null;
     function markReadingHistory(){userReadingHistory=true;S.autoScrollPinned=false;_aiUserPinnedUp=true;}
-    // 点搜索行里的搜索词（或标题）也能展开/收起搜到的网页，不必瞄准条数文字。
+    // 点工具行里调用的内容（搜索词、福州天气、网页地址……）就能展开/收起这一步的数据，
+    // 不必瞄准右边的小图标；键盘 Enter / 空格同样可用。
+    function toggleToolRow(part) {
+      var stepBody = part.closest && part.closest('.ai-tool-step-body');
+      if (!stepBody) return false;
+      var inline = stepBody.querySelector(':scope > .ai-tool-inline-result:not([hidden]) > button.ai-tool-result-card-title');
+      if (inline) { inline.click(); return true; }
+      var details = stepBody.querySelector(':scope > details.ai-tool-data-details.is-row-toggle');
+      if (details) { details.open = !details.open; return true; }
+      return false;
+    }
     messagesEl.addEventListener('click', function(event) {
       var target = event.target;
       if (!target || !target.closest) return;
-      var part = target.closest('.ai-process-rail .ai-tool-step-detail, .ai-process-rail .ai-tool-step-title');
-      if (!part) return;
-      var stepBody = part.closest('.ai-tool-step-body');
-      var toggle = stepBody && stepBody.querySelector(':scope > .ai-tool-inline-result:not([hidden]) > button.ai-tool-result-card-title');
-      if (toggle) toggle.click();
+      var part = target.closest('.ai-tool-step-detail, .ai-tool-step-title');
+      if (part) toggleToolRow(part);
+    });
+    messagesEl.addEventListener('keydown', function(event) {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      var target = event.target;
+      if (!target || !target.matches || !target.matches('.ai-tool-step-detail[role="button"], .ai-tool-step-title[role="button"]')) return;
+      if (toggleToolRow(target)) event.preventDefault();
     });
     messagesEl.addEventListener('wheel',function(event){if(event.deltaY<0)markReadingHistory();},{passive:true});
     messagesEl.addEventListener('touchstart',function(event){touchReadY=event.touches[0]?event.touches[0].clientY:null;},{passive:true});

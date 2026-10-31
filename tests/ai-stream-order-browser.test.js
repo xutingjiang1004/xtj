@@ -7,10 +7,12 @@ test('tool narration stays with the process while CJK paragraphs, a table and te
  try{
   await p.locator('#aiChatMsgInput').fill('核对两个来源后给我一张对比表');await p.locator('#aiChatSendBtn').click();await p.waitForFunction(()=>aiPolish.streams.length===1);
   await emit(p,{type:'reasoning_start'});await emit(p,{type:'reasoning',text:'先核实原始材料。'});await emit(p,{type:'content',text:'我先核对两个来源。'});
-  await p.waitForFunction(()=>document.querySelector('.ai-rail-sentence-text')?.textContent.includes('核对两个来源'));
-  assert.equal(await p.evaluate(()=>!!document.querySelector('.ai-msg.assistant .ai-msg-bubble')?.textContent.includes('核对两个来源')), false);
+  // 2026-10-31：正文第一个字就直接进气泡；紧跟着出现工具调用时，这句话再收回时间轴当过渡句。
+  await p.waitForFunction(()=>document.querySelector('.ai-msg.assistant .ai-msg-bubble')?.textContent.includes('核对两个来源'));
+  assert.equal(await p.evaluate(()=>!!document.querySelector('.ai-rail-beat.is-provisional')), false);
   await emit(p,{type:'tool_calls',tools:[{id:'verify-one',name:'search_web',args:{query:'原始来源'}}]});
   await p.waitForSelector('.ai-rail-sentence');
+  assert.equal(await p.evaluate(()=>!!document.querySelector('.ai-msg.assistant .ai-msg-bubble:not(.ai-content-segment)')?.textContent.includes('核对两个来源')), false);
   assert.equal(await p.locator('.ai-rail-sentence-text').textContent(),'我先核对两个来源。');
   assert.equal(await p.evaluate(()=>!!document.querySelector('.ai-rail-sentence')?.closest('.ai-thinking')), false);
   assert.equal(await p.locator('.ai-process-rail .ai-tool-step').count(),1);
@@ -129,5 +131,58 @@ test('new chat on an already empty conversation does not create another one, and
   assert.equal(await p.locator('.ai-chat-new-btn').isDisabled(),false);
   await p.waitForFunction(()=>!document.querySelector('.ai-chat-new-btn.is-busy'));
   assert.equal(await newCalls(),1);assert.equal(await p.locator('#aiChatMsgInput').inputValue(),'');assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
+
+test('the answer enters the bubble on its first characters and no stray cursor is left between thinking and the bubble',{timeout:45000},async()=>{
+ const f=await aiPolishFixture(),p=f.page;
+ try{
+  await p.locator('#aiChatMsgInput').fill('老公好想你');await p.locator('#aiChatSendBtn').click();await p.waitForFunction(()=>aiPolish.streams.length===1);
+  await p.evaluate(()=>{window.__seen={prov:false,cursorWithBubble:false};(function tick(){const m=document.querySelector('.ai-msg.assistant');if(m){if(m.querySelector('.ai-rail-beat.is-provisional'))__seen.prov=true;const b=m.querySelector('.ai-msg-bubble');if(b&&b.textContent.trim()&&m.querySelector('.ai-thinking-body .ai-stream-cursor'))__seen.cursorWithBubble=true;}requestAnimationFrame(tick);})();});
+  await emit(p,{type:'reasoning_start'});await emit(p,{type:'reasoning',text:'用户撒娇，简短回应。'});await p.waitForTimeout(100);
+  await emit(p,{type:'content',text:'哟，'});await p.waitForFunction(()=>document.querySelector('.ai-msg.assistant .ai-msg-bubble')?.textContent.includes('哟'),null,{timeout:1000});
+  await emit(p,{type:'content',text:'一上来就发糖。'});await p.waitForTimeout(300);
+  await emit(p,{type:'done',content:'哟，一上来就发糖。',reasoning:'用户撒娇，简短回应。',complete:true,saved:true,conversation_id:'CUR01',thinking_elapsed_ms:1000,thinking_mode:'max'});
+  await p.waitForFunction(()=>!document.querySelector('.ai-msg.generating'));
+  const seen=await p.evaluate(()=>window.__seen);assert.equal(seen.prov,false);assert.equal(seen.cursorWithBubble,false);assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
+
+test('web search rows never name the search vendor, and other tool rows expand by clicking what was called',{timeout:45000},async()=>{
+ const f=await aiPolishFixture(),p=f.page;
+ try{
+  await p.locator('#aiChatMsgInput').fill('福州天气');await p.locator('#aiChatSendBtn').click();await p.waitForFunction(()=>aiPolish.streams.length===1);
+  await emit(p,{type:'reasoning_start'});await emit(p,{type:'reasoning',text:'先查。'});await emit(p,{type:'content',text:'我查一下。'});
+  await emit(p,{type:'tool_calls',tools:[{id:'w',name:'get_weather',args:{location:'福州'}},{id:'s',name:'search_web',args:{query:'福州旅游'}}]});
+  await emit(p,{type:'tool_result',call_id:'w',tool_name:'get_weather',success:true,summary:'福州 · 晴 · 26°C',location:'福州'});
+  await emit(p,{type:'card',card:{protocol:'xtj.ai.ui.v1',id:'cw',type:'weather',title:'天气',tool_call_id:'w',data:{city:'福州',condition:'晴',temperature_c:26}}});
+  await emit(p,{type:'tool_result',call_id:'s',tool_name:'search_web',success:true,count:5,items:[{title:'a',url:'https://example.com/a'}],summary:'找到 5 个网页 · DeepSeek 官方搜索',provider:'DeepSeek'});
+  await emit(p,{type:'content',text:'好了。'});await emit(p,{type:'done',content:'我查一下。好了。',complete:true,saved:true,conversation_id:'ROW01',thinking_elapsed_ms:1000,thinking_mode:'low'});
+  await p.waitForFunction(()=>!document.querySelector('.ai-msg.generating'));await p.locator('.ai-thinking-toggle').first().click();await p.waitForSelector('.ai-process-rail .ai-tool-step');
+  const text=await p.locator('.ai-process-rail').innerText();assert.doesNotMatch(text,/DeepSeek|Tavily|官方搜索/);assert.match(text,/找到 5 个网页/);assert.doesNotMatch(text,/查看数据/);
+  const row=p.locator('.ai-process-rail [data-tool-call-id="w"] .ai-tool-step-detail');assert.equal(await p.locator('.ai-tool-card--weather').isVisible(),false);
+  await row.click();assert.equal(await p.locator('.ai-tool-card--weather').isVisible(),true);await row.click();assert.equal(await p.locator('.ai-tool-card--weather').isVisible(),false);
+  await row.focus();await p.keyboard.press('Enter');assert.equal(await p.locator('.ai-tool-card--weather').isVisible(),true);
+  assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
+
+test('site search results collapse into one row with a count and expand on click instead of filling the chat',{timeout:45000},async()=>{
+ const f=await aiPolishFixture(),p=f.page;
+ try{
+  await p.locator('#aiChatMsgInput').fill('搜我的聊天');await p.locator('#aiChatSendBtn').click();await p.waitForFunction(()=>aiPolish.streams.length===1);
+  await emit(p,{type:'reasoning_start'});await emit(p,{type:'reasoning',text:'站内搜索。'});await emit(p,{type:'content',text:'我搜一下。'});
+  await emit(p,{type:'tool_calls',tools:[{id:'ss',name:'search_everything',args:{query:'喵喵喵'}}]});
+  const results=Array.from({length:20},(_,i)=>({title:'小猫对话'+i,snippet:'喵喵喵 '+i,source:'ai_history',created_at:'2026-10-31T12:00:0'+(i%10)+'Z'}));
+  await emit(p,{type:'tool_result',call_id:'ss',tool_name:'search_everything',success:true,summary:'已搜索站内',query:'喵喵喵'});
+  await emit(p,{type:'card',card:{protocol:'xtj.ai.ui.v1',id:'site1',type:'search_results',title:'站内搜索结果',tool_call_id:'ss',data:{results}}});
+  await emit(p,{type:'content',text:'找到了。'});await emit(p,{type:'done',content:'我搜一下。找到了。',complete:true,saved:true,conversation_id:'SITE01',thinking_elapsed_ms:1000,thinking_mode:'low'});
+  await p.waitForFunction(()=>!document.querySelector('.ai-msg.generating'));await p.locator('.ai-thinking-toggle').first().click();await p.waitForSelector('.ai-process-rail .ai-tool-data-details');
+  assert.match(await p.locator('.ai-process-rail .ai-tool-data-details > summary').innerText(),/找到 20 条站内结果/);
+  assert.equal(await p.locator('.ai-tool-card--search_results').isVisible(),false);
+  await p.locator('.ai-process-rail [data-tool-call-id="ss"] .ai-tool-step-detail').click();
+  assert.equal(await p.locator('.ai-tool-card--search_results').isVisible(),true);
+  await p.locator('.ai-process-rail [data-tool-call-id="ss"] .ai-tool-step-detail').click();assert.equal(await p.locator('.ai-tool-card--search_results').isVisible(),false);
+  assert.deepEqual(f.errors,[]);
  }finally{await f.close();}
 });

@@ -8318,3 +8318,21 @@ body.xtj-research-open #panelAiChat { visibility:hidden!important; pointer-event
 [data-theme="dark"] .ai-process-rail .ai-rail-thought { color: rgba(176, 196, 188, .88); }
 .ai-thinking-body .ai-reasoning-segment.is-folded { display: none; }
 .ai-thinking.is-reasoning-folded .ai-thinking-panel { display: none; }
+
+/* 2026-10-31：「已思考 N 秒」整体往右挪一点，贴着左边太挤。 */
+.ai-chat-root .ai-thinking .ai-thinking-toggle { padding-left: 8px !important; }
+
+/* 2026-10-31：工具行里「查看数据」这类摘要不显示，点这一行（调用的内容）直接展开数据；
+   有条数的摘要（找到 N 个网页 / N 条站内结果）保留文字，但去掉前面的小三角。 */
+.ai-tool-data-details.is-row-toggle.is-silent > summary { display: none !important; }
+.ai-tool-data-details.is-row-toggle > summary { list-style: none; cursor: pointer; }
+.ai-tool-data-details.is-row-toggle > summary::-webkit-details-marker { display: none; }
+.ai-tool-data-details.is-row-toggle > summary::marker { content: ''; }
+.ai-tool-step.is-expandable .ai-tool-step-detail,
+.ai-tool-step.is-expandable .ai-tool-step-title { cursor: pointer; }
+.ai-tool-step.is-expandable .ai-tool-step-detail:focus-visible,
+.ai-tool-step.is-expandable .ai-tool-step-title:focus-visible { outline: 2px solid rgba(58, 146, 113, .5); outline-offset: 2px; border-radius: 4px; }
+/* 非搜索类工具（天气、计算、读网页…）把「调用了什么」写完整：标题 + 内容，如「查询天气 福州」。
+   网页搜索仍只显示搜索词（后面跟条数）。 */
+.ai-process-rail .ai-process-timeline .ai-tool-step:not([data-tool-name^="search_"]):not([data-tool-name="tavily_search"]) > .ai-tool-step-body:has(> .ai-tool-step-detail) > .ai-tool-step-title,
+.ai-process-rail .ai-tool-step:not([data-tool-name^="search_"]):not([data-tool-name="tavily_search"]) > .ai-tool-step-body:has(> .ai-tool-step-detail) > .ai-tool-step-title { display: inline; }
