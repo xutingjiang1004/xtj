@@ -19,7 +19,7 @@
 
 （实际分钟数会略早于整点，是为了错开平台高峰，不影响分工。）
 
-- 模块会话**只推自己的分支 `maint/<模块>-<日期>`，不合并，不推 `main`**。定时会话没有 GitHub 的 MCP 工具（2026-10-31 试跑确认），开不了 PR，所以分支就是交付物，说明写在最后一个提交的提交信息里。大哥统一合并，避免多条分支同时改生成文件（`js/core.js`、`*.min.*`、`index.html` 指纹）互相冲突。
+- 模块会话**只推自己的分支 `maint/<模块>-<日期>`，不合并，不推 `main`**。分支就是交付物，说明写在最后一个提交的提交信息里（不依赖 PR：2026-10-31 试跑发现，新开的定时会话没有 GitHub 的 MCP 工具，也没有推送权限，所以改用常驻会话，见第 12 节）。大哥统一合并，避免多条分支同时改生成文件（`js/core.js`、`*.min.*`、`index.html` 指纹）互相冲突。
 - 当天没发现确认存在的问题：**不造改动、不推分支**，一句话汇报「今天未发现新问题」并写清检查了什么。
 - 用户每天自己验收，所以合并前不需要真机确认；但**必须如实写出哪些没法在浏览器里验证**，让用户知道去手机上看哪里。
 - 会话是无人值守的：不要向用户提问，不要等待回复。
@@ -42,11 +42,11 @@
 14. **浏览器模拟和 Linux 环境不等于 iPhone/iPad 真机**：涉及触摸、手势、Safari 视口与键盘、性能的修复，分支描述里标「需真机复核」并说明看哪里。
 15. **省额度**：模块会话总时长不超过 60 分钟；不要整文件读取 `render-api/server.js`（约 2.8 万行）、`js/core.js`、`js/ai-agent.js`，用 `grep -n` 加范围读取；命令输出用 `| tail -n 40` 截断；不要用 `sleep` 轮询，需要等待就放后台。同一个问题两次尝试都没修好就停，写进「未修」。
 
-## 3. 冷启动（每个新会话都是全新容器）
+## 3. 冷启动（常驻会话被唤醒时，容器可能是新的，仓库会重新克隆，依赖和构建产物要重装）
 
 ```bash
-# 仓库不在当前环境时先用 add_repo（owner xutingjiang1004, repo xtj, access push）添加并按返回的命令克隆。
-cd xtj
+# 常驻会话创建时就挂好了仓库并带推送权限：直接进仓库目录（用 `git rev-parse --show-toplevel` 确认）。不要裸 `git clone` 另起一份：那份只能读，推不了。
+cd <仓库目录>
 git fetch origin main
 git checkout -B maint/<模块>-$(TZ=Asia/Taipei date +%Y%m%d) origin/main
 [ -d node_modules ] || npm ci --no-audit --no-fund
@@ -58,7 +58,7 @@ node scripts/maintenance/smoke.js          # 四种配置各点一遍底部标�
 
 - 浏览器：Chromium 已预装，`require('playwright')` 直接可用；测试若找不到 `/usr/bin/chromium`，`run-tests.sh` 会自动设置 `CHROMIUM_PATH=/opt/pw-browsers/chromium`（也可手动 `ln -sf /opt/pw-browsers/chromium /usr/bin/chromium`）。
 - 数据库测试需要本地 PostgreSQL：`eval "$(scripts/maintenance/pg.sh)"`（`run-tests.sh` 会自动调用）。没有它们时数据库测试会被**跳过并算通过**，汇报里要写「跳过了 N 个」。
-- 定时会话只有 git 和 `add_repo`，没有 `mcp__github__*`：不能开 PR、看不到 CI。用 `git push` 推分支；交互式会话里如果有 GitHub 工具，可以顺便开 PR（仓库没有 PR 模板）。
+- 不依赖 GitHub 的 MCP 工具：用 `git push` 推分支；会话里碰巧有 `mcp__github__*` 时可以顺便开 PR（仓库没有 PR 模板），但没有也不影响流程。
 
 ## 4. 每日流程
 
@@ -177,7 +177,7 @@ node scripts/maintenance/smoke.js          # 四种配置各点一遍底部标�
 ### 8.7 服务端 · 管理后台 · CI（10:00）
 - **后端基础设施**：`render-api/server.js` 启动与环境检查；安全头、CSP、CORS（`security-headers.js`、`trusted-proxies.js`）；限流；错误处理与日志（不写密钥与个人信息）；`/health` 与保活；静态服务的敏感路径黑名单；上传限制；优雅关闭；定时器与内存泄漏；`supabase-availability.js`、`db-result.js` 的重试与错误分类；`storage-cleanup.js`、`storage-orphan-scan.js`；`media-digest.js`；`ip-geolocation.js`；`mail-transport.js`。
 - **管理后台**：`admin.html`、`js/admin/*`、`css/admin.css`、`/api/admin/*`、`admin-*.js`、`admin-statistics.js`。`docs/admin-audit-fixes-2026-10-21.md` 记录了待应用的迁移和未验证的范围，重新核对后再动。
-- **CI**：定时会话看不到 GitHub 的 CI（没有 GitHub 工具）；`.github/` 不要改。要让它读 CI，需要用户在 claude.ai 的定时任务页给这个任务挂上 GitHub 连接器。
+- **CI**：先看自己有没有 `mcp__github__actions_list`：有就只读查 `ci.yml` 在 `main` 上最近一次的结果，哪个作业红了、第一个失败的测试是什么，写进汇报；没有就跳过。`.github/` 不要改。
 - **常见 Bug 类型**：未捕获的异常或 Promise 拒绝；超时与重试风暴；日志泄密；路径穿越；限流绕过；请求体大小；时序与竞态；数据库错误被吞；资源未释放。
 - **筛选**：`'admin|backend|security|server|media-traffic|database|migration|health|cors|csp|headers|storage|rate'`（约 32 个文件）。
 
@@ -214,3 +214,22 @@ node scripts/maintenance/smoke.js          # 四种配置各点一遍底部标�
 5. 验证：守卫、测试对比（基线失败点名）、前后数字；没验证的（真机）明说，以及请用户在手机上看哪几处。
 
 大哥最终回复：合并了什么（按板块）；没合并的和原因；**需要你决定 / 待应用迁移**；线上状态；请在手机上重点看的几处；基线状态；今天哪个会话失败了或额度用尽。
+
+## 12. 运维清单（谁被谁唤醒）
+
+每个板块是一个常驻工作会话（名字 `每日·<板块>`，创建时就挂了仓库并带推送权限），每天由一个定时任务按台北时间唤醒。会话的上下文会跨天保留，所以每次唤醒都要重新读手册、从最新 `origin/main` 开新分支，不沿用旧分支。
+
+| 板块 | 常驻会话 | 定时任务（台北时间） |
+| --- | --- | --- |
+| 帖子 | `session_016rCJpV9uHyxQBhXGixnmtG` | `trig_01A3K7J4jFFUXa3i5bDW9bwg`（05:48） |
+| 照片墙 | `session_016rCJpToc9ExPgcqQ7kQ1EE` | `trig_0111dHj92TjB1VDjSDpdnRtW`（06:49） |
+| 小猫 AI | `session_016rCJpTu3ZtSHnvr98reymJ` | `trig_01Mwxixd6tAsPLrdhPCRGNVq`（07:48） |
+| 我的 · 设置 · 登录 | `session_016rCJpVBYXPwtRzttDKggex` | `trig_01Vhm8q6W5sVUVuPn325vx5M`（08:46） |
+| 聊天 | `session_016rCJpSrYTsmFa2D9xffJCx` | `trig_016cQuJvfDTBSgrG8MoxomA2`（08:49） |
+| 服务端 · 管理后台 | `session_016rCJpUzuooyfsWtDTaXW8T` | `trig_0192GgWEfRviaGqgrXPHYEFe`（09:44） |
+| 全局 | `session_016rCJpRVnGeYT5LhjWx9tLn` | `trig_01NPWRVaEyAnDuYmJ9UbMnYx`（09:46） |
+| 大哥整合 | `session_016rCJpUhcFjKAqWNdrhtBbd` | `trig_01UQM56KP1nsaJeQ9ZCEtguJ`（11:00） |
+
+- 暂停某个板块：`update_trigger` 设 `enabled=false`；改成隔天一次：改 cron（例如 `CRON_TZ=Asia/Taipei 48 5 */2 * *`）；改提示词：`update_trigger` 的 `prompt`（要改的是整段，所以细则尽量放在本手册里，提示词只保留摘要）。
+- 常驻会话不能改系统提示；它们靠定时任务里的消息和本手册工作。需要换会话时：`create_session`（带 `source_url`）建新会话，`create_trigger` 的 `persistent_session_id` 指向它，再删旧的定时任务。
+- 用户白天自己用的交互式会话（帖子、照片墙、小猫AI、聊天、前端网站审计报告）不在这套系统里，它们的改动会随时合进 `main`，所以大哥推送前总要重新 `git fetch`。

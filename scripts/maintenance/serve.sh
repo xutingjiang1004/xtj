@@ -20,7 +20,12 @@ if curl -s -o /dev/null "http://127.0.0.1:$PORT/"; then
   pids=$(lsof -ti "tcp:$PORT" -sTCP:LISTEN || true)
   if [ -n "$pids" ]; then kill $pids; sleep 1; fi
 fi
-(cd "$DIR" && PORT=$PORT nohup node scripts/serve-static.js < /dev/null > "output/maintenance/server-$PORT.log" 2>&1 &)
+# The redirections must sit on the process that stays alive: a backgrounded "cd && node" list leaves a waiting subshell that
+# keeps the caller's stdout open, so "serve.sh | tail" would never finish. exec replaces that subshell with node itself.
+(
+  cd "$DIR" || exit 1
+  PORT=$PORT exec nohup node scripts/serve-static.js < /dev/null > "output/maintenance/server-$PORT.log" 2>&1
+) < /dev/null > /dev/null 2>&1 &
 for _ in 1 2 3 4 5 6 7 8 9 10; do
   if curl -s -o /dev/null "http://127.0.0.1:$PORT/"; then echo "serving $DIR on http://127.0.0.1:$PORT"; exit 0; fi
   sleep 1
