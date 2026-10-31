@@ -37,3 +37,59 @@ test('history, context, new chat and research header controls stay actionable th
   await p.waitForSelector('#aiChatMsgInput',{state:'visible'});await p.locator('#aiChatMsgInput').fill('顶栏操作之后仍可输入');assert.equal(await p.locator('#aiChatMsgInput').inputValue(),'顶栏操作之后仍可输入');assert.deepEqual(f.errors,[]);
  }finally{await f.close();}
 });
+
+test('a short reply becomes a bubble while streaming and the folded thinking opens after the reply ends',{timeout:45000},async()=>{
+ const f=await aiPolishFixture(),p=f.page;
+ try{
+  await p.locator('#aiChatMsgInput').fill('你好');await p.locator('#aiChatSendBtn').click();await p.waitForFunction(()=>aiPolish.streams.length===1);
+  await emit(p,{type:'reasoning_start'});await emit(p,{type:'reasoning',text:'用户打招呼，直接回应。'});await emit(p,{type:'content',text:'嗯？憋不住了？'});
+  await p.waitForFunction(()=>document.querySelector('.ai-msg.assistant .ai-msg-bubble')?.textContent.includes('憋不住了'),null,{timeout:2000});
+  assert.equal(await p.evaluate(()=>!!document.querySelector('.ai-msg.assistant .ai-rail-beat.is-provisional')),false);
+  await emit(p,{type:'done',content:'嗯？憋不住了？',reasoning:'用户打招呼，直接回应。',thinking_elapsed_ms:2300,complete:true,saved:true,conversation_id:'SHORT01'});
+  await p.waitForFunction(()=>{const n=document.querySelector('.ai-msg.assistant');return n&&!n.classList.contains('generating');});
+  await p.locator('.ai-msg.assistant .ai-thinking-toggle').click();
+  await p.waitForFunction(()=>document.querySelector('.ai-msg.assistant .ai-thinking-panel')?.getBoundingClientRect().height>10);
+  assert.match(await p.locator('.ai-msg.assistant .ai-thinking-body').textContent(),/用户打招呼/);assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
+
+test('reply long-press menu items share one flat list style instead of the global glass-pill buttons',{timeout:45000},async()=>{
+ const f=await aiPolishFixture(),p=f.page;
+ try{
+  await p.locator('#aiChatMsgInput').fill('你好');await p.locator('#aiChatSendBtn').click();await p.waitForFunction(()=>aiPolish.streams.length===1);
+  await emit(p,{type:'content',text:'行了。'});await emit(p,{type:'done',content:'行了。',complete:true,saved:true,conversation_id:'MENU01'});
+  await p.waitForFunction(()=>{const n=document.querySelector('.ai-msg.assistant');return n&&!n.classList.contains('generating');});
+  await p.locator('.ai-msg.assistant .ai-msg-bubble').last().dispatchEvent('contextmenu');await p.waitForSelector('.ai-copy-menu');
+  const styles=await p.evaluate(()=>[...document.querySelectorAll('.ai-reply-menu-item')].map(x=>{const c=getComputedStyle(x);return[c.backgroundImage,c.backgroundColor,c.borderTopLeftRadius,c.flexDirection,x.offsetHeight].join('|');}));
+  assert.ok(styles.length>=4);assert.equal(new Set(styles).size,1);assert.equal(styles[0],'none|rgba(0, 0, 0, 0)|10px|row|44');assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
+
+test('header buttons have 44px touch targets and delete lives only in the more menu',{timeout:45000},async()=>{
+ const f=await aiPolishFixture(),p=f.page;
+ try{
+  const sizes=await p.evaluate(()=>[...document.querySelectorAll('.ai-chat-header > button')].map(b=>{const r=b.getBoundingClientRect();return[b.className.split(' ')[0],Math.round(r.width),Math.round(r.height)];}));
+  for(const [name,w,h] of sizes){if(name==='ai-deep-think-toggle'){assert.ok(h>=40);continue;}assert.ok(w>=44&&h>=44,name+' '+w+'x'+h);}
+  assert.equal(await p.locator('.ai-chat-header .ai-chat-del-btn').count(),0);
+  assert.equal(await p.locator('.ai-chat-more-menu').isVisible(),false);
+  await p.locator('.ai-chat-more-btn').click();await p.waitForFunction(()=>document.querySelector('.ai-chat-more-menu')&&!document.querySelector('.ai-chat-more-menu').hidden);
+  assert.equal(await p.locator('.ai-chat-more-btn').getAttribute('aria-expanded'),'true');
+  assert.ok(await p.locator('.ai-chat-more-menu .ai-chat-del-btn').isVisible());
+  await p.keyboard.press('Escape');await p.waitForFunction(()=>document.querySelector('.ai-chat-more-menu').hidden);
+  await p.locator('.ai-chat-more-btn').click();await p.mouse.click(200,500);await p.waitForFunction(()=>document.querySelector('.ai-chat-more-menu').hidden);
+  assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
+
+test('new chat during a streaming reply stops that reply and starts the new conversation',{timeout:45000},async()=>{
+ const f=await aiPolishFixture(),p=f.page;
+ try{
+  await p.locator('#aiChatMsgInput').fill('第一个问题');await p.locator('#aiChatSendBtn').click();await p.waitForFunction(()=>aiPolish.streams.length===1);
+  await emit(p,{type:'content',text:'部分回答'});await p.waitForSelector('.ai-msg.assistant .ai-msg-bubble');
+  await p.locator('.ai-chat-new-btn').click();
+  await p.waitForFunction(()=>aiPolish.calls.some(x=>x.path.endsWith('/chat/new')));
+  await p.waitForFunction(()=>aiPolish.streams[0].cancelled===true||aiPolish.streams[0].signal?.aborted);
+  await p.waitForFunction(()=>!document.querySelector('.ai-msg'));
+  assert.equal(await p.locator('#aiChatSendBtn').isDisabled(),false);assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});

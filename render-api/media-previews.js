@@ -167,7 +167,9 @@ function createMediaPreviews({ supabase, sharp, fetchImpl = fetch, traffic = med
       // Do not retain the original buffer or background-decode an unbounded
       // number of uploads. The upload caller awaits this bounded operation.
       if (working || queue.length) return;
-      const result = await schedule(() => encode(input)); put(previewTag(bucket, path, tag), result);
+      // The display copy is an optimisation: encoding it must not hold the upload response. The queue is bounded and a
+      // failed or skipped encode is rebuilt on first view (the preview route already handles a miss).
+      schedule(async () => { put(previewTag(bucket, path, tag), await encode(input)); }).catch(() => {});
     },
     async inspectedUpload(bucket, path, owner) {
       const item = recent.get(bucket + '\0' + path);

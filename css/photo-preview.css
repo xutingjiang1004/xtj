@@ -648,3 +648,19 @@ html.xtj-photo-preview-ready #photoPreviewOverlay .pp-nav-arrow svg { flex: 0 0 
 #photoPreviewOverlay .pp-image-loading .pp-sweep { position: absolute; top: 0; bottom: 0; left: 0; width: 60%; background: linear-gradient(100deg, transparent 0%, rgba(255, 255, 255, .16) 50%, transparent 100%); transform: translate3d(-100%, 0, 0); animation: ppSweep 1.3s cubic-bezier(.4, 0, .2, 1) infinite; will-change: transform; }
 @keyframes ppSweep { to { transform: translate3d(190%, 0, 0); } }
 @media (prefers-reduced-motion: reduce) { #photoPreviewOverlay .pp-image-loading .pp-sweep { animation: none; transform: translate3d(30%, 0, 0); opacity: .6; } }
+
+/* 2026-10-31: smoother pan / zoom / swipe on high-refresh screens.
+   - The slide track only ever translates, so it keeps its own compositor layer while the preview is open instead of
+     being repainted at full-screen size on every frame (that capped dragging at roughly half the display rate).
+   - The photo itself is promoted only while it is being moved or zoomed, then released so it is re-rasterised sharp.
+   - The toolbar / close button blur is paused during a gesture: a backdrop blur over a moving picture is recomputed
+     every frame. A slightly denser fill stands in for it and is swapped back when the finger lifts. */
+html.xtj-photo-preview-ready #photoPreviewOverlay.active #ppSlideTrack { will-change: transform; }
+html.xtj-photo-preview-ready #photoPreviewOverlay.pp-gesturing #photoPreviewImage,
+html.xtj-photo-preview-ready #photoPreviewOverlay.pp-animate-image #photoPreviewImage { will-change: transform; }
+html.xtj-photo-preview-ready #photoPreviewOverlay.pp-gesturing .pp-preview-toolbar {
+  -webkit-backdrop-filter: none; backdrop-filter: none; background: rgba(12, 18, 28, 0.55);
+}
+html.xtj-photo-preview-ready #photoPreviewOverlay.pp-gesturing .photo-preview-close {
+  -webkit-backdrop-filter: none !important; backdrop-filter: none !important; background: rgba(60, 70, 68, .5) !important;
+}

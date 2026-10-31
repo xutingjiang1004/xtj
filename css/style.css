@@ -16541,6 +16541,10 @@ profile content only. Dock stays untouched.
 #panelChat .chat-msg.is-withdrawn { animation: chatWithdrawIn .22s ease both; }
 #panelChat .chat-msg .msg-img { transition: filter .22s ease, transform .22s cubic-bezier(.2,.75,.25,1); }
 #panelChat .chat-msg .msg-img:not(video):hover { transform: translateY(-1px); }
+/* 2026-10-31: chat photos that are still downloading show a left-to-right light sweep instead of an empty block. */
+#panelChat .chat-msg img.msg-img:not([data-loaded="1"]) { background-color: rgba(255,255,255,.06); background-image: linear-gradient(100deg, transparent 0%, rgba(255,255,255,.16) 50%, transparent 100%); background-size: 60% 100%; background-repeat: no-repeat; animation: chatImgSweep 1.3s ease-in-out infinite; }
+@keyframes chatImgSweep { from { background-position: -80% 0; } to { background-position: 180% 0; } }
+@media (prefers-reduced-motion: reduce) { #panelChat .chat-msg img.msg-img:not([data-loaded="1"]) { animation: none; } }
 [data-theme="dark"] #panelChat .chat-input-wrap { background: rgba(20, 38, 31, .72); border-color: rgba(134, 190, 160, .2); }
 [data-theme="dark"] #panelChat .chat-input-wrap:focus-within { background: rgba(23, 45, 35, .9); }
 [data-theme="dark"] #panelChat .chat-file-preview { background: linear-gradient(145deg, rgba(28,45,37,.96), rgba(20,35,29,.92)); border-color: rgba(134,190,160,.18); box-shadow: 0 6px 18px rgba(0,0,0,.18), inset 0 1px 0 rgba(255,255,255,.035); }
