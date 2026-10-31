@@ -154,7 +154,10 @@ async function migratePhotoStorage(supabase) {
   return moved;
 }
 
-async function streamOriginal(req, res, { supabase, bucket, path, fetchImpl = fetch, allowDownload = false, previews }) {
+// Media is revalidated on every use because access can change. Avatars are the exception: they are
+// public by definition and every upload gets a new unique path, so a cached copy can never be stale.
+const PRIVATE_MEDIA_CACHE = 'private, no-cache, must-revalidate';
+async function streamOriginal(req, res, { supabase, bucket, path, fetchImpl = fetch, allowDownload = false, previews, cacheControl = PRIVATE_MEDIA_CACHE }) {
   mediaTraffic.identify(bucket, path, req.params && req.params.id);
   if (req.query && req.query.preview !== undefined) {
     if (req.query.preview !== '1' || !previews) return res.status(400).json({ ok:false, code:'invalid_preview' });
@@ -181,7 +184,7 @@ async function streamOriginal(req, res, { supabase, bucket, path, fetchImpl = fe
     if (![304,416].includes(response.status) && !mediaType && !downloadType) throw Error('media_type_unavailable');
     // Every route authorizes against current session/visibility before reaching
     // this point. Private caches may reuse bytes only after that fresh check.
-    res.status(response.status).set({ 'Cache-Control': 'private, no-cache, must-revalidate', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' });
+    res.status(response.status).set({ 'Cache-Control': cacheControl, 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' });
     if (downloadType) res.set('Content-Disposition','attachment');
     for (const name of ['etag','last-modified','accept-ranges']) { const value = response.headers.get(name); if (value) res.set(name, value); }
     if (response.status !== 304) for (const name of ['content-type','content-length','content-range']) { const value = response.headers.get(name); if (value) res.set(name, value); }

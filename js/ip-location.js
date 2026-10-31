@@ -118,6 +118,7 @@ function normalizeCountry(value) {
 
 const CHINA_REGIONS = new Set(['北京','天津','河北','山西','内蒙古','辽宁','吉林','黑龙江','上海','江苏','浙江','安徽','福建','江西','山东','河南','湖北','湖南','广东','广西','海南','重庆','四川','贵州','云南','西藏','陕西','甘肃','青海','宁夏','新疆','台湾','香港','澳门']);
 const MUNICIPAL_REGIONS = new Set(['北京','上海','天津','重庆','香港','澳门']);
+const SPECIAL_REGIONS = new Set(['台湾','香港','澳门']);
 // These romanizations identify different cities in different provinces. Never
 // choose one using the flat display-name dictionary or a missing province.
 const AMBIGUOUS_CITIES = {
@@ -223,7 +224,11 @@ function selectIpLocation(candidates, ip, now = Date.now()) {
     if (!row.provider || seen.has(row.provider)) return false;
     seen.add(row.provider); return true;
   }).map(row => {
-    const country = normalizeCountry(row.country), region = normalizeIpGeoName(row.region);
+    let country = normalizeCountry(row.country), region = normalizeIpGeoName(row.region);
+    // 台湾/香港/澳门：有的来源把它们当“国家”（ipwho.is：country=台湾），有的当中国的省份
+    // （百度：中国 · 台湾）。不统一的话两个来源在国家上各执一词，多数表决无结果，
+    // 整次解析被判失败，帖子就一直“解析中”再变“未知”。统一成 中国 + 省份。
+    if (SPECIAL_REGIONS.has(country)) { region = country; country = '中国'; }
     const invalidRegion = country === '中国' && region && !CHINA_REGIONS.has(region);
     const city = invalidRegion ? '' : cleanCity(row.city,region,country);
     return {...row,country,region:invalidRegion?'':region,city,
