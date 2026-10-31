@@ -9025,6 +9025,7 @@
                     window.__xtjPostDetailPaging[kind] = { offset: 0, size: kind === 'likes' ? 50 : 30, has_more: !!meta.has_more, cursor: meta.next_cursor || null, loading: false };
                 });
                 body.innerHTML = statPostDetailMarkup(post, likes || [], comments || []);
+                if (window.__xtjEnsureAvatars) window.__xtjEnsureAvatars((comments || []).map(function(row) { return row.user_name; }).concat([post.user_name]), body);
             };
 
             function detailRelationsMarkup(post, kind, relationRows) {
@@ -9109,7 +9110,10 @@
                 if (!body) return;
                 var comments = window.__xtjPostDetailComments || [], likes = window.__xtjPostDetailLikes || [];
                 var panel = body.querySelector('.post-detail-comments-panel');
+                var keptReply = panel && window.__xtjDetachReplyBox ? window.__xtjDetachReplyBox(panel) : null;
                 if (panel) panel.innerHTML = detailRelationsMarkup(post, 'comments');
+                if (panel && keptReply && window.__xtjReattachReplyBox) window.__xtjReattachReplyBox(panel, keptReply);
+                if (panel && window.__xtjEnsureAvatars) window.__xtjEnsureAvatars(comments.map(function(row) { return row.user_name; }), panel);
                 var likesPanel = body.querySelector('.post-detail-likes-panel');
                 if (likesPanel) likesPanel.innerHTML = detailRelationsMarkup(post, 'likes');
                 var stats = body.querySelector('.post-detail-stats');

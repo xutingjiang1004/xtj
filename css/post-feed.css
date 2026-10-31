@@ -233,6 +233,18 @@ html[data-xtj-motion="off"] #pubBtn .post-publish-progress-copy { animation:none
   box-shadow:none!important; filter:none!important; font-size:12px; line-height:1.5; color:var(--text-muted)!important; opacity:1;
 }
 .comments .comment-del-btn::before, .comments .comment-del-btn::after { content:none!important; }
+.comments .comment-reply-btn {
+  /* 点击区靠内边距加负外边距放大，不撑高评论的标题行 */
+  flex:0 0 auto; min-height:0; height:auto; margin:-7px 0 -7px 2px; padding:7px 6px; border:0; border-radius:0; background:transparent;
+  box-shadow:none; font:inherit; font-size:12px; line-height:1.4; color:var(--text-muted); cursor:pointer;
+}
+.comments .comment-reply-btn::before, .comments .comment-reply-btn::after { content:none!important; }
+.comments .comment-reply-btn:hover { color:var(--text-main); }
+.comments .comment-reply-btn:focus-visible { outline:2px solid var(--accent, #2f7a57); outline-offset:1px; border-radius:6px; }
+/* 回复框跟在被回复评论那一行下面，对齐到正文列 */
+.comments .comment-item > .inline-reply-box { margin-left:42px; margin-right:0; }
+.comments .comment-replies .comment-item > .inline-reply-box { margin-left:36px; }
+
 #panelPosts .comment-replies, #postDetailBody .comment-replies { margin:2px 0 0 42px!important; }
 #panelPosts .comment-replies .comment-replies, #postDetailBody .comment-replies .comment-replies { margin-left:0!important; }
 #panelPosts .inline-comment-box, #postDetailBody .inline-comment-box { margin-top:8px!important; padding:4px 0!important; border:0!important; border-radius:0!important; background:transparent!important; box-shadow:none!important; backdrop-filter:none!important; -webkit-backdrop-filter:none!important; }

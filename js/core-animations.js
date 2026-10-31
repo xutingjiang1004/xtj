@@ -156,7 +156,8 @@
       if (window.showToast) window.showToast('请先登录');
       return;
     }
-    if (_origOpenComment) _origOpenComment(postId);
+    // 转发全部参数：回复某条评论时第二个参数带着被回复评论的信息。
+    if (_origOpenComment) _origOpenComment.apply(this, arguments);
   };
 
   document.addEventListener('click', function (e) {
