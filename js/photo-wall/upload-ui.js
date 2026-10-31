@@ -1353,7 +1353,14 @@
     // 单次渲染：setUploadResult 内部统一处理 dataset/title/detail/庆祝，
     // 避免旧写法(setUploadResult + setUploadResultState 连续调用)二次写入、成功庆祝触发两次。
     setUploadResult(summary, resultState, fullMsg);
-    if (resultState === 'success' && ok > 0 && window.XTJHaptics) window.XTJHaptics.play('success');
+    if (resultState === 'success' && ok > 0) {
+      // A fully successful batch is confirmed by the top toast, not by a card under the grid. The card stays for
+      // anything the user may need to act on or read (failures, skipped files, a refresh problem).
+      toast(ok > 1 ? '上传成功，共 ' + ok + ' 张' : '上传成功');
+      var resultCard = byId('pwUploadResult');
+      if (resultCard && !state.skippedFiles.length && !refreshFailed) resultCard.hidden = true;
+      if (window.XTJHaptics) window.XTJHaptics.play('success');
+    }
 
     // Committed rows are rendered immediately; reconcile the wall in the background.
     if (ok && typeof window.loadPhotoWallData === 'function') {
