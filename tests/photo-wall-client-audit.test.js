@@ -20,7 +20,10 @@ test('photo uploads retain a bounded worker pool and continue after a worker cal
 });
 
 test('original uploads never use canvas re-encoding and uncommon-format checks release resources', () => {
-  assert.doesNotMatch(upload, /toBlob|drawImage|createImageBitmap/);
+  // The selection sheet may downscale a throwaway thumbnail; everything else (the upload path) must not.
+  const uploadPath = upload.replace(/\/\/ <sheet-thumbs>[\s\S]*?\/\/ <\/sheet-thumbs>/, '');
+  assert.notEqual(uploadPath.length, upload.length, 'thumbnail helper stays inside its marked block');
+  assert.doesNotMatch(uploadPath, /toBlob|drawImage|createImageBitmap/);
   assert.match(upload, /if \(ok\) resolve\(file\)/);
   assert.match(upload, /URL\.revokeObjectURL\(url\)/);
   assert.match(upload, /img\.onload = null/);

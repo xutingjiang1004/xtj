@@ -155,6 +155,15 @@
     return error;
   }
 
+  var SERVER_UPLOAD_REASONS = {
+    photo_quota_exceeded: '上传已达每小时容量上限，请稍后再试',
+    photo_upload_busy: '服务器正忙，请稍后重试',
+    photo_decode_busy: '同时处理的照片过多，请稍后重试',
+    INVALID_IMAGE: '无法识别为有效图片',
+    file_too_large: '文件超过 50 MB 限制',
+    photo_not_owned: '上传编号冲突，请重新上传',
+    photo_ownership_forbidden: '上传编号冲突，请重新上传'
+  };
   function photoUploadFailureReason(error, stage){
     var code = error && error.photoUploadCode;
     var status = Number(error && (error.status || error.statusCode)) || 0;
@@ -162,6 +171,9 @@
     if (code === 'identity_changed') return '账号已变化，上传已停止';
     if (code === 'cancelled') return '已取消';
     if (stage === 'pending' || code === 'timeout' || (error && error.name === 'AbortError')) return '正在确认上传结果，请稍候';
+    // The server says exactly why it refused; show that instead of a generic line (a 403 is not always an expired login).
+    var serverReason = SERVER_UPLOAD_REASONS[error && error.serverCode];
+    if (serverReason) return serverReason;
     if (code === 'unsupported_type') return '文件类型不支持';
     if (code === 'file_too_large') return '文件超过 50 MB 限制';
     if (code === 'timeout' || /timeout|timed out/.test(message)) return '正在确认上传结果，请稍候';
@@ -689,6 +701,7 @@
     if (!resp.ok || !data.ok || !data.public_url) {
       var err = new Error((data && data.error) || '图片上传失败');
       err.status = resp.status;
+      err.serverCode = data && data.code;
       err.photoUploadStage = 'storage';
       throw err;
     }
@@ -854,6 +867,37 @@
     }
   }
 
+  // <sheet-thumbs> preview-only: nothing here touches the bytes that are uploaded.
+  // Showing the selected originals directly makes the browser decode every full-size photo (a 12-photo batch of
+  // phone shots is hundreds of MB of pixels) just to paint small squares. Decode one at a time at thumbnail size
+  // instead; the original blob stays the fallback when the browser cannot downscale.
+  var thumbChain = Promise.resolve();
+  function setSheetUrl(file, img, url){
+    var at = state.photoFiles.indexOf(file);
+    if (at < 0) { try { URL.revokeObjectURL(url); } catch (_) {} return; }
+    state.photoUrls[at] = url;
+    img.src = url;
+  }
+  function showSheetThumb(file, img){
+    thumbChain = thumbChain.then(function(){
+      if (state.photoFiles.indexOf(file) < 0) return;
+      var fallback = function(){ setSheetUrl(file, img, URL.createObjectURL(file)); };
+      if (typeof createImageBitmap !== 'function' || typeof document.createElement !== 'function') return fallback();
+      return createImageBitmap(file, { resizeWidth: 480, resizeQuality: 'medium', imageOrientation: 'from-image' }).then(function(bitmap){
+        var canvas = document.createElement('canvas');
+        canvas.width = bitmap.width; canvas.height = bitmap.height;
+        canvas.getContext('2d').drawImage(bitmap, 0, 0);
+        if (bitmap.close) bitmap.close();
+        return new Promise(function(resolve){ canvas.toBlob(resolve, 'image/webp', 0.8); });
+      }).then(function(blob){
+        if (!blob) return fallback();
+        setSheetUrl(file, img, URL.createObjectURL(blob));
+      }).catch(fallback);
+    }).catch(function(){});
+  }
+
+  // </sheet-thumbs>
+
   function openSheet(files, skipped){
     var sheet = byId('pwUploadSheet');
     var grid = byId('pwUploadSheetGrid');
@@ -868,14 +912,14 @@
     state.skippedFiles = (skipped || []).slice();
     grid.innerHTML = '';
     files.forEach(function(file, index){
-      var url = URL.createObjectURL(file);
-      state.photoUrls.push(url);
+      // photoUrls stays index-aligned with photoFiles; the real URL is filled in below.
+      state.photoUrls.push('');
       var item = document.createElement('div');
       item.className = 'pw-upload-sheet-thumb';
       var img = document.createElement('img');
-      img.src = url; img.alt = ''; img.decoding = 'async';
-      if (index > 3) img.loading = 'lazy';
+      img.alt = ''; img.decoding = 'async';
       img.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block;';
+      showSheetThumb(file, img);
       item.appendChild(img);
       var remove = document.createElement('button');
       remove.type='button';remove.className='pw-upload-remove';remove.dataset.fileName=file.name;
@@ -1159,6 +1203,7 @@
       try { errBody = await createRes.json(); } catch (_) { errBody = {}; }
       var recordError = new Error((errBody && errBody.error) || '创建照片记录失败');
       recordError.status = createRes.status;
+      recordError.serverCode = errBody && errBody.code;
       recordError.photoUploadStage = 'record';
       await cleanupStorage(path, uploadId, cleanupAfterCreateOptions);
       throw recordError;
