@@ -4107,6 +4107,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       }
       var open = !container.classList.contains('expanded');
       container.__userCollapsed = !open;
+      if (open) {
+        // 回复结束时思考原文被整体折起（is-reasoning-folded / .is-folded 都是 display:none），
+        // 这里没有时间轴可开合，用户点「已思考」就是要看原文，必须把折起标记摘掉。
+        container.classList.remove('is-reasoning-folded');
+        container.querySelectorAll('.ai-reasoning-segment.is-folded').forEach(function(seg) { seg.classList.remove('is-folded'); });
+      }
       setThinkingExpanded(container, open, messagesEl || S.messagesEl);
       if (open) {
         container.querySelectorAll('.ai-reasoning-segment').forEach(function(seg) {
@@ -11331,14 +11337,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         }
         if (contentRenderer) contentRenderer.append(aiContent, evtReceivedAt);
       }
-      function scheduleAnswerPromote(evtReceivedAt) {
+      function scheduleAnswerPromote(evtReceivedAt, delayMs) {
         if (_sendThinkingMode === 'off' || answerCommitted || answerPromoteTimer) return;
         var scheduledReq = reqId;
         answerPromoteTimer = setTimeout(function() {
           answerPromoteTimer = null;
           if (scheduledReq !== S._currentReqId || !customModelIdentityCurrent(sendIdentity)) return;
           promoteRunningAnswer(evtReceivedAt);
-        }, 280);
+        }, delayMs || 280);
       }
       function unfoldRunningProcess() {
         var thinking = assistantNode.querySelector('.ai-thinking');
@@ -12671,7 +12677,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             if (accepted) {
               if (_sendThinkingMode !== 'off' && !answerCommitted) {
                 showProvisionalNarration(aiContent.trim());
-                if (aiContent.indexOf('\n') >= 0 || aiContent.trim().length >= 80) scheduleAnswerPromote(evtReceivedAt);
+                // 任何长度的正文都要排上「升级为气泡」的计时：短回复（「嗯？憋不住了？」）
+                // 以前只挂在时间轴上显示成圆点 + 无气泡文字，直到整条回复结束才变成气泡。
+                scheduleAnswerPromote(evtReceivedAt, aiContent.indexOf('\n') >= 0 || aiContent.trim().length >= 80 ? 280 : 450);
                 continue;
               }
               ensureAssistantBubbleReady();
@@ -12988,6 +12996,38 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     scrollToBottom(messagesEl, false);
   }
 
+  // 「正在加载聊天记录」占位：4 秒还没回来就换成明确的慢网提示，而不是一直原样转下去。
+  function buildHistoryLoadingState() {
+    var node = buildEmptyState('正在加载聊天记录…');
+    node.classList.add('ai-history-loading');
+    setTimeout(function() {
+      if (!node.isConnected) return;
+      var tip = node.querySelector('.ai-chat-empty-tip');
+      if (tip) tip.textContent = '网络有点慢，还在加载…';
+    }, 4000);
+    return node;
+  }
+
+  // 同步把本地缓存的会话画出来；打开页面时不必等鉴权和接口，先有内容可看。
+  function paintCachedHistory(messagesEl, cachedMsgs) {
+    S.messages = cachedMsgs;
+    S._pendingLocalMsgs = cachedMsgs.filter(function(m) { return m && m._pendingSync === true; });
+    messagesEl.innerHTML = '';
+    messagesEl.__xtjAiCardIds = {};
+    var frag = document.createDocumentFragment();
+    var cachedNodes = [];
+    cachedMsgs.forEach(function(m, index) {
+      var cachedNode = historyTurn(m, messagesEl, index, cachedMsgs.length);
+      cachedNodes.push(cachedNode);
+      frag.appendChild(cachedNode);
+    });
+    messagesEl.appendChild(frag);
+    renderAiHistoryCards(messagesEl, cachedMsgs, cachedNodes, []);
+    messagesEl.__xtjCachePainted = cachedMsgs;
+    S.autoScrollPinned = true;
+    scrollToBottom(messagesEl, true);
+  }
+
   async function loadHistory(messagesEl, before) {
     if (S.loading || S.loadingMore) return;
     if (before) S.loadingMore = true;
@@ -13009,30 +13049,17 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       
       if (!S.sending && cachedMsgs && Array.isArray(cachedMsgs) && cachedMsgs.length > 0) {
         hasCache = true;
-        S.messages = cachedMsgs;
-        S._pendingLocalMsgs = cachedMsgs.filter(function(m) { return m && m._pendingSync === true; });
-        messagesEl.innerHTML = '';
-        messagesEl.__xtjAiCardIds = {};
-        var frag = document.createDocumentFragment();
-        var cachedNodes = [];
-        cachedMsgs.forEach(function(m,index) {
-          var cachedNode = historyTurn(m,messagesEl,index,cachedMsgs.length);
-          cachedNodes.push(cachedNode);
-          frag.appendChild(cachedNode);
-        });
-        messagesEl.appendChild(frag);
-        renderAiHistoryCards(messagesEl, cachedMsgs, cachedNodes, []);
-        S.autoScrollPinned = true;
-        scrollToBottom(messagesEl, true);
+        // 打开页面时已经同步画过同一份缓存，就不再整页重画（避免鉴权之后闪一下）。
+        var alreadyPainted = !!(messagesEl.__xtjCachePainted && messagesEl.querySelector('.ai-msg'));
+        messagesEl.__xtjCachePainted = null;
+        if (!alreadyPainted) paintCachedHistory(messagesEl, cachedMsgs);
       } else if (!S.sending && (!messagesEl.children.length
           || messagesEl.querySelector('.ai-history-unavailable')
           // renderAiRoot starts with the welcome empty-state, so checking only
           // children.length skipped the loading indicator on every cold open.
           || messagesEl.querySelector('.ai-chat-empty'))) {
         messagesEl.innerHTML = '';
-        var loadingState = buildEmptyState('正在加载聊天记录…');
-        loadingState.classList.add('ai-history-loading');
-        messagesEl.appendChild(loadingState);
+        messagesEl.appendChild(buildHistoryLoadingState());
       }
     }
 
@@ -13042,14 +13069,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (before) qs += '&before=' + encodeURIComponent(before);
       qs += '&mode=normal';
       // 历史接口偶发慢/弱网：超时放宽并做一次静默重试，减少「缓存记录，刷新失败」误报
-      var r = await apiRequest('GET', '/chat/history' + qs, null, { timeoutMs: 15000, abortController: loadController });
+      var r = await apiRequest('GET', '/chat/history' + qs, null, { timeoutMs: 10000, abortController: loadController });
       if ((!r.ok || !r.data) && !before && r && r.error_code !== 'aborted') {
         var canRetry = r.retryable !== false && (r.status === 0 || r.error_code === 'timeout' || r.error_code === 'network_error' || (r.status >= 500));
         if (canRetry && requestId === S.historyRequestId) {
           try {
             await new Promise(function(resolve) { setTimeout(resolve, 400); });
             if (requestId === S.historyRequestId && (!loadController || !loadController.signal || !loadController.signal.aborted)) {
-              r = await apiRequest('GET', '/chat/history' + qs, null, { timeoutMs: 18000, abortController: loadController });
+              r = await apiRequest('GET', '/chat/history' + qs, null, { timeoutMs: 12000, abortController: loadController });
             }
           } catch (eRetry) {}
         }
@@ -15937,9 +15964,10 @@ function showChatMessages() {
     startQuotaPolling();
     if (readUserName() && r.messagesEl) {
       r.messagesEl.innerHTML = '';
-      var openingHistory = buildEmptyState('正在加载聊天记录…');
-      openingHistory.classList.add('ai-history-loading');
-      r.messagesEl.appendChild(openingHistory);
+      var openingCache = null;
+      try { openingCache = getAiHistoryCache(S.conversationId); } catch (eOpenCache) {}
+      if (!S.sending && openingCache && Array.isArray(openingCache.messages) && openingCache.messages.length) paintCachedHistory(r.messagesEl, openingCache.messages);
+      else r.messagesEl.appendChild(buildHistoryLoadingState());
     }
 
     if (S.viewportCleanup) {

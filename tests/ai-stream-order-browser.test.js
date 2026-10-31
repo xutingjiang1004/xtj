@@ -37,3 +37,18 @@ test('history, context, new chat and research header controls stay actionable th
   await p.waitForSelector('#aiChatMsgInput',{state:'visible'});await p.locator('#aiChatMsgInput').fill('顶栏操作之后仍可输入');assert.equal(await p.locator('#aiChatMsgInput').inputValue(),'顶栏操作之后仍可输入');assert.deepEqual(f.errors,[]);
  }finally{await f.close();}
 });
+
+test('a short reply becomes a bubble while streaming and the folded thinking opens after the reply ends',{timeout:45000},async()=>{
+ const f=await aiPolishFixture(),p=f.page;
+ try{
+  await p.locator('#aiChatMsgInput').fill('你好');await p.locator('#aiChatSendBtn').click();await p.waitForFunction(()=>aiPolish.streams.length===1);
+  await emit(p,{type:'reasoning_start'});await emit(p,{type:'reasoning',text:'用户打招呼，直接回应。'});await emit(p,{type:'content',text:'嗯？憋不住了？'});
+  await p.waitForFunction(()=>document.querySelector('.ai-msg.assistant .ai-msg-bubble')?.textContent.includes('憋不住了'),null,{timeout:2000});
+  assert.equal(await p.evaluate(()=>!!document.querySelector('.ai-msg.assistant .ai-rail-beat.is-provisional')),false);
+  await emit(p,{type:'done',content:'嗯？憋不住了？',reasoning:'用户打招呼，直接回应。',thinking_elapsed_ms:2300,complete:true,saved:true,conversation_id:'SHORT01'});
+  await p.waitForFunction(()=>{const n=document.querySelector('.ai-msg.assistant');return n&&!n.classList.contains('generating');});
+  await p.locator('.ai-msg.assistant .ai-thinking-toggle').click();
+  await p.waitForFunction(()=>document.querySelector('.ai-msg.assistant .ai-thinking-panel')?.getBoundingClientRect().height>10);
+  assert.match(await p.locator('.ai-msg.assistant .ai-thinking-body').textContent(),/用户打招呼/);assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});

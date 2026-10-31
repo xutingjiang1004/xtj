@@ -51,7 +51,8 @@ test('Requirement 7: Successful history load removes history unavailable banner'
 test('cold history load replaces the initial welcome state with a visible loader', () => {
   const loadHistory = aiSource.slice(aiSource.indexOf('async function loadHistory'), aiSource.indexOf('async function fetchConversations'));
   assert.match(loadHistory, /messagesEl\.querySelector\('\.ai-chat-empty'\)/);
-  assert.match(loadHistory, /loadingState\.classList\.add\('ai-history-loading'\)/);
+  assert.match(loadHistory, /buildHistoryLoadingState\(\)/);
+  assert.match(aiSource, /function buildHistoryLoadingState\(\)[\s\S]{0,200}classList\.add\('ai-history-loading'\)/);
 });
 
 // 8. 缓存按完整 user/assistant 轮次保存
