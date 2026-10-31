@@ -6414,12 +6414,14 @@ function renderProfileActivityList(kind) {
                     const controller = new AbortController();
                     const timeoutId = setTimeout(() => controller.abort(), 15000);
                     try {
+                        var commentRequest = { post_id: targetPostId, content: content, client_request_id: commentAttempt.id };
+                        if (reply) commentRequest.parent_comment_id = String(reply.parentId); // 回复时才带，普通评论的请求体保持原样
                         const response = await window.xtjProtectedFetch('/api/post/comment', {
                             authOwner: identity.owner, authEpoch: identity.epoch,
                             signal: controller.signal,
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(reply ? { post_id: targetPostId, content: content, client_request_id: commentAttempt.id, parent_comment_id: String(reply.parentId) } : { post_id: targetPostId, content: content, client_request_id: commentAttempt.id })
+                            body: JSON.stringify(commentRequest)
                         });
                         const result = await response.json().catch(function() { return {}; });
                         if (!postActionIdentityCurrent(identity)) return;
