@@ -12104,9 +12104,25 @@ function renderProfileActivityList(kind) {
             //   所以图片从头到尾都在，绝不会出现"空白气泡"。这里在后台把远端图下载好，
             //   完成后才把 src 指过去（同一张图，肉眼无变化），随后释放 blob。
             //   远端下载失败则**什么都不做**：继续显示本地图，不清空、不降级成按钮。
+            // ★ 2026-10-31：请求一直不返回（存储限流、弱网）时 onerror 永远不会触发，气泡会无限停在占位。
+            //   超过阈值仍没加载完就按「加载失败」处理：沿用 handleDockChatImageError 的两次退避重试，
+            //   仍不行才降级成「查看图片」按钮。每次处理后继续盯，直到加载成功或气泡被替换。
+            function watchDockChatImageStall(img) {
+                if (!img || img.getAttribute('data-stall-watch')) return;
+                img.setAttribute('data-stall-watch', '1');
+                setTimeout(function() {
+                    img.removeAttribute('data-stall-watch');
+                    if (!img.isConnected) return;
+                    if (img.complete && img.naturalWidth > 0) { img.setAttribute('data-loaded', '1'); return; }
+                    if (img.getAttribute('data-loaded') === '1') return;
+                    window.handleDockChatImageError(img);
+                    if (img.isConnected) watchDockChatImageStall(img);
+                }, Number(window.__xtjChatImageStallMs) || 20000);
+            }
             function hydrateDockChatRemoteMedia(host) {
                 var root = host || document.getElementById('dockChatMessages');
                 if (!root) return;
+                Array.prototype.forEach.call(root.querySelectorAll('img.msg-img:not([data-loaded="1"])'), watchDockChatImageStall);
                 var imgs = root.querySelectorAll('img.msg-img[data-remote-src]');
                 Array.prototype.forEach.call(imgs, function(img) {
                     var remote = String(img.getAttribute('data-remote-src') || '');
@@ -12275,15 +12291,19 @@ function renderProfileActivityList(kind) {
                     });
                 }
                 if (updates.length) {
-                    var response = await window.xtjProtectedFetch('/api/dm/read', {
-                        method: 'POST',
-                        authOwner: owner, authEpoch: epoch,
-                        body: JSON.stringify({ message_ids: updates.map(function(update) { return update.id; }) })
-                    });
-                    var result = await response.json().catch(function() { return {}; });
-                    if (owner !== window.currentUser || epoch !== _authStateEpoch) return;
-                    if (!response.ok || !result.ok) throw new Error(result.error || 'DM read update failed');
-                    var readRows = Array.isArray(result.data) ? result.data : [];
+                    // 服务端一次最多处理 200 个 ID，超出的会被静默截掉、永远留在未读；这里按 200 分批。
+                    var readRows = [];
+                    for (var offset = 0; offset < updates.length; offset += 200) {
+                        var response = await window.xtjProtectedFetch('/api/dm/read', {
+                            method: 'POST',
+                            authOwner: owner, authEpoch: epoch,
+                            body: JSON.stringify({ message_ids: updates.slice(offset, offset + 200).map(function(update) { return update.id; }) })
+                        });
+                        var result = await response.json().catch(function() { return {}; });
+                        if (owner !== window.currentUser || epoch !== _authStateEpoch) return;
+                        if (!response.ok || !result.ok) throw new Error(result.error || 'DM read update failed');
+                        if (Array.isArray(result.data)) readRows = readRows.concat(result.data);
+                    }
                     var readById = new Map(readRows.map(function(row) { return [String(row.id), row]; }));
                     var cacheKey = getDockChatCacheKey(senderName);
                     var cached = Array.isArray(_chatCache[cacheKey]) ? _chatCache[cacheKey] : [];
@@ -15054,7 +15074,7 @@ function renderProfileActivityList(kind) {
             function buildDockChatBodyMarkup(message) {
                 var payload = getDMMessagePayload(message) || {};
                 if (payload && payload.withdrawn) {
-                    return '<span class="msg-text withdrawn">[此消息已被撤回]</span>';
+                    return '<span class="msg-text withdrawn">此消息已被撤回</span>';
                 }
                 if(payload.flash){var own=message.user_name===currentUser,expired=!own&&(payload.flash.state==='expired'||flashLocallyViewed(currentUser,message.id));return '<button type="button" class="chat-flash-card" '+(expired||message.__optimistic?'disabled':'onclick="openChatFlash(\''+escapeHtml(String(message.id))+'\')"')+' aria-label="'+(expired?'闪图已失效':own?'查看自己发送的闪图，不限次数':'查看一次性闪图，3 秒后失效')+'"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 2-10 12h7l-1 8 10-12h-7z"/></svg><span>'+(expired?'闪图已失效':'闪图 3 秒')+'</span></button>';}
                 var media = resolveDockChatMedia(message);
@@ -15990,11 +16010,28 @@ function renderProfileActivityList(kind) {
                 var next = _dockChatSendQueue[0];
                 if (!next || next.owner !== window.currentUser || next.epoch !== _authStateEpoch || next.peer !== dockChatActiveUser) {
                     _dockChatSendQueue.shift();
-                    showToast('会话已切换，排队消息已取消');
+                    // 排队时已经显示了气泡；会话切换后不会再发出，要把它撤掉，不能留成永远「发送中」。
+                    if (next && next.tempId && next.owner === window.currentUser && next.epoch === _authStateEpoch) {
+                        try { removeDockChatCacheMessage(next.peer, next.tempId); } catch (eDropQueued) {}
+                        if (dockChatActiveUser === next.peer) {
+                            try { renderDockMessages(next.peer, _chatCache[getDockChatCacheKey(next.peer)] || [], false); } catch (eDropRender) {}
+                        }
+                    }
+                    // 文字不能凭空消失：放回原会话的草稿，回到那个会话时还在。
+                    var restored = false;
+                    if (next && next.content && next.owner === window.currentUser && next.epoch === _authStateEpoch) {
+                        try {
+                            var draftKey = next.owner + '\u0000' + next.peer;
+                            var existingDraft = _dockChatLocalDrafts[draftKey] ? _dockChatLocalDrafts[draftKey].value : '';
+                            persistDockChatDraft(next.peer, existingDraft ? next.content + '\n' + existingDraft : next.content);
+                            restored = true;
+                        } catch (eRestoreDraft) {}
+                    }
+                    showToast(restored ? '会话已切换，未发出的消息已放回草稿' : '会话已切换，排队消息已取消');
                     return drainDockChatSendQueue();
                 }
                 _dockChatSendQueue.shift();
-                return sendDockChatMessageSingle(null, next.content, { queued: true, replyDraft: next.replyDraft || null });
+                return sendDockChatMessageSingle(null, next.content, { queued: true, replyDraft: next.replyDraft || null, tempId: next.tempId, clientMessageId: next.clientMessageId, createdAt: next.createdAt });
             }
             async function sendDockChatMessageSingle(queuedFile, queuedText, retryOptions) {
                 var forwarding = !!(retryOptions && retryOptions.forwardTo);
@@ -16030,18 +16067,35 @@ function renderProfileActivityList(kind) {
                 if (dockChatSending || _chatBatchSending) {
                     if (forwarding) { showToast('上一条消息正在发送，请稍候再转发'); return; }
                     if (queuedSend) {
-                        _dockChatSendQueue.unshift({ content: content, peer: dockChatActiveUser, owner: currentUser, epoch: _authStateEpoch, replyDraft: replyDraft });
+                        _dockChatSendQueue.unshift({ content: content, peer: dockChatActiveUser, owner: currentUser, epoch: _authStateEpoch, replyDraft: replyDraft,
+                            tempId: retryOptions.tempId, clientMessageId: retryOptions.clientMessageId, createdAt: retryOptions.createdAt });
                         return;
                     }
                     if (!file && content) {
-                        if (_dockChatSendQueue.length >= 5) { showToast('排队消息过多，请等当前消息发送完成'); return; }
+                        if (_dockChatSendQueue.length >= 50) { showToast('待发送的消息太多，请稍等片刻'); return; }
                         var queuedReply = replyDraft ? Object.assign({}, replyDraft) : null;
-                        _dockChatSendQueue.push({ content: content, peer: dockChatActiveUser, owner: currentUser, epoch: _authStateEpoch, replyDraft: queuedReply });
+                        // ★ 2026-10-31：连发时不再弹「已排队」提示，也不让消息消失一段时间。
+                        //   气泡立刻出现在会话里（带发送中状态），上一条完成后按原顺序自动发出，
+                        //   沿用同一个气泡和幂等键，不会重复也不会乱序。
+                        var queuedTempId = 'temp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+                        var queuedCreatedAt = new Date().toISOString();
+                        var queuedTarget = dockChatActiveUser;
+                        var queuedMessage = {
+                            id: queuedTempId, __tempId: queuedTempId, __clientMessageId: queuedTempId, __optimistic: true, __localPreviewUrl: '',
+                            user_name: currentUser,
+                            content: buildDMMessageContent({ content: content }, Object.assign({ text: content, read_at: null, media: null }, queuedReply ? { reply_to: queuedReply } : {})),
+                            media_type: DM_MARKER, media_url: queuedTarget, actor_key: DM_MARKER, created_at: queuedCreatedAt, views: 0
+                        };
+                        var queuedOrigin = captureDockChatSendOrigin(null);
+                        _dockChatSendQueue.push({ content: content, peer: queuedTarget, owner: currentUser, epoch: _authStateEpoch, replyDraft: queuedReply,
+                            tempId: queuedTempId, clientMessageId: queuedTempId, createdAt: queuedCreatedAt });
                         inp.value = '';
                         try { inp.dispatchEvent(new Event('input', { bubbles: true })); } catch (eQueueInput) {}
-                        try { persistDockChatDraft(dockChatActiveUser, ''); } catch (eQueueDraft) {}
+                        try { persistDockChatDraft(queuedTarget, ''); } catch (eQueueDraft) {}
                         if (queuedReply) clearChatMessageDraft(false);
-                        showToast('已排队，上一条发送完成后自动发出');
+                        renderDockMessages(queuedTarget, upsertDockChatCacheMessage(queuedTarget, queuedMessage), true);
+                        animateDockChatSend(queuedTempId, queuedTarget, queuedOrigin);
+                        applyDockChatConversationPreview(queuedTarget, queuedMessage, 0);
                         return;
                     }
                     // ★ 2026-09-25 修复（审计 M-4）：旧实现把 dockChatSending 与"无内容"
@@ -16076,7 +16130,7 @@ function renderProfileActivityList(kind) {
                 // 把真实的发送状态告诉 ux-features 的指示器（它此前是假的 1.8 秒计时）
                 try { if (typeof window.__xtjNotifyChatSending === 'function') window.__xtjNotifyChatSending(true); } catch (e) {}
                 var capturedContent = content;
-                var tempId = 'temp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+                var tempId = queuedSend && retryOptions.tempId || 'temp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
                 // ★ 2026-09-27 修复（审计 S5：发送请求缺幂等键）：
                 //   /api/dm/send 此前只带 target_user + content，服务端无法区分
                 //   「用户真的发了两条一模一样的话」和「同一条消息被重发了一次」。
@@ -16088,7 +16142,7 @@ function renderProfileActivityList(kind) {
                 //   现在为每次用户动作生成一个稳定幂等键（同一 tempId 生命周期内不变，
                 //   重发/重试复用同一个值），服务端据此去重即可。
                 var clientMessageId = retryOptions && retryOptions.clientMessageId || tempId;
-                var optimisticCreatedAt = new Date().toISOString();
+                var optimisticCreatedAt = queuedSend && retryOptions.createdAt || new Date().toISOString();
                 var localPreviewUrl = '';
                 var mediaKind = file
                     ? getChatUploadKind(file)
@@ -16126,7 +16180,7 @@ function renderProfileActivityList(kind) {
                     views: 0
                 };
                 renderDockMessages(targetUser, upsertDockChatCacheMessage(targetUser, optimisticMessage), true);
-                animateDockChatSend(tempId,targetUser,sendOrigin);
+                if (!queuedSend) animateDockChatSend(tempId,targetUser,sendOrigin);
                 applyDockChatConversationPreview(targetUser, optimisticMessage, 0);
                 if (file && !retrying && !forwarding) clearDockChatFilePreview(false);
                 // 失败重发时复用同一个文件对象（File 在内存里保留，页面刷新后重发不可用）
@@ -17758,7 +17812,7 @@ function renderProfileActivityList(kind) {
                 // 由 sendDockChatMessageSingle 的排队分支把文本排进队列。
                 if(_chatBatchSending && _chatAttachmentQueue.length){showToast('附件正在依次发送');return;}
                 if(!_chatAttachmentQueue.length)return sendDockChatMessageSingle();
-                if(dockChatSending)return;
+                if(dockChatSending){showToast('上一条消息正在发送，请稍候');return;}
                 var files=_chatAttachmentQueue.slice(),peer=dockChatActiveUser,owner=window.currentUser,epoch=_authStateEpoch,text=document.getElementById('dockChatInput').value.trim();
                 if(!peer || !owner || isUserMuted())return sendDockChatMessageSingle();
                 var batch={owner:owner,epoch:epoch,peer:peer,cancelled:false};
@@ -17773,6 +17827,11 @@ function renderProfileActivityList(kind) {
                     setTimeout(function() { try { drainDockChatSendQueue(); } catch (eBatchDrain) {} }, 0);
                 }}
             }
+            // 聊天图片下载完成后去掉扫光占位（load 不冒泡，用捕获阶段在文档上统一接）。
+            document.addEventListener('load', function(event) {
+                var node = event.target;
+                if (node && node.tagName === 'IMG' && node.classList && node.classList.contains('msg-img') && node.naturalWidth > 0) node.setAttribute('data-loaded', '1');
+            }, true);
             function bindChatReplyGestures() {
                 var host=document.getElementById('dockChatMessages');
                 host.addEventListener('click',function(event){var quote=event.target.closest('.chat-reply-quote');if(quote){event.stopPropagation();if(quote.dataset.replyId)jumpChatHistory(dockChatActiveUser,quote.dataset.replyId);}});
@@ -18526,8 +18585,8 @@ function renderProfileActivityList(kind) {
             }
 
             async function mutateDockChatConversation(peer, action) {
-                if (action === 'clear' && !window.confirm('清空你看到的聊天记录？对方的记录不会删除。')) return;
-                if (action === 'delete' && !window.confirm('删除你列表中的会话？对方的记录不会删除。')) return;
+                if (action === 'clear' && !(await window.xtjConfirm('清空聊天记录', '清空你看到的聊天记录？对方的记录不会删除。', '清空'))) return;
+                if (action === 'delete' && !(await window.xtjConfirm('删除会话', '删除你列表中的会话？对方的记录不会删除。', '删除'))) return;
                 var owner = window.currentUser;
                 try {
                     var data = await requestDockChatSocial('/conversations/' + encodeURIComponent(peer), {
@@ -18568,6 +18627,7 @@ function renderProfileActivityList(kind) {
                 if(existing&&existing.epoch===epoch&&existing.value===value)return existing;
                 return _dockChatLocalDrafts[key]={value:value,epoch:epoch};
             }
+            var _dockChatDraftToastAt = 0;
             function persistDockChatDraft(peer, value) {
                 var owner = window.currentUser,epoch=window._authStateEpoch||0;
                 if (!peer || !owner) return;
@@ -18595,7 +18655,11 @@ function renderProfileActivityList(kind) {
                             _dockChatConversationStates[peer] = Object.assign({},state,{ draft_revision:error.draft_revision });
                             _dockChatDraftConflicts[key] = value;
                             showToast('草稿在其他设备已更新，本机输入已保留；请编辑后重试');
-                        } else if (error.code !== 'not_found' && error.code !== 'deleted') showToast('草稿保存失败，本机输入已保留；请编辑后重试');
+                        } else if (error.code !== 'not_found' && error.code !== 'deleted' && Date.now() - _dockChatDraftToastAt > 30000) {
+                            // 草稿同步是后台动作，服务器不稳时每发一条都会失败；30 秒内只提醒一次。
+                            _dockChatDraftToastAt = Date.now();
+                            showToast('草稿保存失败，本机输入已保留；请编辑后重试');
+                        }
                     });
                 });
                 _dockChatDraftWrites[key] = write;
@@ -19084,7 +19148,7 @@ function renderProfileActivityList(kind) {
                 if (action === 'friend-mutual') { await showChatMutualFriends(peer); return; }
                 if (action === 'friend-note') {
                     var existingNote = button.getAttribute('data-note') || '';
-                    var nextNote = window.prompt('设置仅自己可见的好友备注（留空可清除）', existingNote);
+                    var nextNote = await window.xtjPrompt('好友备注', '设置仅自己可见的好友备注（留空可清除）', existingNote, 30);
                     if (nextNote === null) return;
                     try {
                         await requestDockChatSocial('/friends/' + encodeURIComponent(peer) + '/note', { method: 'PUT', body: JSON.stringify({ note: nextNote }) });
@@ -19095,7 +19159,7 @@ function renderProfileActivityList(kind) {
                     return;
                 }
                 if (action === 'friend-remove') {
-                    if (!window.confirm('删除好友后会保留历史聊天，但需要重新成为好友才能发送新消息。确定删除？')) return;
+                    if (!(await window.xtjConfirm('删除好友', '删除好友后会保留历史聊天，但需要重新成为好友才能发送新消息。确定删除？', '删除'))) return;
                     try {
                         await requestDockChatSocial('/friends/' + encodeURIComponent(peer), { method: 'DELETE' });
                         await refreshChatFriendNotes(true);
@@ -19106,7 +19170,7 @@ function renderProfileActivityList(kind) {
                     return;
                 }
                 if (action === 'friend-block' || action === 'request-block') {
-                    if (!window.confirm('拉黑后会解除好友关系，并阻止双方互相申请好友和发送新消息。历史聊天会保留。确定拉黑？')) return;
+                    if (!(await window.xtjConfirm('拉黑用户', '拉黑后会解除好友关系，并阻止双方互相申请好友和发送新消息。历史聊天会保留。确定拉黑？', '拉黑'))) return;
                     try {
                         await requestDockChatSocial('/blocks/' + encodeURIComponent(peer), { method: 'POST', body: '{}' });
                         await refreshChatFriendNotes(true);

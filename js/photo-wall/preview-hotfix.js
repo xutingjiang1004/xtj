@@ -309,6 +309,13 @@
     });
   }
 
+  // While a finger or pointer is moving the photo, the overlay is flagged so CSS can promote the moving layers and drop
+  // the backdrop blur that would otherwise be recomputed over a changing picture on every frame.
+  function setGesturing(on) {
+    var root = overlay();
+    if (root && root.classList.contains('pp-gesturing') !== on) root.classList.toggle('pp-gesturing', on);
+  }
+
   function applyImageTransform(animate) {
     var img = previewImage();
     var root = overlay();
@@ -501,6 +508,7 @@
     state.scale = clamp(rawScale, 0.85, 5);
     state.tx = centerX - width / 2 - state.pinchAnchorX * state.scale;
     state.ty = centerY - height / 2 - state.pinchAnchorY * state.scale;
+    setGesturing(true);
     applyImageTransform(false);
   }
 
@@ -510,6 +518,7 @@
     if (Math.abs(point.x - state.startX) + Math.abs(point.y - state.startY) > 8) {
       state.moved = true;
     }
+    setGesturing(true);
     applyImageTransform(false);
   }
 
@@ -541,6 +550,7 @@
       var opacity = Math.max(0.35, 1 - dy / viewportHeight());
       var scale = Math.max(0.82, 1 - dy / 900);
       if (root) {
+        setGesturing(true);
         root.classList.remove('pp-animate-root', 'pp-animate-image');
         setPreviewVars({
           '--pp-overlay-opacity': opacity,
@@ -559,6 +569,7 @@
       var extraX = dx;
       if (currentIndex === 0 && dx > 0) extraX = dx * 0.35;
       if (currentIndex === list.length - 1 && dx < 0) extraX = dx * 0.35;
+      setGesturing(true);
       syncTrackTransform(extraX, false);
     }
   }
@@ -657,6 +668,7 @@
     state.pinchAnchorY = 0;
     state.viewportWidthCache = 0;
     state.viewportHeightCache = 0;
+    setGesturing(false);
     clearDismissVisual(true);
     cancelPendingMoveFrame();
   }

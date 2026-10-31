@@ -467,9 +467,25 @@
             //   所以图片从头到尾都在，绝不会出现"空白气泡"。这里在后台把远端图下载好，
             //   完成后才把 src 指过去（同一张图，肉眼无变化），随后释放 blob。
             //   远端下载失败则**什么都不做**：继续显示本地图，不清空、不降级成按钮。
+            // ★ 2026-10-31：请求一直不返回（存储限流、弱网）时 onerror 永远不会触发，气泡会无限停在占位。
+            //   超过阈值仍没加载完就按「加载失败」处理：沿用 handleDockChatImageError 的两次退避重试，
+            //   仍不行才降级成「查看图片」按钮。每次处理后继续盯，直到加载成功或气泡被替换。
+            function watchDockChatImageStall(img) {
+                if (!img || img.getAttribute('data-stall-watch')) return;
+                img.setAttribute('data-stall-watch', '1');
+                setTimeout(function() {
+                    img.removeAttribute('data-stall-watch');
+                    if (!img.isConnected) return;
+                    if (img.complete && img.naturalWidth > 0) { img.setAttribute('data-loaded', '1'); return; }
+                    if (img.getAttribute('data-loaded') === '1') return;
+                    window.handleDockChatImageError(img);
+                    if (img.isConnected) watchDockChatImageStall(img);
+                }, Number(window.__xtjChatImageStallMs) || 20000);
+            }
             function hydrateDockChatRemoteMedia(host) {
                 var root = host || document.getElementById('dockChatMessages');
                 if (!root) return;
+                Array.prototype.forEach.call(root.querySelectorAll('img.msg-img:not([data-loaded="1"])'), watchDockChatImageStall);
                 var imgs = root.querySelectorAll('img.msg-img[data-remote-src]');
                 Array.prototype.forEach.call(imgs, function(img) {
                     var remote = String(img.getAttribute('data-remote-src') || '');
@@ -638,15 +654,19 @@
                     });
                 }
                 if (updates.length) {
-                    var response = await window.xtjProtectedFetch('/api/dm/read', {
-                        method: 'POST',
-                        authOwner: owner, authEpoch: epoch,
-                        body: JSON.stringify({ message_ids: updates.map(function(update) { return update.id; }) })
-                    });
-                    var result = await response.json().catch(function() { return {}; });
-                    if (owner !== window.currentUser || epoch !== _authStateEpoch) return;
-                    if (!response.ok || !result.ok) throw new Error(result.error || 'DM read update failed');
-                    var readRows = Array.isArray(result.data) ? result.data : [];
+                    // 服务端一次最多处理 200 个 ID，超出的会被静默截掉、永远留在未读；这里按 200 分批。
+                    var readRows = [];
+                    for (var offset = 0; offset < updates.length; offset += 200) {
+                        var response = await window.xtjProtectedFetch('/api/dm/read', {
+                            method: 'POST',
+                            authOwner: owner, authEpoch: epoch,
+                            body: JSON.stringify({ message_ids: updates.slice(offset, offset + 200).map(function(update) { return update.id; }) })
+                        });
+                        var result = await response.json().catch(function() { return {}; });
+                        if (owner !== window.currentUser || epoch !== _authStateEpoch) return;
+                        if (!response.ok || !result.ok) throw new Error(result.error || 'DM read update failed');
+                        if (Array.isArray(result.data)) readRows = readRows.concat(result.data);
+                    }
                     var readById = new Map(readRows.map(function(row) { return [String(row.id), row]; }));
                     var cacheKey = getDockChatCacheKey(senderName);
                     var cached = Array.isArray(_chatCache[cacheKey]) ? _chatCache[cacheKey] : [];
