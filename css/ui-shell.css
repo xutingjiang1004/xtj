@@ -3467,3 +3467,39 @@ html body #panelAiChat #aiChatRoot > .ai-chat-input-bar { background: rgba(243, 
 html[data-theme="dark"] body #panelAiChat #aiChatRoot > .ai-chat-header { background: rgba(21, 27, 24, .94) !important; }
 html[data-theme="dark"] body #panelAiChat #aiChatRoot > .ai-chat-input-bar { background: rgba(18, 24, 21, .94) !important; }
 html body #panelAiChat :is(.ai-plus-btn, .ai-context-trigger, .ai-chat-voice, .ai-chat-send, .ai-chat-pause) { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+
+/* ---- Dialogs: one scrim and one opaque card for every site dialog (including the ones opened from the posts page). ----
+   The photo viewer's own panels and the "delete photo" glass confirm keep their dedicated looks. */
+html body :is(#delModal, #ppConfirmOverlay, #statModal, #postDetailModal, #profileActivityModal, #profileDetailModal, #userProfileModal, #loginModal, #registerModal, .xtj-prompt-overlay) {
+  background: rgba(10, 25, 18, .40) !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
+}
+html[data-theme="dark"] body :is(#delModal, #ppConfirmOverlay, #statModal, #postDetailModal, #profileActivityModal, #profileDetailModal, #userProfileModal, #loginModal, #registerModal, .xtj-prompt-overlay) {
+  background: rgba(0, 0, 0, .62) !important;
+}
+html body :is(#delModal .modal-box, #statModal .modal-box, #postDetailModal .modal-box, #profileActivityModal .modal-box, #loginModal .modal-box, #registerModal .modal-box, #ppConfirmOverlay:not(.photo-delete-confirm) .pp-confirm-dialog, .xtj-prompt-dialog) {
+  background: #fbfdfc !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
+}
+html[data-theme="dark"] body :is(#delModal .modal-box, #statModal .modal-box, #postDetailModal .modal-box, #profileActivityModal .modal-box, #loginModal .modal-box, #registerModal .modal-box, #ppConfirmOverlay:not(.photo-delete-confirm) .pp-confirm-dialog, .xtj-prompt-dialog) {
+  background: #121c19 !important;
+}
+/* Dark delete/confirm dialogs: the card was light glass with light text. */
+html[data-theme="dark"] body :is(#delModal, #ppConfirmOverlay:not(.photo-delete-confirm)) :is(h3, h4, .pp-confirm-title, #ppConfirmTitle, p, #ppConfirmMsg, .post-action-title) { color: #e6f1ed !important; }
+html body #delModal .modal-box.glass.post-action-box.post-delete-modal { background: #fbfdfc !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+html[data-theme="dark"] body #delModal .modal-box.glass.post-action-box.post-delete-modal { background: #121c19 !important; }
+html[data-theme="dark"] body :is(#delModal .post-delete-cancel, #ppConfirmOverlay:not(.photo-delete-confirm) button:not(#ppConfirmOkBtn)) { color: #c9d6d1 !important; }
+html[data-theme="dark"] body :is(#delModal .post-delete-confirm, #delModal .btn-primary, #ppConfirmOverlay:not(.photo-delete-confirm) #ppConfirmOkBtn) { color: #ff8f84 !important; }
+html body :is(#delModal, #ppConfirmOverlay:not(.photo-delete-confirm), .xtj-prompt-overlay) * { text-shadow: none !important; }
+
+/* ---- 聊天: withdrawn messages are a quiet notice (no brackets, no italics); the 原图 switch label is readable. ---- */
+html body .chat-msg .msg-text.withdrawn { font-style: normal; font-size: 13px; }
+html body #dockChatOrigBtn .cor-label { font-size: 12px; }
+
+/* ---- 照片上传面板: a compact row per photo (thumbnail + its caption) instead of one huge card each ---- */
+html body #pwUploadSheet .pw-upload-sheet-grid { display: flex !important; flex-direction: column; gap: 12px !important; }
+html body #pwUploadSheet .pw-upload-sheet-thumb { display: grid !important; grid-template-columns: 84px minmax(0, 1fr); gap: 12px; align-items: stretch; position: relative; overflow: visible; }
+html body #pwUploadSheet .pw-upload-sheet-thumb img { width: 84px !important; height: 84px !important; border-radius: 12px; }
+html body #pwUploadSheet .pw-photo-caption { margin: 0 !important; min-height: 84px !important; max-height: 84px !important; resize: none; }
+html body #pwUploadSheet .pw-upload-remove { top: 0 !important; left: 40px !important; right: auto !important; }
+
+/* ---- One "in progress" cue at a time: while a tool step is running its icon pulses; the thinking label stays still. ---- */
+.ai-msg:has(.ai-tool-step.is-running) .ai-thinking-label { animation: none !important; }
