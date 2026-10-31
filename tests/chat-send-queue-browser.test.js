@@ -43,3 +43,45 @@ test('rapid sends show every bubble at once, send in order and never toast "已�
   assert.equal(await p.evaluate(() => (document.getElementById('dockChatMessages').textContent.match(/第[一二三]条/g) || []).length), 3);
   assert.deepEqual(f.errors, []);
 });
+
+test('queued text is put back into its own draft when the user switches conversation first', { timeout: 30000 }, async t => {
+  const f = await postBrowserFixture({ counts: [1], publicPosts: true });
+  t.after(() => f.close());
+  const p = f.page;
+  p.setDefaultTimeout(7000);
+  await p.waitForFunction(() => window._xtjAuthState === 'authenticated');
+  const drafts = {};
+  await p.route('**/api/chat/**', route => {
+    const req = route.request();
+    const peer = decodeURIComponent(new URL(req.url()).pathname.split('/').pop());
+    if (req.method() === 'PATCH') {
+      const body = req.postDataJSON();
+      if (body.action === 'draft') drafts[peer] = body.draft_text;
+    }
+    route.fulfill({ json: { ok: true, friends: [], items: [], users: [], relationship: { status: 'friends', can_message: true },
+      state: { status: 'ok', draft_text: drafts[peer] || '', draft_revision: 0 } } });
+  });
+  await p.route('**/api/dm/messages?**', route => route.fulfill({ json: { ok: true, data: [], has_more: false } }));
+  let release;
+  const held = new Promise(resolve => { release = resolve; });
+  let calls = 0;
+  await p.route('**/api/dm/send', async route => {
+    calls++;
+    const body = route.request().postDataJSON();
+    await held;
+    await route.fulfill({ json: { ok: true, message: { id: '00000000-0000-4000-8000-000000000009', user_name: 'alice',
+      media_type: '__dm__', media_url: 'bob', content: body.content, created_at: new Date().toISOString() } } });
+  });
+  await p.evaluate(() => openChat('bob'));
+  for (const text of ['先发的', '没来得及发的']) {
+    await p.locator('#dockChatInput').fill(text);
+    await p.evaluate(() => { sendDockChatMessage(); });
+  }
+  await p.evaluate(() => openChat('carol'));
+  release();
+  await p.waitForFunction(() => document.body.textContent.includes('已放回草稿'));
+  await p.evaluate(() => openChat('bob'));
+  await p.waitForFunction(() => document.getElementById('dockChatInput').value === '没来得及发的');
+  assert.equal(calls, 1);
+  assert.equal(await p.evaluate(() => document.getElementById('dockChatMessages').textContent.includes('没来得及发的')), false);
+});

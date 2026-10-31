@@ -2820,7 +2820,17 @@
                             try { renderDockMessages(next.peer, _chatCache[getDockChatCacheKey(next.peer)] || [], false); } catch (eDropRender) {}
                         }
                     }
-                    showToast('会话已切换，排队消息已取消');
+                    // 文字不能凭空消失：放回原会话的草稿，回到那个会话时还在。
+                    var restored = false;
+                    if (next && next.content && next.owner === window.currentUser && next.epoch === _authStateEpoch) {
+                        try {
+                            var draftKey = next.owner + '\u0000' + next.peer;
+                            var existingDraft = _dockChatLocalDrafts[draftKey] ? _dockChatLocalDrafts[draftKey].value : '';
+                            persistDockChatDraft(next.peer, existingDraft ? next.content + '\n' + existingDraft : next.content);
+                            restored = true;
+                        } catch (eRestoreDraft) {}
+                    }
+                    showToast(restored ? '会话已切换，未发出的消息已放回草稿' : '会话已切换，排队消息已取消');
                     return drainDockChatSendQueue();
                 }
                 _dockChatSendQueue.shift();
@@ -4620,6 +4630,11 @@
                     setTimeout(function() { try { drainDockChatSendQueue(); } catch (eBatchDrain) {} }, 0);
                 }}
             }
+            // 聊天图片下载完成后去掉扫光占位（load 不冒泡，用捕获阶段在文档上统一接）。
+            document.addEventListener('load', function(event) {
+                var node = event.target;
+                if (node && node.tagName === 'IMG' && node.classList && node.classList.contains('msg-img') && node.naturalWidth > 0) node.setAttribute('data-loaded', '1');
+            }, true);
             function bindChatReplyGestures() {
                 var host=document.getElementById('dockChatMessages');
                 host.addEventListener('click',function(event){var quote=event.target.closest('.chat-reply-quote');if(quote){event.stopPropagation();if(quote.dataset.replyId)jumpChatHistory(dockChatActiveUser,quote.dataset.replyId);}});
