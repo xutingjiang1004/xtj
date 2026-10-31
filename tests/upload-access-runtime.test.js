@@ -38,3 +38,11 @@ test('cookie sessions cover the uploads route with the same scoped expiry and Ht
  const cookies=[];setPhotoSession({cookie:(...args)=>cookies.push(args)},'signed-access',Date.now()+900000,'11111111-1111-4111-8111-111111111111');
  const cookie=cookies.find(c=>c[2].path==='/api/uploads');assert.ok(cookie);assert.equal(cookie[2].httpOnly,true);assert.equal(cookie[2].secure,true);
 });
+
+test('avatars may be cached by the browser while every other upload is still revalidated',async()=>{
+ const f=fixture(),post='posts/cache-check.png';f.rows.posts.push({id:'p',user_name:'alice',media_type:'image',media_url:url(post),visibility:'public'});
+ const avatar=await request(f.app).get('/api/uploads/media').query({path:'avatars/alice_1_abc_a.jpg'}).expect(200);
+ assert.match(avatar.headers['cache-control'],/public, max-age=86400/);
+ const media=await request(f.app).get('/api/uploads/media').query({path:post}).expect(200);
+ assert.equal(media.headers['cache-control'],'private, no-cache, must-revalidate');
+});

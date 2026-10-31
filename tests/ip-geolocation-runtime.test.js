@@ -329,3 +329,34 @@ test('pconline GBK bytes are decoded before province and city agreement', async 
   const result = await resolver.resolve(ip);
   assert.equal(result.city,'杭州'); assert.equal(result.city_confidence,'corroborated');
 });
+
+// Real payload shapes for a Taiwan (HiNet) address: Baidu answers "China · Taiwan"
+// while ipwho.is answers country "Taiwan". They used to disagree on the country, the
+// majority vote returned nothing and the post stayed "解析中" before turning "未知".
+test('a Taiwan address resolves when providers disagree on whether Taiwan is a country', async () => {
+  const taiwan = '1.162.155.104';
+  const baiduTaiwan = {status:'0', data:[{OriginQuery:taiwan, location:'台湾省桃园市'}]};
+  const whoTaiwan = {ip:taiwan, success:true, country:'台湾', country_code:'TW', region:'新北', city:'新北'};
+  const resolver = geo.createIpGeocoder({isPrivateOrReservedIp:isPrivate, fetch:async url => {
+    const name = providerName(url);
+    return name === 'baidu-opendata' ? response(baiduTaiwan) : name === 'ipwho.is' ? response(whoTaiwan) : new Response('', {status:429});
+  }});
+  const location = await resolver.resolve(taiwan);
+  assert.ok(location, 'two answers about the same place must not cancel each other out');
+  assert.equal(location.country, '中国');
+  assert.equal(location.region, '台湾');
+  assert.equal(location.region_confidence, 'corroborated');
+  const {postIpView} = require('../js/ip-location');
+  assert.equal(postIpView({ip_region_status:'resolved', ip_province:location.region, ip_region_text:location.region}).text, '台湾');
+});
+
+test('a single provider that calls Hong Kong or Taiwan a country is read as a Chinese region', () => {
+  const {selectIpLocation} = require('../js/ip-location');
+  for (const [country, expected] of [['台湾', '台湾'], ['香港', '香港'], ['Hong Kong', '香港'], ['TW', '台湾']]) {
+    const location = selectIpLocation([{provider:'ipwho.is', country, region:'', city:''}], ip);
+    assert.equal(location.country, '中国', country);
+    assert.equal(location.region, expected, country);
+  }
+  // Mainland and other countries are untouched.
+  assert.equal(selectIpLocation([{provider:'a', country:'日本', region:'东京', city:''}], ip).country, '日本');
+});

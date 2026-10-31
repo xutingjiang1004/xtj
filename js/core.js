@@ -6075,7 +6075,9 @@ function renderProfileActivityList(kind) {
                 closeOtherPostActionModals('');
             }
 
-            window.openComment = function (postId) {
+            window.openComment = function (postId, replyOpts) {
+                // replyOpts: { parentId, parentName, postEl, anchor } —— 回复某条评论时，输入框挂在那条评论下面。
+                var reply = replyOpts && replyOpts.parentId ? replyOpts : null;
                 if (!currentUser) { showToast("请先登录"); return; }
                 if (window.__xtjDeleteInProgress) {
                     if (Date.now() - window.__xtjDeleteStartTime > 12000) {
@@ -6089,9 +6091,10 @@ function renderProfileActivityList(kind) {
                 var postEl = findBySafePostSelector(postId);
                 var detail = document.getElementById('postDetailModal');
                 if (detail && detail.classList.contains('active')) { var detailSel = safePostSelector(postId); var detailCard = detailSel && detail.querySelector(detailSel); if (detailCard) postEl = detailCard; }
+                if (reply && reply.postEl) postEl = reply.postEl;
                 if (!postEl) return;
                 
-                // 如果已经存在，则收起（切换显示状态）
+                // 如果已经存在，则收起；点的是同一个目标（同一条评论 / 帖子本身）就只收起，换了目标则继续打开新的
                 var existingBox = postEl.querySelector('.inline-comment-box');
                 if (existingBox) {
                     existingBox.__xtjClosing = true;
@@ -6099,7 +6102,7 @@ function renderProfileActivityList(kind) {
                     existingBox.style.opacity = '0';
                     existingBox.style.marginTop = '0px';
                     setTimeout(() => existingBox.remove(), 300);
-                    return;
+                    if ((existingBox.__xtjReplyId || '') === (reply ? String(reply.parentId) : '')) return;
                 }
                 
                 // 移除其他帖子下可能打开的内联输入框，保持界面整洁
@@ -6113,7 +6116,8 @@ function renderProfileActivityList(kind) {
                 
                 // 创建内联评论框容器 (带动画)
                 var box = document.createElement('div');
-                box.className = 'inline-comment-box';
+                box.className = 'inline-comment-box' + (reply ? ' inline-reply-box' : '');
+                box.__xtjReplyId = reply ? String(reply.parentId) : '';
                 box.style.display = 'grid';
                 box.style.gridTemplateRows = '0fr';
                 box.style.opacity = '0';
@@ -6164,7 +6168,7 @@ function renderProfileActivityList(kind) {
                 gridInner.style.overflow = 'hidden';
                 
                 var innerWrap = document.createElement('div');
-                innerWrap.style.padding = '0px 16px 16px 16px'; // 取消上边距和线，让它自然融入 actions 之下
+                innerWrap.style.padding = reply ? '0px 0px 6px 0px' : '0px 16px 16px 16px'; // 取消上边距和线，让它自然融入 actions 之下
                 innerWrap.style.display = 'flex';
                 innerWrap.style.gap = '8px';
                 innerWrap.style.alignItems = 'center';
@@ -6172,7 +6176,7 @@ function renderProfileActivityList(kind) {
                 var inp = document.createElement('input');
                 inp.type = 'text';
                 inp.className = 'inline-comment-inp';
-                inp.placeholder = '写下你的想法...';
+                inp.placeholder = reply ? ('回复 @' + (reply.parentName || '') + '…') : '写下你的想法...';
                 inp.style.flex = '1';
                 inp.style.minWidth = '0';
                 inp.style.minHeight = '44px';
@@ -6410,19 +6414,21 @@ function renderProfileActivityList(kind) {
                     const controller = new AbortController();
                     const timeoutId = setTimeout(() => controller.abort(), 15000);
                     try {
+                        var commentRequest = { post_id: targetPostId, content: content, client_request_id: commentAttempt.id };
+                        if (reply) commentRequest.parent_comment_id = String(reply.parentId); // 回复时才带，普通评论的请求体保持原样
                         const response = await window.xtjProtectedFetch('/api/post/comment', {
                             authOwner: identity.owner, authEpoch: identity.epoch,
                             signal: controller.signal,
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ post_id: targetPostId, content: content, client_request_id: commentAttempt.id })
+                            body: JSON.stringify(commentRequest)
                         });
                         const result = await response.json().catch(function() { return {}; });
                         if (!postActionIdentityCurrent(identity)) return;
                         if (!response.ok || !result.ok) throw new Error(result.error || '评论失败');
                         
                         touchUserSession(false);
-                        showToast("评论成功");
+                        showToast(reply ? "回复成功" : "评论成功");
                         box.__xtjClosing = true;
                         box.style.gridTemplateRows = '0fr';
                         box.style.opacity = '0';
@@ -6497,7 +6503,11 @@ function renderProfileActivityList(kind) {
                 box.appendChild(gridInner);
                 
                 var actionsEl = postEl.querySelector('.actions');
-                if (actionsEl) {
+                var replyRow = reply && reply.anchor ? Array.prototype.find.call(reply.anchor.children, function(child) { return child.classList && child.classList.contains('comment-row'); }) : null;
+                if (replyRow) {
+                    // 回复框紧跟在被回复评论那一行下面（该评论自己的回复列表之前）
+                    replyRow.insertAdjacentElement('afterend', box);
+                } else if (actionsEl) {
                     actionsEl.parentNode.insertBefore(box, actionsEl.nextSibling);
                 } else {
                     postEl.appendChild(box);
@@ -6517,6 +6527,40 @@ function renderProfileActivityList(kind) {
                     });
                 });
             };
+
+            // 评论行上的「回复」按钮：找到这条评论、所属帖子，把回复框挂在这条评论下面。
+            window.openCommentReply = function(btn) {
+                var item = btn && btn.closest ? btn.closest('.comment-item') : null;
+                if (!item) return;
+                var postId = btn.getAttribute('data-post-id') || '';
+                var holder = item.closest('.post[data-post-id]') || document.getElementById('postDetailBody');
+                window.openComment(postId, {
+                    parentId: item.getAttribute('data-comment-id'),
+                    parentName: item.getAttribute('data-user-name') || '',
+                    postEl: holder, anchor: item
+                });
+            };
+            // 评论区整块重绘（实时新评论、翻页）会丢掉正在写的回复框。重绘前摘下来，重绘后挂回同一条评论下面。
+            function detachReplyBox(root) {
+                var box = root && root.querySelector ? root.querySelector('.inline-reply-box') : null;
+                if (!box || !box.parentNode) return null;
+                var input = box.querySelector('.inline-comment-inp');
+                var hadFocus = !!input && document.activeElement === input;
+                box.parentNode.removeChild(box); // 不用 box.remove()：它被改写为会清理提及下拉的监听器
+                return { box: box, id: box.__xtjReplyId, hadFocus: hadFocus };
+            }
+            function reattachReplyBox(root, kept) {
+                if (!kept) return;
+                var items = root.querySelectorAll('.comment-item[data-comment-id]');
+                var item = Array.prototype.find.call(items, function(node) { return node.getAttribute('data-comment-id') === kept.id; });
+                var row = item && Array.prototype.find.call(item.children, function(child) { return child.classList && child.classList.contains('comment-row'); });
+                if (!row) { kept.box.remove(); return; } // 被回复的评论已不存在
+                row.insertAdjacentElement('afterend', kept.box);
+                var input = kept.box.querySelector('.inline-comment-inp');
+                if (kept.hadFocus && input) { try { input.focus({ preventScroll: true }); } catch (_) { input.focus(); } }
+            }
+            window.__xtjDetachReplyBox = detachReplyBox;
+            window.__xtjReattachReplyBox = reattachReplyBox;
 
             // ===================== 删除帖子 =====================
             // 用 window 挂载，确保不同 IIFE 共享
@@ -8251,6 +8295,7 @@ function renderProfileActivityList(kind) {
                 var tail = anchor || document.getElementById('feedNoMore') || document.getElementById('feedContinueSearch') || document.getElementById('feedStaleNotice') || document.getElementById('feedSentinel') || null;
                 feed.insertBefore(postEl, tail);
                 observePostViewportState([postEl]);
+                ensureAvatarsInFeed([post.user_name], postEl);
                 var clearPublishedAnimation = function() { postEl.classList.remove('is-newly-published'); };
                 postEl.addEventListener('animationend', clearPublishedAnimation, { once: true });
                 setTimeout(clearPublishedAnimation, 420);
@@ -9002,6 +9047,7 @@ function renderProfileActivityList(kind) {
                 return '<div class="comment-row">' + buildCommentAvatarHtml(comment.user_name, isAi) +
                     '<div class="comment-item-body"><div class="comment-item-header">' + nameHtml +
                     '<span class="comment-item-time">' + escapeHtml(comment.created_at ? formatRelativeTime(comment.created_at) : '刚刚') + '</span>' +
+                    '<button type="button" class="comment-reply-btn" data-post-id="' + escapeHtml(comment.post_id) + '" aria-label="回复 ' + escapeHtml(isAi ? '小猫' : comment.user_name) + '" onclick="openCommentReply(this)">回复</button>' +
                     buildCommentDeleteButtonHtml(comment) + '</div>' +
                     '<div class="comment-item-content">' + replyTo + escapeHtml(comment.content) + '</div></div></div>';
             }
@@ -9142,7 +9188,9 @@ function renderProfileActivityList(kind) {
                     var oldComments = card.querySelector('.comments');
                     var newComments = newNode.querySelector('.comments');
                     if (oldComments && newComments) {
+                        var keptReply = detachReplyBox(oldComments);
                         oldComments.replaceWith(newComments);
+                        reattachReplyBox(newComments, keptReply);
                     } else if (oldComments) {
                         oldComments.remove();
                     } else if (newComments) {
@@ -9151,6 +9199,7 @@ function renderProfileActivityList(kind) {
                         else card.appendChild(newComments);
                     }
                     try { if (typeof updateFeedStats === 'function') updateFeedStats(); } catch (_) {}
+                    ensureAvatarsInFeed((scopedComments.filter(function(row) { return String(row.post_id) === String(postId); })).map(function(row) { return row.user_name; }), card);
                     return true;
                 } catch (ePatch) {
                     console.warn('[feed] patchSinglePostCard failed, fallback to full render', ePatch);
@@ -9193,6 +9242,34 @@ function renderProfileActivityList(kind) {
             }
             window.__xtjSchedulePostCardPatch = schedulePostCardPatch;
 
+            // 头像请求是异步的：卡片先以首字母占位，头像到达后原地换成图片。
+            // 首次渲染、发布新帖、局部刷新评论都要走这一步，否则新卡片上的头像会一直是首字母。
+            function applyLoadedAvatarsToFeed(root) {
+                var scope = root || document.getElementById('feed');
+                if (!scope) return;
+                scope.querySelectorAll('.avatar.clickable').forEach(function(avatarEl) {
+                    if (avatarEl.querySelector('img')) return;
+                    var username = avatarEl.getAttribute('data-user-name') ||
+                        avatarEl.parentElement && avatarEl.parentElement.getAttribute('data-user-name') ||
+                        avatarEl.closest && avatarEl.closest('[data-user-name]') && avatarEl.closest('[data-user-name]').getAttribute('data-user-name');
+                    if (!username) {
+                        // 兼容旧版 onclick 解析
+                        var onclick = avatarEl.getAttribute('onclick') || '';
+                        username = onclick.replace(/^.*openUserProfile\('([^']*)'.*$/, '$1');
+                        if (!username || username === onclick) username = '';
+                    }
+                    if (!username) return;
+                    var avatarUrl = getAvatarUrl(username);
+                    if (avatarUrl) avatarEl.innerHTML = renderAvatarContent(username, avatarUrl);
+                });
+            }
+            function ensureAvatarsInFeed(users, root) {
+                var names = (users || []).filter(Boolean);
+                if (!names.length) return;
+                loadAvatarsForUsers(names).then(function() { applyLoadedAvatarsToFeed(root); }).catch(function() {});
+            }
+
+            window.__xtjEnsureAvatars = ensureAvatarsInFeed;
             function hydrateCachedAvatarsForUsers(usernames) {
                 var users = Array.from(new Set((usernames || []).map(function(value) {
                     return String(value || '').trim();
@@ -11632,28 +11709,7 @@ function renderProfileActivityList(kind) {
                 renderFilterSummary(filteredPosts.length);
                 if (typeof setupFeedInfiniteScroll === 'function') setupFeedInfiniteScroll();
 
-                loadAvatarsForUsers(Array.from(allUsers)).then(function() {
-                    var feedEl = document.getElementById('feed');
-                    if (!feedEl) return;
-                    var avatars = feedEl.querySelectorAll('.avatar.clickable');
-                    avatars.forEach(function(avatarEl) {
-                        if (avatarEl.querySelector('img')) return;
-                        var username = avatarEl.getAttribute('data-user-name') ||
-                            avatarEl.parentElement && avatarEl.parentElement.getAttribute('data-user-name') ||
-                            avatarEl.closest && avatarEl.closest('[data-user-name]') && avatarEl.closest('[data-user-name]').getAttribute('data-user-name');
-                        if (!username) {
-                            // 兼容旧版 onclick 解析
-                            var onclick = avatarEl.getAttribute('onclick') || '';
-                            username = onclick.replace(/^.*openUserProfile\('([^']*)'.*$/, '$1');
-                            if (!username || username === onclick) username = '';
-                        }
-                        if (!username) return;
-                        var avatarUrl = getAvatarUrl(username);
-                        if (avatarUrl) {
-                            avatarEl.innerHTML = renderAvatarContent(username, avatarUrl);
-                        }
-                    });
-                });
+                loadAvatarsForUsers(Array.from(allUsers)).then(function() { applyLoadedAvatarsToFeed(); });
                 setTimeout(function() { prefetchStatData(); }, 1000);
             };
             window.renderFeed = renderFeed;
@@ -22254,6 +22310,7 @@ function renderProfileActivityList(kind) {
                     window.__xtjPostDetailPaging[kind] = { offset: 0, size: kind === 'likes' ? 50 : 30, has_more: !!meta.has_more, cursor: meta.next_cursor || null, loading: false };
                 });
                 body.innerHTML = statPostDetailMarkup(post, likes || [], comments || []);
+                if (window.__xtjEnsureAvatars) window.__xtjEnsureAvatars((comments || []).map(function(row) { return row.user_name; }).concat([post.user_name]), body);
             };
 
             function detailRelationsMarkup(post, kind, relationRows) {
@@ -22338,7 +22395,10 @@ function renderProfileActivityList(kind) {
                 if (!body) return;
                 var comments = window.__xtjPostDetailComments || [], likes = window.__xtjPostDetailLikes || [];
                 var panel = body.querySelector('.post-detail-comments-panel');
+                var keptReply = panel && window.__xtjDetachReplyBox ? window.__xtjDetachReplyBox(panel) : null;
                 if (panel) panel.innerHTML = detailRelationsMarkup(post, 'comments');
+                if (panel && keptReply && window.__xtjReattachReplyBox) window.__xtjReattachReplyBox(panel, keptReply);
+                if (panel && window.__xtjEnsureAvatars) window.__xtjEnsureAvatars(comments.map(function(row) { return row.user_name; }), panel);
                 var likesPanel = body.querySelector('.post-detail-likes-panel');
                 if (likesPanel) likesPanel.innerHTML = detailRelationsMarkup(post, 'likes');
                 var stats = body.querySelector('.post-detail-stats');

@@ -237,9 +237,12 @@ test('weather feedback has actual facts and optional data stays collapsed in its
   emit({type:'tool_result',call_id:'weather',tool_name:'get_weather',success:true,summary:'已查询天气 · 福州 · 晴 · 26.7°C'});
   emit({type:'card',call_id:'weather',card:{protocol:'xtj.ai.ui.v1',id:'weather-card',type:'weather',title:'福州天气',data:{city:'福州',condition:'晴',temperature_c:26.7}}});
  });
- await page.waitForSelector('.ai-tool-data-details');assert.match(await page.locator('.ai-tool-step-status').textContent(),/晴.*26.7/);
+ await page.waitForSelector('.ai-tool-data-details',{state:'attached'});assert.match(await page.locator('.ai-tool-step-status').textContent(),/晴.*26.7/);
   assert.equal(await page.locator('.ai-process-rail [data-tool-call-id="weather"] .ai-tool-data-details').count(),1);assert.equal(await page.locator('.ai-tool-card--weather').isVisible(),false);
- await page.locator('.ai-tool-data-details > summary').click();assert.equal(await page.locator('.ai-tool-card--weather').isVisible(),true);
+ // 2026-10-31：「查看数据」摘要不再显示，点调用内容这一行直接展开数据。
+ assert.equal(await page.locator('.ai-process-rail [data-tool-call-id="weather"] .ai-tool-data-details > summary').isVisible(),false);
+ await page.locator('.ai-process-rail [data-tool-call-id="weather"] .ai-tool-step-detail').click();assert.equal(await page.locator('.ai-tool-card--weather').isVisible(),true);
+ await page.locator('.ai-process-rail [data-tool-call-id="weather"] .ai-tool-step-detail').click();assert.equal(await page.locator('.ai-tool-card--weather').isVisible(),false);
  await page.evaluate(()=>{emit({type:'done',content:'福州晴。',reasoning:'',thinking_mode:'max',complete:true,saved:true});stream.close();});
 });
 test('answer completion keeps the existing prefix, readable text and copyable final output',async t=>{
@@ -414,7 +417,8 @@ for(const model of ['deepseek-flash','custom:test-custom'])test(model+': sending
  const page=await fixture(t,'max',model);
  await page.locator('#aiChatMsgInput').fill('旧问题');await page.locator('#aiChatSendBtn').click();await page.waitForFunction(()=>window.turns?.length===1);
  await page.evaluate(()=>{emit({type:'reasoning',text:'未完成的思考过程。'});emit({type:'content',text:'旧回复的部分内容。'});});
- await page.waitForFunction(()=>document.querySelector('.ai-rail-sentence-text')?.textContent.includes('旧回复'));
+ // 2026-10-31：正文第一个字就直接进气泡，不再先挂成时间轴上的句子。
+ await page.waitForFunction(()=>document.querySelector('.ai-msg.assistant .ai-msg-bubble')?.textContent.includes('旧回复'));
  assert.equal(await page.locator('#aiChatSendBtn').isEnabled(),true);
  await page.locator('#aiChatMsgInput').fill('改成回答新问题');await page.locator('#aiChatSendBtn').click();await page.waitForFunction(()=>turns.length===2);
  assert.equal(await page.evaluate(()=>turns[0].signal.aborted&&turns[0].cancelled),true);

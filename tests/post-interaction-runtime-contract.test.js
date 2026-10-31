@@ -24,7 +24,9 @@ test('publish and comment handlers reject duplicate in-flight submissions', () =
 
 test('comment keeps its target id and patches only the affected card after success', () => {
   assert.match(core, /var targetPostId = String\(postId \|\| ''\)\.trim\(\)\.toLowerCase\(\)/);
-  assert.match(core, /JSON\.stringify\(\{ post_id: targetPostId, content: content, client_request_id: commentAttempt.id \}\)/);
+  assert.match(core, /var commentRequest = \{ post_id: targetPostId, content: content, client_request_id: commentAttempt.id \};/);
+  assert.match(core, /if \(reply\) commentRequest\.parent_comment_id = String\(reply\.parentId\);/);
+  assert.match(core, /body: JSON\.stringify\(commentRequest\)/);
   assert.match(core, /result\.data && String\(result\.data\.post_id\) === targetPostId/);
   assert.match(core, /feedAllComments[\s\S]*window\.__xtjSchedulePostCardPatch\(targetPostId\)/);
   const commentSubmit = between('var insertedComment = result.data', 'requestAnimationFrame(function() {');

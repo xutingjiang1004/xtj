@@ -38,7 +38,9 @@ function installUploadAccess(app, { supabase, supabaseUrl, optionalAuth, rateLim
         }
       }
       if (!allowed) return res.status(404).end();
-      await streamOriginal(req,res,{supabase,bucket:'uploads',path,fetchImpl,allowDownload:path.startsWith('chat/')});
+      // Avatar paths are unique per upload, so browsers may reuse them for a day without asking again.
+      const cacheControl = /^avatars\//.test(path) ? 'public, max-age=86400, stale-while-revalidate=604800' : undefined;
+      await streamOriginal(req,res,{supabase,bucket:'uploads',path,fetchImpl,allowDownload:path.startsWith('chat/'),cacheControl});
     } catch (_) { if (!res.headersSent) res.status(503).json({ok:false,code:'media_unavailable',retryable:true}); else res.destroy(); }
   });
 }

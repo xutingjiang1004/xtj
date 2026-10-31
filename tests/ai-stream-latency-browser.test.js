@@ -56,8 +56,9 @@ test('real thinking and answer streams show text immediately without an ink wash
  await send(p);await emit(p,{type:'reasoning',text:'真实思考逐字柔和出现。'});await frames(p);
  assert.equal(await p.locator('.ai-reasoning-segment').textContent(),'真实思考逐字柔和出现。');
  await emit(p,{type:'content',text:'正文也按原有顺序柔和出现。'});await frames(p);
- assert.match(await p.locator('.ai-rail-sentence-text').textContent(),/正文也按原有顺序柔和出现。/);
- assert.equal(await p.evaluate(()=>!!document.querySelector('.ai-msg.assistant .ai-msg-bubble')?.textContent.includes('正文也按原有顺序柔和出现')), false);
+ // 2026-10-31：正文第一个字就直接进气泡，不再先挂成时间轴上的句子。
+ assert.equal(await p.locator('.ai-rail-sentence-text').count(),0);
+ assert.equal(await p.evaluate(()=>!!document.querySelector('.ai-msg.assistant .ai-msg-bubble')?.textContent.includes('正文也按原有顺序柔和出现')), true);
  const surfaces=await p.evaluate(()=>inkSurfaces);assert.deepEqual(surfaces,[]);
  await emit(p,{type:'done',complete:true,saved:true,content:'正文也按原有顺序柔和出现。',reasoning:'真实思考逐字柔和出现。'});
  await p.waitForFunction(()=>!document.querySelector('.ai-msg.assistant.generating'));assert.deepEqual(f.errors,[]);
