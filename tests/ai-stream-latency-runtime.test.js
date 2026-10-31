@@ -1,6 +1,8 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 const source=fs.readFileSync('render-api/server.js','utf8');
+function extractFunction(name){const start=source.indexOf('function '+name+'(');const end=source.indexOf('\n}\n',start)+3;if(start<0||end<start)throw new Error('missing '+name);return source.slice(start,end);}
+const modelFacingToolResultSource=extractFunction('modelFacingToolResult');
 function client(fetch,chat=false){
  const marker=chat?'async function callDeepSeek(messages, options)':'async function callDeepSeekViaResponses(';
  const start=source.indexOf(marker),end=chat?source.indexOf('// ===================== M:',start):source.indexOf('\nasync function ',start+10);
@@ -10,7 +12,7 @@ function client(fetch,chat=false){
   DEEPSEEK_RESPONSES_MODEL:'deepseek-flash',DEEPSEEK_MODEL_REASONER:'deepseek-flash',DEEPSEEK_TIMEOUT_MS:5000,DEEPSEEK_INPUT_PRICE_PER_1M:1,DEEPSEEK_OUTPUT_PRICE_PER_1M:2,DEEPSEEK_CACHE_HIT_PRICE_PER_1M:.02,DEEPSEEK_CURRENCY:'CNY',
   DEBUG_PROVIDER:false,DEBUG_PROVIDER_ALWAYS:false,getPreferredDeepSeekModel:value=>value,normalizeDeepSeekUsageModel:(value,fallback)=>value||fallback,
   executeToolCall:async()=>({ok:true}),finalReplyContainsInternalProtocolGlobal:()=>false,looksLikeToolArgsFragment:()=>false,responsesUsageToInternal:()=>({prompt_tokens:1,completion_tokens:1,total_tokens:2})};
- vm.createContext(scope);vm.runInContext(source.slice(start,end)+'\nglobalThis.call='+ (chat?'callDeepSeek':'callDeepSeekViaResponses')+';',scope);return scope.call;
+ vm.createContext(scope);vm.runInContext(modelFacingToolResultSource+'\n'+source.slice(start,end)+'\nglobalThis.call='+ (chat?'callDeepSeek':'callDeepSeekViaResponses')+';',scope);return scope.call;
 }
 function pipe(){
  let controller,closed=false,cancelled=0;
