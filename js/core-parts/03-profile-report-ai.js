@@ -1889,19 +1889,15 @@ function renderProfileActivityList(kind) {
                     repliesContainer.className = 'comment-replies';
                     sourceEl.appendChild(repliesContainer);
                 }
-                // 创建 AI 评论 DOM（与 renderCatAiComment 渲染结构一致）
+                // 创建 AI 评论 DOM（与静态渲染共用 buildCommentRowHtml，结构一致）
                 var aiEl = document.createElement('div');
                 aiEl.className = 'comment-item cat-ai-comment';
                 aiEl.setAttribute('data-comment-id', aiIdStr);
                 aiEl.setAttribute('data-parent-comment-id', srcIdStr);
-                var timeStr = (typeof formatRelativeTime === 'function' ? formatRelativeTime(aiComment.created_at) : (aiComment.created_at || '刚刚'));
-                var delBtn = isAdmin() ? '<button type="button" class="comment-del-btn" onclick="deleteFeedComment(\'' + safeJsStr(aiIdStr) + '\', this)">删除</button>' : '';
-                aiEl.innerHTML = '<div class="comment-item-inner">' +
-                    '<span class="cat-ai-avatar" aria-label="小猫">🐱</span>' +
-                    '<div class="comment-item-body">' +
-                    '<div class="comment-item-header"><b class="cat-ai-name">小猫</b><span class="cat-ai-badge">AI</span><span class="comment-item-time">' + escapeHtml(timeStr) + '</span>' + delBtn + '</div>' +
-                    '<div class="comment-item-content">' + escapeHtml(aiComment.content || '') + '</div>' +
-                    '</div></div>';
+                aiEl.setAttribute('data-user-name', '小猫');
+                // 回复挂在第二层以下的评论上时，用 @ 点名上一条的作者。
+                var nestedUnderReply = sourceEl.closest('.comment-replies');
+                aiEl.innerHTML = buildCommentRowHtml(aiComment, nestedUnderReply ? sourceEl.getAttribute('data-user-name') : '');
                 // ★ 追加到 .comment-replies 容器内，而非源评论的兄弟节点
                 repliesContainer.appendChild(aiEl);
                 return { inserted: true, reason: 'ok' };
@@ -2022,11 +2018,7 @@ function renderProfileActivityList(kind) {
             // ===================== 小猫 AI 评论渲染 =====================
             function renderCatAiComment(comment) {
                 if (!comment || comment.user_name !== 'cat_ai' || !comment.generated_by_ai) return '';
-                var avatarHtml = '<span class="cat-ai-avatar" aria-label="小猫">🐱</span>';
-                var badgeHtml = '<span class="cat-ai-badge">AI</span>';
-                var timeStr = (typeof formatRelativeTime === 'function' ? formatRelativeTime(comment.created_at) : (comment.created_at || '刚刚'));
-                var delBtn = isAdmin() ? '<button type="button" class="comment-del-btn" onclick="deleteFeedComment(\'' + safeJsStr(comment.id) + '\', this)">删除</button>' : '';
-                return '<div class="comment-item cat-ai-comment" data-comment-id="' + escapeHtml(comment.id) + '" data-parent-comment-id="' + escapeHtml(comment.parent_comment_id || '') + '"><div class="comment-item-inner">' + avatarHtml + '<div class="comment-item-body"><div class="comment-item-header"><b class="cat-ai-name">小猫</b>' + badgeHtml + '<span class="comment-item-time">' + escapeHtml(timeStr) + '</span>' + delBtn + '</div><div class="comment-item-content">' + escapeHtml(comment.content || '') + '</div></div></div></div>';
+                return '<div class="comment-item cat-ai-comment" data-comment-id="' + escapeHtml(comment.id) + '" data-parent-comment-id="' + escapeHtml(comment.parent_comment_id || '') + '" data-user-name="小猫">' + buildCommentRowHtml(comment, '') + '</div>';
             }
 
             var __xtjDeferredWarmupQueued = false;

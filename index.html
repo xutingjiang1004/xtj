@@ -81,7 +81,7 @@
     <link rel="stylesheet" media="(min-width: 768px) and (min-height: 480px)" href="css/desktop.min.css?v=d872211228" />
     <link rel="stylesheet" href="css/ui-enhance.min.css?v=140db3ad55" media="print" onload="this.media='all'">
     <link rel="stylesheet" href="css/ui-shell.min.css?v=594896a7c2">
-    <link rel="stylesheet" href="css/post-feed.min.css?v=e7b8a22594">
+    <link rel="stylesheet" href="css/post-feed.min.css?v=1077a6a9d2">
     <link rel="stylesheet" href="css/profile-settings.min.css?v=49f1fd0516">
     <link rel="stylesheet" href="css/author-posts.min.css?v=9d1a7a9bb8">
     <!-- 首屏关键脚本提前抓取：core.min.js 在文档中排在第 31 个 defer 脚本，
@@ -89,7 +89,7 @@
          DCL 因此推迟到 4s 量级。preload 只提前「下载」，不改变执行顺序
          （defer 仍按文档顺序执行），构建脚本会同步刷新 ?v= 指纹。 -->
     <link rel="preload" as="script" href="js/vendor/supabase.min.js?v=e8c548fa1b" />
-    <link rel="preload" as="script" href="js/core.min.js?v=7d9c5be702" />
+    <link rel="preload" as="script" href="js/core.min.js?v=1079059cf4" />
     <!-- 小猫 AI 模块按需加载，但实测它会被首屏图片请求挤在连接队列里几十秒，
          用户点开只看到「正在加载 AI 模块」且无法返回。这里在第一波就把它取下来，
          执行时机仍由模块加载器决定（不会提前执行）。 -->
@@ -1266,7 +1266,7 @@
     <script defer src="js/core-utils.min.js?v=a376d5219e"></script>
     <script defer src="js/photo-wall/story.min.js?v=167ce053d3"></script>
     <script defer src="js/voice-transcription.min.js?v=6247e4303f"></script>
-    <script defer src="js/core.min.js?v=7d9c5be702"></script>
+    <script defer src="js/core.min.js?v=1079059cf4"></script>
     <script defer src="js/login-device.min.js?v=7f402fc787"></script>
     <script defer src="js/theme-toggle.min.js?v=f67dfa81a9"></script>
     <script defer src="js/desktop-shell.min.js?v=8420dc4713"></script>

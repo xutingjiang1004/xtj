@@ -3389,13 +3389,46 @@
                 window.openPostDetail(postId);
             };
             if (typeof window.addEventListener === 'function') window.addEventListener('auth-ready', function() { if (expandedCommentsOwner !== currentUser) { expandedPostComments.clear(); expandedCommentsOwner = currentUser; } });
+            var COMMENT_CAT_ICON = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 9 6.5 4.5 10 7q2-.4 4 0l3.5-2.5L19 9q1.5 2 1.5 4.5c0 4-3.7 6.5-8.5 6.5s-8.5-2.5-8.5-6.5Q3.5 11 5 9Z"/><circle cx="9.2" cy="13" r=".8" fill="currentColor" stroke="none"/><circle cx="14.8" cy="13" r=".8" fill="currentColor" stroke="none"/><path d="M10.5 16q1.5 1 3 0"/></svg>';
+            function commentAvatarTone(userName) {
+                var text = String(userName || ''), hash = 0;
+                for (var i = 0; i < text.length; i++) hash = (hash * 31 + text.charCodeAt(i)) >>> 0;
+                return hash % 6;
+            }
+            function buildCommentAvatarHtml(userName, isAi) {
+                if (isAi) return '<span class="comment-avatar comment-avatar-ai" aria-label="小猫">' + COMMENT_CAT_ICON + '</span>';
+                var safeUser = String(userName || '').trim();
+                var avatarUrl = getAvatarUrl(safeUser) || '';
+                if (!avatarUrl && safeUser) {
+                    try {
+                        var cachedAvatars = readAvatarCacheFromStorage();
+                        if (cachedAvatars[safeUser] && cachedAvatars[safeUser].url) {
+                            avatarCache[safeUser] = cachedAvatars[safeUser];
+                            avatarUrl = getAvatarUrl(safeUser) || '';
+                        }
+                    } catch (e) {}
+                }
+                // 带 .avatar.clickable：头像异步到达后由 renderFeed 的补图逻辑原地换成图片。
+                return '<span class="avatar clickable comment-avatar comment-tone-' + commentAvatarTone(safeUser) + '" role="button" tabindex="0" aria-label="查看 ' + escapeHtml(safeUser) + ' 的动态" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();this.click();}" onclick="openUserProfile(\'' + safeJsStr(safeUser) + '\')" data-user-name="' + escapeHtml(safeUser) + '">' + renderAvatarContent(safeUser, avatarUrl) + '</span>';
+            }
+            function buildCommentDeleteButtonHtml(comment) {
+                if (!comment || !currentUser || !(isAdmin() || String(comment.user_name || '') === String(currentUser))) return '';
+                return '<button type="button" class="comment-del-btn" onclick="deleteFeedComment(\'' + safeJsStr(comment.id) + '\', this)">删除</button>';
+            }
+            // 头像 + 昵称/时间同一行 + 正文；回复容器由调用方接在这一行下面。
+            function buildCommentRowHtml(comment, replyToName) {
+                var isAi = comment.user_name === 'cat_ai' && !!comment.generated_by_ai;
+                var nameHtml = isAi ? '<b class="cat-ai-name">小猫</b><span class="cat-ai-badge">AI</span>' : '<b class="comment-item-name">' + escapeHtml(comment.user_name) + '</b>';
+                var replyTo = replyToName ? '<span class="comment-reply-to">回复 @' + escapeHtml(replyToName) + '</span> ' : '';
+                return '<div class="comment-row">' + buildCommentAvatarHtml(comment.user_name, isAi) +
+                    '<div class="comment-item-body"><div class="comment-item-header">' + nameHtml +
+                    '<span class="comment-item-time">' + escapeHtml(comment.created_at ? formatRelativeTime(comment.created_at) : '刚刚') + '</span>' +
+                    buildCommentDeleteButtonHtml(comment) + '</div>' +
+                    '<div class="comment-item-content">' + replyTo + escapeHtml(comment.content) + '</div></div></div>';
+            }
             function buildPostCommentsHtml(post, pComms, options) {
                 if (!pComms.length) return '';
                 var limit = options && options.detail ? 30 : 3;
-                function commentDeleteButton(comment) {
-                    if (!comment || !currentUser || !(isAdmin() || String(comment.user_name || '') === String(currentUser))) return '';
-                    return '<button type="button" class="comment-del-btn" onclick="deleteFeedComment(\'' + safeJsStr(comment.id) + '\', this)">删除</button>';
-                }
                       var _byId = {}; var _seen = Object.create(null); var _count = 0;
                       pComms.forEach(function(c) { _byId[String(c.id)] = c; });
                       var _childrenOf = {};
@@ -3408,7 +3441,7 @@
                           _roots.push(c);
                         }
                       });
-                      function _renderCommentNode(c, depth) {
+                      function _renderCommentNode(c, depth, parent) {
                         depth = typeof depth === 'number' ? depth : 0;
                         if (_seen[String(c.id)] || _count >= limit) return '';
                         _seen[String(c.id)] = true; _count++;
@@ -3418,17 +3451,16 @@
                             var parentLoaded=(window.__xtjPostDetailComments||[]).some(function(row){return String(row.id)===String(c.parent_comment_id);});
                             replyContext=parentLoaded?'<button type="button" class="comment-reply-context" onclick="__xtjGotoPostComment(\''+safeJsStr(String(c.parent_comment_id))+'\')">查看原评论 #'+escapeHtml(c.parent_comment_id)+'</button>':'<span class="comment-reply-context">回复评论 #'+escapeHtml(c.parent_comment_id)+'</span>';
                         }
-                        if (c.user_name === 'cat_ai' && c.generated_by_ai) {
-                          _node = '<div class="comment-item cat-ai-comment" data-comment-id="' + escapeHtml(c.id) + '" data-parent-comment-id="' + escapeHtml(c.parent_comment_id || '') + '"><div class="comment-item-inner"><span class="cat-ai-avatar" aria-label="小猫">🐱</span><div class="comment-item-body"><div class="comment-item-header"><b class="cat-ai-name">小猫</b><span class="cat-ai-badge">AI</span><span class="comment-item-time">' + escapeHtml(c.created_at ? formatRelativeTime(c.created_at) : '刚刚') + '</span>' + commentDeleteButton(c) + '</div><div class="comment-item-content">' + escapeHtml(c.content) + '</div></div></div></div>';
-                        } else {
-                          _node = '<div class="comment-item" data-comment-id="' + escapeHtml(c.id) + '"><div><b>' + escapeHtml(c.user_name) + ':</b> ' + escapeHtml(c.content) + '</div>' + commentDeleteButton(c) + '</div>';
-                        }
-                        _node=replyContext+_node;
+                        var isAiComment = c.user_name === 'cat_ai' && !!c.generated_by_ai;
+                        // 只有回复的是“回复”（第三层起）才点名：第二层缩进已经表明在回上一条。
+                        var replyToName = depth >= 2 && parent && !(parent.user_name === 'cat_ai' && parent.generated_by_ai) ? parent.user_name : (depth >= 2 && parent ? '小猫' : '');
                         var _kids = _childrenOf[String(c.id)] || [];
+                        var _replies = '';
                         if (_kids.length && depth < 8 && _count < limit) {
-                          _node += '<div class="comment-replies" style="margin-left:24px; margin-top:8px;">' + _kids.map(function(child) { return _renderCommentNode(child, depth + 1); }).join('') + '</div>';
+                          _replies = '<div class="comment-replies">' + _kids.map(function(child) { return _renderCommentNode(child, depth + 1, c); }).join('') + '</div>';
                         }
-                        return _node;
+                        _node = '<div class="comment-item' + (isAiComment ? ' cat-ai-comment' : '') + '" data-comment-id="' + escapeHtml(c.id) + '" data-parent-comment-id="' + escapeHtml(c.parent_comment_id || '') + '" data-user-name="' + escapeHtml(isAiComment ? '小猫' : c.user_name) + '">' + buildCommentRowHtml(c, replyToName) + _replies + '</div>';
+                        return replyContext + _node;
                       }
                 var html = _roots.map(function(c) { return _renderCommentNode(c, 0); }).join('');
                 // Orphan/cyclic/deep historical replies stay readable without unbounded recursion.
