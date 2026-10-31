@@ -3,6 +3,7 @@
 ## 2026-10-31 每日自动化维护工具与手册
 
 - 新增 `docs/automation-playbook.md`（每日会话的铁律、各板块工单、PR 模板、整合流程）和 `scripts/maintenance/`：可复用的页面驱动 harness、小猫 AI 流式模拟、前端与后端冒烟、Dock 与帖子页计算样式对比、PR 规则检查、PR 合并助手、测试对比、一次性 PostgreSQL、流畅度测量。
+- 每日会话的唤醒时间按 Pro 套餐每 5 小时重置一次额度的规则错开：00:33–05:33 四个、05:38–10:38 四个（含大哥整合），任意 5 小时内最多启动 4 个。
 - `.gitattributes`：`CHANGELOG.md` 与 `docs/current-product-decisions.md` 使用 union 合并，多条分支各加一条记录时不再互相冲突。
 - 没有改动产品代码、Dock 和帖子页。
 

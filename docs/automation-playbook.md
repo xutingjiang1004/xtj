@@ -1,23 +1,25 @@
 # 每日自动化维护手册（前端 + 后端）
 
-建立于 2026-10-31。依据用户的明确指示：每天台北时间早上按板块自动找 Bug、修复，由「大哥」会话统一合并到 `main`（Render 随之自动部署）；目标是减少 Bug、让动画更流畅、让交互更顺手；2026-10-31 补充：**后端也纳入，网站前端后端全部交给大哥和这些会话**。
+建立于 2026-10-31。依据用户的明确指示：每天台北时间凌晨到上午按板块自动找 Bug、修复，由「大哥」会话统一合并到 `main`（Render 随之自动部署）；目标是减少 Bug、让动画更流畅、让交互更顺手；2026-10-31 补充：**后端也纳入，网站前端后端全部交给大哥和这些会话**。
 
 这份手册是所有定时会话的共同依据。会话提示词很短，细节都在这里。冲突时的优先级：用户最新的明确指示 > `AGENTS.md` > `docs/current-product-decisions.md` > 本手册 > 历史代码和旧交接。
 
 ## 1. 运行方式
 
+时间是按用户的 Pro 套餐安排的：额度每 5 小时重置一次，8 个会话挤在一个窗口里不够用。所以分成两个 5 小时窗口，每个窗口 4 个，相邻会话至少隔 75 分钟，任意 5 小时内最多启动 4 个；整个流程在用户白天开始用之前（约 10:40）结束。
+
 | 台北时间 | 会话（定时任务名） | 范围（前端 + 对应后端接口） | 产出 |
 | --- | --- | --- | --- |
-| 06:00 | 每日帖子板块巡检与修复 | 帖子、评论、点赞、发布、个人动态页、公告与举报 | 分支 `maint/posts-日期` |
-| 07:00 | 每日照片墙巡检与修复 | 照片墙、上传、预览（与帖子图共用）、照片接口与预览缓存 | 分支 `maint/photos-日期` |
-| 08:00 | 小猫AI每日巡检修复 | 小猫 AI 页、深入研究、`/api/agent/*` 与模型链路 | 分支 `maint/ai-日期` |
-| 09:00 | 每日我的设置登录巡检与修复 | 登录注册、个人资料、设置、头像、账户与安全接口 | 分支 `maint/profile-日期` |
-| 09:00 | 每日聊天页巡检与修复 | 私聊、发送队列、图片/语音、未读、通知、`/api/dm/*` | 分支 `maint/chat-日期` |
-| 10:00 | 每日全局弹窗动效巡检与修复 | 弹窗、提示、转场、加载态、桌面外壳、性能、可访问性 | 分支 `maint/global-日期` |
-| 10:00 | 每日服务端与管理后台巡检与修复 | `render-api` 基础设施、管理后台、安全头、日志、存储清理 | 分支 `maint/server-日期` |
-| 11:00 | 每日大哥整合与推送 | 审查并合并当天所有 `maint/*` 分支，全量验证后推送 `main`，汇报 | 推送 `main` + 每日汇报 |
+| 00:33 | 每日帖子板块巡检与修复 | 帖子、评论、点赞、发布、个人动态页、公告与举报 | 分支 `maint/posts-日期` |
+| 01:48 | 每日照片墙巡检与修复 | 照片墙、上传、预览（与帖子图共用）、照片接口与预览缓存 | 分支 `maint/photos-日期` |
+| 03:03 | 小猫AI每日巡检修复 | 小猫 AI 页、深入研究、`/api/agent/*` 与模型链路 | 分支 `maint/ai-日期` |
+| 04:18 | 每日聊天页巡检与修复 | 私聊、发送队列、图片/语音、未读、通知、`/api/dm/*` | 分支 `maint/chat-日期` |
+| 05:38 | 每日我的设置登录巡检与修复 | 登录注册、个人资料、设置、头像、账户与安全接口 | 分支 `maint/profile-日期` |
+| 06:53 | 每日服务端与管理后台巡检与修复 | `render-api` 基础设施、管理后台、安全头、日志、存储清理 | 分支 `maint/server-日期` |
+| 08:08 | 每日全局弹窗动效巡检与修复 | 弹窗、提示、转场、加载态、桌面外壳、性能、可访问性 | 分支 `maint/global-日期` |
+| 09:23 | 每日大哥整合与推送 | 审查并合并当天所有 `maint/*` 分支，全量验证后推送 `main`，汇报 | 推送 `main` + 每日汇报 |
 
-（实际分钟数会略早于整点，是为了错开平台高峰，不影响分工。）
+（00:33–05:33 是第一个窗口：帖子、照片墙、小猫 AI、聊天；05:38–10:38 是第二个窗口：我的·设置·登录、服务端·管理后台、全局、大哥整合。改时间或加会话时守住「任意 5 小时最多 4 次启动、大哥排在所有模块之后至少 60 分钟」，见第 12 节。）
 
 - 模块会话**只推自己的分支 `maint/<模块>-<日期>`，不合并，不推 `main`**。分支就是交付物，说明写在最后一个提交的提交信息里（不依赖 PR：2026-10-31 试跑发现，新开的定时会话没有 GitHub 的 MCP 工具，也没有推送权限，所以改用常驻会话，见第 12 节）。大哥统一合并，避免多条分支同时改生成文件（`js/core.js`、`*.min.*`、`index.html` 指纹）互相冲突。
 - 当天没发现确认存在的问题：**不造改动、不推分支**，一句话汇报「今天未发现新问题」并写清检查了什么。
@@ -132,7 +134,7 @@ node scripts/maintenance/smoke.js          # 四种配置各点一遍底部标�
 
 通用提醒：每个板块都先看第 4 节第 1 步的近期改动，再按下面的清单。后端部分只修 Bug，兼容优先。
 
-### 8.1 帖子（06:00）——UI 冻结
+### 8.1 帖子——UI 冻结
 - **前端**：信息流与无限滚动；发布区（文字/图片/视频/音频/定位/可见范围/进度与动效/失败重试）；点赞；评论（预览、详情页、分页、回复层级、头像、小猫 AI 回复与轮询、删除）；帖子删除、置顶、公开/私密切换；帖子详情；图片视频预览与原图加载与缩放手势；搜索与筛选；更多菜单（小猫 AI 对话、深入研究、站内搜索、翻译、锐评、举报）；点头像进入的个人动态页；公告与举报弹窗；骨架屏、加载与错误重试；亮色/深色；390/1024/1280px。
 - **后端**：`/api/feed`、`/api/post/*`、`/api/comments`、`/api/likes`、`/api/announcements`、`/api/report`；`render-api/post-*.js`、`author-posts.js`、`feed-search.js`、`post-attachments.js`、`post-media.js`。
 - **常见 Bug 类型**：分页游标重复或漏条；乐观点赞重复计数；评论数不一致；删除后刷新又出现（缓存）；发布后信息流缓存过期；双击发布发两次；上传失败留下孤儿媒体；私密帖泄露给他人；超长文本与超长网址溢出；昵称里的 HTML；相对时间在跨天时出错；轮询泄漏。
@@ -140,14 +142,14 @@ node scripts/maintenance/smoke.js          # 四种配置各点一遍底部标�
 - **筛选**：`'post|feed|author-posts|comment|like|announce|report|search'`（约 37 个文件）。
 - **已知基线**：`post-attachments-browser`「real composer appends…retry succeeds」、`frontend-social-audit-runtime`「failed media publish uses authenticated cleanup…」「cached posts beyond the first visible page remain expandable…」在修复前就失败，原因待用户决定，除非有确凿证据否则不要动。
 
-### 8.2 照片墙（07:00）
+### 8.2 照片墙
 - **前端**：照片格子（渲染、懒加载、扫光占位）；排序与相册；上传面板（选图、紧凑行、说明、进度、失败原因）；顶部上传成功提示；全屏预览（与帖子图共用：左右切换、放大缩小按钮、双指、滚轮、双击、键盘、计数、先预览后原图）；删除、可见性、说明编辑；相册故事页；分享；游客只读；桌面与手机；深色；减少动态效果。
 - **后端**：`/api/photo/*`、`/api/photos/*`；`render-api/photo-*.js`、`media-previews.js`、`media-traffic.js`、`flash-photos.js`、`storage-cleanup.js`、`upload-access.js`。
 - **常见 Bug 类型**：滚动掉帧与图片解码内存；预览闪烁；手势冲突；上传重复、编号冲突、部分失败；孤儿存储对象；预览缓存雪崩；免费流量额度超支；他人照片的权限检查；EXIF 方向；分页。
 - **决定要点**：预览与帖子图共用；+/− 按钮保留；等待用扫光而非「小草」；照片墙进入只做透明度；列表预览 1080/q80。
 - **筛选**：`'photo|preview|media|upload|flash|share'`（约 30 个文件）。
 
-### 8.3 小猫 AI（08:00）
+### 8.3 小猫 AI
 - **前端**：发送、流式、停止、重新回答、复制/朗读/收藏/分享、长按与右键菜单；思考时间轴（思考直接显示 → 写出过渡句或调用工具时折进那一步 → 回复完成后整体折叠成「已思考」）；工具与搜索行；多轮推理与联网搜索；深入研究页；历史会话（打开、关闭、重命名、删除、翻页）；上下文详情与压缩；模型菜单与第三方模型；附件；语音对话；Markdown（表格、代码、引用）；顶栏与输入栏；桌面 760px 阅读栏；游客与配额提示；错误与重试。
 - **后端**：`/api/agent/*`（约 32 个）；`render-api/ai-*.js`、`deepseek-*.js`、`openrouter.js`、`research-*.js`、`responses-context.js`、`sse-*.js`、`sandbox.js`、`search-*.js`、`web-fetch.js`、`image-ocr.js`、`file-parsers.js`。
 - **工具**：`bench-ai.js`、`ai-mock.js`、`tests/helpers/ai-polish-fixture.js`。
@@ -155,33 +157,33 @@ node scripts/maintenance/smoke.js          # 四种配置各点一遍底部标�
 - **第一件事**：`main` 上 `npm test` 的第一组因 `tests/ai-stream-latency-runtime.test.js`「semantic completion starts the next genuine tool round…」失败而一直是红的（见第 10 节）：测试的 `vm` 作用域缺 `modelFacingToolResult`，生产代码没问题。修好这个夹具即可，不要改生产代码去迎合它。
 - **筛选**：`'ai-|agent|research|openrouter|deepseek|stream|markdown|sse|sandbox'`（约 88 个文件，约 5 分钟）。
 
-### 8.4 聊天（09:00）
+### 8.4 聊天
 - **前端**：私信列表与会话；发送队列（气泡立即出现、顺序、幂等、重试）；图片（扫光占位、超时重试）；语音与转写；撤回；已读（按 200 条分批）；未读角标；通知与 Service Worker（`chat-notifications-sw.js`）；实时通道与轮询降级；好友（添加、删除、备注、拉黑）、免打扰、搜索；草稿同步；iOS 键盘与视口；断网与慢网。
 - **后端**：`/api/dm/*`（约 12 个）；`render-api/chat-*.js`、`dm-*.js`、`adaptive-poller.js`、`mail-transport.js`（未读邮件提醒）。
 - **常见 Bug 类型**：消息重复或乱序；切会话丢草稿；已读状态回退；未读数漂移；重连后漏消息；大图或语音占内存；推送重复；键盘遮挡输入框。
 - **决定要点**：清空、删除会话、删除好友、拉黑、改备注使用站内弹窗；聊天页头部重排等用户未拍板，不要做。
 - **筛选**：`'chat|dm-|push|notif|mention|voice|transcri'`（约 20 个文件）。
 
-### 8.5 我的 · 设置 · 登录（09:00）
+### 8.5 我的 · 设置 · 登录
 - **前端**：登录、注册、退出（右上「×」保持现状，不加确认）；会话刷新与吊销；设备登录记录；个人资料与头像上传裁剪；昵称规则；设置开关（布尔设置统一用开关）；数据导出与清理；举报与「我的」列表；主题（浅色/深色/跟随）；操作震动；原图预加载设置；同意与定位历史；IP 属地显示；游客限制（`02-auth-restrictions.js`）。
 - **后端**：`/api/user/*`、`/api/avatar/*`、`/api/security-settings`、`/api/my-reports`、`/api/log-*`、`/api/location`；`render-api/profile-settings.js`、`profile-records.js`、`auth-record.js`、`account-*.js`、`behavior-consent.js`、`personal-export.js`、`location-history.js`、`ip-*.js`、`security-activity.js`。
 - **常见 Bug 类型**：刷新令牌竞态与丢失回执；多标签页退出；退出后残留缓存的用户；头像缓存过期；表单边界（昵称长度、空白、Unicode）；设置没保存；导出大数据失败；时区；错误文案不准。
 - **筛选**：`'profile|settings|login|auth|account|avatar|consent|refresh|register|revoke|ip-|location'`（约 28 个文件）。
 
-### 8.6 全局：弹窗 · 动效 · 性能（10:00）
+### 8.6 全局：弹窗 · 动效 · 性能
 - **前端**：站内弹窗体系（`xtjConfirm`/`xtjPrompt`、遮罩、实底卡片、焦点陷阱、Esc、滚动锁、层叠）；提示；面板与标签转场；减少动态效果；加载态（扫光、骨架）；离线与错误；桌面侧栏与手机 Dock 的一致行为（只看行为，不碰 Dock）；安全区、视口、键盘；主题切换闪烁；Service Worker 与缓存（部署后旧资源、`?v=` 指纹）；性能（长任务、重排、切标签时的监听器与定时器泄漏、图片解码）；可访问性（焦点环、aria、对比度、点击区）；全站控制台报错与 CSP 违规。
 - **工具**：`probe-motion.js`（切标签与弹窗的前后对比）、`smoke.js`。
 - **不许碰**：Dock；帖子页版面；液态玻璃统一。
 - **筛选**：`'navigation|haptic|theme|performance|layout|modal|toast|motion|ux-|ui-|desktop|dialog|confirm|viewport'`（约 15 个文件）。
 
-### 8.7 服务端 · 管理后台 · CI（10:00）
+### 8.7 服务端 · 管理后台 · CI
 - **后端基础设施**：`render-api/server.js` 启动与环境检查；安全头、CSP、CORS（`security-headers.js`、`trusted-proxies.js`）；限流；错误处理与日志（不写密钥与个人信息）；`/health` 与保活；静态服务的敏感路径黑名单；上传限制；优雅关闭；定时器与内存泄漏；`supabase-availability.js`、`db-result.js` 的重试与错误分类；`storage-cleanup.js`、`storage-orphan-scan.js`；`media-digest.js`；`ip-geolocation.js`；`mail-transport.js`。
 - **管理后台**：`admin.html`、`js/admin/*`、`css/admin.css`、`/api/admin/*`、`admin-*.js`、`admin-statistics.js`。`docs/admin-audit-fixes-2026-10-21.md` 记录了待应用的迁移和未验证的范围，重新核对后再动。
 - **CI**：先看自己有没有 `mcp__github__actions_list`：有就只读查 `ci.yml` 在 `main` 上最近一次的结果，哪个作业红了、第一个失败的测试是什么，写进汇报；没有就跳过。`.github/` 不要改。
 - **常见 Bug 类型**：未捕获的异常或 Promise 拒绝；超时与重试风暴；日志泄密；路径穿越；限流绕过；请求体大小；时序与竞态；数据库错误被吞；资源未释放。
 - **筛选**：`'admin|backend|security|server|media-traffic|database|migration|health|cors|csp|headers|storage|rate'`（约 32 个文件）。
 
-## 9. 大哥整合（11:00）
+## 9. 大哥整合
 
 大哥是唯一能合并到 `main` 的会话。步骤：
 
@@ -221,15 +223,16 @@ node scripts/maintenance/smoke.js          # 四种配置各点一遍底部标�
 
 | 板块 | 常驻会话 | 定时任务（台北时间） |
 | --- | --- | --- |
-| 帖子 | `session_016rCJpV9uHyxQBhXGixnmtG` | `trig_01A3K7J4jFFUXa3i5bDW9bwg`（05:48） |
-| 照片墙 | `session_016rCJpToc9ExPgcqQ7kQ1EE` | `trig_0111dHj92TjB1VDjSDpdnRtW`（06:49） |
-| 小猫 AI | `session_016rCJpTu3ZtSHnvr98reymJ` | `trig_01Mwxixd6tAsPLrdhPCRGNVq`（07:48） |
-| 我的 · 设置 · 登录 | `session_016rCJpVBYXPwtRzttDKggex` | `trig_01Vhm8q6W5sVUVuPn325vx5M`（08:46） |
-| 聊天 | `session_016rCJpSrYTsmFa2D9xffJCx` | `trig_016cQuJvfDTBSgrG8MoxomA2`（08:49） |
-| 服务端 · 管理后台 | `session_016rCJpUzuooyfsWtDTaXW8T` | `trig_0192GgWEfRviaGqgrXPHYEFe`（09:44） |
-| 全局 | `session_016rCJpRVnGeYT5LhjWx9tLn` | `trig_01NPWRVaEyAnDuYmJ9UbMnYx`（09:46） |
-| 大哥整合 | `session_016rCJpUhcFjKAqWNdrhtBbd` | `trig_01UQM56KP1nsaJeQ9ZCEtguJ`（11:00） |
+| 帖子 | `session_016rCJpV9uHyxQBhXGixnmtG` | `trig_01A3K7J4jFFUXa3i5bDW9bwg`（00:33） |
+| 照片墙 | `session_016rCJpToc9ExPgcqQ7kQ1EE` | `trig_0111dHj92TjB1VDjSDpdnRtW`（01:48） |
+| 小猫 AI | `session_016rCJpTu3ZtSHnvr98reymJ` | `trig_01Mwxixd6tAsPLrdhPCRGNVq`（03:03） |
+| 聊天 | `session_016rCJpSrYTsmFa2D9xffJCx` | `trig_016cQuJvfDTBSgrG8MoxomA2`（04:18） |
+| 我的 · 设置 · 登录 | `session_016rCJpVBYXPwtRzttDKggex` | `trig_01Vhm8q6W5sVUVuPn325vx5M`（05:38） |
+| 服务端 · 管理后台 | `session_016rCJpUzuooyfsWtDTaXW8T` | `trig_0192GgWEfRviaGqgrXPHYEFe`（06:53） |
+| 全局 | `session_016rCJpRVnGeYT5LhjWx9tLn` | `trig_01NPWRVaEyAnDuYmJ9UbMnYx`（08:08） |
+| 大哥整合 | `session_016rCJpUhcFjKAqWNdrhtBbd` | `trig_01UQM56KP1nsaJeQ9ZCEtguJ`（09:23） |
 
-- 暂停某个板块：`update_trigger` 设 `enabled=false`；改成隔天一次：改 cron（例如 `CRON_TZ=Asia/Taipei 48 5 */2 * *`）；改提示词：`update_trigger` 的 `prompt`（要改的是整段，所以细则尽量放在本手册里，提示词只保留摘要）。
+- 暂停某个板块：`update_trigger` 设 `enabled=false`；改成隔天一次：改 cron（例如 `CRON_TZ=Asia/Taipei 33 0 */2 * *`）；改提示词：`update_trigger` 的 `prompt`（要改的是整段，所以细则尽量放在本手册里，提示词只保留摘要）。
 - 常驻会话不能改系统提示；它们靠定时任务里的消息和本手册工作。需要换会话时：`create_session`（带 `source_url`）建新会话，`create_trigger` 的 `persistent_session_id` 指向它，再删旧的定时任务。
+- **额度与时间安排（用户用 Pro 套餐，2026-10-31 定）**：任意 5 小时内最多启动 4 个会话，相邻至少隔 75 分钟；第一个窗口 00:33–05:33（帖子、照片墙、小猫 AI、聊天），第二个窗口 05:38–10:38（我的·设置·登录、服务端·管理后台、全局、大哥整合）。新增、移动或补跑任务前先按这条核对，不要把几个会话叠在同一时段。第一天（2026-11-01）之后用 `get_session` 的 `external_metadata.usage.cost_usd` 汇总每个会话的花费；装不进窗口时，把最耗额度的模块改成隔天（模块分成单双日两批，大哥每天都跑），不要靠缩短检查来省额度。
 - 用户白天自己用的交互式会话（帖子、照片墙、小猫AI、聊天、前端网站审计报告）不在这套系统里，它们的改动会随时合进 `main`，所以大哥推送前总要重新 `git fetch`。
