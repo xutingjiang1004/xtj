@@ -136,7 +136,7 @@ test('a pending current-conversation deletion blocks a new send and duplicate de
   await p.locator('#aiChatSendBtn').click();
   assert.equal(await p.evaluate(() => aiPolish.streams.length), 0);
   assert.equal(await p.locator('#aiChatMsgInput').inputValue(), '删除尚未确认时的新提问');
-  await p.locator('.ai-chat-del-btn').click();
+  await p.locator('.ai-chat-more-btn').click(); await p.locator('.ai-chat-del-btn').click();
   assert.equal(await p.evaluate(() => repairDeletes), 1);
   await p.evaluate(() => releaseRepairDelete());
   await p.waitForFunction(() => __xtjAiAgent.getConversationId() === null);
@@ -167,7 +167,7 @@ test('automatic new-conversation creation after deleting the current chat keeps 
       return new Promise(resolve => window.releaseRepairNew = () => resolve(new Response('{"ok":true,"conversation_id":"AFTERDELETE01"}', { headers: { 'Content-Type': 'application/json' } })));
     };
   });
-  await p.locator('.ai-chat-del-btn').click(); await p.waitForFunction(() => typeof releaseRepairNew === 'function');
+  await p.locator('.ai-chat-more-btn').click(); await p.locator('.ai-chat-del-btn').click(); await p.waitForFunction(() => typeof releaseRepairNew === 'function');
   await p.locator('#aiChatMsgInput').fill('给删除后新会话的提问'); await p.locator('#aiChatSendBtn').click();
   assert.equal(await p.evaluate(() => aiPolish.streams.length), 0);
   assert.equal(await p.locator('#aiChatMsgInput').inputValue(), '给删除后新会话的提问');
@@ -211,7 +211,7 @@ test('a successful deletion followed by failed creation reports the actual state
       return previous(url, options);
     };
   });
-  await p.locator('.ai-chat-del-btn').click();
+  await p.locator('.ai-chat-more-btn').click(); await p.locator('.ai-chat-del-btn').click();
   await p.waitForFunction(() => document.body.textContent.includes('对话已删除，新对话创建失败'));
   assert.equal(await p.evaluate(() => __xtjAiAgent.getConversationId()), null);
   await p.locator('.ai-chat-new-btn').click();

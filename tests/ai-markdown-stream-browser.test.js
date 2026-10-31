@@ -42,3 +42,29 @@ test('Chinese paragraphs following a streamed table never jump in front of the t
   assert.ok(result.text.endsWith('之后再安排出行。'));
  }finally{await f.browser.close();}
 });
+
+test('streaming block cache matches a full render at every prefix for list-heavy answers and keeps caching after lists',{timeout:60000},async()=>{
+ const f=await rendererFixture();try{
+  const result=await f.page.evaluate(()=>{
+   const docs=[
+    '## 概览\n这是第一段，带**加粗**。\n\n- 要点一\n- 要点二\n\n结论段落在这里。\n\n1. 步骤一\n2. 步骤二\n\n最后一段。',
+    '- 甲\n\n- 乙\n\n文字\n\n- 丙\n\n  续行缩进\n\n- 丁\n\n收尾',
+    '前言\n\n- 外层\n  - 内层\n\n之后\n\n```js\n- 不是列表\n\n还是代码\n```\n\n尾声',
+    '列表后接表格\n\n- 一\n- 二\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n结束',
+    '1. 一\n\n2. 二\n\n3. 三\n\n总结'
+   ],failures=[];
+   for(const doc of docs){
+    const cache=createStreamingMarkdownCache(renderMarkdown);
+    for(let i=1;i<=doc.length;i++){const text=doc.slice(0,i);if(cache(text)!==renderMarkdown(text,true)){failures.push([doc.slice(0,12),i]);break;}}
+   }
+   // cost: after the first list, earlier blocks must not be re-rendered every frame
+   const calls=[];const counting=(t,x)=>{calls.push(t.length);return renderMarkdown(t,x);};
+   const cache=createStreamingMarkdownCache(counting);let doc='';
+   for(let i=0;i<60;i++)doc+='## 小节'+i+'\n第'+i+'段内容，含**加粗**。\n\n- 要点一\n- 要点二\n\n';
+   let sizes=[];for(let i=0;i<doc.length;i+=7){calls.length=0;cache(doc.slice(0,i+1));sizes.push(calls.reduce((a,b)=>a+b,0)/(i+1));}
+   return {failures,lateRatio:Math.max(...sizes.slice(-20))};
+  });
+  assert.deepEqual(result.failures,[]);
+  assert.ok(result.lateRatio<0.6,'late frames still re-render most of the text: '+result.lateRatio);
+ }finally{await f.browser.close();}
+});

@@ -64,3 +64,32 @@ test('reply long-press menu items share one flat list style instead of the globa
   assert.ok(styles.length>=4);assert.equal(new Set(styles).size,1);assert.equal(styles[0],'none|rgba(0, 0, 0, 0)|10px|row|44');assert.deepEqual(f.errors,[]);
  }finally{await f.close();}
 });
+
+test('header buttons have 44px touch targets and delete lives only in the more menu',{timeout:45000},async()=>{
+ const f=await aiPolishFixture(),p=f.page;
+ try{
+  const sizes=await p.evaluate(()=>[...document.querySelectorAll('.ai-chat-header > button')].map(b=>{const r=b.getBoundingClientRect();return[b.className.split(' ')[0],Math.round(r.width),Math.round(r.height)];}));
+  for(const [name,w,h] of sizes){if(name==='ai-deep-think-toggle'){assert.ok(h>=40);continue;}assert.ok(w>=44&&h>=44,name+' '+w+'x'+h);}
+  assert.equal(await p.locator('.ai-chat-header .ai-chat-del-btn').count(),0);
+  assert.equal(await p.locator('.ai-chat-more-menu').isVisible(),false);
+  await p.locator('.ai-chat-more-btn').click();await p.waitForFunction(()=>document.querySelector('.ai-chat-more-menu')&&!document.querySelector('.ai-chat-more-menu').hidden);
+  assert.equal(await p.locator('.ai-chat-more-btn').getAttribute('aria-expanded'),'true');
+  assert.ok(await p.locator('.ai-chat-more-menu .ai-chat-del-btn').isVisible());
+  await p.keyboard.press('Escape');await p.waitForFunction(()=>document.querySelector('.ai-chat-more-menu').hidden);
+  await p.locator('.ai-chat-more-btn').click();await p.mouse.click(200,500);await p.waitForFunction(()=>document.querySelector('.ai-chat-more-menu').hidden);
+  assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
+
+test('new chat during a streaming reply stops that reply and starts the new conversation',{timeout:45000},async()=>{
+ const f=await aiPolishFixture(),p=f.page;
+ try{
+  await p.locator('#aiChatMsgInput').fill('第一个问题');await p.locator('#aiChatSendBtn').click();await p.waitForFunction(()=>aiPolish.streams.length===1);
+  await emit(p,{type:'content',text:'部分回答'});await p.waitForSelector('.ai-msg.assistant .ai-msg-bubble');
+  await p.locator('.ai-chat-new-btn').click();
+  await p.waitForFunction(()=>aiPolish.calls.some(x=>x.path.endsWith('/chat/new')));
+  await p.waitForFunction(()=>aiPolish.streams[0].cancelled===true||aiPolish.streams[0].signal?.aborted);
+  await p.waitForFunction(()=>!document.querySelector('.ai-msg'));
+  assert.equal(await p.locator('#aiChatSendBtn').isDisabled(),false);assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});

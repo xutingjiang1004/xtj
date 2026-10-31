@@ -5021,15 +5021,18 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
      That path preserves stable DOM nodes, but parsing/traversing can still
      scale with the open block. Plain prose uses the bounded direct-append
      path below, so common answers do not repeatedly parse their whole body. */
-  function patchInnerHTML(targetEl, html, ink) {
+  // stable：流式缓存里已经定稿的块的 HTML 前缀（html 以它开头，且它由若干完整的顶层节点组成）。
+  // 传入时只解析、对比它后面的部分，前面的节点原样保留；否则整篇解析并逐节点对比，
+  // 长回答每一帧的代价就会随长度增长。
+  function patchInnerHTML(targetEl, html, ink, stable) {
     if (!targetEl) return;
     if (targetEl.__xtjStreamHtml && tryExtendStreamHtml(targetEl, targetEl.__xtjStreamHtml, html, ink)) {
       targetEl.__xtjStreamHtml = html;
       return;
     }
-    function children(parent, wanted, depth) {
+    function children(parent, wanted, depth, skip) {
       var old = Array.from(parent.childNodes).filter(function(n) { return !(n.nodeType === 1 && n.classList.contains('ai-stream-cursor')); });
-      var pos = 0;
+      var pos = skip || 0;
       Array.from(wanted.childNodes).forEach(function(want) {
         var have = old[pos++];
         if (!have) { var added = want.cloneNode(true); parent.insertBefore(added, parent.querySelector(':scope > .ai-stream-cursor')); if (ink) ink.inserted(added); return; }
@@ -5048,9 +5051,28 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       for (; pos < old.length; pos++) if (old[pos].parentNode === parent) old[pos].remove();
     }
     try {
-      var holder = document.createElement('div'); holder.innerHTML = html;
-      children(targetEl, holder, 0);
-    } catch (_) { targetEl.innerHTML = html; }
+      var holder = document.createElement('div');
+      var known = targetEl.__xtjStable;
+      if (stable && html.indexOf(stable) === 0 && known && stable.indexOf(known.html) === 0 && known.nodes <= targetEl.childNodes.length) {
+        // 沿用已经对齐过的前缀，只解析并对比它后面的部分（含刚定稿的那一块）。
+        holder.innerHTML = html.slice(known.html.length);
+        children(targetEl, holder, 0, known.nodes);
+        if (stable.length > known.html.length) {
+          var grown = document.createElement('div');
+          grown.innerHTML = stable.slice(known.html.length);
+          targetEl.__xtjStable = { html: stable, nodes: known.nodes + grown.childNodes.length };
+        }
+      } else {
+        holder.innerHTML = html;
+        children(targetEl, holder, 0);
+        targetEl.__xtjStable = null;
+        if (stable && html.indexOf(stable) === 0) {
+          var whole = document.createElement('div');
+          whole.innerHTML = stable;
+          targetEl.__xtjStable = { html: stable, nodes: whole.childNodes.length };
+        }
+      }
+    } catch (_) { targetEl.innerHTML = html; targetEl.__xtjStable = null; }
     targetEl.__xtjStreamHtml = html;
   }
 
@@ -5062,20 +5084,34 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var prefix = '', markup = '', verified = false, disabled = false;
     var blocks = new Map();
     var tailAccel = createTailAccelerator(function(text) { return render(text, true); });
-    function safeBlock(text) {
-      if (/```|\||<|>|^[ \t]*(?:[-*+] |\d+\. )/m.test(text)) return false;
+    // 只由「顶格列表项」组成的块。列表项之间隔着空行也会被并成同一个列表，
+    // 所以这种块只有在后面紧跟一个明确不是列表/缩进续行的块时，才能单独冻结。
+    function isFlatList(text) {
+      var lines = text.split('\n'), items = 0;
+      for (var i = 0; i < lines.length; i++) {
+        if (!lines[i]) continue;
+        if (!/^(?:[-*+] |\d+\. )/.test(lines[i])) return false;
+        items++;
+      }
+      return items > 0;
+    }
+    function safeBlock(text, following) {
+      if (/```|\||<|>/.test(text)) return false;
+      if (/^[ \t]*(?:[-*+] |\d+\. )/m.test(text)) {
+        if (!following || !isFlatList(text) || /^[ \t\-*+\d]/.test(following)) return false;
+      }
       var rest = text.replace(/`[^`\n]*`/g, '')
         .replace(/!?\[[^\]\n]*\]\([^\)\n]*\)/g, '')
         .replace(/\*\*[^*]+\*\*/g, '').replace(/\*[^*]+\*/g, '');
       return !/[`*\[\]]/.test(rest);
     }
-    return function(text) {
+    var cache = function(text) {
       if (disabled) return render(text, true);
       if (prefix && text.indexOf(prefix) !== 0) { prefix = ''; markup = ''; verified = false; blocks.clear(); tailAccel.reset(); }
       var tail = text.slice(prefix.length), breaks = /\n[ \t]*\n+/g, match, committed = 0;
       while ((match = breaks.exec(tail))) {
         var block = tail.slice(committed, match.index);
-        if (!safeBlock(block)) break;
+        if (!safeBlock(block, tail.slice(breaks.lastIndex, breaks.lastIndex + 1))) break;
         var html = blocks.get(block);
         if (html === undefined) {
           html = render(block, true);
@@ -5093,6 +5129,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       }
       return result;
     };
+    // 已经核对过与整篇渲染一致、可以原样保留 DOM 的定稿前缀。
+    cache.stable = function() { return verified && !disabled ? markup : ''; };
+    return cache;
   }
 
   // Optional local-only stream timing probe. Enable from the browser console
@@ -5308,9 +5347,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         // precision or clock corrections must not suppress an accepted frame.
         if (!isSelectionInTarget(targetEl)) {
           if (!appendPlainMarkdown(next)) {
-            patchInnerHTML(targetEl, renderStreamMarkdown(rendered), ink);
+            patchInnerHTML(targetEl, renderStreamMarkdown(rendered), ink, renderStreamMarkdown.stable());
             resumePlainMarkdownTail();
-          } else delete targetEl.__xtjStreamHtml;
+          } else { delete targetEl.__xtjStreamHtml; targetEl.__xtjStable = null; }
         } else if (!selectionRetryHandler) {
           // Consumed text must not be lost while the user has a selection.
           // Re-render the accumulated text once the selection clears.
@@ -5318,7 +5357,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             if (isSelectionInTarget(targetEl)) return;
             try { document.removeEventListener('selectionchange', selectionRetryHandler); } catch (_) {}
             selectionRetryHandler = null;
-            try { patchInnerHTML(targetEl, renderStreamMarkdown(rendered), ink); } catch (_) {}
+            try { patchInnerHTML(targetEl, renderStreamMarkdown(rendered), ink, renderStreamMarkdown.stable()); } catch (_) {}
           };
           try { document.addEventListener('selectionchange', selectionRetryHandler); } catch (_) {}
         }
@@ -13790,9 +13829,14 @@ function showChatMessages() {
     var delBtn = el('button', {
       type: 'button',
       class: 'ai-chat-del-btn',
+      role: 'menuitem',
       'aria-label': '删除当前对话',
       title: '删除当前对话'
-    }, '删除');
+    });
+    var delIcon = el('span', { class: 'ai-chat-more-icon', 'aria-hidden': 'true' });
+    delIcon.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l.8 12.5h9.4L17.5 7M10 11v5M14 11v5"/></svg>';
+    delBtn.appendChild(delIcon);
+    delBtn.appendChild(el('span', { class: 'ai-chat-more-label', text: '删除这段对话' }));
     delBtn.addEventListener('click', async function(ev) {
       ev.preventDefault();
       ev.stopPropagation();
@@ -13877,7 +13921,8 @@ function showChatMessages() {
       if (S._voiceConversation) S._voiceConversation.setEnabled(false);
       ev.preventDefault();
       ev.stopPropagation();
-      if (S.sending) { notify('正在回复中，请稍候再新建对话'); return; }
+      // 回复进行中点「新对话」：像 ChatGPT / Claude 一样先停掉这条回复（已写出的部分保留在旧对话里），再新建。
+      if (S.sending) interruptCurrentChat();
       // 访客没有服务端会话，直接在本地清空上下文与附件，不请求 /chat/new。
       if (!readUserName()) {
         abortCurrentRequest('chat');
@@ -13965,12 +14010,48 @@ function showChatMessages() {
       }
     });
     header.appendChild(newBtn);
-    header.insertBefore(delBtn, newBtn);
+    // 删除只留在「⋯」菜单里：顶栏不再放红色删除键，避免和「新对话」挤在一起误触。
+    var moreBtn = el('button', {
+      type: 'button', class: 'ai-chat-more-btn', 'aria-label': '更多操作', title: '更多',
+      'aria-haspopup': 'menu', 'aria-expanded': 'false'
+    });
+    var moreMenu = el('div', { class: 'ai-chat-more-menu', role: 'menu', 'aria-label': '更多操作', hidden: 'hidden' });
+    moreMenu.appendChild(delBtn);
+    var moreAbort = null;
+    function closeMoreMenu(restoreFocus) {
+      if (moreAbort) { try { moreAbort.abort(); } catch (eMoreAbort) {} moreAbort = null; }
+      moreMenu.hidden = true;
+      moreBtn.setAttribute('aria-expanded', 'false');
+      if (restoreFocus && moreBtn.isConnected) { try { moreBtn.focus(); } catch (eMoreFocus) {} }
+    }
+    function openMoreMenu() {
+      moreMenu.style.top = (header.offsetTop + header.offsetHeight + 6) + 'px';
+      moreMenu.hidden = false;
+      moreBtn.setAttribute('aria-expanded', 'true');
+      moreAbort = new AbortController();
+      var sig = moreAbort.signal;
+      document.addEventListener('pointerdown', function(pe) {
+        if (!moreMenu.contains(pe.target) && !moreBtn.contains(pe.target)) closeMoreMenu(false);
+      }, { signal: sig, capture: true });
+      document.addEventListener('keydown', function(ke) {
+        if (ke.key === 'Escape') { ke.stopPropagation(); closeMoreMenu(true); }
+      }, { signal: sig, capture: true });
+      try { delBtn.focus({ preventScroll: true }); } catch (eDelFocus) {}
+    }
+    moreBtn.addEventListener('click', function(ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (moreMenu.hidden) openMoreMenu(); else closeMoreMenu(true);
+    });
+    delBtn.addEventListener('click', function() { closeMoreMenu(false); });
+    header.appendChild(moreBtn);
     if (S.headerButtonsCleanup) {
       try { S.headerButtonsCleanup(); } catch (eCleanup) {}
     }
     S.headerButtonsCleanup = bindAiHeaderButtons(histBtn, newBtn);
     root.appendChild(header);
+    // 菜单放在根容器而不是顶栏里：顶栏为窄屏横向滚动设了 overflow，会把向下弹出的菜单裁掉。
+    root.appendChild(moreMenu);
 
     var messagesEl = el('div', { class: 'ai-chat-messages', id: 'aiChatMessagesArea' });
     var userReadingHistory=false,lastReadTop=0,lastReadHeight=0,touchReadY=null;
