@@ -2663,8 +2663,8 @@ function isAdmin() {
             container.appendChild(toast);
             setTimeout(() => {
                 toast.classList.add('is-fading');
-                toast.style.animation = 'toastFade 0.3s ease-out forwards';
-                setTimeout(() => toast.remove(), 300);
+                toast.style.animation = 'toastFade 0.16s ease-out forwards';
+                setTimeout(() => toast.remove(), 160);
             }, type === 'error' ? 4000 : 2500);
         }
         window.showToast = showToast;

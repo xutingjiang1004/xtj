@@ -161,10 +161,10 @@
       hold = Math.min(7000, Math.max(hold, 1400 + msgStr.length * 90));
       setTimeout(function () {
         toast.__xtjLeaving = true;
-        toast.style.animation = 'toastFade 0.3s ease-out forwards';
+        toast.style.animation = 'toastFade 0.16s ease-out forwards';
         setTimeout(function () {
           if (toast.parentNode) toast.remove();
-        }, 300);
+        }, 160);
       }, hold);
     };
     window.showToast.__xtjToastPatched = true;

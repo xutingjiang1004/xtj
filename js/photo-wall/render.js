@@ -192,6 +192,13 @@
     return html;
   }
 
+  // "10 月 31 日 · 周五" (the year is added only for earlier years); the ISO date stays the group key.
+  function albumTitle(d){
+    var week = ['周日','周一','周二','周三','周四','周五','周六'][d.getDay()];
+    var year = d.getFullYear() === new Date().getFullYear() ? '' : d.getFullYear() + ' 年 ';
+    return year + (d.getMonth() + 1) + ' 月 ' + d.getDate() + ' 日 · ' + week;
+  }
+
   function groupByDate(photos){
     var groups = [];
     var map = {};
@@ -201,7 +208,7 @@
       if (isNaN(d.getTime())) d = new Date();
       var key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
       if (!map[key]) {
-        map[key] = { key:key, title:key, photos:[] };
+        map[key] = { key:key, title:albumTitle(d), photos:[] };
         groups.push(map[key]);
       }
       map[key].photos.push(photo);

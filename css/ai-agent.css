@@ -1730,7 +1730,7 @@ html[data-xtj-motion="off"] .ai-chat-input-bar {
   justify-content: center;
   /* ★ 2026-09-22：轻微过冲的 spring 曲线，让 + → × 的旋转有"咬合"感，
      不再是匀速转过去的机械感。 */
-  transition: transform 300ms cubic-bezier(0.34, 1.42, 0.64, 1);
+  transition: transform 300ms cubic-bezier(0.16, 1, 0.3, 1);
   pointer-events: none;
 }
 .ai-plus-btn svg {
@@ -4914,7 +4914,7 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
   overflow: hidden;
 }
 .ai-progress-card.dt-animate-in {
-  animation: dt-bounce-in .55s cubic-bezier(.34, 1.56, .64, 1) both;
+  animation: dt-bounce-in .32s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 @media (hover: hover) and (pointer: fine) {
 .ai-progress-card:hover {
@@ -5004,7 +5004,7 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
   animation: none;
 }
 .ai-progress-thinking-log .ai-thought-entry.dt-animate-in {
-  animation: dt-thought-pop .35s cubic-bezier(.34, 1.56, .64, 1) both;
+  animation: dt-thought-pop .24s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 .ai-progress-thinking-log .ai-thought-entry:last-child { border-bottom: none; }
 .ai-progress-thinking-log .ai-thought-role {
@@ -5080,7 +5080,7 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
     0 1px 0 rgba(255, 255, 255, .5) inset;
 }
 .ai-think-card.dt-animate-in {
-  animation: dt-bounce-in .55s cubic-bezier(.34, 1.56, .64, 1) both;
+  animation: dt-bounce-in .32s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 @media (hover: hover) and (pointer: fine) {
 .ai-think-card:hover {
@@ -5149,7 +5149,7 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
   color: rgba(120, 145, 138, .7);
   flex-shrink: 0;
   margin-left: 2px;
-  transition: transform .28s cubic-bezier(.34, 1.56, .64, 1);
+  transition: transform .28s cubic-bezier(0.16, 1, 0.3, 1);
   width: 14px;
   text-align: center;
 }
@@ -5233,7 +5233,7 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
   animation: none;
 }
 .ai-thought-entry.dt-animate-in {
-  animation: dt-thought-pop .35s cubic-bezier(.34, 1.56, .64, 1) both;
+  animation: dt-thought-pop .24s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 .ai-thought-entry:last-child { border-bottom: none; }
 .ai-thought-role {
@@ -5745,9 +5745,8 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
 }
 
 @keyframes dt-bounce-in {
-  0% { opacity: 0; transform: translateY(14px) scale(.92); }
-  60% { opacity: 1; transform: translateY(-3px) scale(1.02); }
-  100% { opacity: 1; transform: translateY(0) scale(1); }
+  0% { opacity: 0; transform: translate3d(0, 10px, 0); }
+  100% { opacity: 1; transform: none; }
 }
 
 @keyframes dt-soft-settle {
@@ -5769,9 +5768,8 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
 }
 
 @keyframes dt-thought-pop {
-  0% { opacity: 0; transform: translateY(6px) scale(.96); }
-  70% { opacity: 1; transform: translateY(-2px) scale(1.01); }
-  100% { opacity: 1; transform: translateY(0) scale(1); }
+  0% { opacity: 0; transform: translate3d(0, 6px, 0); }
+  100% { opacity: 1; transform: none; }
 }
 
 @keyframes dt-dot-breathe {

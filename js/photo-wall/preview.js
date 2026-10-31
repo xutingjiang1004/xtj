@@ -338,8 +338,14 @@
     }
     function F(e) {
         var t = n, o = document.getElementById("ppDots");
-        if (!o || t.length <= 1) o && (o.style.display = "none"); else {
+        if (!o || t.length <= 1) o && (o.style.display = "none"); else if (t.length > 7) {
+            // Many photos: dots overflow the screen, so show a "3 / 14" counter instead.
             o.style.display = "flex";
+            o.classList.add("pp-dots-count");
+            o.textContent = (e + 1) + " / " + t.length;
+        } else {
+            o.style.display = "flex";
+            o.classList.remove("pp-dots-count");
             for (var i = "", a = 0; a < t.length; a++) i += '<span class="pp-dot' + (a === e ? " active" : "") + '" data-index="' + a + '"></span>';
             o.innerHTML = i;
         }
