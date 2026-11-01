@@ -1,5 +1,6 @@
 'use strict';
 const test = require('node:test');
+const researchOptions=async page=>{if(await page.locator('.dt-research-options.is-open').count()===0)await page.locator('.dt-research-options-toggle').click();return page;};// 研究强度和模型收在折叠的一行摘要里，先展开
 const assert = require('node:assert/strict');
 const { postBrowserFixture, wireAiChat } = require('./helpers/post-browser-fixture');
 
@@ -175,7 +176,7 @@ test('research history exposes older pages and keeps the next draft while paging
 
 test('research model preference belongs to the logged-in account and updates an already-built selector', { timeout: 45000 }, async t => {
   const f = await deepFixture(t);
-  await f.page.locator('.dt-research-model-select').selectOption('flash');
+  await (await researchOptions(f.page)).locator('.dt-research-model-select').selectOption('flash');
   assert.equal(await f.page.evaluate(() => localStorage.getItem('xtj_ai_research_model__alice')), 'flash');
   await f.page.evaluate(() => doLogout());
   for (const path of ['login', 'refresh']) await f.page.route('**/api/user/' + path, r => r.fulfill({ json: { ok: true, user_name: 'bob', token: 'bob-fixture-token' } }));
@@ -264,7 +265,7 @@ test('an unsaved research answer is explicit and retains the original file for r
 
 test('file research carries the selected builtin model and research intensity through its fallback request', { timeout: 45000 }, async t => {
   const f=await deepFixture(t);
-  await f.page.locator('.dt-research-model-select').selectOption('pro');await f.page.locator('.dt-research-mode-opt').getByText('快速',{exact:true}).click();
+  await (await researchOptions(f.page)).locator('.dt-research-model-select').selectOption('pro');await (await researchOptions(f.page)).locator('.dt-research-mode-opt').getByText('快速',{exact:true}).click();
   await attach(f.page,'#dtFileInp','selected.pdf',Buffer.from('%PDF-1.4\nfixture'),'application/pdf');
   await f.page.locator('#dtInput').fill('USE SELECTED MODEL');await f.page.locator('#dtSendBtn').click();await f.page.waitForFunction(()=>deepBodies.length===1);
   assert.equal(await f.page.evaluate(()=>deepBodies[0].model),'deepseek-v4-pro');assert.equal(await f.page.evaluate(()=>deepBodies[0].thinking_mode),'low');assert.deepEqual(f.errors,[]);
@@ -284,8 +285,8 @@ test('third-party research files use the selected account configuration without 
   });
   await f.page.waitForFunction(()=>localStorage.getItem('xtj_ai_custom_models__alice')?.includes('research-custom'));
   await f.page.evaluate(()=>__xtjAiAgent.openConversation('CUSTOM111','deep_think'));
-  await f.page.locator('.dt-research-model-select').selectOption('custom:research-custom');
-  await f.page.locator('.dt-research-mode-opt').getByText('快速', { exact: true }).click();
+  await (await researchOptions(f.page)).locator('.dt-research-model-select').selectOption('custom:research-custom');
+  await (await researchOptions(f.page)).locator('.dt-research-mode-opt').getByText('快速', { exact: true }).click();
   await attach(f.page,'#dtFileInp','private-research.txt',Buffer.from('ORIGINAL DOCUMENT BYTES'),'text/plain');
   await f.page.locator('#dtInput').fill('RESEARCH WITH MY MODEL');await f.page.locator('#dtSendBtn').click();await f.page.waitForFunction(()=>selectedResearchCalls.length===1);
   const call=await f.page.evaluate(()=>selectedResearchCalls[0]);assert.equal(call.path,'/api/agent/custom-chat/deep-stream');assert.equal(call.body.model,'synthetic-selected-model');

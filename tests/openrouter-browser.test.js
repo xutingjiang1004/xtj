@@ -1,5 +1,6 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict');
+const researchOptions=async page=>{if(await page.locator('.dt-research-options.is-open').count()===0)await page.locator('.dt-research-options-toggle').click();return page;};// 研究强度和模型收在折叠的一行摘要里，先展开
 const {aiPolishFixture,openModelPicker,models}=require('./helpers/ai-polish-fixture');
 const or=require('../render-api/openrouter');
 const managed={uid:or.MODEL_UID,provider:'openrouter',model:or.modelId(),base_url:'https://openrouter.ai/api/v1',label:or.modelLabel(),provider_label:'OpenRouter',server_managed:true};
@@ -42,7 +43,7 @@ test('free model stop cancels existing stream and an account switch clears the p
 });
 test('research selects the same free reference and quota errors end without retrying another model', {timeout:45000},async t=>{
   const f=await fixture(t),p=f.page;await selectFree(p);await p.locator('#aiDeepThinkToggle').click();
-  const select=p.locator('.dt-research-model-select');
+  const select=(await researchOptions(p)).locator('.dt-research-model-select');
   await select.locator('option[value="custom:'+managed.uid+'"]').waitFor({state:'attached'});
   await select.selectOption('custom:'+managed.uid);await p.locator('#dtInput').fill('请深入研究这个主题并核对来源');await p.locator('#dtSendBtn').click();
   await p.waitForFunction(()=>aiPolish.streams.length===1);assert.equal(await p.evaluate(()=>aiPolish.streams[0].body.research_model),'custom:'+managed.uid);
@@ -51,7 +52,7 @@ test('research selects the same free reference and quota errors end without retr
   assert.equal(await p.evaluate(()=>aiPolish.streams.length),1);assert.deepEqual(f.errors,[]);
 });
 test('a missing managed credential preserves the chosen free model instead of switching to paid defaults', {timeout:45000},async t=>{
-  const f=await fixture(t),p=f.page;await selectFree(p);await p.locator('#aiDeepThinkToggle').click();await p.locator('.dt-research-model-select').selectOption('custom:'+managed.uid);
+  const f=await fixture(t),p=f.page;await selectFree(p);await p.locator('#aiDeepThinkToggle').click();await (await researchOptions(p)).locator('.dt-research-model-select').selectOption('custom:'+managed.uid);
   await p.locator('#dtBackBtn').click();
   await p.evaluate(()=>{aiPolish.serverModels=[];__xtjAiAgent.close();__xtjAiAgent.open();});
   await p.waitForSelector('#aiChatMsgInput');await picker(p);

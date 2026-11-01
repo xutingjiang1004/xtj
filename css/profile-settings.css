@@ -223,3 +223,75 @@ html[data-theme="dark"].profile-custom-background .app-container {
       calc(var(--dock-reserve, 100px) + env(safe-area-inset-bottom)) !important;
   }
 }
+
+/* ===== AI 记忆管理弹窗（我的 → AI 记忆）：站内弹窗样式——一层遮罩、一张实底卡片、圆角矩形按钮、红色破坏性操作 ===== */
+body.xtj-memory-open { overflow: hidden; }
+.xtj-memory-overlay { position: fixed; inset: 0; z-index: 10001; display: grid; place-items: center; padding: 16px; background: rgba(10, 25, 18, .4); animation: xtjMemoryFade 180ms cubic-bezier(.16, 1, .3, 1) both; }
+.xtj-memory-dialog { width: min(460px, 100%); max-height: min(82vh, 640px); display: flex; flex-direction: column; box-sizing: border-box; padding: 18px 18px 14px; border-radius: 18px; background: #fff; color: #17231e; box-shadow: 0 18px 48px rgba(20, 60, 45, .22); animation: xtjMemoryRise 220ms cubic-bezier(.16, 1, .3, 1) both; }
+.xtj-memory-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.xtj-memory-head h3 { margin: 0; font-size: 18px; font-weight: 700; }
+.xtj-memory-close { width: 36px; height: 36px; border: 0; border-radius: 10px; background: transparent; color: inherit; font-size: 24px; line-height: 1; cursor: pointer; }
+.xtj-memory-close:hover { background: rgba(14, 122, 91, .08); }
+.xtj-memory-sub { margin: 4px 0 12px; font-size: 13px; line-height: 1.55; color: #4b5e56; }
+.xtj-memory-switch { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid rgba(23, 35, 30, .1); border-radius: 12px; font-size: 15px; font-weight: 500; }
+.xtj-memory-count { margin: 10px 2px 6px; font-size: 12px; color: #6e8a84; min-height: 16px; }
+.xtj-memory-body { flex: 1 1 auto; min-height: 60px; overflow-y: auto; overscroll-behavior: contain; margin: 0 -4px; padding: 0 4px; }
+.xtj-memory-empty { padding: 22px 8px; text-align: center; font-size: 13.5px; line-height: 1.6; color: #6e8a84; }
+.xtj-memory-retry { display: block; margin: 0 auto 12px; min-height: 36px; padding: 0 16px; border: 1px solid rgba(23, 35, 30, .16); border-radius: 10px; background: #fff; color: inherit; font-size: 14px; cursor: pointer; }
+.xtj-memory-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.xtj-memory-item { display: flex; align-items: flex-start; gap: 10px; padding: 10px 10px 10px 12px; border: 1px solid rgba(23, 35, 30, .1); border-radius: 12px; background: rgba(14, 122, 91, .035); }
+.xtj-memory-info { flex: 1 1 auto; min-width: 0; }
+.xtj-memory-text { font-size: 14.5px; line-height: 1.55; overflow-wrap: anywhere; }
+.xtj-memory-meta { margin-top: 3px; font-size: 12px; color: #6e8a84; }
+.xtj-memory-del { flex: none; min-height: 36px; padding: 0 12px; border: 1px solid transparent; border-radius: 10px; background: transparent; color: #6e8a84; font-size: 13px; cursor: pointer; }
+.xtj-memory-del:hover { background: rgba(23, 35, 30, .06); }
+.xtj-memory-del.is-confirm { border-color: rgba(179, 38, 30, .35); background: rgba(179, 38, 30, .08); color: #b3261e; font-weight: 600; }
+.xtj-memory-del:disabled { opacity: .5; cursor: default; }
+.xtj-memory-add { display: flex; gap: 8px; margin-top: 12px; }
+.xtj-memory-add input { flex: 1 1 auto; min-width: 0; box-sizing: border-box; padding: 10px 12px; border: 1px solid rgba(23, 35, 30, .18); border-radius: 10px; background: #fff; color: inherit; font-size: 16px; }
+.xtj-memory-add button { flex: none; min-height: 44px; padding: 0 16px; border: 1px solid #0e7a5b; border-radius: 12px; background: #0e7a5b; color: #fff; font-size: 15px; font-weight: 600; cursor: pointer; }
+.xtj-memory-add button:disabled { opacity: .5; cursor: default; }
+.xtj-memory-foot { display: flex; justify-content: center; margin-top: 10px; }
+.xtj-memory-clear { min-height: 40px; padding: 0 14px; border: 0; border-radius: 10px; background: transparent; color: #b3261e; font-size: 14px; cursor: pointer; }
+.xtj-memory-clear:hover { background: rgba(179, 38, 30, .08); }
+.xtj-memory-dialog button:focus-visible, .xtj-memory-dialog input:focus-visible { outline: 2px solid rgba(14, 122, 91, .5); outline-offset: 2px; }
+@keyframes xtjMemoryFade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes xtjMemoryRise { from { opacity: 0; transform: translateY(8px) scale(.985); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .xtj-memory-overlay, .xtj-memory-dialog { animation: none; } }
+html.xtj-reduce-motion .xtj-memory-overlay, html.xtj-reduce-motion .xtj-memory-dialog { animation: none; }
+@media (max-width: 520px) { .xtj-memory-overlay { align-items: end; padding: 0; } .xtj-memory-dialog { width: 100%; max-height: 88vh; border-radius: 18px 18px 0 0; padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px)); } }
+html[data-theme="dark"] .xtj-memory-overlay { background: rgba(0, 0, 0, .62); }
+html[data-theme="dark"] .xtj-memory-dialog { background: #151b18; color: #e6f1ed; box-shadow: 0 18px 48px rgba(0, 0, 0, .55); }
+html[data-theme="dark"] .xtj-memory-sub { color: #9fb3ab; }
+html[data-theme="dark"] .xtj-memory-switch, html[data-theme="dark"] .xtj-memory-item { border-color: rgba(255, 255, 255, .12); }
+html[data-theme="dark"] .xtj-memory-item { background: rgba(79, 209, 165, .06); }
+html[data-theme="dark"] .xtj-memory-count, html[data-theme="dark"] .xtj-memory-meta, html[data-theme="dark"] .xtj-memory-empty, html[data-theme="dark"] .xtj-memory-del { color: #8eaaa0; }
+html[data-theme="dark"] .xtj-memory-close:hover, html[data-theme="dark"] .xtj-memory-del:hover { background: rgba(255, 255, 255, .08); }
+html[data-theme="dark"] .xtj-memory-del.is-confirm { border-color: rgba(255, 154, 141, .4); background: rgba(255, 154, 141, .12); color: #ff9a8d; }
+html[data-theme="dark"] .xtj-memory-add input, html[data-theme="dark"] .xtj-memory-retry { background: #1d2723; color: #e6f1ed; border-color: rgba(255, 255, 255, .16); }
+html[data-theme="dark"] .xtj-memory-add button { background: #1f4d3e; border-color: #4fd1a5; color: #e6f1ed; }
+html[data-theme="dark"] .xtj-memory-clear { color: #ff9a8d; }
+html[data-theme="dark"] .xtj-memory-clear:hover { background: rgba(255, 154, 141, .12); }
+
+/* 弹窗里的按钮要压住全站给所有 button 套的玻璃胶囊规则：圆角矩形、无阴影、无模糊。 */
+html body #xtjMemoryDialog button { background-image: none; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; transform: none; text-shadow: none; }
+html body #xtjMemoryDialog button.xtj-memory-close { background-color: transparent; border: 0; border-radius: 10px; color: inherit; }
+html body #xtjMemoryDialog button.xtj-memory-del { background-color: transparent; border: 1px solid transparent; border-radius: 10px; color: #6e8a84; }
+html body #xtjMemoryDialog button.xtj-memory-del.is-confirm { background-color: rgba(179, 38, 30, .08); border-color: rgba(179, 38, 30, .35); color: #b3261e; }
+html body #xtjMemoryDialog button.xtj-memory-clear { background-color: transparent; border: 0; border-radius: 10px; color: #b3261e; }
+html body #xtjMemoryDialog button.xtj-memory-retry { background-color: #fff; border: 1px solid rgba(23, 35, 30, .16); border-radius: 10px; color: inherit; }
+html body #xtjMemoryDialog .xtj-memory-add button { background-color: #0e7a5b; border: 1px solid #0e7a5b; border-radius: 12px; color: #fff; }
+/* 使用记忆开关：和「我的」页面里其它布尔设置的绿色开关一致。 */
+html body #xtjMemoryDialog button.xtj-memory-toggle { position: relative; flex: none; width: 46px; height: 28px; min-height: 0; padding: 0; border: 0; border-radius: 14px; background-color: #c4d2cc; cursor: pointer; transition: background-color 160ms ease; }
+html body #xtjMemoryDialog button.xtj-memory-toggle[aria-checked="true"] { background-color: #1f9a7c; }
+html body #xtjMemoryDialog button.xtj-memory-toggle:disabled { opacity: .6; cursor: default; }
+.xtj-memory-thumb { position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, .28); transition: transform 160ms cubic-bezier(.16, 1, .3, 1); }
+button.xtj-memory-toggle[aria-checked="true"] .xtj-memory-thumb { transform: translateX(18px); }
+@media (prefers-reduced-motion: reduce) { html body #xtjMemoryDialog button.xtj-memory-toggle, .xtj-memory-thumb { transition: none; } }
+html[data-theme="dark"] body #xtjMemoryDialog button.xtj-memory-del { color: #8eaaa0; }
+html[data-theme="dark"] body #xtjMemoryDialog button.xtj-memory-del.is-confirm { background-color: rgba(255, 154, 141, .12); border-color: rgba(255, 154, 141, .4); color: #ff9a8d; }
+html[data-theme="dark"] body #xtjMemoryDialog button.xtj-memory-clear { color: #ff9a8d; }
+html[data-theme="dark"] body #xtjMemoryDialog button.xtj-memory-retry { background-color: #1d2723; border-color: rgba(255, 255, 255, .16); color: #e6f1ed; }
+html[data-theme="dark"] body #xtjMemoryDialog .xtj-memory-add button { background-color: #1f4d3e; border-color: #4fd1a5; color: #e6f1ed; }
+html[data-theme="dark"] body #xtjMemoryDialog button.xtj-memory-toggle { background-color: rgba(255, 255, 255, .22); }
+html[data-theme="dark"] body #xtjMemoryDialog button.xtj-memory-toggle[aria-checked="true"] { background-color: #1f9a7c; }
