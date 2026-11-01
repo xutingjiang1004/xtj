@@ -126,8 +126,10 @@
   }
   var recheckTimer = 0;
   function scheduleRecheck() { clearTimeout(recheckTimer); recheckTimer = setTimeout(recheck, 120); }
-  window.addEventListener('scroll', scheduleRecheck, { passive: true, capture: true });
-  window.addEventListener('resize', scheduleRecheck, { passive: true });
+  if (typeof window.addEventListener === 'function') {
+    window.addEventListener('scroll', scheduleRecheck, { passive: true, capture: true });
+    window.addEventListener('resize', scheduleRecheck, { passive: true });
+  }
   if (window.visualViewport) { window.visualViewport.addEventListener('resize', scheduleRecheck, { passive: true }); window.visualViewport.addEventListener('scroll', scheduleRecheck, { passive: true }); }
   window.xtjRecheckPostImages = scheduleRecheck;
   scan(document.body);

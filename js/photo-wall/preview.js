@@ -122,10 +122,12 @@
         if (!entry) {
             entry = warming[url] = { p: 0, subs: [], killTimer: 0, ctl: window.AbortController ? new AbortController() : null };
             var finish;
-            entry.promise = new Promise(function(resolve) { finish = function(ok) { if (warming[url] === entry) delete warming[url]; resolve(ok); }; });
+            entry.promise = new Promise(function(resolve) { finish = function(ok) { clearTimeout(entry.stall); if (warming[url] === entry) delete warming[url]; resolve(ok); }; });
             if (!url || /^(blob|data):/i.test(url) || typeof fetch !== "function") finish(!1);
             else (function() {
                 var chunks = [], loaded = 0, total = 0, type = "", etag = "", retries = 0;
+                // 10 秒一个字节都没来：放弃这条下载，交给 <img> 直接加载（它自带 30 秒看门狗和「重试」界面），不让查看器一直转圈。
+                function arm() { clearTimeout(entry.stall); entry.stall = setTimeout(function() { try { entry.ctl && entry.ctl.abort(); } catch (err) {} finish(!1); }, 10000); }
                 function report() { if (total) { entry.p = Math.min(.94, loaded / total); entry.subs.slice().forEach(function(cb) { cb(entry.p); }); } }
                 function complete() {
                     // 数据不够就当断了：接着取剩下的，不拿残缺的图当图显示。
@@ -140,6 +142,7 @@
                     if (retries++ < 4 && loaded > 0 && etag) setTimeout(attempt, 500 * retries); else finish(!1);
                 }
                 function attempt() {
+                    arm();
                     var resume = loaded > 0 && !!etag;
                     fetch(url, { credentials: "same-origin", signal: entry.ctl ? entry.ctl.signal : undefined, headers: resume ? { Range: "bytes=" + loaded + "-", "If-Range": etag } : undefined }).then(function(res) {
                         if (res.status === 206 && resume) {
@@ -155,9 +158,11 @@
                         if (total > BLOB_MAX_FILE) { try { entry.ctl && entry.ctl.abort(); } catch (err) {} return finish(!1); }
                         if (!res.body || !res.body.getReader) return res.arrayBuffer().then(function(buffer) { chunks = [new Uint8Array(buffer)]; loaded = buffer.byteLength; complete(); }, retry);
                         var reader = res.body.getReader();
+                        arm();
                         (function pump() {
                             reader.read().then(function(r) {
                                 if (r.done) return complete();
+                                arm();
                                 if (r.value) { chunks.push(r.value); loaded += r.value.length; }
                                 if (loaded > BLOB_MAX_FILE) { try { entry.ctl && entry.ctl.abort(); } catch (err) {} return finish(!1); }
                                 report();

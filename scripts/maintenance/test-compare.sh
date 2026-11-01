@@ -6,7 +6,7 @@
 set -uo pipefail
 cd "$(git rev-parse --show-toplevel)"
 HERE=scripts/maintenance
-OUT=output/maintenance/tests/run-$(date +%Y%m%d-%H%M%S)
+OUT=$PWD/output/maintenance/tests/run-$(date +%Y%m%d-%H%M%S)
 mkdir -p "$OUT"
 "$HERE/run-tests.sh" . "$OUT/new" "${1:-}"
 node "$HERE/compare-tests.js" "$OUT/new" --failing > "$OUT/failing.txt"

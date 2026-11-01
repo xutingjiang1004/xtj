@@ -117,11 +117,17 @@ for (const surface of ['post', 'preview']) {
       const originalUrl = surface === 'post' ? f.origin + '/api/post/8c1cb02d-74d0-4e45-9e15-000000000001/media/0' : f.origin + '/storage/v1/object/public/uploads/posts/retry.png';
       const url = originalUrl + (surface === 'post' ? '?preview=1' : '');
       let count = 0;
-      let requestStarted;
+      let requestStarted, imageRequested;
       const started = new Promise(resolve => { requestStarted = resolve; });
+      const imageStarted = new Promise(resolve => { imageRequested = resolve; });
+      // The viewer first reads the original with fetch() (for its progress bar); when that stalls for 10 s it hands the
+      // picture to <img>, whose own 30 s watchdog and retry button take over. The post grid loads with <img> only.
+      const stalledRequests = surface === 'post' ? 1 : 2;
       await page.route(url + '*', async route => {
         count++;
-        if (count === 1) { requestStarted(); await pending; }
+        if (count === 1) requestStarted();
+        if (count === stalledRequests) imageRequested();
+        if (count <= stalledRequests) await pending;
         await route.fulfill({ contentType: 'image/png', body: f.png }).catch(() => {});
       });
       await page.evaluate(({ url, originalUrl, surface }) => {
@@ -145,6 +151,7 @@ for (const surface of ['post', 'preview']) {
         }, { rootMargin: '160px 0px' });
         observer.observe(img);
       }), surface);
+      if (surface !== 'post') { await page.clock.runFor(10500); await imageStarted; await page.waitForTimeout(300); }
       await page.clock.runFor(31000);
       const retry = surface === 'post' ? page.locator('#feed .post-media-cell.post-image-failed').first() : page.locator('.pp-error-retry');
       await retry.waitFor({ state: 'visible' });

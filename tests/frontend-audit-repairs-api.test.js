@@ -16,7 +16,7 @@ function fixture(patch={}){
       if(name==='xtj_delete_comment')return{data:{ok:true,post_id:id,deleted_comment_ids:[10,11,12],comment_count:4}};
       return{data:{}};}};
   const app=express();app.use(express.json());const auth=(req,res,next)=>{const user=req.get('x-user');if(!user)return res.sendStatus(401);req.userName=user;next();};
-  const context={app,supabase:db,authenticateUser:auth,rateLimit:()=>((_req,_res,next)=>next()),userBanError:()=>null,normalizePostId:value=>/^[a-f0-9-]{36}$/i.test(value)?value:null,isNormalPost,createComment,crypto:require('node:crypto'),ADMIN_USERNAME:'xxz',CAT_AI_USERNAME:'cat_ai',isValidCatTrigger:()=>false,sanitizeError:()=> 'database error',console,
+  const context={app,supabase:db,authenticateUser:auth,rateLimit:()=>((_req,_res,next)=>next()),userBanError:()=>null,normalizePostId:value=>/^[a-f0-9-]{36}$/i.test(value)?value:null,isNormalPost,createComment,crypto:require('node:crypto'),ADMIN_USERNAME:'xxz',CAT_AI_USERNAME:'cat_ai',isValidCatTrigger:()=>false,hasCatMention:()=>false,commentRepliesToCat:async()=>false,sanitizeError:()=> 'database error',console,
     blockCatJobAfterCommentDelete:async()=>({}),logCatCAS:()=>{}};vm.createContext(context);
   const a=source.indexOf('function normalizeInteractionId('),b=source.indexOf('// Authenticated feed statistics snapshot',a);vm.runInContext(source.slice(a,b),context);
   installPhotoSocial(app,{supabase:db,authenticateUser:auth,rateLimit:context.rateLimit,userBanError:context.userBanError});

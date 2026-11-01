@@ -17,7 +17,7 @@ const SKIP = new Set(['transition-property', 'transition-duration', 'transition-
 // Changes the user asked for explicitly. Each entry says what is allowed to differ and why; anything else still fails.
 //   panel : the search/filter panel is not compared at all (redesigned on 2026-11-01 at the user's request, hidden by default)
 //   avatar: border radii of the post author avatar (circle -> rounded square, 2026-11-01: the circle cut off the edge of the photo)
-const AUTHORIZED_AVATAR_PROPS = /^border-(top|bottom)-(left|right)-radius$/;
+const AUTHORIZED_AVATAR_PROPS = /^border-((top|bottom)-(left|right)|(start|end)-(start|end))-radius$/;
 
 async function dump(origin, theme, viewport, mobile) {
   const s = await open({ origin, theme, viewport, mobile, dsf: 1, fixedTime: true, settleMs: 5000, init: SELFTEST && origin === NEW ? inject : undefined });

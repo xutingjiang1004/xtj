@@ -129,7 +129,7 @@ test('default reduced preloading requests only the selected original and can be 
     },mode);}
     await open('on');await p.waitForFunction(()=>document.getElementById('photoPreviewImage')?.naturalWidth>0);await p.waitForTimeout(250);
     assert.ok(seen.includes('/save-data-on-0.png'));assert.ok(!seen.some(url=>/on-[12]\.png$/.test(url)));
-    await p.evaluate(()=>ppNextPhoto());await p.waitForFunction(()=>document.getElementById('photoPreviewImage')?.src.includes('on-1.png')&&document.getElementById('photoPreviewImage').naturalWidth>0);
+    await p.evaluate(()=>ppNextPhoto());await p.waitForFunction(()=>(()=>{const i=document.getElementById('photoPreviewImage');return !!i&&(i._ppUrl||i.src).includes('on-1.png')&&i.naturalWidth>0;})());
     assert.ok(!seen.includes('/save-data-on-2.png'));
     await p.evaluate(()=>closePhotoPreview());await p.waitForTimeout(350);await open('off');
     await p.waitForFunction(()=>document.getElementById('ppNextImg')?.naturalWidth>0);assert.ok(seen.includes('/save-data-off-1.png'));

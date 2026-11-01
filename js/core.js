@@ -7225,65 +7225,67 @@ function renderProfileActivityList(kind) {
                     // Blur behind a moving window is re-rendered every frame (and some windows force it with !important).
                     box.style.setProperty('backdrop-filter', 'none', 'important'); box.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
                     var boxStyle = getComputedStyle(box);
-                    // 遮罩：和窗口同色的一层，先盖住内容再淡出（打开）/ 先盖上再缩回（关闭）。
-                    var coverColor = solid(boxStyle.backgroundColor), cover = null;
-                    if (coverColor && o.cover !== false) {
-                        if (boxStyle.position === 'static') box.style.position = 'relative';
-                        cover = document.createElement('div');
-                        cover.setAttribute('aria-hidden', 'true');
-                        cover.style.cssText = 'position:absolute;left:0;top:0;right:0;bottom:0;z-index:2147483000;pointer-events:none;border-radius:inherit;background:' + coverColor;
-                        box.appendChild(cover); nodes.push(cover);
-                    }
-                    // 背景压暗：把外层的底色挪到一个单独的节点上，由它单独淡入淡出。
-                    var scrim = null;
-                    if (o.overlay && o.overlay.parentNode) {
-                        var os = getComputedStyle(o.overlay), scrimColor = os.backgroundColor;
-                        if (scrimColor && !/^rgba?\([^)]*,\s*0\)$/.test(scrimColor) && scrimColor !== 'transparent') {
-                            scrim = document.createElement('div');
-                            scrim.setAttribute('aria-hidden', 'true');
-                            var z = parseInt(os.zIndex, 10);
-                            scrim.style.cssText = 'position:' + (os.position === 'absolute' ? 'absolute' : 'fixed') + ';left:0;top:0;right:0;bottom:0;pointer-events:none;background:' + scrimColor + ';z-index:' + (isFinite(z) ? z - 1 : 0);
-                            o.overlay.parentNode.insertBefore(scrim, o.overlay);
-                            o.overlay.style.setProperty('background', 'transparent', 'important');
-                            nodes.push(scrim);
-                            restores.push(function() { o.overlay.style.removeProperty('background'); });
+                    try {
+                        // 遮罩：和窗口同色的一层，先盖住内容再淡出（打开）/ 先盖上再缩回（关闭）。
+                        var coverColor = solid(boxStyle.backgroundColor), cover = null;
+                        if (coverColor && o.cover !== false) {
+                            if (boxStyle.position === 'static') box.style.position = 'relative';
+                            cover = document.createElement('div');
+                            cover.setAttribute('aria-hidden', 'true');
+                            cover.style.cssText = 'position:absolute;left:0;top:0;right:0;bottom:0;z-index:2147483000;pointer-events:none;border-radius:inherit;background:' + coverColor;
+                            box.appendChild(cover); nodes.push(cover);
                         }
-                    }
-                    // 飞行的图。
-                    var ghost = null, hiddenTarget = null, flight = false;
-                    var hero = o.hero;
-                    if (hero && hero.src) {
-                        var target = hero.target && hero.target.isConnected ? hero.target.getBoundingClientRect() : null;
-                        var s = o.heroRect || rect;
-                        ghost = document.createElement('img');
-                        ghost.alt = ''; ghost.setAttribute('aria-hidden', 'true'); ghost.decoding = 'sync';
-                        ghost.src = hero.src;
-                        var same = target && target.width > 8 && target.height > 8 && Math.abs(Math.log((s.width / s.height) / (target.width / target.height))) < .22;
-                        var gr = same ? target : s;
-                        ghost.style.cssText = 'position:fixed;left:' + gr.left + 'px;top:' + gr.top + 'px;width:' + gr.width + 'px;height:' + gr.height + 'px;margin:0;padding:0;max-width:none;max-height:none;pointer-events:none;z-index:2147483001;transform-origin:0 0;will-change:transform,opacity;object-fit:' + (hero.fit || 'cover') + ';border-radius:' + (same && hero.targetRadius != null ? hero.targetRadius : (hero.radius || 0)) + 'px';
-                        document.body.appendChild(ghost); nodes.push(ghost);
-                        if (same) {
-                            flight = true;
-                            hiddenTarget = hero.target;
-                            hiddenTarget.style.visibility = 'hidden';
-                            restores.push(function() { hiddenTarget.style.visibility = ''; });
-                            handle.ghostFar = 'translate3d(' + (s.left - target.left).toFixed(2) + 'px,' + (s.top - target.top).toFixed(2) + 'px,0) scale(' + (s.width / target.width).toFixed(4) + ',' + (s.height / target.height).toFixed(4) + ')';
+                        // 背景压暗：把外层的底色挪到一个单独的节点上，由它单独淡入淡出。
+                        var scrim = null;
+                        if (o.overlay && o.overlay.parentNode) {
+                            var os = getComputedStyle(o.overlay), scrimColor = os.backgroundColor;
+                            if (scrimColor && !/^rgba?\([^)]*,\s*0\)$/.test(scrimColor) && scrimColor !== 'transparent') {
+                                scrim = document.createElement('div');
+                                scrim.setAttribute('aria-hidden', 'true');
+                                var z = parseInt(os.zIndex, 10);
+                                scrim.style.cssText = 'position:' + (os.position === 'absolute' ? 'absolute' : 'fixed') + ';left:0;top:0;right:0;bottom:0;pointer-events:none;background:' + scrimColor + ';z-index:' + (isFinite(z) ? z - 1 : 0);
+                                o.overlay.parentNode.insertBefore(scrim, o.overlay);
+                                o.overlay.style.setProperty('background', 'transparent', 'important');
+                                nodes.push(scrim);
+                                restores.push(function() { o.overlay.style.removeProperty('background'); });
+                            }
                         }
-                    }
-                    var open = kind === 'open';
-                    function add(el, frames, opts) { var a = el.animate(frames, Object.assign({ fill: 'both' }, opts)); a.__xtjOrigin = true; anims.push(a); return a; }
-                    var move = add(box, open ? [{ transform: far }, { transform: 'none' }] : [{ transform: 'none' }, { transform: far }], { duration: D, easing: EASE });
-                    add(box, open ? [{ opacity: 0 }, { opacity: 1, offset: .2 }, { opacity: 1 }] : [{ opacity: 1 }, { opacity: 1, offset: .72 }, { opacity: 0 }], { duration: D, easing: 'linear' });
-                    if (cover) add(cover, open ? [{ opacity: 1 }, { opacity: 1, offset: .14 }, { opacity: 0, offset: .62 }, { opacity: 0 }] : [{ opacity: 0 }, { opacity: 1, offset: .4 }, { opacity: 1 }], { duration: D, easing: 'linear' });
-                    if (scrim) add(scrim, open ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 1 }, { opacity: 0 }], { duration: D * (open ? .7 : .9), easing: 'ease-out' });
-                    if (ghost) {
-                        if (flight) add(ghost, open ? [{ transform: handle.ghostFar }, { transform: 'none' }] : [{ transform: 'none' }, { transform: handle.ghostFar }], { duration: D, easing: EASE });
-                        else add(ghost, open ? [{ opacity: 1 }, { opacity: 1, offset: .12 }, { opacity: 0, offset: .55 }, { opacity: 0 }] : [{ opacity: 0 }, { opacity: 0, offset: .5 }, { opacity: 1 }], { duration: D, easing: 'linear' });
-                    }
-                    // 初始姿态先停在第 0 帧，等它真的画出来之后再开始走。
-                    anims.forEach(function(a) { a.pause(); a.currentTime = 0; });
-                    var started = false;
-                    afterPaint(function() { if (handle.ended || started) return; started = true; anims.forEach(function(a) { a.play(); }); });
+                        // 飞行的图。
+                        var ghost = null, hiddenTarget = null, flight = false;
+                        var hero = o.hero;
+                        if (hero && hero.src) {
+                            var target = hero.target && hero.target.isConnected ? hero.target.getBoundingClientRect() : null;
+                            var s = o.heroRect || rect;
+                            ghost = document.createElement('img');
+                            ghost.alt = ''; ghost.setAttribute('aria-hidden', 'true'); ghost.decoding = 'sync';
+                            ghost.src = hero.src;
+                            var same = target && target.width > 8 && target.height > 8 && Math.abs(Math.log((s.width / s.height) / (target.width / target.height))) < .22;
+                            var gr = same ? target : s;
+                            ghost.style.cssText = 'position:fixed;left:' + gr.left + 'px;top:' + gr.top + 'px;width:' + gr.width + 'px;height:' + gr.height + 'px;margin:0;padding:0;max-width:none;max-height:none;pointer-events:none;z-index:2147483001;transform-origin:0 0;will-change:transform,opacity;object-fit:' + (hero.fit || 'cover') + ';border-radius:' + (same && hero.targetRadius != null ? hero.targetRadius : (hero.radius || 0)) + 'px';
+                            document.body.appendChild(ghost); nodes.push(ghost);
+                            if (same) {
+                                flight = true;
+                                hiddenTarget = hero.target;
+                                hiddenTarget.style.visibility = 'hidden';
+                                restores.push(function() { hiddenTarget.style.visibility = ''; });
+                                handle.ghostFar = 'translate3d(' + (s.left - target.left).toFixed(2) + 'px,' + (s.top - target.top).toFixed(2) + 'px,0) scale(' + (s.width / target.width).toFixed(4) + ',' + (s.height / target.height).toFixed(4) + ')';
+                            }
+                        }
+                        var open = kind === 'open';
+                        function add(el, frames, opts) { var a = el.animate(frames, Object.assign({ fill: 'both' }, opts)); a.__xtjOrigin = true; anims.push(a); return a; }
+                        var move = add(box, open ? [{ transform: far }, { transform: 'none' }] : [{ transform: 'none' }, { transform: far }], { duration: D, easing: EASE });
+                        add(box, open ? [{ opacity: 0 }, { opacity: 1, offset: .2 }, { opacity: 1 }] : [{ opacity: 1 }, { opacity: 1, offset: .72 }, { opacity: 0 }], { duration: D, easing: 'linear' });
+                        if (cover) add(cover, open ? [{ opacity: 1 }, { opacity: 1, offset: .14 }, { opacity: 0, offset: .62 }, { opacity: 0 }] : [{ opacity: 0 }, { opacity: 1, offset: .4 }, { opacity: 1 }], { duration: D, easing: 'linear' });
+                        if (scrim) add(scrim, open ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 1 }, { opacity: 0 }], { duration: D * (open ? .7 : .9), easing: 'ease-out' });
+                        if (ghost) {
+                            if (flight) add(ghost, open ? [{ transform: handle.ghostFar }, { transform: 'none' }] : [{ transform: 'none' }, { transform: handle.ghostFar }], { duration: D, easing: EASE });
+                            else add(ghost, open ? [{ opacity: 1 }, { opacity: 1, offset: .12 }, { opacity: 0, offset: .55 }, { opacity: 0 }] : [{ opacity: 0 }, { opacity: 0, offset: .5 }, { opacity: 1 }], { duration: D, easing: 'linear' });
+                        }
+                        // 初始姿态先停在第 0 帧，等它真的画出来之后再开始走。
+                        anims.forEach(function(a) { a.pause(); a.currentTime = 0; });
+                        var started = false;
+                        afterPaint(function() { if (handle.ended || started) return; started = true; anims.forEach(function(a) { a.play(); }); });
+                    } catch (buildError) { cleanup(0); return null; }
 
                     var cleaned = false, endTimer = 0;
                     function cleanup(delay) {
@@ -9864,8 +9866,8 @@ function renderProfileActivityList(kind) {
                 var margin = 12, wide = vw >= 700, width = wide ? Math.min(420, vw - margin * 2) : vw - margin * 2;
                 var left = wide ? Math.max(margin, Math.min(vw - width - margin, r.right - width)) : margin;
                 var top = Math.round(r.bottom + 10);
-                var dock = document.getElementById('dockBar'), dockTop = dock && dock.getClientRects().length ? dock.getBoundingClientRect().top : vh;
-                var limit = Math.min(vh, dockTop > top ? dockTop : vh) - margin;
+                // Keep clear of the bottom navigation strip (a fixed reserve; this panel never reads or touches that strip).
+                var limit = vh - 104;
                 panel.style.left = Math.round(left) + 'px'; panel.style.top = top + 'px'; panel.style.width = Math.round(width) + 'px';
                 panel.style.maxHeight = Math.max(220, Math.round(limit - top)) + 'px';
             }
@@ -9876,8 +9878,9 @@ function renderProfileActivityList(kind) {
                 if (btn) { btn.classList.remove("active"); btn.setAttribute("aria-expanded", "false"); }
                 if (!panel || panel.style.display === 'none') return;
                 var morph = window.xtjMorph, from = !immediate && morph && morph.motionOk() && btn ? morph.rectOfElement(btn) : null;
-                if (from && morph.close(panel, { rect: from, hide: function() { panel.style.display = 'none'; } })) return;
+                if (from && morph.close(panel, { rect: from, hide: function() { panel.style.display = 'none'; panel.removeAttribute('data-closing'); } })) { panel.setAttribute('data-closing', '1'); return; }
                 if (morph) morph.abort(panel);
+                panel.removeAttribute('data-closing');
                 panel.style.display = 'none';
             }
             window.closePostFilterPanel = closePostFilterPanel;
@@ -9885,10 +9888,12 @@ function renderProfileActivityList(kind) {
                 var panel = document.getElementById("postFilterPanel");
                 var btn = document.getElementById("filterToggleBtn");
                 if (!panel) return;
-                var isHidden = panel.style.display === "none" || window.getComputedStyle(panel).display === "none";
+                // 正在收起的面板再点一下就重新展开（连点不会卡住）。
+                var isHidden = panel.hasAttribute('data-closing') || panel.style.display === "none" || window.getComputedStyle(panel).display === "none";
                 if (!isHidden) { closePostFilterPanel(false); return; }
                 var morph = window.xtjMorph;
                 if (morph) morph.abort(panel);
+                panel.removeAttribute('data-closing');
                 panel.style.display = "flex";
                 if (btn) { btn.classList.add("active"); btn.setAttribute("aria-expanded", "true"); }
                 placePostFilterPanel();

@@ -4237,8 +4237,8 @@
                 var margin = 12, wide = vw >= 700, width = wide ? Math.min(420, vw - margin * 2) : vw - margin * 2;
                 var left = wide ? Math.max(margin, Math.min(vw - width - margin, r.right - width)) : margin;
                 var top = Math.round(r.bottom + 10);
-                var dock = document.getElementById('dockBar'), dockTop = dock && dock.getClientRects().length ? dock.getBoundingClientRect().top : vh;
-                var limit = Math.min(vh, dockTop > top ? dockTop : vh) - margin;
+                // Keep clear of the bottom navigation strip (a fixed reserve; this panel never reads or touches that strip).
+                var limit = vh - 104;
                 panel.style.left = Math.round(left) + 'px'; panel.style.top = top + 'px'; panel.style.width = Math.round(width) + 'px';
                 panel.style.maxHeight = Math.max(220, Math.round(limit - top)) + 'px';
             }
@@ -4249,8 +4249,9 @@
                 if (btn) { btn.classList.remove("active"); btn.setAttribute("aria-expanded", "false"); }
                 if (!panel || panel.style.display === 'none') return;
                 var morph = window.xtjMorph, from = !immediate && morph && morph.motionOk() && btn ? morph.rectOfElement(btn) : null;
-                if (from && morph.close(panel, { rect: from, hide: function() { panel.style.display = 'none'; } })) return;
+                if (from && morph.close(panel, { rect: from, hide: function() { panel.style.display = 'none'; panel.removeAttribute('data-closing'); } })) { panel.setAttribute('data-closing', '1'); return; }
                 if (morph) morph.abort(panel);
+                panel.removeAttribute('data-closing');
                 panel.style.display = 'none';
             }
             window.closePostFilterPanel = closePostFilterPanel;
@@ -4258,10 +4259,12 @@
                 var panel = document.getElementById("postFilterPanel");
                 var btn = document.getElementById("filterToggleBtn");
                 if (!panel) return;
-                var isHidden = panel.style.display === "none" || window.getComputedStyle(panel).display === "none";
+                // 正在收起的面板再点一下就重新展开（连点不会卡住）。
+                var isHidden = panel.hasAttribute('data-closing') || panel.style.display === "none" || window.getComputedStyle(panel).display === "none";
                 if (!isHidden) { closePostFilterPanel(false); return; }
                 var morph = window.xtjMorph;
                 if (morph) morph.abort(panel);
+                panel.removeAttribute('data-closing');
                 panel.style.display = "flex";
                 if (btn) { btn.classList.add("active"); btn.setAttribute("aria-expanded", "true"); }
                 placePostFilterPanel();

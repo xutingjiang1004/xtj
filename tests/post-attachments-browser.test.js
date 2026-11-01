@@ -182,13 +182,15 @@ test('new wall upload keeps its local File until verified seeding succeeds and t
  }finally{if(release)release();await f.close();}
 });
 
-test('gallery shows a left-to-right light sweep only while the original image is pending',{timeout:30000},async()=>{
+test('gallery never shows the old light-sweep skeleton while the original image is pending (2026-11-01: removed on purpose)',{timeout:30000},async()=>{
  const f=await postBrowserFixture({counts:[3],holdImages:true});try{
   const {page}=f;page.setDefaultTimeout(6000);await page.locator('#feed .post-media-cell').first().click();
-  await page.waitForFunction(()=>document.getElementById('photoPreviewImage')?.parentElement.querySelector('.pp-image-loading:not([hidden])'));
-  assert.equal(await page.locator('.pp-slide-slot:has(#photoPreviewImage) .pp-image-loading .pp-sweep').count(),1);assert.equal(await page.locator('.pp-slide-slot:has(#photoPreviewImage) .pp-image-loading svg').count(),0);
+  await page.waitForFunction(()=>document.getElementById('photoPreviewOverlay')?.classList.contains('active'));
+  await page.waitForTimeout(400);
+  const shown=await page.evaluate(()=>Array.from(document.querySelectorAll('#photoPreviewOverlay .pp-image-loading, #photoPreviewOverlay .pp-sweep')).filter(el=>{const r=el.getBoundingClientRect(),cs=getComputedStyle(el);return cs.display!=='none'&&cs.visibility!=='hidden'&&r.width>0&&r.height>0;}).length);
+  assert.equal(shown,0);
   assert.equal(await page.locator('.pp-slide-slot:has(#photoPreviewImage)').evaluate(el=>getComputedStyle(el,'::before').content),'none');
-  f.releaseImages();await page.waitForFunction(()=>document.getElementById('photoPreviewImage')?.naturalWidth>0&&document.getElementById('photoPreviewImage').parentElement.querySelector('.pp-image-loading').hidden);
+  f.releaseImages();await page.waitForFunction(()=>document.getElementById('photoPreviewImage')?.naturalWidth>0);
   assert.deepEqual(f.errors,[]);
  }finally{f.releaseImages();await f.close();}
 });
