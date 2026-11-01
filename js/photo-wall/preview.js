@@ -89,7 +89,33 @@
     // 把原图读进设备缓存（Service Worker / 浏览器缓存）并报告进度；之后 <img> 再取同一地址只是一次校验。
     // 同一地址同时只读一次：查看器在 4 秒兜底、切图等时刻会换一个加载者，新加载者接着看同一条下载，不会重头再来。
     var warming = Object.create(null);
-    function watchOriginal(url, onProgress) {
+    // 下载好的原图以 blob 地址留在内存里（最近 6 张、不超过 72MB）：显示时直接用它，不再向服务器发第二次请求，
+    // 所以进度条走到头时图片已经在手，只剩解码；同一张图再次打开也不用任何网络。
+    var blobUrls = Object.create(null), blobOrder = [], blobSizes = Object.create(null), BLOB_LIMIT = 6, BLOB_BYTES = 72 * 1024 * 1024;
+    function forgetBlob(key) {
+        var u = blobUrls[key];
+        if (!u) return;
+        delete blobUrls[key]; delete blobSizes[key];
+        var i = blobOrder.indexOf(key); i >= 0 && blobOrder.splice(i, 1);
+        try { URL.revokeObjectURL(u); } catch (err) {}
+    }
+    function rememberBlob(key, blob) {
+        forgetBlob(key);
+        try { blobUrls[key] = URL.createObjectURL(blob); } catch (err) { return; }
+        blobSizes[key] = blob.size; blobOrder.push(key);
+        var bytes = function() { return blobOrder.reduce(function(sum, k) { return sum + (blobSizes[k] || 0); }, 0); };
+        while (blobOrder.length > 1 && (blobOrder.length > BLOB_LIMIT || bytes() > BLOB_BYTES)) forgetBlob(blobOrder[0]);
+    }
+    function originalDisplayUrl(url) {
+        return blobUrls[url] || (window.XtjPostOriginals ? window.XtjPostOriginals.displayUrl(url) : url);
+    }
+    // 换账号时丢掉内存里的原图，避免上一个账号的图被下一个账号看到。
+    window.addEventListener("auth-ready", function() {
+        var who = window.currentUser || "";
+        if (blobOrder.length && window.__ppBlobOwner !== undefined && window.__ppBlobOwner !== who) blobOrder.slice().forEach(forgetBlob), loadedOriginals = Object.create(null), loadedOriginalOrder = [];
+        window.__ppBlobOwner = who;
+    });
+    function watchOriginal(url, onProgress, key) {
         var entry = warming[url];
         if (!entry) {
             entry = warming[url] = { p: 0, subs: [], killTimer: 0, ctl: window.AbortController ? new AbortController() : null };
@@ -98,14 +124,20 @@
             if (!url || /^(blob|data):/i.test(url) || typeof fetch !== "function") finish(!1);
             else fetch(url, { credentials: "same-origin", signal: entry.ctl ? entry.ctl.signal : undefined }).then(function(res) {
                 if (!res.ok) return finish(!1);
-                var total = Number(res.headers.get("Content-Length")) || 0, loaded = 0;
-                if (!res.body || !res.body.getReader) return res.arrayBuffer().then(function() { finish(!0); }, function() { finish(!1); });
+                var total = Number(res.headers.get("Content-Length")) || 0, loaded = 0, chunks = [], keep = !total || total <= 48 * 1024 * 1024;
+                var type = res.headers.get("Content-Type") || "";
+                if (!res.body || !res.body.getReader) return res.blob().then(function(blob) { if (/^image\//i.test(blob.type || type) && blob.size <= 48 * 1024 * 1024 && key) rememberBlob(key, blob); finish(!0); }, function() { finish(!1); });
                 var reader = res.body.getReader();
                 (function pump() {
                     reader.read().then(function(r) {
-                        if (r.done) return finish(!0);
+                        if (r.done) {
+                            // 只收确实是图片的响应（服务端限额页、错误页不能当图显示）。
+                            if (keep && key && /^image\//i.test(type)) rememberBlob(key, new Blob(chunks, { type: type }));
+                            return finish(!0);
+                        }
                         loaded += r.value ? r.value.length : 0;
-                        if (total) { entry.p = Math.min(.98, loaded / total); entry.subs.slice().forEach(function(cb) { cb(entry.p); }); }
+                        if (keep) { if (loaded > 48 * 1024 * 1024) { keep = !1; chunks = []; } else chunks.push(r.value); }
+                        if (total) { entry.p = Math.min(.94, loaded / total); entry.subs.slice().forEach(function(cb) { cb(entry.p); }); }
                         pump();
                     }, function() { finish(!1); });
                 })();
@@ -227,7 +259,7 @@
                     delete _[e], delete H[e], t();
                 });
             }
-            o.src = window.XtjPostOriginals ? window.XtjPostOriginals.displayUrl(e) : e, "decode" in o ? o.decode().then(function() {
+            o.src = originalDisplayUrl(e), "decode" in o ? o.decode().then(function() {
                 safeCacheAndResolve();
             }).catch(function() {
                 n();
@@ -323,14 +355,15 @@
                 }(e)));
             }
             e._ppCleanup = cleanup, e.addEventListener("load", handleLoad), e.addEventListener("error", handleError), e._ppListenerUrl = t;
-            var displaySource = window.XtjPostOriginals ? window.XtjPostOriginals.displayUrl(t) : t;
+            forceReload && forgetBlob(t);
+            var displaySource = originalDisplayUrl(t);
             var firstSource = forceReload || loadedOriginals[t] ? "" : previewFirstUrl(t);
             if (firstSource) {
                 // Show the preview now, fetch and decode the original behind it, then swap with no blank frame.
                 e.removeEventListener("load", handleLoad); e.removeEventListener("error", handleError); e._ppListenerUrl = null;
                 e.style.transition = "none"; e.src = firstSource; e.style.opacity = "1";
                 var fullImage = new Image(), swapped = !1, bar = null, watch = null;
-                if (e.id === "photoPreviewImage") { bar = ppBar.start(displaySource); watch = watchOriginal(displaySource, bar.set); }
+                if (e.id === "photoPreviewImage") { bar = ppBar.start(t); watch = watchOriginal(displaySource, bar.set, t); }
                 fullImage.decoding = "async";
                 try { fullImage.fetchPriority = e.id === "photoPreviewImage" ? "high" : "low"; } catch (err) {}
                 e._ppCleanup = function() {
@@ -351,6 +384,7 @@
                 fullImage.onerror = swapToOriginal;
                 var startOriginal = function() {
                     if (swapped || e._ppLoadGen !== a || e._ppUrl !== t) return;
+                    displaySource = originalDisplayUrl(t);
                     fullImage.src = displaySource;
                     fullImage.complete && fullImage.naturalWidth > 0 && swapToOriginal();
                 };
@@ -1045,7 +1079,7 @@
                 J.style.transition = "none", J.style.opacity = "0";
                 if (oe && oe.complete && oe.naturalWidth > 0) {
                     J._ppUrl = S.imageUrl;
-                    J.src = window.XtjPostOriginals ? window.XtjPostOriginals.displayUrl(S.imageUrl) : S.imageUrl;
+                    J.src = originalDisplayUrl(S.imageUrl);
                     if (J.offsetHeight, D) {
                         var ne = J.getBoundingClientRect();
                         if (ne && ne.width > 0) {
@@ -1112,7 +1146,7 @@
                             J.style.transition = "none";
                             // 预览图垫在下面：换源的那一帧如果还没解码完，看到的仍是预览图，不会闪成空白。
                             if (thumbSrc) { J.style.backgroundImage = "url(" + JSON.stringify(thumbSrc) + ")"; J.style.backgroundSize = "100% 100%"; J.style.backgroundRepeat = "no-repeat"; }
-                            J.src = openFullUrl;
+                            J.src = originalDisplayUrl(openFullUrl);
                             J.style.opacity = "1";
                             if (J.complete) {
                                 J.naturalWidth > 0 ? handleOpenLoad() : handleOpenError();
@@ -1144,7 +1178,7 @@
                         J._ppUrl = openFullUrl;
                         J.addEventListener("load", handleOpenLoad);
                         J.addEventListener("error", handleOpenError);
-                        J.src = openFullUrl;
+                        J.src = originalDisplayUrl(openFullUrl);
                         if (J.complete) {
                             J.naturalWidth > 0 ? handleOpenLoad() : handleOpenError();
                         }
@@ -1157,13 +1191,13 @@
                         fullStarted = !0;
                         var loadFull = function() {
                             if (preDone) return;
-                            preImg.src = openFullUrl;
+                            preImg.src = originalDisplayUrl(openFullUrl);
                             // 若原图已在浏览器缓存中，onload 可能同步触发前就已 complete
                             if (preImg.complete && preImg.naturalWidth > 0) swapToFull();
                         };
-                        var warmUrl = window.XtjPostOriginals ? window.XtjPostOriginals.displayUrl(openFullUrl) : openFullUrl;
-                        preBar = ppBar.start(warmUrl);
-                        preWatch = watchOriginal(warmUrl, preBar.set);
+                        var warmUrl = originalDisplayUrl(openFullUrl);
+                        preBar = ppBar.start(openFullUrl);
+                        preWatch = watchOriginal(warmUrl, preBar.set, openFullUrl);
                         preWatch.promise.then(loadFull);
                     }
                     if (J.complete && J.naturalWidth > 0) startFullLoad();
@@ -1172,7 +1206,7 @@
                         setTimeout(startFullLoad, 1500);
                     }
                 } else {
-                    J.src = window.XtjPostOriginals ? window.XtjPostOriginals.displayUrl(S.imageUrl) : S.imageUrl;
+                    J.src = originalDisplayUrl(S.imageUrl);
                     J.addEventListener("load", handleOpenLoad), J.addEventListener("error", handleOpenError), $ = setTimeout(function() {
                         _._openLoadGen === ee && (cleanupOpenListeners(), re());
                     }, 8e3);

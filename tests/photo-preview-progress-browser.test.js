@@ -26,15 +26,16 @@ test('a slow original shows a wordless blossom progress bar, and a reopened orig
     assert.ok(mid.p > 0 && mid.p < 1, 'progress is between empty and full');
     assert.ok(mid.on >= 1 && mid.on < 14, 'blossoms fill in with the progress');
     assert.match(await p.evaluate(() => document.getElementById('photoPreviewImage').currentSrc), /preview=1/, 'the preview stays up meanwhile');
-    await p.waitForFunction(() => { const i = document.getElementById('photoPreviewImage'); return /11111111-1111-4111-8111-111111111111\/media$/.test(i.currentSrc || i.src) && i.complete; }, null, { timeout: 15000 });
+    await p.waitForFunction(() => { const i = document.getElementById('photoPreviewImage'); return !/preview=1/.test(i.currentSrc || i.src) && i.complete && i.naturalWidth > 0; }, null, { timeout: 15000 });
     await p.waitForTimeout(1200);
     assert.equal(await bar(), null, 'the bar is gone once the original shows');
     await p.evaluate(() => window.closePhotoPreview(true)); await p.waitForTimeout(500);
     const before = requests.filter(r => r === '11p').length;
     await open();
     await p.waitForTimeout(450);
-    assert.match(await p.evaluate(() => document.getElementById('photoPreviewImage').currentSrc), /11111111-1111-4111-8111-111111111111\/media$/, 'reopening shows the original, not the preview');
+    assert.doesNotMatch(await p.evaluate(() => document.getElementById('photoPreviewImage').currentSrc), /preview=1/, 'reopening shows the original, not the preview');
     assert.equal(requests.filter(r => r === '11p').length, before, 'the preview is not requested again');
+    assert.equal(requests.filter(r => r === '11o').length, 1, 'the original is downloaded once and reused from memory');
     assert.equal(await bar(), null, 'no bar on reopen');
     assert.deepEqual(s.errors, []);
   } finally { await s.close(); }

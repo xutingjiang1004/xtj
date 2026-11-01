@@ -1446,17 +1446,50 @@
             };
             resetPostActionModals();
 
-            // ===== The profile page and the post detail open from what was tapped and close back to it =====
+            // ===== Windows open from what was tapped and close back to it (shared by modals, the photo info card, menus) =====
+            // 动画只用 transform 和 opacity（合成层，不重绘）；起点是被点的那个小元素（头像/缩略图/按钮，或手指落点），不是整行的中心。
             (function() {
-                var ORIGIN_PRIORITY = ['.post-media-cell', '.author-post-entry', '.author-post-row', '.comment-item', '[data-user-name]', '.avatar-wrap', '.avatar.clickable', '.photo-wall-item', '.post'];
-                var ANIMATED = { userProfileModal: 1, postDetailModal: 1 };
-                var lastTap = { el: null, at: 0 }, origins = Object.create(null);
+                var ORIGIN_PRIORITY = ['.post-media-cell', '.author-post-entry', '.author-post-row', '.comment-item', '[data-user-name]', '.avatar-wrap', '.avatar.clickable', '.photo-wall-item', '.pp-info-btn', '.ai-plus-btn', 'button', '[role="button"]', 'a[href]', '.post'];
+                var INNER_VISUAL = 'img, .avatar, .avatar-wrap, canvas, video, svg, .post-media-cell, .upc-avatar';
+                var ANIMATED = { userProfileModal: 1, postDetailModal: 1, profileActivityModal: 1, profileDetailModal: 1, statModal: 1 };
+                var lastTap = { spec: null, at: 0 }, origins = Object.create(null);
+                function keyOf(el) {
+                    var holder = el.closest && el.closest('[data-post-id],[data-comment-id],[data-id]');
+                    if (!holder) return null;
+                    var attr = holder.hasAttribute('data-post-id') ? 'data-post-id' : holder.hasAttribute('data-comment-id') ? 'data-comment-id' : 'data-id';
+                    var value = holder.getAttribute(attr);
+                    if (!value || /["\\]/.test(value)) return null;
+                    return { selector: '[' + attr + '="' + value + '"]', sub: holder === el ? '' : (el.classList && el.classList[0] ? '.' + el.classList[0] : '') };
+                }
+                function specFor(el, x, y) {
+                    var r = el.getBoundingClientRect(), spec = { el: el, dx: 0, dy: 0, w: r.width, h: r.height, key: keyOf(el) };
+                    if (r.width <= 132 && r.height <= 132) return spec;
+                    var inner = null;
+                    if (x != null && document.elementsFromPoint) {
+                        var stack = document.elementsFromPoint(x, y);
+                        for (var i = 0; i < stack.length; i++) {
+                            var n = stack[i];
+                            if (n !== el && el.contains(n) && n.matches && n.matches(INNER_VISUAL)) {
+                                var ir = n.getBoundingClientRect();
+                                if (ir.width >= 12 && ir.height >= 12 && ir.width <= 260 && ir.height <= 260) { inner = ir; break; }
+                            }
+                        }
+                    }
+                    if (inner) { spec.dx = inner.left - r.left; spec.dy = inner.top - r.top; spec.w = inner.width; spec.h = inner.height; return spec; }
+                    var side = Math.max(40, Math.min(88, Math.min(r.width, r.height) * .9));
+                    var cx = x != null ? x : r.left + r.width / 2, cy = y != null ? y : r.top + r.height / 2;
+                    spec.w = spec.h = side;
+                    spec.dx = Math.max(0, Math.min(r.width - side, cx - side / 2 - r.left));
+                    spec.dy = Math.max(0, Math.min(r.height - side, cy - side / 2 - r.top));
+                    return spec;
+                }
                 function remember(event) {
                     var target = event.target;
                     if (!target || !target.closest) return;
+                    var x = typeof event.clientX === 'number' && event.type !== 'keydown' ? event.clientX : null, y = x == null ? null : event.clientY;
                     for (var i = 0; i < ORIGIN_PRIORITY.length; i++) {
                         var el = target.closest(ORIGIN_PRIORITY[i]);
-                        if (el) { lastTap = { el: el, at: Date.now() }; return; }
+                        if (el) { lastTap = { spec: specFor(el, x, y), at: Date.now() }; return; }
                     }
                 }
                 document.addEventListener('pointerdown', remember, true);
@@ -1464,67 +1497,96 @@
                 function motionOk() {
                     return !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) && document.documentElement.getAttribute('data-xtj-motion') !== 'off';
                 }
-                function visibleRect(el) {
+                function inView(r) {
+                    return r && r.width >= 4 && r.height >= 4 && r.bottom > 0 && r.top < window.innerHeight && r.right > 0 && r.left < window.innerWidth;
+                }
+                function rectOfSpec(spec) {
+                    if (!spec) return null;
+                    var el = spec.el;
+                    if (!el || !el.isConnected) {
+                        el = null;
+                        if (spec.key) { try { var holder = document.querySelector(spec.key.selector); el = holder && (spec.key.sub ? holder.querySelector(spec.key.sub) : holder); } catch (_) { el = null; } }
+                        if (!el) return null;
+                    }
+                    var r = el.getBoundingClientRect();
+                    var rect = { left: r.left + spec.dx, top: r.top + spec.dy, width: spec.w, height: spec.h };
+                    rect.right = rect.left + rect.width; rect.bottom = rect.top + rect.height;
+                    return inView(rect) ? rect : null;
+                }
+                function rectOfElement(el) {
                     if (!el || !el.isConnected) return null;
                     var r = el.getBoundingClientRect();
-                    if (r.width < 4 || r.height < 4 || r.bottom < 0 || r.top > window.innerHeight || r.right < 0 || r.left > window.innerWidth) return null;
-                    return r;
+                    return inView(r) ? r : null;
                 }
-                // Transform that makes the box look like the tapped element: same centre, uniform scale, rounded like it.
-                function boxFrom(box, from) {
-                    var to = box.getBoundingClientRect();
-                    if (!to.width || !to.height) return null;
-                    var scale = Math.max(.06, Math.min(.92, Math.min(from.width / to.width, from.height / to.height)));
-                    var dx = (from.left + from.width / 2) - (to.left + to.width / 2), dy = (from.top + from.height / 2) - (to.top + to.height / 2);
-                    var finalRadius = parseFloat(window.getComputedStyle(box).borderTopLeftRadius) || 24;
-                    var startRadius = Math.min(Math.min(from.width, from.height) / 2 / scale, 400);
-                    return { transform: 'translate(' + dx + 'px, ' + dy + 'px) scale(' + scale + ')', startRadius: startRadius + 'px', finalRadius: finalRadius + 'px' };
+                // Transform that puts the box (already at its final place) onto the anchor: same centre, uniform scale that fits inside it.
+                function transformFor(box, from) {
+                    if (!box.width || !box.height || !from) return null;
+                    var scale = Math.max(.04, Math.min(1, from.width / box.width, from.height / box.height));
+                    var dx = (from.left + from.width / 2) - (box.left + box.width / 2), dy = (from.top + from.height / 2) - (box.top + box.height / 2);
+                    return { css: 'translate3d(' + dx.toFixed(1) + 'px, ' + dy.toFixed(1) + 'px, 0) scale(' + scale.toFixed(4) + ')', dx: dx, dy: dy, scale: scale };
                 }
                 function cancelRunning(el) { try { el.getAnimations({ subtree: true }).forEach(function(a) { if (a.__xtjOrigin) a.cancel(); }); } catch (_) {} }
                 function track(animation) { animation.__xtjOrigin = true; return animation; }
-                function runOpen(id, from) {
-                    var el = document.getElementById(id), box = el && el.querySelector('.modal-box');
-                    if (!box || !box.animate) return;
-                    var frame = boxFrom(box, from);
-                    if (!frame) return;
-                    var blur = box.style.backdropFilter, blurWebkit = box.style.webkitBackdropFilter;
+                var OPEN_MS = 430, CLOSE_MS = 320, OPEN_EASE = 'cubic-bezier(.22,.9,.28,1)', CLOSE_EASE = 'cubic-bezier(.4,0,.2,1)';
+                // Blur behind a moving window is re-rendered every frame: switch it off while it moves, put it back after.
+                function holdBlur(box) {
+                    var a = box.style.backdropFilter, b = box.style.webkitBackdropFilter;
                     box.style.backdropFilter = 'none'; box.style.webkitBackdropFilter = 'none';
-                    var anim = track(box.animate([
-                        { transform: frame.transform, opacity: .25, borderRadius: frame.startRadius },
-                        { transform: 'none', opacity: 1, borderRadius: frame.finalRadius }
-                    ], { duration: 440, easing: 'cubic-bezier(.2,.8,.2,1)', fill: 'backwards' }));
-                    track(el.animate([{ backgroundColor: 'rgba(0,0,0,0)' }, { backgroundColor: window.getComputedStyle(el).backgroundColor }], { duration: 300, easing: 'ease-out', fill: 'backwards' }));
-                    anim.onfinish = anim.oncancel = function() { box.style.backdropFilter = blur; box.style.webkitBackdropFilter = blurWebkit; };
+                    return function() { box.style.backdropFilter = a; box.style.webkitBackdropFilter = b; };
                 }
-                function runClose(el, box, to, done) {
-                    var frame = boxFrom(box, to);
-                    if (!frame) { done(); return; }
-                    cancelRunning(el);
-                    box.style.backdropFilter = 'none'; box.style.webkitBackdropFilter = 'none';
-                    var anim = track(box.animate([
-                        { transform: 'none', opacity: 1, borderRadius: frame.finalRadius },
-                        { transform: frame.transform, opacity: .2, borderRadius: frame.startRadius }
-                    ], { duration: 340, easing: 'cubic-bezier(.4,0,.2,1)', fill: 'forwards' }));
-                    track(el.animate([{ backgroundColor: window.getComputedStyle(el).backgroundColor }, { backgroundColor: 'rgba(0,0,0,0)' }], { duration: 300, easing: 'ease-in', fill: 'forwards' }));
+                // Opens `box` (already laid out at its final place) out of `from`. Returns the transform animation.
+                function morphIn(box, from) {
+                    var t = transformFor(box.getBoundingClientRect(), from);
+                    if (!t || !box.animate) return null;
+                    var blur = holdBlur(box);
+                    box.style.willChange = 'transform, opacity';
+                    var move = track(box.animate([{ transform: t.css }, { transform: 'none' }], { duration: OPEN_MS, easing: OPEN_EASE, fill: 'backwards' }));
+                    track(box.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 160, easing: 'ease-out', fill: 'backwards' }));
+                    move.onfinish = move.oncancel = function() { box.style.willChange = ''; blur(); };
+                    return move;
+                }
+                // Closes `box` back into `from`; calls `done` once it is gone (the caller hides the window there, without a second animation).
+                function morphOut(box, from, done) {
+                    var t = transformFor(box.getBoundingClientRect(), from);
+                    if (!t || !box.animate) return false;
+                    var blur = holdBlur(box);
+                    box.style.willChange = 'transform, opacity';
+                    var move = track(box.animate([{ transform: 'none' }, { transform: t.css }], { duration: CLOSE_MS, easing: CLOSE_EASE, fill: 'forwards' }));
+                    track(box.animate([{ opacity: 1 }, { opacity: 1, offset: .55 }, { opacity: 0 }], { duration: CLOSE_MS, easing: 'linear', fill: 'forwards' }));
                     var finished = false;
-                    function end() {
-                        if (finished) return; finished = true;
-                        done();
-                        cancelRunning(el);
-                        box.style.backdropFilter = ''; box.style.webkitBackdropFilter = '';
-                    }
-                    anim.onfinish = end;
-                    setTimeout(end, 480);
+                    function end() { if (finished) return; finished = true; done(); blur(); }
+                    move.onfinish = end;
+                    setTimeout(end, CLOSE_MS + 160);
+                    return true;
                 }
+                window.xtjOrigin = {
+                    motionOk: motionOk, last: function() { return lastTap.spec && Date.now() - lastTap.at < 6000 ? lastTap.spec : null; },
+                    rectOfSpec: rectOfSpec, rectOfElement: rectOfElement, transformFor: transformFor, morphIn: morphIn, morphOut: morphOut, cancel: cancelRunning,
+                    OPEN_MS: OPEN_MS, CLOSE_MS: CLOSE_MS, OPEN_EASE: OPEN_EASE, CLOSE_EASE: CLOSE_EASE
+                };
+
+                // ----- modals -----
                 var baseOpen = window.openModal, baseClose = window.closeModal;
                 window.openModal = function(id) {
-                    var from = null, originEl = null;
-                    if (ANIMATED[id] && motionOk() && lastTap.el && Date.now() - lastTap.at < 6000) { originEl = lastTap.el; from = visibleRect(originEl); }
-                    var already = document.getElementById(id);
-                    var wasActive = !!(already && already.classList.contains('active'));
+                    var el = document.getElementById(id), box = el && el.querySelector('.modal-box');
+                    var spec = ANIMATED[id] && motionOk() ? window.xtjOrigin.last() : null;
+                    var from = spec ? rectOfSpec(spec) : null;
+                    var wasActive = !!(el && el.classList.contains('active'));
+                    if (el && el.__xtjClosing) { el.__xtjCloseToken = (el.__xtjCloseToken || 0) + 1; el.__xtjClosing = false; cancelRunning(el); el.style.transition = ''; el.style.opacity = ''; if (box) box.style.transition = ''; }
+                    var scrimWas = el ? el.style.transition : '';
+                    // Scrim fades in fast so the window is visible from its first frame.
+                    if (from && !wasActive && el) { el.style.transition = 'opacity 130ms ease-out'; setTimeout(function() { el.style.transition = scrimWas; }, OPEN_MS + 40); }
                     var result = baseOpen.apply(this, arguments);
-                    if (ANIMATED[id]) origins[id] = from ? originEl : null;
-                    if (from && !wasActive) runOpen(id, from);
+                    if (ANIMATED[id]) origins[id] = from ? spec : null;
+                    if (from && !wasActive && box && box.animate) {
+                        // The page's own fade/slide transitions would stack on top of this one; this window moves only by the morph.
+                        var oldBoxTransition = box.style.transition;
+                        box.style.transition = 'none';
+                        void box.offsetWidth;
+                        var move = morphIn(box, from);
+                        if (move) { var restore = function() { box.style.transition = oldBoxTransition; }; move.addEventListener('finish', restore); move.addEventListener('cancel', restore); }
+                        else box.style.transition = oldBoxTransition;
+                    }
                     return result;
                 };
                 window.closeModal = function(id) {
@@ -1532,12 +1594,28 @@
                         var el = document.getElementById(id);
                         if (el && el.__xtjClosing) return;
                         var box = el && el.classList.contains('active') ? el.querySelector('.modal-box') : null;
-                        var to = box && box.animate ? visibleRect(origins[id]) : null;
+                        var to = box && box.animate ? rectOfSpec(origins[id]) : null;
                         if (to) {
                             el.__xtjClosing = true;
-                            var args = arguments, self = this;
-                            runClose(el, box, to, function() { el.__xtjClosing = false; baseClose.apply(self, args); });
-                            return;
+                            var token = el.__xtjCloseToken = (el.__xtjCloseToken || 0) + 1;
+                            var args = arguments, self = this, oldBoxTransition = box.style.transition, oldTransition = el.style.transition;
+                            box.style.transition = 'none';
+                            var scrimTimer = setTimeout(function() { if (el.__xtjCloseToken === token) { el.style.transition = 'opacity 230ms ease-in'; el.style.opacity = '0'; } }, 90);
+                            var started = morphOut(box, to, function() {
+                                clearTimeout(scrimTimer);
+                                if (el.__xtjCloseToken !== token) return;
+                                el.__xtjClosing = false;
+                                // Hide at once: letting the page's own close transition run would show the whole window again for a moment.
+                                el.style.transition = 'none'; box.style.transition = 'none';
+                                baseClose.apply(self, args);
+                                el.style.opacity = '';
+                                void el.offsetHeight;
+                                cancelRunning(el);
+                                box.style.willChange = '';
+                                requestAnimationFrame(function() { el.style.transition = oldTransition; box.style.transition = oldBoxTransition; });
+                            });
+                            if (started) return;
+                            clearTimeout(scrimTimer); el.__xtjClosing = false; box.style.transition = oldBoxTransition;
                         }
                     }
                     return baseClose.apply(this, arguments);
@@ -2432,14 +2510,15 @@
                 }
             }
 
-            function renderAvatarContent(username, avatarUrl) {
+            // eager：评论头像很小又常在折叠/展开动画中的容器里，懒加载在那里可能一直不触发，头像就停在首字母。
+            function renderAvatarContent(username, avatarUrl, eager) {
                 var safeUser = String(username || '').trim();
                 var fallbackInitial = (Array.from(safeUser)[0] || '?').toUpperCase();
                 var fallbackSpan = '<span class="avatar-fallback" data-user-name="' + escapeHtml(safeUser) + '">' + escapeHtml(fallbackInitial) + '</span>';
                 if (avatarUrl && sanitizeUrl(avatarUrl)) {
                     return '<img class="avatar-image" src="' + escapeHtml(sanitizeUrl(avatarUrl)) +
                         '" alt="' + escapeHtml(safeUser) + '" data-user-name="' + escapeHtml(safeUser) +
-                        '" loading="lazy" decoding="async" style="opacity:0;transition:opacity 0.2s"' +
+                        '" loading="' + (eager ? 'eager' : 'lazy') + '" decoding="async" style="opacity:0;transition:opacity 0.2s"' +
                         ' onload="this.style.opacity=\'1\';var p=this.closest(\'.avatar\')||this.closest(\'.profile-detail-avatar\');if(p){p.classList.add(\'has-image\');}"' +
                         ' onerror="var rn=+this.getAttribute(\'data-retry\')||0;if(rn<2){this.setAttribute(\'data-retry\',rn+1);var re=this,rb=(re.getAttribute(\'src\')||\'\').split(\'#\')[0];setTimeout(function(){re.src=rb+\'#r\'+(rn+1)},800*(rn+1));return}var p=this.closest(\'.avatar\')||this.closest(\'.profile-detail-avatar\');if(p){p.classList.remove(\'has-image\');this.remove();var f=p.querySelector(\'.avatar-fallback\');if(f)f.style.visibility=\'visible\'};var u=this.getAttribute(\'data-user-name\');if(u&&window.__xtjInvalidateAvatarCache)window.__xtjInvalidateAvatarCache(u)">' +
                         fallbackSpan;
@@ -3555,7 +3634,7 @@
                     } catch (e) {}
                 }
                 // 带 .avatar.clickable：头像异步到达后由 renderFeed 的补图逻辑原地换成图片。
-                return '<span class="avatar clickable comment-avatar comment-tone-' + commentAvatarTone(safeUser) + '" role="button" tabindex="0" aria-label="查看 ' + escapeHtml(safeUser) + ' 的动态" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();this.click();}" onclick="openUserProfile(\'' + safeJsStr(safeUser) + '\')" data-user-name="' + escapeHtml(safeUser) + '">' + renderAvatarContent(safeUser, avatarUrl) + '</span>';
+                return '<span class="avatar clickable comment-avatar comment-tone-' + commentAvatarTone(safeUser) + '" role="button" tabindex="0" aria-label="查看 ' + escapeHtml(safeUser) + ' 的动态" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();this.click();}" onclick="openUserProfile(\'' + safeJsStr(safeUser) + '\')" data-user-name="' + escapeHtml(safeUser) + '">' + renderAvatarContent(safeUser, avatarUrl, true) + '</span>';
             }
             function buildCommentDeleteButtonHtml(comment) {
                 if (!comment || !currentUser || !(isAdmin() || String(comment.user_name || '') === String(currentUser))) return '';
@@ -3782,7 +3861,7 @@
                     }
                     if (!username) return;
                     var avatarUrl = getAvatarUrl(username);
-                    if (avatarUrl) avatarEl.innerHTML = renderAvatarContent(username, avatarUrl);
+                    if (avatarUrl) avatarEl.innerHTML = renderAvatarContent(username, avatarUrl, avatarEl.classList.contains('comment-avatar'));
                 });
             }
             function ensureAvatarsInFeed(users, root) {

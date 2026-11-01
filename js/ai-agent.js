@@ -15254,7 +15254,8 @@ function showChatMessages() {
       var originX = Math.round(btnRect.left + btnRect.width / 2 - bar.left - left);
       if (originX < 12) originX = 12;
       if (originX > panelW - 12) originX = panelW - 12;
-      panelShell.style.transformOrigin = originX + 'px 100%';
+      // 原点放在按钮中心：面板底边在按钮上方约 10px，按钮中心在面板底边下方 10px + 按钮半高。
+      panelShell.style.transformOrigin = originX + 'px calc(100% + ' + Math.round(10 + btnRect.height / 2) + 'px)';
       panelShell.style.setProperty('--hero-ox', originX + 'px');
     }
 
@@ -15477,7 +15478,7 @@ function showChatMessages() {
       closeTimer = setTimeout(function() {
         panelShell.classList.remove('is-opening');
         closeTimer = null;
-      }, 340);
+      }, 420);
     }
 
     function closePanel(animate) {
@@ -15509,7 +15510,7 @@ function showChatMessages() {
         panelShell.classList.remove('is-closing');
         panelClosing = false;
         closeTimer = null;
-      }, 230);
+      }, 330);
     }
 
     function closeInviteModal() {

@@ -36,7 +36,7 @@ test('thumbnail full-size preload is single-flight and tied to preview image lif
   assert.match(preview, /J\._ppFullPreloadCleanup = cleanupFullPreload/);
   assert.match(preview, /cleanupFullPreload\(cancelRequest\)/);
   assert.match(preview, /if \(cancelRequest && wasPending\)[\s\S]*?preImg\.src = ''/);
-  assert.match(preview, /preImg\.onerror = function\(\)\s*\{[\s\S]*?cleanupFullPreload\(!0\);[\s\S]*?fullRequestStarted = !0;[\s\S]*?J\.src = openFullUrl/);
+  assert.match(preview, /preImg\.onerror = function\(\)\s*\{[\s\S]*?cleanupFullPreload\(!0\);[\s\S]*?fullRequestStarted = !0;[\s\S]*?J\.src = originalDisplayUrl\(openFullUrl\)/);
   assert.match(preview, /if \(!\(_\._openLoadGen === ee && t === S && J && J\.isConnected\)\) return/);
   assert.match(preview, /J\._ppUrl !== openFullUrl/);
   // The active thumbnail path should not concurrently fetch the same original via the generic cache prewarmer.
