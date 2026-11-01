@@ -13,3 +13,9 @@ test('the job queue poll relies on the retry-backoff migration being present in 
   assert.match(block('async function processNextCatJob(', 900), /next_retry_at/);
   assert.ok(fs.readFileSync('supabase/migrations/038_cat_ai_retry_backoff.sql', 'utf8').includes('ADD COLUMN IF NOT EXISTS next_retry_at'));
 });
+test('the cat is told when a post carries media it cannot see, so it does not invent what is in the picture', () => {
+  assert.match(block('const CAT_AI_COMMENT_PROMPT', 1600), /看不到画面[\s\S]*绝不编造画面内容/);
+  const context = block('async function getCatPostContext(', 700);
+  assert.match(context, /select\('id, content, user_name, media_type'\)/);
+  assert.match(block('async function getCatPostContext(', 3200), /attachment_kind/);
+});

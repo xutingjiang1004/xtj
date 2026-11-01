@@ -6896,7 +6896,8 @@ const CAT_AI_COMMENT_PROMPT = CAT_AI_BASE_PERSONA + '\n\n' +
   '3. 不使用标题、列表、Markdown 标记或大量引号。\n' +
   '4. 用户只叫你但没有提问时，可以毒舌地提醒用户把问题说清楚。\n' +
   '5. 不得引用或泄露用户的私密AI对话、私聊、长期记忆、账号信息、IP、定位或其他私人数据。\n' +
-  '6. 只能使用提供的公开帖子上下文，不能编造站内其他内容。';
+  '6. 只能使用提供的公开帖子上下文，不能编造站内其他内容。\n' +
+  '7. 帖子可能带有图片、视频或音频，你只能看到文字，看不到画面。被问到图里有什么、在哪里拍的、写了什么时，如实说明你看不到画面，只能根据帖子文字和评论回答，并请对方用文字补充细节；绝不编造画面内容。';
 
 // 检测评论是否包含有效 @小猫 mention
 function hasCatMention(content) {
@@ -7130,7 +7131,7 @@ async function requeueCatJob(job, reason) {
 
 async function getCatPostContext(postId, sourceCommentId) {
   try {
-    var postRes = await supabase.from('posts').select('id, content, user_name').eq('id', postId).maybeSingle();
+    var postRes = await supabase.from('posts').select('id, content, user_name, media_type').eq('id', postId).maybeSingle();
     if (postRes.error) return { ok: false, state: 'query_failed', error: postRes.error, code: 'post_query_failed' };
     var post = postRes.data;
     if (!post) return { ok: false, state: 'not_found', missing: 'post' };
@@ -7168,7 +7169,9 @@ async function getCatPostContext(postId, sourceCommentId) {
       state: 'ready',
       post: post ? {
         id: post.id,
-        content: String(post.content || '').slice(0, 2000)
+        content: String(post.content || '').slice(0, 2000),
+        // Tells the model a picture/video exists that it cannot see, so it answers honestly instead of guessing.
+        attachment_kind: /^(image|photo|album|video|audio)$/i.test(String(post.media_type || '').trim()) ? String(post.media_type).trim().toLowerCase() : null
       } : null,
       parent_comments: parentComments,
       nearby_comments: nearbyComments.slice(0, 15).map(function(c) {
