@@ -2,6 +2,18 @@
 const { MAX_POST_IMAGES, MAX_POST_FILE_BYTES, getPostMediaItems } = require('../js/post-media');
 const { parsePostMediaUrl } = require('./post-media');
 const FIELDS = 'id,post_id,position,media_type,media_url,width,height,file_size,created_at';
+// 视频封面不走 post_attachments：数据库函数会把「带附件的帖子」强制写成 image，
+// 视频帖一挂附件就变成图片帖。封面改成存在帖子内容的元数据里，读取时再取出来。
+function contentPosterUrl(content) {
+  let parsed;
+  try { parsed = JSON.parse(String(content || '')); } catch (_) { return null; }
+  if (!parsed || parsed.__type !== '__xtj_post_v2__' || !parsed.meta) return null;
+  const url = typeof parsed.meta.poster_url === 'string' ? parsed.meta.poster_url.trim() : '';
+  if (!url || url.length > 2048 || !/^https:\/\//i.test(url)) return null;
+  // 只认存储里的 posts/ 图片，避免把任意地址渲染成封面。
+  if (!/\/storage\/v1\/object\/public\/uploads\/posts\//.test(url) && !/\/api\/uploads\/media\?path=posts(%2F|\/)/i.test(url)) return null;
+  return url;
+}
 function validatePostAttachments(value, origin) {
   if (value == null) return [];
   if (!Array.isArray(value) || !value.length || value.length > MAX_POST_IMAGES) throw Object.assign(new Error('图片数量无效，最多' + MAX_POST_IMAGES + '张'), { code: 'invalid_attachments' });
@@ -41,7 +53,9 @@ async function loadPostAttachments(db, posts) {
     list.forEach((item, index) => { item.position = index; });
     const items = getPostMediaItems(Object.assign({}, post, { media_items: list }));
     const marked = items.find(item => item.__poster);
-    return Object.assign({}, post, { poster_url: marked ? marked.media_url : null, media_items: items });
+    // 新视频帖的封面存在内容元数据里；老帖没有就是 null，由前端退回首帧。
+    const posterUrl = marked ? marked.media_url : contentPosterUrl(post.content);
+    return Object.assign({}, post, { poster_url: posterUrl || null, media_items: items });
   });
 }
 async function createPostWithAttachments(db, actor, payload, attachments) {

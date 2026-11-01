@@ -1825,6 +1825,7 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
             fileSize: null,
             originalSize: null,
             mimeType: "",
+            poster_url: "",
         };
         let postSearchState = {
             keyword: "",
@@ -2501,6 +2502,9 @@ function isAdmin() {
                 location_city: post && post.location_city ? post.location_city : metaLocationCity,
                 location_district: post && post.location_district ? post.location_district : metaLocationDistrict,
                 location_level: post && post.location_level ? post.location_level : metaLocationLevel,
+                // 视频封面：后端能从帖子内容里解析出来就优先用它，解析不到再退回内容元数据。
+                // 封面单独存放而不是当附件，是因为带附件的帖子会被写成图片帖，视频会丢。
+                poster_url: (post && post.poster_url) || meta.poster_url || "",
                 media_items: window.XtjPostMedia ? window.XtjPostMedia.getPostMediaItems(Object.assign({}, post, { _contentMeta: meta })) : (post && post.media_items),
                 _contentMeta: meta
             });
@@ -11717,7 +11721,7 @@ function renderProfileActivityList(kind) {
                 btn.dataset.originalText = btn.textContent;btn._composeMarkup=btn.innerHTML;
                 btn.innerHTML = '<span>发布中</span>';
                 if (window.XtjPostPublishProgress) flight.progress = window.XtjPostPublishProgress.begin(btn, selectedPostMedia, function() { return postPublishIdentityCurrent(flight); });
-                var uploadedPath = '', mediaUploadId = '', uploadedMedia = [];
+                var uploadedPath = '', mediaUploadId = '', uploadedMedia = [], posterUrl = '';
                 try {
                     var media_url = "";
                     var media_type = "";
@@ -11730,6 +11734,7 @@ function renderProfileActivityList(kind) {
                             uploadedPath = cachedUpload.uploadedPath;
                             mediaUploadId = cachedUpload.mediaUploadId;
                             uploadedMedia = cachedUpload.uploadedMedia.slice();
+                            posterUrl = cachedUpload.posterUrl || '';
                             reusedUpload = true;
                         } else {
                             var uploaded = await window.XtjPostMedia.mapUploads(selectedPostMedia, async function(selectedFile, position) {
@@ -11756,31 +11761,20 @@ function renderProfileActivityList(kind) {
                             media_type = uploaded.length > 1 ? 'album' : uploaded[0].media_type;
                             if (media_type === 'album' || media_type === 'image') attachments = uploaded;
                             else { uploadedPath = uploaded[0].storage_path; mediaUploadId = uploaded[0].upload_id; }
-                            // 视频帖把选片时截的那一帧作为图片附件一起上传，后端会把它拆成 poster_url。
-                            // 没有它，视频在信息流里是一块黑底，分享到微信也只能退回发布者头像。
+                            // 视频封面：单独上传成一张图片，但**绝对不能**放进 attachments。
+                            // 发布接口和数据库函数 create_post_with_attachments 都把「带附件的帖子」
+                            // 强制写成 image/album，视频帖一挂附件就变成图片帖，视频直接丢失。
+                            // 所以封面走帖子内容里的元数据（poster_url），帖子本体仍是纯视频。
                             if (media_type === 'video' && window.XtjPostComposerMedia && typeof window.XtjPostComposerMedia.posterFile === 'function') {
-                                try {
-                                    var posterFile = window.XtjPostComposerMedia.posterFile(selectedPostMedia[0]);
-                                    if (posterFile && posterFile.size > 0 && posterFile.size <= window.XtjPostMedia.MAX_POST_FILE_BYTES) {
-                                        var posterPath = buildStorageUploadPath('posts', posterFile.name), posterUploadId = crypto.randomUUID();
-                                        var pendingPoster = { storage_path: posterPath, upload_id: posterUploadId };
-                                        uploadedMedia.push(pendingPoster);
-                                        rememberPendingPostMedia(flight.owner, posterPath, posterUploadId);
-                                        var posterPrepare = await window.xtjProtectedFetch('/api/post/media/prepare', { method: 'POST', authOwner: flight.owner, authEpoch: flight.epoch, body: JSON.stringify(pendingPoster) });
-                                        var posterPrepared = await posterPrepare.json();
-                                        assertPostPublishIdentity(flight);
-                                        if (posterPrepare.ok && posterPrepared.ok) {
-                                            var posterUpload = await sb.storage.from('uploads').upload(posterPath, posterFile, { upsert: false, cacheControl: '31536000' });
-                                            if (posterUpload.error) throw posterUpload.error;
-                                            var posterDims = await readPostImageDimensions(posterFile);
-                                            assertPostPublishIdentity(flight);
-                                            attachments = [Object.assign({}, pendingPoster, posterDims, { position: 0, media_type: 'image',
-                                                media_url: sb.storage.from('uploads').getPublicUrl(posterPath).data.publicUrl, file_size: posterFile.size })];
-                                        }
-                                    }
-                                } catch (_) {
-                                    // 封面只是锦上添花，失败不能连累视频发布；附件为空时帖子照常发。
-                                    attachments = [];
+                                var posterFile = null;
+                                try { posterFile = window.XtjPostComposerMedia.posterFile(selectedPostMedia[0]); } catch (_) { posterFile = null; }
+                                if (posterFile && posterFile.size > 0 && posterFile.size <= window.XtjPostMedia.MAX_POST_FILE_BYTES) {
+                                    var posterPath = buildStorageUploadPath('posts', posterFile.name);
+                                    var posterUpload = await sb.storage.from('uploads').upload(posterPath, posterFile, { upsert: false, cacheControl: '31536000' })
+                                        .catch(function () { return { error: true }; });
+                                    assertPostPublishIdentity(flight);
+                                    // 封面传失败就当作没有封面，帖子照常发，不让它连累视频。
+                                    if (!posterUpload.error) posterUrl = sb.storage.from('uploads').getPublicUrl(posterPath).data.publicUrl;
                                 }
                             }
                             postUploadCache.set(requestKey, {
@@ -11789,14 +11783,15 @@ function renderProfileActivityList(kind) {
                                 attachments: attachments.slice(),
                                 uploadedPath: uploadedPath,
                                 mediaUploadId: mediaUploadId,
-                                uploadedMedia: uploadedMedia.slice()
+                                uploadedMedia: uploadedMedia.slice(),
+                                posterUrl: posterUrl || ''
                             });
                         }
                     } else if (file) {
                         throw new Error('附件模块未加载，请刷新后重试');
                     }
                     var plainText = content.slice(0, 2000);
-                    var metadata = collectPostMetadata ? collectPostMetadata(visibility, { location: publishLocation }) : { visibility: visibility || "public" };
+                    var metadata = collectPostMetadata ? collectPostMetadata(visibility, { location: publishLocation, poster_url: posterUrl || '' }) : { visibility: visibility || "public" };
                     var contentPayload = buildPostContentPayload(plainText, metadata);
                     var payload = {
                         user_name: flight.owner,

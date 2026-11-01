@@ -328,7 +328,7 @@ function createPhotoAccess({ app, supabase, supabaseUrl, secret, authenticateUse
         // 微信抓取端对 webp 支持不稳定，这里显式要 JPEG。
         if (avatarPath) avatarUrl = origin + avatarPath + '&size=large&format=jpg';
       } catch (_) { avatarUrl = ''; }
-      res.set({'Cache-Control':'no-store, private','Referrer-Policy':'no-referrer'}).type('html').send(renderPostSharePage(row, items, origin, preview, { avatarUrl, sharer:String(req.query.from || '') }));
+      res.set({'Cache-Control':'no-store, private','Referrer-Policy':'no-referrer'}).type('html').send(renderPostSharePage(posts[0] || row, items, origin, preview, { avatarUrl, sharer:String(req.query.from || ''), poster: sharePosterUrl(origin, posts[0] && posts[0].poster_url) }));
     } catch (_) { unavailable(res); }
   });
   return { photo, codec, authenticateMedia, migrate: () => migratePhotoStorage(supabase) };
@@ -525,6 +525,21 @@ function linkCardHtml(preview) {
   return '<section class="lblock">' + card + audio + '</section>';
 }
 
+// 把存储里的封面转成同源 1080 JPEG 预览：私有桶地址微信抓不到，webp 微信也不认。
+function sharePosterUrl(origin, value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  let path = '';
+  const stored = raw.match(/\/storage\/v1\/object\/public\/uploads\/([^?#]+)/);
+  if (stored) path = decodeURIComponent(stored[1]);
+  else if (/^\/?api\/uploads\/media\?/.test(raw)) {
+    const match = raw.match(/[?&]path=([^&#]+)/);
+    if (match) path = decodeURIComponent(match[1]);
+  }
+  if (!path || !/^posts\//.test(path)) return '';
+  return origin + '/api/uploads/media?path=' + encodeURIComponent(path) + '&preview=1&format=jpeg';
+}
+
 // 单个帖子的公开分享页：正文 + 图片（可点开缩放）+ 音视频，游客无需登录即可查看。
 // og:* 元信息让微信在聊天里展示帖子标题与摘要，而不是一条裸链接。
 function renderPostSharePage(row, items, origin, preview = null, options = {}) {
@@ -539,6 +554,9 @@ function renderPostSharePage(row, items, origin, preview = null, options = {}) {
   const plain = text.replace(POST_URL_RE, ' ').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
   const firstImage = media.find(item => /^(image|photo)$/.test(String(item.media_type || '')));
   const isVideo = String(row.media_type || '') === 'video';
+  // 视频封面单独存在帖子内容里（不能当附件，否则帖子会被写成图片帖）。
+  // 这里已经转成同源 1080 JPEG 预览地址，微信才抓得到。
+  const videoPoster = String((options && options.poster) || '');
   // 标题统一「某某 分享的帖子」；某某优先取分享者，拿不到分享者才退回帖子作者。
   const title = (sharer || author) + ' 分享的帖子';
   // 描述统一「正文 · 来自 某某 的帖子，点开即可查看」；带图片的帖子正文由图片承担，不再重复文字。
@@ -550,10 +568,10 @@ function renderPostSharePage(row, items, origin, preview = null, options = {}) {
   // 纯文字帖没有配图时用发布者头像，而不是站点默认封面——好友一眼能看出是谁发的。
   // 有图帖必须给微信一张「能抓到的图」：原图常常 1-4MB、4032px，微信抓取端会直接放弃，
   // 卡片就变成灰块。这里固定用 1080 宽 JPEG 预览（约 100KB），格式也避开 webp。
-  const shareCover = firstImage ? origin + firstImage.share_media_url + '?preview=1&format=jpeg' : '';
+  const shareCover = firstImage ? origin + firstImage.share_media_url + '?preview=1&format=jpeg' : videoPoster;
   const shareImage = shareCover || (preview && preview.image) || avatarUrl || origin + '/img/share-cover-v2.jpg';
   // 只有回退到站点默认封面时才声明 1200×1200，避免给真实图片/头像标错尺寸。
-  const coverMeta = firstImage || (preview && preview.image) || avatarUrl ? '' : '<meta property="og:image:width" content="1200"><meta property="og:image:height" content="1200">';
+  const coverMeta = firstImage || videoPoster || (preview && preview.image) || avatarUrl ? '' : '<meta property="og:image:width" content="1200"><meta property="og:image:height" content="1200">';
   const card = linkCardHtml(preview);
   const textBlock = plain ? '<p class="text">' + html(plain) + '</p>' : '';
   const date = html(String(row.created_at || '').slice(0, 10));
@@ -570,7 +588,7 @@ function renderPostSharePage(row, items, origin, preview = null, options = {}) {
     if (/^(image|photo)$/.test(kind)) return `<article><button class="photo" aria-label="查看第${index + 1}张图片"><img data-original="${html(url)}" src="${html(url + '?preview=1')}" alt="${html(text.slice(0, 60) || '帖子图片')}" loading="${index ? 'lazy' : 'eager'}"></button><button class="retry" hidden>图片未加载 · 点击重试</button></article>`;
     // 视频不预加载：preload=none 下，没点播放就不会向存储要一个字节。
     // 封面用上传时截的首帧（1080 JPEG），既出图快，也避免默认黑块。
-    if (kind === 'video') return `<section class="media"><video controls playsinline preload="none"${firstImage ? ` poster="${html(origin + firstImage.share_media_url + '?preview=1&format=jpeg')}"` : ''} src="${html(url)}"></video></section>`;
+    if (kind === 'video') return `<section class="media"><video controls playsinline preload="none"${firstImage ? ` poster="${html(origin + firstImage.share_media_url + '?preview=1&format=jpeg')}"` : (videoPoster ? ` poster="${html(videoPoster)}"` : '')} src="${html(url)}"></video></section>`;
     if (kind === 'audio') return `<section class="media"><audio controls preload="metadata" src="${html(url)}"></audio></section>`;
     return '';
   }).join('');

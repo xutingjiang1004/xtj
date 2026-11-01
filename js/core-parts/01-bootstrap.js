@@ -1819,6 +1819,7 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
             fileSize: null,
             originalSize: null,
             mimeType: "",
+            poster_url: "",
         };
         let postSearchState = {
             keyword: "",
@@ -2495,6 +2496,9 @@ function isAdmin() {
                 location_city: post && post.location_city ? post.location_city : metaLocationCity,
                 location_district: post && post.location_district ? post.location_district : metaLocationDistrict,
                 location_level: post && post.location_level ? post.location_level : metaLocationLevel,
+                // 视频封面：后端能从帖子内容里解析出来就优先用它，解析不到再退回内容元数据。
+                // 封面单独存放而不是当附件，是因为带附件的帖子会被写成图片帖，视频会丢。
+                poster_url: (post && post.poster_url) || meta.poster_url || "",
                 media_items: window.XtjPostMedia ? window.XtjPostMedia.getPostMediaItems(Object.assign({}, post, { _contentMeta: meta })) : (post && post.media_items),
                 _contentMeta: meta
             });
