@@ -55,7 +55,7 @@ test('research pipeline: cache/rewrite/persist helpers remain intact', () => {
 test('POST /api/agent/research/stream is authenticated, rate-limited and SSE-forwarded', () => {
   const source = routeSource('post', '/api/agent/research/stream', "app.post('/api/agent/chat/delete'");
   assert.match(source, /authenticateUser/);
-  assert.match(source, /rateLimit\(3600000,\s*20\)/);
+  assert.match(source, /rateLimit\(3600000,\s*AI_CHAT_HOURLY_IP_LIMIT\)/); // shares the cat AI chat IP limit
   assert.match(source, /text\/event-stream/);
   assert.match(source, /flushHeaders\(\)/);
   // 心跳：每 4s 检查，沉默 ≥8s 发 heartbeat

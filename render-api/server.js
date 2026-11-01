@@ -25643,6 +25643,7 @@ async function runResearchSubAgent(opts) {
   var sharedPrefix = opts.sharedPrefix || '';
   var cancelToken = opts.cancelToken || { cancelled: false };
   var onSearch = opts.onSearch || function () {};
+  var onActivity = typeof opts.onActivity === 'function' ? opts.onActivity : function () {};
   var deep = opts.deep !== false; // pro/auto 走双阶段(海量检索→自主深度思考)；mini 走单阶段(检索→简要结论)
 
   // ★ 取消中断：客户端断开/取消时立即 abort 在途 DeepSeek 调用，避免跑满超时继续烧 token
@@ -25672,10 +25673,12 @@ async function runResearchSubAgent(opts) {
       if (agent.need_search !== false) for (var ti=0; ti<Math.min(terms.length,3); ti++) {
         if (subAbortCtrl.signal.aborted || cancelToken.cancelled) break;
         var beforeSearch = customSearch.searchConsumed;
+        try { onActivity({ kind: 'search', text: terms[ti], role: agent.role }); } catch (_eAct) {}
         var search = await searchWebForUser(opts.userName,terms[ti],5,customSearch);
         if (search && (search.search_quota_exceeded || search.quota_service_unavailable)) break;
         if (customSearch.searchConsumed > beforeSearch) onSearch();
         customQueries.push(terms[ti]);
+        try { (search && search.results || []).slice(0, 3).forEach(function(item) { if (item && item.url) onActivity({ kind: 'read', url: item.url, title: item.title || '', role: agent.role }); }); } catch (_eAct2) {}
         (search && search.results || []).slice(0,5).forEach(function(item) { if (item && item.url) customSources.push({title:item.title || '',url:item.url,snippet:item.snippet || '',summary:item.summary || ''}); });
       }
       if (subAbortCtrl.signal.aborted || cancelToken.cancelled) return {content:'',sources:customSources,queries:customQueries,usage:null};
@@ -25733,6 +25736,15 @@ async function runResearchSubAgent(opts) {
       signal: subAbortCtrl.signal,
       onContentChunk: function (c) { rawMaterial += c; },
       onSources:function(items){items.forEach(function(item){if(sources.length<100&&!sources.some(function(existing){return existing.url===item.url;}))sources.push(item);});},
+      onToolCall: function (list) {
+        (Array.isArray(list) ? list : []).slice(0, 8).forEach(function (t) {
+          var args = {};
+          try { args = JSON.parse((t && t.args) || '{}'); } catch (_eArgs) { args = {}; }
+          var name = t && t.name;
+          if ((name === 'search_web' || name === 'tavily_search') && args.query) onActivity({ kind: 'search', text: String(args.query), role: agent.role });
+          else if (name === 'read_web_page' && args.url) onActivity({ kind: 'read', url: String(args.url), role: agent.role });
+        });
+      },
       onSearchStatus: function (s) { if (s === 'completed') { searchCount++; onSearch(); } }
     });
     if (!rawMaterial && r1 && r1.content) rawMaterial = r1.content;
@@ -26071,6 +26083,26 @@ async function runSelfResearchFlow(opts) {
   if (checkpointHeartbeat && checkpointHeartbeat.unref) checkpointHeartbeat.unref();
   if (opts.resumed) sseSend({ type:'research_stage', stage:'resume', message:'已恢复断点，复用 ' + (frontier.workers || []).filter(function(w) { return w && w.status === 'success'; }).length + ' 个已完成的研究方向，仅继续未完成阶段。' });
   function emitThinking(role, chunk) { if (!isCancelled() && chunk) sseSend({type:'research_thinking',agent_role:role,chunk:String(chunk)}); }
+  // 实时活动：搜了什么、打开了哪个网页，直接推给前端卡片显示（只带网页的域名和路径，不含查询参数，单次研究最多 120 条）。
+  var activityCount = 0;
+  function emitActivity(item) {
+    if (!item || isCancelled() || activityCount >= 120) return;
+    var out = { type: 'research_activity', kind: item.kind === 'read' ? 'read' : 'search', role: String(item.role || '').slice(0, 40) };
+    if (out.kind === 'search') {
+      out.text = String(item.text || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+      if (!out.text) return;
+    } else {
+      try {
+        var u = new URL(String(item.url || ''));
+        if (u.protocol !== 'https:' && u.protocol !== 'http:') return;
+        out.host = u.hostname.replace(/^www\./, '').slice(0, 80);
+        out.url = (u.origin + u.pathname).slice(0, 300);
+      } catch (_eUrl) { return; }
+      out.title = String(item.title || '').replace(/\s+/g, ' ').trim().slice(0, 100);
+    }
+    activityCount++;
+    sseSend(out);
+  }
   function sseSend(obj) {
     if (res.writableEnded) return;
     processLog.record(obj);
@@ -26204,6 +26236,7 @@ async function runSelfResearchFlow(opts) {
       model:activeResearchModel, customModel:researchCustomModel, userName:userName,
       cancelToken: cancelToken, deep: deepMode, signal: flowAbortCtrl.signal,
       onThinkingChunk: function(chunk) { emitThinking(agent.role+' · 分析',chunk); },
+      onActivity: emitActivity,
       onSearch: function () { searchCountTotal++; board.search(); }
     }).then(async function (wr) {
       if (wr && wr.sources) wr.sources.forEach(function (s) { allSources.push(s); });
@@ -26277,6 +26310,7 @@ async function runSelfResearchFlow(opts) {
             cancelToken: cancelToken,
             signal: flowAbortCtrl.signal,
             deep: false, // 补充轮只补事实，不再做二次长思考（控制时延）
+            onActivity: emitActivity,
             onSearch: function () { searchCountTotal++; board.search(); }
           }).then(async function (wr) {
             if (wr && wr.sources) wr.sources.forEach(function (s) { allSources.push(s); });
@@ -26441,7 +26475,7 @@ require('./ai-workbench').registerWorkbenchRoutes(app,{authenticateUser:authenti
 //   4) 24h LRU 缓存（key=sha256(query+model+mode)，命中直接回放）
 //   5) 最终报告持久化到 posts（type=tavily_research 以兼容历史读取），research_done 携带 message_id
 // 事件：research_stage / research_step / research_content / research_sources / research_done / heartbeat / error
-app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, rateLimit(3600000, 20), express.json({limit:'80mb'}), aiRequestMiddleware, async (req, res) => {
+app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), express.json({limit:'80mb'}), aiRequestMiddleware, async (req, res) => {
   var aborted = false;
   var _researchAbort = new AbortController();
   var cancelToken = { cancelled: false };

@@ -186,8 +186,8 @@ test('S9-6: 前端对 concurrent 不得回退到 deep think（否则必然二次
   //   直接 indexOf 会命中注释中的这段文字，造成"终结分支在 fallback 之后"的假阴性。
   const block = stripComments(src.slice(catchIdx, catchIdx + 4000));
 
-  assert.match(block, /var isConcurrent = errCode === 'concurrent' \|\| \/上一个\(研究\)\?请求\|请等待上一个\/\.test\(errMsg\);/,
-    '必须识别 concurrent 类错误');
+  assert.match(block, /var isConcurrent = errCode === 'concurrent' \|\| errCode === 'ai_concurrent_limit' \|\| \/上一个\(研究\)\?请求\|请等待上一个\|已有进行中的 AI 请求\/\.test\(errMsg\);/,
+    '必须识别 concurrent 类错误（含聊天并发闸 ai_concurrent_limit）');
   assert.match(block, /if \(isConcurrent \|\| isQuota \|\|[^\n]+\) \{/,
     'concurrent / 配额类错误必须走终结分支');
   // 终结分支必须在 `return 'fallback'` 之前

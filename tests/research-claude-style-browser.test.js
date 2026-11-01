@@ -16,7 +16,7 @@ test('a research run shows a compact card with sources and time, and opens a she
     assert.match(await p.locator('.dt-research-options-label').textContent(),/深度 · /);
     assert.equal(await p.locator('.dt-research-model-select').isVisible(),false);
     await p.locator('.dt-research-options-toggle').click();assert.equal(await p.locator('.dt-research-model-select').isVisible(),true);
-    await p.locator('.dt-research-options-toggle').click();assert.equal(await p.locator('.dt-research-model-select').isVisible(),false);
+    await p.locator('.dt-research-options-toggle').click();await p.waitForFunction(()=>getComputedStyle(document.querySelector('.dt-research-options-pop')).visibility==='hidden');assert.equal(await p.locator('.dt-research-model-select').isVisible(),false);
     await p.locator('#dtInput').fill('《末路兼职》结局与剧情解析');await p.locator('#dtSendBtn').click();await p.waitForFunction(()=>aiPolish.streams.length>=1);
     await emit(p,{type:'research_stage',stage:'rewrite',message:'正在优化研究问题…'});
     await emit(p,{type:'research_stage',stage:'rewrite_done',message:'任务已拆解'});await emit(p,{type:'research_stage',stage:'collect',message:'并行研究中'});
@@ -117,4 +117,78 @@ test('a research report restored from history shows the same card with its topic
     assert.equal(await p.locator('.ai-rs-domain').count(),4);assert.equal(await p.locator('.ai-rs-step.is-done').count(),await p.locator('.ai-rs-step').count());
     assert.deepEqual(f.errors,[]);
   }finally{await f.close();}
+});
+
+test('live activity: searches and pages show on the card without opening the sheet, keep the latest 4, and collapse when the report starts',{timeout:60000},async()=>{
+  const f=await aiPolishFixture(),p=f.page;
+  try{
+    await start(p);
+    await emit(p,{type:'research_stage',stage:'collect',message:'并行研究中'});
+    await emit(p,{type:'research_activity',kind:'search',text:'末路兼职 结局 解析',role:'剧情'});
+    await emit(p,{type:'research_activity',kind:'read',host:'en.wikipedia.org',url:'https://en.wikipedia.org/wiki/X',title:'末路兼职 - 维基百科',role:'剧情'});
+    await p.waitForFunction(()=>document.querySelectorAll('.ai-rc-live-item').length===2);
+    const rows=await p.evaluate(()=>[...document.querySelectorAll('.ai-rc-live-item')].map(li=>[li.className,li.querySelector('.ai-rc-live-verb').textContent,li.querySelector('.ai-rc-live-main').textContent]));
+    assert.deepEqual(rows.map(r=>r.slice(1)),[['搜索','末路兼职 结局 解析'],['读取','末路兼职 - 维基百科']]);
+    assert.match(rows[1][0],/is-active/);assert.doesNotMatch(rows[0][0],/is-active/);
+    assert.equal(await p.locator('.ai-rc-live').isVisible(),true);assert.equal(await p.locator('.ai-rs-overlay').count(),0);
+    // duplicates are ignored; only the newest four stay
+    await emit(p,{type:'research_activity',kind:'search',text:'末路兼职 结局 解析'});
+    for(const t of ['第二季 续订','演员 采访','收视率','导演 访谈'])await emit(p,{type:'research_activity',kind:'search',text:t});
+    await p.waitForFunction(()=>document.querySelectorAll('.ai-rc-live-item:not(.is-leaving)').length===4&&document.querySelectorAll('.ai-rc-live-item').length<=5);
+    await p.waitForFunction(()=>document.querySelectorAll('.ai-rc-live-item').length===4);
+    assert.equal(await p.evaluate(()=>[...document.querySelectorAll('.ai-rc-live-main')].pop().textContent),'导演 访谈');
+    // unsafe or odd input is rendered as text only
+    await emit(p,{type:'research_activity',kind:'search',text:'<img src=x onerror=alert(1)>'});
+    assert.equal(await p.locator('.ai-rc-live img').count(),0);
+    await emit(p,{type:'research_stage',stage:'synthesize',message:'正在综合生成中文报告…'});await emit(p,{type:'research_content',content:'## 结论\n\n正文'});
+    await p.waitForFunction(()=>!document.querySelector('.ai-rc-live'));
+    assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+test('the strength and model chooser is a floating panel that closes by itself after a pick, outside click or Escape, and the old research board is gone',{timeout:60000},async()=>{
+  const f=await aiPolishFixture(),p=f.page;
+  try{
+    await p.locator('.ai-deep-think-toggle').click();await p.waitForSelector('#panelDeepThink.active');
+    const open=()=>p.locator('.dt-research-options').evaluate(n=>n.classList.contains('is-open'));
+    const before=await p.locator('#dtInput').boundingBox();
+    await p.locator('.dt-research-options-toggle').click();assert.equal(await open(),true);
+    assert.equal(await p.locator('.dt-research-mode-bar').isVisible(),true);
+    const after=await p.locator('#dtInput').boundingBox();assert.equal(after.y,before.y,'opening must not push the input');
+    await p.locator('.dt-research-mode-opt').first().click();
+    await p.waitForFunction(()=>!document.querySelector('.dt-research-options').classList.contains('is-open'));
+    assert.match(await p.locator('.dt-research-options-label').textContent(),/快速 · /);
+    assert.equal(await p.locator('.dt-research-options-toggle').getAttribute('aria-expanded'),'false');
+    await p.locator('.dt-research-options-toggle').click();assert.equal(await open(),true);
+    await p.locator('.dt-research-model-select').selectOption('flash');
+    await p.waitForFunction(()=>!document.querySelector('.dt-research-options').classList.contains('is-open'));
+    assert.match(await p.locator('.dt-research-options-label').textContent(),/Flash/);
+    await p.locator('.dt-research-options-toggle').click();assert.equal(await open(),true);
+    await p.mouse.click(40,300);await p.waitForFunction(()=>!document.querySelector('.dt-research-options').classList.contains('is-open'));
+    await p.locator('.dt-research-options-toggle').click();assert.equal(await open(),true);
+    await p.keyboard.press('Escape');await p.waitForFunction(()=>!document.querySelector('.dt-research-options').classList.contains('is-open'));
+    // a research run never renders the old board, even when the server sends it
+    await p.locator('.dt-research-options-toggle').click();await p.locator('.dt-research-mode-opt').nth(1).click();await p.waitForFunction(()=>!document.querySelector('.dt-research-options').classList.contains('is-open'));
+    await p.locator('#dtInput').fill('测试深入研究看板是否出现');await p.locator('#dtSendBtn').click();await p.waitForFunction(()=>aiPolish.streams.length>=1);
+    await emit(p,{type:'research_board',directions:[{id:'a',role:'方向一',status:'running'}],search_calls:2,usage:{}});
+    await emit(p,{type:'research_sources',sources:ALL.slice(0,3)});
+    await p.waitForFunction(()=>/3 个来源/.test(document.querySelector('.ai-rc-meta-line')?.textContent||''));
+    assert.equal(await p.locator('.ai-research-board').count(),0);
+    assert.deepEqual(f.errors,[]);
+  }finally{await f.close();}
+});
+
+test('a rate-limit or busy 429 on the research route is explained honestly and never shown as an exhausted quota or a dropped connection',{timeout:60000},async()=>{
+  for(const [status,body,expected] of [[429,{error:'请求过于频繁，请稍后再试',code:'RATE_LIMITED',retry_after:45},/请求过于频繁/],[429,{error:'已有进行中的 AI 请求，请等它完成后再发下一条',code:'ai_concurrent_limit',retry_after:5},/仍在进行中/]]){
+    const f=await aiPolishFixture(),p=f.page;
+    try{
+      await p.locator('.ai-deep-think-toggle').click();await p.waitForSelector('#panelDeepThink.active');
+      await p.evaluate(([status,body])=>{const base=window.fetch;window.fetch=async(url,opts={})=>{if(new URL(url,location.href).pathname.endsWith('/research/stream')){window.__researchHits=(window.__researchHits||0)+1;return new Response(JSON.stringify(body),{status,headers:{'Content-Type':'application/json'}});}return base(url,opts);};},[status,body]);
+      await p.locator('#dtInput').fill('测试额度提示是否如实显示');await p.locator('#dtSendBtn').click();
+      await p.waitForFunction(()=>document.querySelector('.ai-rc')?.getAttribute('data-rc-state')==='failed');
+      const meta=await p.locator('.ai-rc-meta-line').textContent();
+      assert.match(meta,expected);assert.doesNotMatch(meta,/额度已达上限|开通 Pro|连接中断/);
+      assert.equal(await p.evaluate(()=>window.__researchHits),1,'a 429 must not trigger the legacy deep-think fallback');
+      assert.equal(await p.evaluate(()=>aiPolish.streams.length),0,'no second request is made');
+    }finally{await f.close();}
+  }
 });

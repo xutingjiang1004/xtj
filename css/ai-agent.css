@@ -8582,5 +8582,39 @@ html body #panelDeepThink .dt-research-options-toggle { display: inline-flex; al
 html body #panelDeepThink .dt-research-options-toggle svg { transition: transform 200ms cubic-bezier(.16, 1, .3, 1); }
 html body #panelDeepThink .dt-research-options.is-open .dt-research-options-toggle svg { transform: rotate(180deg); }
 html[data-theme="dark"] body #panelDeepThink .dt-research-options-toggle { border-color: rgba(255, 255, 255, .16); color: #a9c2b8; }
-#panelDeepThink .dt-research-options > .dt-research-mode-bar, #panelDeepThink .dt-research-options > .dt-research-model-bar { display: none !important; padding-left: 0 !important; padding-right: 0 !important; }
-#panelDeepThink .dt-research-options.is-open > .dt-research-mode-bar, #panelDeepThink .dt-research-options.is-open > .dt-research-model-bar { display: flex !important; }
+/* 浮在摘要上方的小面板：不挤压输入区，选好后自动收起（淡入 + 上移，只用 opacity / transform）。 */
+#panelDeepThink .dt-research-options { position: relative; }
+html body #panelDeepThink .dt-research-options-pop {
+  position: absolute; left: 16px; bottom: calc(100% + 6px); z-index: 6; display: flex; flex-direction: column; gap: 2px; min-width: 260px; max-width: min(360px, calc(100vw - 32px)); padding: 10px 12px 12px; box-sizing: border-box;
+  border: 1px solid rgba(23, 35, 30, .12); border-radius: 14px; background: #fff; box-shadow: 0 10px 30px rgba(23, 35, 30, .16);
+  opacity: 0; transform: translateY(6px) scale(.98); transform-origin: left bottom; pointer-events: none; visibility: hidden;
+  transition: opacity 160ms ease, transform 200ms cubic-bezier(.16, 1, .3, 1), visibility 0s linear 200ms;
+}
+html[data-theme="dark"] body #panelDeepThink .dt-research-options-pop { background: #1a221f; border-color: rgba(255, 255, 255, .14); box-shadow: 0 10px 30px rgba(0, 0, 0, .5); }
+html body #panelDeepThink .dt-research-options.is-open .dt-research-options-pop { opacity: 1; transform: none; pointer-events: auto; visibility: visible; transition-delay: 0s; }
+#panelDeepThink .dt-research-options-pop > .dt-research-mode-bar, #panelDeepThink .dt-research-options-pop > .dt-research-model-bar { display: flex !important; padding-left: 0 !important; padding-right: 0 !important; }
+@media (prefers-reduced-motion: reduce) { html body #panelDeepThink .dt-research-options-pop { transition: none; } }
+
+/* 实时活动：卡片下面滚动显示「搜索 xxx / 读取 xxx」，最新一条在底部；结束时整块平滑收起。 */
+.ai-rc-live { display: grid; grid-template-rows: 1fr; margin: 10px 4px 0; transition: grid-template-rows 280ms cubic-bezier(.16, 1, .3, 1), opacity 240ms ease, margin 280ms ease; }
+.ai-rc-live:not(.has-items) { display: none; }
+.ai-rc-live.is-closing { grid-template-rows: 0fr; opacity: 0; margin-top: 0; }
+.ai-rc-live-list { list-style: none; margin: 0; padding: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 2px; }
+.ai-rc-live-item { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 5px 0; font-size: 13.5px; line-height: 1.4; color: var(--rc-muted, #6e8a84); max-height: 40px; opacity: .55;
+  animation: aiRcLiveIn 280ms cubic-bezier(.16, 1, .3, 1) both; transition: opacity 240ms ease, max-height 280ms ease, padding 280ms ease; will-change: transform, opacity; }
+.ai-rc-live-item.is-active { opacity: 1; color: var(--rc-ink, #17231e); }
+.ai-rc-live-item.is-leaving { opacity: 0; max-height: 0; padding-top: 0; padding-bottom: 0; overflow: hidden; }
+.ai-rc-live-icon { flex: none; display: grid; place-items: center; width: 20px; height: 20px; color: var(--rc-accent, #0e7a5b); }
+.ai-rc-live-icon .ai-rc-fav { margin: 0; border: 0; }
+.ai-rc-live-item.is-active .ai-rc-live-icon svg { animation: aiRcLiveSpin 1.6s ease-in-out infinite; transform-origin: 50% 50%; }
+.ai-rc-live-text { display: flex; align-items: baseline; gap: 6px; min-width: 0; flex: 1 1 auto; }
+.ai-rc-live-verb { flex: none; font-weight: 600; color: var(--rc-accent, #0e7a5b); }
+.ai-rc-live-main { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-rc-live-host { flex: none; max-width: 38%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; opacity: .75; }
+@keyframes aiRcLiveIn { from { opacity: 0; transform: translateY(8px); } to { transform: none; } }
+@keyframes aiRcLiveSpin { 0%, 100% { transform: translateX(0) scale(1); } 50% { transform: translateX(1.5px) scale(1.12); } }
+html body #dtMessages .ai-rc[data-rc-live="on"] .ai-rc-wait { margin-top: 6px; }
+@media (prefers-reduced-motion: reduce) { .ai-rc-live, .ai-rc-live-item { transition: none !important; animation: none !important; } .ai-rc-live-item.is-active .ai-rc-live-icon svg { animation: none; } }
+html[data-xtj-motion="off"] .ai-rc-live, html[data-xtj-motion="off"] .ai-rc-live-item { transition: none !important; animation: none !important; }
+/* 旧的「研究看板」不再显示。 */
+#dtMessages .ai-research-board { display: none !important; }

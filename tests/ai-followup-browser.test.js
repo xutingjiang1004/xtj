@@ -1,6 +1,6 @@
 'use strict';
 const test = require('node:test');
-const researchOptions=async page=>{if(await page.locator('.dt-research-options.is-open').count()===0)await page.locator('.dt-research-options-toggle').click();return page;};// 研究强度和模型收在折叠的一行摘要里，先展开
+const researchOptions=async page=>{await page.waitForTimeout(220);/* the panel closes itself shortly after a pick */if(await page.locator('.dt-research-options.is-open').count()===0)await page.locator('.dt-research-options-toggle').click();return page;};// 研究强度和模型收在折叠的一行摘要里，先展开
 const assert = require('node:assert/strict');
 const { postBrowserFixture, wireAiChat } = require('./helpers/post-browser-fixture');
 

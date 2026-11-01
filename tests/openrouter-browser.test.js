@@ -1,6 +1,6 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict');
-const researchOptions=async page=>{if(await page.locator('.dt-research-options.is-open').count()===0)await page.locator('.dt-research-options-toggle').click();return page;};// 研究强度和模型收在折叠的一行摘要里，先展开
+const researchOptions=async page=>{await page.waitForTimeout(220);/* the panel closes itself shortly after a pick */if(await page.locator('.dt-research-options.is-open').count()===0)await page.locator('.dt-research-options-toggle').click();return page;};// 研究强度和模型收在折叠的一行摘要里，先展开
 const {aiPolishFixture,openModelPicker,models}=require('./helpers/ai-polish-fixture');
 const or=require('../render-api/openrouter');
 const managed={uid:or.MODEL_UID,provider:'openrouter',model:or.modelId(),base_url:'https://openrouter.ai/api/v1',label:or.modelLabel(),provider_label:'OpenRouter',server_managed:true};
