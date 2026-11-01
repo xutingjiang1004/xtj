@@ -2763,6 +2763,8 @@ function isAdmin() {
                 dialog.setAttribute('role', 'dialog');
                 dialog.setAttribute('aria-modal', 'true');
                 var heading = document.createElement('h3'); heading.textContent = title || '请输入';
+                heading.id = 'xtjPromptTitle' + Date.now().toString(36);
+                dialog.setAttribute('aria-labelledby', heading.id);
                 var hint = document.createElement('p'); hint.textContent = message || '';
                 var input = document.createElement('input'); input.type = 'text'; input.value = initial || ''; input.maxLength = maxLength || 200;
                 var row = document.createElement('div'); row.className = 'xtj-prompt-actions';
@@ -2777,6 +2779,12 @@ function isAdmin() {
                 function onKey(event) {
                     if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(null); }
                     else if (event.key === 'Enter' && document.activeElement === input) { event.preventDefault(); close(input.value); }
+                    else if (event.key === 'Tab') {
+                        // Keep keyboard focus inside the dialog: Tab/Shift+Tab wrap between its controls.
+                        var stops = [input, cancel, ok], at = stops.indexOf(document.activeElement);
+                        event.preventDefault();
+                        stops[(at + (event.shiftKey ? stops.length - 1 : 1)) % stops.length].focus();
+                    }
                 }
                 document.addEventListener('keydown', onKey, true);
                 cancel.addEventListener('click', function () { close(null); });
