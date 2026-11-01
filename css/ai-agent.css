@@ -8617,4 +8617,4 @@ html body #dtMessages .ai-rc[data-rc-live="on"] .ai-rc-wait { margin-top: 6px; }
 @media (prefers-reduced-motion: reduce) { .ai-rc-live, .ai-rc-live-item { transition: none !important; animation: none !important; } .ai-rc-live-item.is-active .ai-rc-live-icon svg { animation: none; } }
 html[data-xtj-motion="off"] .ai-rc-live, html[data-xtj-motion="off"] .ai-rc-live-item { transition: none !important; animation: none !important; }
 /* 旧的「研究看板」不再显示。 */
-.ai-research-board { display: none !important; }
+#dtMessages .ai-research-board { display: none !important; }
