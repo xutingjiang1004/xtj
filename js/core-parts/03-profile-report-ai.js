@@ -1586,7 +1586,7 @@ function renderProfileActivityList(kind) {
                 window.__catAiPollStatus[commentIdStr] = { postId: String(postId) };
 
                 // 显示临时状态
-                showCatAiStatus(commentIdStr, '小猫正在组织毒液……');
+                showCatAiStatus(commentIdStr, '小猫正在回复中…');
 
                 function poll() {
                     if ((window._catAiCancelled || 0) !== myGlobalEpoch ||
@@ -1731,7 +1731,7 @@ function renderProfileActivityList(kind) {
                                 if (data.message && data.message.includes('同步')) {
                                     showCatAiStatus(commentIdStr, '回复已生成，正在同步……');
                                 } else {
-                                    showCatAiStatus(commentIdStr, '小猫正在组织毒液……');
+                                    showCatAiStatus(commentIdStr, '小猫正在回复中…');
                                 }
                                 window.__catAiPollTimers[commentIdStr] = setTimeout(poll, baseInterval);
                             } else {

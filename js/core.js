@@ -5057,7 +5057,7 @@ function renderProfileActivityList(kind) {
                 window.__catAiPollStatus[commentIdStr] = { postId: String(postId) };
 
                 // 显示临时状态
-                showCatAiStatus(commentIdStr, '小猫正在组织毒液……');
+                showCatAiStatus(commentIdStr, '小猫正在回复中…');
 
                 function poll() {
                     if ((window._catAiCancelled || 0) !== myGlobalEpoch ||
@@ -5202,7 +5202,7 @@ function renderProfileActivityList(kind) {
                                 if (data.message && data.message.includes('同步')) {
                                     showCatAiStatus(commentIdStr, '回复已生成，正在同步……');
                                 } else {
-                                    showCatAiStatus(commentIdStr, '小猫正在组织毒液……');
+                                    showCatAiStatus(commentIdStr, '小猫正在回复中…');
                                 }
                                 window.__catAiPollTimers[commentIdStr] = setTimeout(poll, baseInterval);
                             } else {
@@ -6264,11 +6264,11 @@ function renderProfileActivityList(kind) {
                     var atPos = -1;
                     for (var i = start - 1; i >= 0; i--) {
                         if (text[i] === '@' || text[i] === '＠') {
-                            // 检查 @ 是否在开头、空格后或换行后
-                            if (i === 0 || text[i - 1] === ' ' || text[i - 1] === '\n' || text[i - 1] === '\r') {
-                                atPos = i;
-                                break;
-                            }
+                            // ★ 2026-11-02：@ 不再要求出现在开头/空格后。
+                            //   中文输入没有空格，句尾接 "@小猫" 是常态，旧判断会整段失配，
+                            //   导致只有开头 @ 才能唤起候选框。误判由下面的前缀匹配兜底。
+                            atPos = i;
+                            break;
                         }
                     }
                     if (atPos >= 0) {
@@ -6288,10 +6288,9 @@ function renderProfileActivityList(kind) {
                     var atPos = -1;
                     for (var i = start - 1; i >= 0; i--) {
                         if (text[i] === '@' || text[i] === '＠') {
-                            if (i === 0 || text[i - 1] === ' ' || text[i - 1] === '\n' || text[i - 1] === '\r') {
-                                atPos = i;
-                                break;
-                            }
+                            // 任意位置都能唤起候选（中文语句里 @ 前后通常没有空格）
+                            atPos = i;
+                            break;
                         }
                     }
                     if (atPos < 0) { closeMentionDropdown(); return; }
@@ -9516,7 +9515,7 @@ function renderProfileActivityList(kind) {
             }
             function buildPostCommentsHtml(post, pComms, options) {
                 if (!pComms.length) return '';
-                var limit = options && options.detail ? 30 : 3;
+                var limit = options && options.detail ? 60 : 60; // 列表也一次画满，不再截断成 3 条
                       var _byId = {}; var _seen = Object.create(null); var _count = 0;
                       pComms.forEach(function(c) { _byId[String(c.id)] = c; });
                       var _childrenOf = {};
@@ -9554,10 +9553,96 @@ function renderProfileActivityList(kind) {
                 // Orphan/cyclic/deep historical replies stay readable without unbounded recursion.
                 pComms.forEach(function(c) { if (!_seen[String(c.id)] && _count < limit) html += _renderCommentNode(c, 0); });
                 var totalComments = Number.isFinite(post.comment_count) ? post.comment_count : pComms.length;
-                if (!(options && options.detail) && totalComments > _count) html += '<button type="button" class="post-all-comments" onclick="showFeedPostComments(\'' + safeJsStr(String(post.id)) + '\')">查看全部 ' + totalComments + ' 条评论</button>';
+                if (!(options && options.detail) && totalComments > _count) html += '<button type="button" class="post-all-comments" data-post-id="' + escapeHtml(String(post.id)) + '" onclick="__xtjExpandPostComments(\'' + safeJsStr(String(post.id)) + '\', this)">展开其余 ' + (totalComments - _count) + ' 条评论</button>';
                 return '<div class="comments">' + html + '</div>';
             }
             window.buildPostCommentsHtml = buildPostCommentsHtml;
+
+            // ===== 评论全展开：卡片内直接补齐该帖所有评论，不再跳详情 =====
+            // 列表接口只带每帖前 3 条评论（RPC 侧固定上限），剩余评论过去只能点进
+            // 「帖子详情」才能看到。这里按需把这些评论拉回卡片内部再重绘一次。
+            var _commentExpandInflight = Object.create(null);
+            var _commentExpandAttempted = Object.create(null);
+            window.__xtjExpandPostComments = function(postId, btn) {
+                var key = String(postId || '');
+                if (!key) return Promise.resolve(false);
+                if (_commentExpandInflight[key]) return _commentExpandInflight[key];
+                if (_commentExpandAttempted[key] && !btn) return Promise.resolve(false);
+                _commentExpandAttempted[key] = true;
+                if (btn) { btn.disabled = true; btn.textContent = '正在加载评论…'; }
+                var task = (async function() {
+                    var rows = [], cursor = null, guard = 0;
+                    try {
+                        do {
+                            var path = '/api/post/detail/' + encodeURIComponent(key) + '/relations/comments?limit=50' + (cursor ? '&cursor=' + encodeURIComponent(cursor) : '');
+                            var res = typeof window.xtjOptionalAuthFetch === 'function'
+                                ? await window.xtjOptionalAuthFetch(path, { timeoutMs: 15000 })
+                                : await fetch((window.API_BASE || '') + path, { credentials: 'include', headers: { Accept: 'application/json' } });
+                            var body = await res.json();
+                            if (!body || !body.ok) break;
+                            rows = rows.concat(Array.isArray(body.data) ? body.data : []);
+                            cursor = body.has_more && body.next_cursor ? body.next_cursor : null;
+                        } while (cursor && ++guard < 6);
+                    } catch (eExpand) {
+                        console.warn('[comments] expand failed', eExpand);
+                    }
+                    if (!rows.length) {
+                        if (btn) { btn.disabled = false; btn.textContent = '展开评论失败，点开帖子详情'; }
+                        return false;
+                    }
+                    feedAllComments = mergeFeedRecords(feedAllComments || [], rows, function(c) { return String(c.id); }, false);
+                    if (typeof window.__xtjSchedulePostCardPatch === 'function') window.__xtjSchedulePostCardPatch(key);
+                    return true;
+                })();
+                _commentExpandInflight[key] = task;
+                var clear = function() { setTimeout(function() { delete _commentExpandInflight[key]; }, 300); };
+                task.then(clear, clear);
+                return task;
+            };
+
+            // 按钮滚进视口就自动补齐 → 视觉上评论始终是全展开的，不需要用户点任何东西。
+            var _commentAutoObserver = null;
+            var _commentAutoTimer = null;
+            function autoExpandVisibleComments() {
+                if (typeof IntersectionObserver !== 'function') return;
+                var feed = document.getElementById('feed');
+                if (!feed) return;
+                if (!_commentAutoObserver) {
+                    _commentAutoObserver = new IntersectionObserver(function(entries) {
+                        entries.forEach(function(entry) {
+                            if (!entry.isIntersecting) return;
+                            var btn = entry.target;
+                            _commentAutoObserver.unobserve(btn);
+                            if (!btn.isConnected) return;
+                            var pid = btn.getAttribute('data-post-id');
+                            if (pid) window.__xtjExpandPostComments(pid, btn);
+                        });
+                    }, { rootMargin: '240px 0px' });
+                }
+                Array.prototype.forEach.call(feed.querySelectorAll('.post-all-comments[data-post-id]:not([data-auto-expand])'), function(btn) {
+                    btn.setAttribute('data-auto-expand', '1');
+                    _commentAutoObserver.observe(btn);
+                });
+            }
+            function scheduleAutoExpandComments() {
+                if (_commentAutoTimer) return;
+                _commentAutoTimer = setTimeout(function() {
+                    _commentAutoTimer = null;
+                    autoExpandVisibleComments();
+                }, 350);
+            }
+            window.__xtjAutoExpandComments = scheduleAutoExpandComments;
+            if (typeof MutationObserver === 'function') {
+                try {
+                    var _commentFeedObserver = new MutationObserver(scheduleAutoExpandComments);
+                    var _observeCommentFeed = function() {
+                        var feed = document.getElementById('feed');
+                        if (feed) _commentFeedObserver.observe(feed, { childList: true, subtree: true });
+                    };
+                    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _observeCommentFeed, { once: true });
+                    else _observeCommentFeed();
+                } catch (eObserve) { console.warn('[comments] observer init failed', eObserve); }
+            }
 
             function renderPostCard(post, commentMap, likeMap, likeUserMap) {
                 var normalized = normalizePostForRender(post);
