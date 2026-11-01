@@ -319,6 +319,153 @@
     finally {button.disabled=false;button.textContent='导出';}
   }
 
+  // ---------- AI memory manager (My page → AI 记忆) ----------
+  // 查看小猫记住了什么：列表、单条删除（点两次确认）、手动添加、清空全部、使用记忆开关。
+  var aiMemoryDialog = null;
+  function openAiMemoryManager(trigger) {
+    if (aiMemoryDialog) return;
+    var owner = window.currentUser || '';
+    if (!owner) { if (window.showToast) window.showToast('请先登录后再管理 AI 记忆', 'error'); return; }
+    var epoch = typeof window.__xtjGetAuthEpoch === 'function' ? window.__xtjGetAuthEpoch() : 0;
+    var opener = trigger || document.activeElement;
+    var state = { items: [], enabled: true, limit: 50, ready: false, failed: false, busy: false };
+    var overlay = document.createElement('div');
+    overlay.className = 'xtj-memory-overlay';
+    overlay.innerHTML =
+      '<div class="xtj-memory-dialog" id="xtjMemoryDialog" role="dialog" aria-modal="true" aria-labelledby="xtjMemoryTitle">' +
+      '<div class="xtj-memory-head"><h3 id="xtjMemoryTitle">AI 记忆</h3><button type="button" class="xtj-memory-close" aria-label="关闭">×</button></div>' +
+      '<p class="xtj-memory-sub">小猫在和你聊天时记住的内容，只用来让回答更贴合你。你可以随时删除，或关闭记忆。</p>' +
+      '<div class="xtj-memory-switch"><span id="xtjMemoryToggleLabel">使用记忆</span><button type="button" class="xtj-memory-toggle" id="xtjMemoryToggle" role="switch" aria-checked="true" aria-labelledby="xtjMemoryToggleLabel"><span class="xtj-memory-thumb"></span></button></div>' +
+      '<div class="xtj-memory-count" aria-live="polite"></div>' +
+      '<div class="xtj-memory-body"></div>' +
+      '<div class="xtj-memory-add"><input type="text" maxlength="300" placeholder="添加一条记忆，如：我喜欢简短的回答" aria-label="添加记忆"><button type="button" class="is-primary">添加</button></div>' +
+      '<div class="xtj-memory-foot"><button type="button" class="xtj-memory-clear">清空全部记忆</button></div>' +
+      '</div>';
+    var dialog = overlay.firstChild;
+    var body = dialog.querySelector('.xtj-memory-body'), count = dialog.querySelector('.xtj-memory-count');
+    var toggle = dialog.querySelector('#xtjMemoryToggle'), input = dialog.querySelector('.xtj-memory-add input');
+    var addBtn = dialog.querySelector('.xtj-memory-add button'), clearAll = dialog.querySelector('.xtj-memory-clear');
+    var closeBtn = dialog.querySelector('.xtj-memory-close');
+    function same() { return (window.currentUser || '') === owner && (typeof window.__xtjGetAuthEpoch !== 'function' || window.__xtjGetAuthEpoch() === epoch); }
+    function toast(message, kind) { if (window.showToast) window.showToast(message, kind || 'info'); }
+    function request(path, options) {
+      options = options || {};
+      var init = { method: options.method || 'GET', authOwner: owner, authEpoch: epoch, timeoutMs: 15000 };
+      if (options.body) { init.headers = { 'Content-Type': 'application/json' }; init.body = JSON.stringify(options.body); }
+      return window.xtjProtectedFetch(path, init).then(function (response) {
+        return response.json().then(function (data) { return { ok: response.ok && data && data.ok !== false, data: data || {} }; });
+      });
+    }
+    function kindLabel(kind) { return kind === 'preference' ? '偏好' : kind === 'instruction' ? '要求' : '信息'; }
+    function dateLabel(value) {
+      var d = new Date(value); if (isNaN(d.getTime())) return '';
+      return (d.getMonth() + 1) + '月' + d.getDate() + '日';
+    }
+    function render() {
+      toggle.setAttribute('aria-checked', String(state.enabled));
+      count.textContent = state.ready ? state.items.length + ' / ' + state.limit : '';
+      clearAll.hidden = !state.items.length; addBtn.disabled = state.busy || !state.ready; input.disabled = !state.ready;
+      body.textContent = '';
+      if (!state.ready) {
+        var status = document.createElement('div'); status.className = 'xtj-memory-empty';
+        status.textContent = state.failed ? '记忆暂时无法读取' : '正在读取…'; body.appendChild(status);
+        if (state.failed) { var retry = document.createElement('button'); retry.type = 'button'; retry.className = 'xtj-memory-retry'; retry.textContent = '重试'; retry.addEventListener('click', load); body.appendChild(retry); }
+        return;
+      }
+      if (!state.items.length) {
+        var empty = document.createElement('div'); empty.className = 'xtj-memory-empty';
+        empty.textContent = state.enabled ? '还没有记忆。在聊天里对小猫说「记住…」，它就会记在这里。' : '记忆已关闭，小猫不会使用也不会保存新的记忆。';
+        body.appendChild(empty); return;
+      }
+      var list = document.createElement('ul'); list.className = 'xtj-memory-list';
+      state.items.forEach(function (item) {
+        var li = document.createElement('li'); li.className = 'xtj-memory-item';
+        var text = document.createElement('div'); text.className = 'xtj-memory-text'; text.textContent = item.content;
+        var meta = document.createElement('div'); meta.className = 'xtj-memory-meta'; meta.textContent = kindLabel(item.kind) + (dateLabel(item.updated_at) ? ' · ' + dateLabel(item.updated_at) : '');
+        var info = document.createElement('div'); info.className = 'xtj-memory-info'; info.appendChild(text); info.appendChild(meta);
+        var del = document.createElement('button'); del.type = 'button'; del.className = 'xtj-memory-del'; del.textContent = '删除'; del.setAttribute('aria-label', '删除这条记忆：' + item.content.slice(0, 20));
+        var timer = 0;
+        del.addEventListener('click', function () {
+          if (!del.classList.contains('is-confirm')) {
+            del.classList.add('is-confirm'); del.textContent = '确认删除';
+            timer = setTimeout(function () { del.classList.remove('is-confirm'); del.textContent = '删除'; }, 3000); return;
+          }
+          clearTimeout(timer); del.disabled = true;
+          request('/api/user/ai-memory/' + encodeURIComponent(item.id), { method: 'DELETE' }).then(function (result) {
+            if (!same()) return;
+            if (!result.ok) { del.disabled = false; toast(result.data.error || '删除失败，请重试', 'error'); return; }
+            state.items = state.items.filter(function (x) { return x.id !== item.id; }); render(); toast('已删除', 'success');
+          }).catch(function () { del.disabled = false; toast('网络异常，删除未完成', 'error'); });
+        });
+        li.appendChild(info); li.appendChild(del); list.appendChild(li);
+      });
+      body.appendChild(list);
+    }
+    function load() {
+      state.ready = false; state.failed = false; render();
+      request('/api/user/ai-memory').then(function (result) {
+        if (!same() || !aiMemoryDialog) return;
+        if (!result.ok) { state.failed = true; render(); return; }
+        state.items = result.data.items || []; state.enabled = result.data.enabled !== false; state.limit = result.data.limit || 50; state.ready = true; render();
+      }).catch(function () { if (aiMemoryDialog && same()) { state.failed = true; render(); } });
+    }
+    function close() {
+      if (!aiMemoryDialog) return;
+      document.removeEventListener('keydown', onKey, true);
+      overlay.remove(); aiMemoryDialog = null; document.body.classList.remove('xtj-memory-open');
+      try { if (opener && opener.focus && opener.isConnected) opener.focus(); } catch (_) {}
+    }
+    function onKey(event) {
+      if (event.key === 'Escape') { event.stopPropagation(); event.preventDefault(); close(); return; }
+      if (event.key !== 'Tab') return;
+      var focusable = Array.prototype.filter.call(dialog.querySelectorAll('button, input'), function (node) { return !node.disabled && !node.hidden && node.offsetParent !== null; });
+      if (!focusable.length) return;
+      var first = focusable[0], last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    }
+    function add() {
+      var value = String(input.value || '').trim();
+      if (!value) { input.focus(); return; }
+      state.busy = true; render();
+      request('/api/user/ai-memory', { method: 'POST', body: { content: value, kind: 'fact' } }).then(function (result) {
+        state.busy = false;
+        if (!same() || !aiMemoryDialog) return;
+        if (!result.ok) { render(); toast(result.data.error || '添加失败，请重试', 'error'); return; }
+        input.value = ''; toast(result.data.duplicate ? '已经记过这一条了' : '已添加', 'success'); load();
+      }).catch(function () { state.busy = false; render(); toast('网络异常，添加未完成', 'error'); });
+    }
+    toggle.addEventListener('click', function () {
+      var next = !state.enabled; state.enabled = next; render(); toggle.disabled = true;
+      request('/api/profile/settings', { method: 'PATCH', body: { ai_memory_enabled: next } }).then(function (result) {
+        toggle.disabled = false;
+        if (!same() || !aiMemoryDialog) return;
+        if (!result.ok) { state.enabled = !next; render(); toast(result.data.error || '设置未保存，请重试', 'error'); return; }
+        toast(next ? '已开启记忆' : '已关闭记忆，小猫不会再使用或保存记忆', 'success');
+      }).catch(function () { toggle.disabled = false; state.enabled = !next; render(); toast('网络异常，设置未保存', 'error'); });
+    });
+    addBtn.addEventListener('click', add);
+    input.addEventListener('keydown', function (event) { if (event.key === 'Enter' && !event.isComposing) { event.preventDefault(); add(); } });
+    clearAll.addEventListener('click', function () {
+      var ask = typeof window.xtjConfirm === 'function' ? window.xtjConfirm('清空全部记忆', '确定清空小猫记住的全部内容吗？删除后不可恢复。', '清空') : Promise.resolve(false);
+      ask.then(function (yes) {
+        if (!yes || !same() || !aiMemoryDialog) return;
+        request('/api/user/ai-memory', { method: 'DELETE', body: { confirm: true } }).then(function (result) {
+          if (!same() || !aiMemoryDialog) return;
+          if (!result.ok) { toast(result.data.error || '清空失败，请重试', 'error'); return; }
+          state.items = []; render(); toast('已清空全部记忆', 'success');
+        }).catch(function () { toast('网络异常，清空未完成', 'error'); });
+      });
+    });
+    closeBtn.addEventListener('click', close);
+    overlay.addEventListener('mousedown', function (event) { if (event.target === overlay) close(); });
+    document.addEventListener('keydown', onKey, true);
+    aiMemoryDialog = overlay; document.body.appendChild(overlay); document.body.classList.add('xtj-memory-open');
+    render(); load();
+    setTimeout(function () { try { closeBtn.focus(); } catch (_) {} }, 0);
+  }
+  window.xtjOpenAiMemory = openAiMemoryManager;
+
   function injectProfileSettings() {
     var box = document.querySelector('#panelProfile .profile-general-settings');
     if (!box || box.querySelector('#xtjClearCacheBtn')) return;
@@ -337,11 +484,13 @@
 
     var cacheRow = row('清理本机缓存', '<button type="button" class="btn btn-ghost profile-mini-btn" id="xtjClearCacheBtn">清理</button>');
     var exportRow = row('导出我的数据', '<button type="button" class="btn btn-ghost profile-mini-btn" id="xtjExportDataBtn">导出</button>');
+    var memoryRow = row('AI 记忆', '<button type="button" class="btn btn-ghost profile-mini-btn" id="xtjAiMemoryBtn" aria-haspopup="dialog">管理</button>');
     var saveDataRow = row('减少原图预加载', '<button type="button" class="btn btn-ghost profile-mini-btn" id="xtjMediaSaveDataBtn" aria-pressed="true">已开启</button>');
     var target = document.querySelector('#panelProfile .profile-general-settings') || box;
     var about = target.lastElementChild;
     target.insertBefore(cacheRow,about);
     target.insertBefore(exportRow,about);
+    target.insertBefore(memoryRow,about);
     target.insertBefore(saveDataRow,about);
     var hapticsRow = row('操作震动', '<button type="button" class="btn btn-ghost profile-mini-btn" id="xtjHapticsBtn" aria-label="操作震动" aria-pressed="false">暂不支持</button>');
     target.insertBefore(hapticsRow,about);
@@ -379,6 +528,8 @@
     if (clearBtn) clearBtn.addEventListener('click', clearLocalCache);
     var exportBtn = document.getElementById('xtjExportDataBtn');
     if (exportBtn) exportBtn.addEventListener('click', exportMyData);
+    var memoryBtn = document.getElementById('xtjAiMemoryBtn');
+    if (memoryBtn) memoryBtn.addEventListener('click', function () { openAiMemoryManager(memoryBtn); });
   }
 
   // ---------- Site 4 announcement pulse ----------

@@ -2,19 +2,21 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),crypto=require('node:crypto');
 const server=fs.readFileSync('render-api/server.js','utf8');
 const policy=require('../render-api/ai-task-policy');
-const memorySource=server.slice(server.indexOf('// ===================== 长期记忆 ====================='),server.indexOf('// 单个工具调用的执行时限'));
+const {createAiMemory,createAiMemoryRouter}=require('../render-api/ai-memory');
 // Minimal in-memory stand-in for the chained Supabase calls the memory tools use.
 function fakeSupabase(options={}){
   const rows=[];let missing=!!options.missing;
+  const settings=options.settings||{};
   const builder=(table)=>{
-    const state={filters:[],op:'select',order:null,limit:null,payload:null,inList:null};
+    const state={filters:[],op:'select',order:null,limit:null,payload:null,inList:null,single:false};
     const api={
       select(){state.op='select';return api;},eq(col,val){state.filters.push([col,val]);return api;},order(col,opts){state.order=[col,opts];return api;},limit(n){state.limit=n;return api;},
       in(col,list){state.inList=[col,list];return api;},
-      upsert(row){state.op='upsert';state.payload=row;return api;},delete(){state.op='delete';return api;},
+      upsert(row){state.op='upsert';state.payload=row;return api;},delete(){state.op='delete';return api;},maybeSingle(){state.single=true;return api;},
       then(resolve,reject){return Promise.resolve(run()).then(resolve,reject);}
     };
     function run(){
+      if(table==='account_profile_settings'){if(options.settingsError)return {error:{message:'boom'},data:null};const id=state.filters.find(f=>f[0]==='account_id')[1];return {error:null,data:id in settings?{flag:settings[id]}:null};}
       if(missing)return {error:{message:'relation "public.ai_user_memories" does not exist',code:'42P01'},data:null};
       const match=r=>state.filters.every(([c,v])=>r[c]===v)&&(!state.inList||state.inList[1].includes(r[state.inList[0]]));
       if(state.op==='upsert'){const i=rows.findIndex(r=>r.account_id===state.payload.account_id&&r.content_hash===state.payload.content_hash);if(i>=0)Object.assign(rows[i],state.payload);else rows.push({id:crypto.randomUUID(),created_at:new Date().toISOString(),...state.payload});return {error:null,data:null};}
@@ -23,9 +25,9 @@ function fakeSupabase(options={}){
     }
     return api;
   };
-  return {from:builder,rows,setMissing(v){missing=v;}};
+  return {from:builder,rows,settings,setMissing(v){missing=v;}};
 }
-function load(db){return new Function('supabase','crypto','console',memorySource+'\nreturn {executeAiMemoryTool,aiMemoryContextMessage,aiMemoryLooksSensitive};')(db,crypto,{error(){}});}
+function load(db){const m=createAiMemory({supabase:db,crypto,logger:{error(){}}});return {executeAiMemoryTool:m.executeTool,aiMemoryContextMessage:m.contextMessage,memory:m};}
 const user={accountId:'11111111-1111-1111-1111-111111111111'};
 
 test('memory tools save, de-duplicate, list and forget per account, and refuse guests and sensitive text',async()=>{
@@ -91,4 +93,51 @@ test('the policy teaches memory, confirmation and answer verification, and the f
   }
   assert.match(server,/aiMemoryContextMessage\(requestSearchCtx\(req, req\.userName \|\| ''\)\)/);assert.match(server,/aiMemoryContextMessage\(toolContext\)/);
   assert.match(fs.readFileSync('supabase/migrations/20261031180000_ai_user_memories.sql','utf8'),/ENABLE ROW LEVEL SECURITY[\s\S]*REVOKE ALL ON TABLE public\.ai_user_memories FROM PUBLIC, anon, authenticated[\s\S]*TO service_role/);
+});
+
+test('the use-memory switch is respected everywhere and fails closed',async()=>{
+  const db=fakeSupabase(),m=load(db);
+  await m.executeAiMemoryTool('save_memory',{content:'用户喜欢茶'},user);
+  assert.ok(await m.aiMemoryContextMessage(user));
+  db.settings[user.accountId]='false';
+  assert.equal(await m.aiMemoryContextMessage(user),null);
+  assert.match((await m.executeAiMemoryTool('save_memory',{content:'用户喜欢咖啡'},user)).error,/关闭了记忆/);
+  assert.match((await m.executeAiMemoryTool('list_memories',{},user)).content,/茶/);// listing and forgetting still work while it is off
+  assert.match((await m.executeAiMemoryTool('forget_memory',{query:'茶'},user)).content,/已忘掉 1 条/);
+  const broken=load(fakeSupabase({settingsError:true}));
+  assert.equal(await broken.aiMemoryContextMessage(user),null);
+  assert.match((await broken.executeAiMemoryTool('save_memory',{content:'x 用户喜欢茶'},user)).error,/关闭了记忆/);
+  assert.ok(await load(fakeSupabase()).aiMemoryContextMessage({accountId:'admin:boss'})===null);// admin with no memories: nothing to carry, but not blocked
+});
+function routerFixture(db,memory){
+  const handlers={};const express={Router(){const r={use(){return r;},get(p,h){handlers['GET '+p]=h;return r;},post(p,h){handlers['POST '+p]=h;return r;},delete(p,h){handlers['DELETE '+p]=h;return r;}};return r;}};
+  createAiMemoryRouter({express,authenticateUser:()=>{},rateLimit:null,memory,supabase:db});
+  const call=async(key,req)=>{const out={status:200,body:null,headers:{}};const res={set(k,v){out.headers[k]=v;},status(c){out.status=c;return res;},json(b){out.body=b;return res;}};await handlers[key]({params:{},body:{},...req},res);return out;};
+  return call;
+}
+test('the My page API lists, adds, deletes one and clears all only for the signed-in account',async()=>{
+  const db=fakeSupabase(),m=load(db),call=routerFixture(db,m.memory);
+  const mine={accountId:user.accountId},other={accountId:'22222222-2222-2222-2222-222222222222'};
+  assert.equal((await call('GET /',{})).status,401);
+  assert.equal((await call('POST /',{accountId:'',body:{content:'x'}})).status,401);
+  const added=await call('POST /',{...mine,body:{content:'用户喜欢简短回答'}});assert.equal(added.body.ok,true);
+  await call('POST /',{...other,body:{content:'别人的记忆'}});
+  const listed=await call('GET /',mine);assert.equal(listed.body.items.length,1);assert.equal(listed.body.enabled,true);assert.equal(listed.body.limit,50);assert.equal(listed.body.items[0].content,'用户喜欢简短回答');
+  assert.equal((await call('POST /',{...mine,body:{content:'我的密码是 hunter2abc'}})).status,400);
+  assert.equal((await call('DELETE /:id',{...mine,params:{id:'not-a-uuid'}})).status,400);
+  const otherId=db.rows.find(r=>r.account_id===other.accountId).id;
+  await call('DELETE /:id',{...mine,params:{id:otherId}});assert.equal(db.rows.filter(r=>r.account_id===other.accountId).length,1,'cannot delete another account\'s memory');
+  const ownId=db.rows.find(r=>r.account_id===mine.accountId).id;
+  assert.equal((await call('DELETE /:id',{...mine,params:{id:ownId}})).body.ok,true);assert.equal(db.rows.filter(r=>r.account_id===mine.accountId).length,0);
+  await call('POST /',{...mine,body:{content:'再记一条'}});
+  assert.equal((await call('DELETE /',{...mine,body:{}})).status,400);assert.equal(db.rows.filter(r=>r.account_id===mine.accountId).length,1);
+  assert.equal((await call('DELETE /',{...mine,body:{confirm:true}})).body.ok,true);
+  assert.equal(db.rows.filter(r=>r.account_id===mine.accountId).length,0);assert.equal(db.rows.filter(r=>r.account_id===other.accountId).length,1);
+  db.setMissing(true);assert.equal((await call('GET /',mine)).status,503);
+});
+test('the on/off switch is an account setting accepted only as a boolean',()=>{
+  const settings=require('../render-api/profile-settings');
+  assert.equal(settings.DEFAULTS.ai_memory_enabled,true);
+  assert.match(fs.readFileSync('render-api/profile-settings.js','utf8'),/"ai_memory_enabled",\n\s*\]\.includes\(key\)/);
+  assert.match(server,/app\.use\('\/api\/user\/ai-memory', require\('\.\/ai-memory'\)\.createAiMemoryRouter/);
 });
