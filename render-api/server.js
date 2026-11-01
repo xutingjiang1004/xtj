@@ -11943,7 +11943,7 @@ require('./upload-access').installUploadAccess(app, {supabase,supabaseUrl:SUPABA
     }
     next();
   });
-},rateLimit,adminName:ADMIN_USERNAME});
+},rateLimit,adminName:ADMIN_USERNAME,previews:mediaPreviews});
 
 
 // The service-role backed chat social API is mounted behind the same signed

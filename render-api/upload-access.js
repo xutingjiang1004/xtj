@@ -10,7 +10,7 @@ function uploadPath(value, origin) {
   } catch (_) { return null; }
 }
 async function checked(query) { const result = await query; if (!result || result.error) throw result && result.error || Error('upload_access_unavailable'); return result.data; }
-function installUploadAccess(app, { supabase, supabaseUrl, optionalAuth, rateLimit, adminName, fetchImpl }) {
+function installUploadAccess(app, { supabase, supabaseUrl, optionalAuth, rateLimit, adminName, fetchImpl, previews }) {
   app.get('/api/uploads/media', optionalAuth, rateLimit(60000, 300), async (req,res) => {
     const path = String(req.query.path || '');
     if (!path || path.length > 1024 || /[\\%\u0000-\u001f\u007f]/.test(path) || path.split('/').some(p => !p || p === '.' || p === '..')) return res.status(404).end();
@@ -26,12 +26,21 @@ function installUploadAccess(app, { supabase, supabaseUrl, optionalAuth, rateLim
           if (auth && (uploadPath(row.settings.cover_url,supabaseUrl) === path || (row.user_name === req.userName && uploadPath(row.settings.background_url,supabaseUrl) === path))) allowed = true;
         }
       } else if (!allowed) {
-        const pattern = '%/' + path.replace(/[\\%_]/g,'\\$&');
-        const attachments = await checked(supabase.from('post_attachments').select('post_id,media_url').ilike('media_url',pattern).limit(100));
-        const direct = await checked(supabase.from('posts').select('id,user_name,media_type,media_url,visibility,is_deleted').ilike('media_url',pattern).limit(100));
-        const matchingAttachments = (attachments || []).filter(row => uploadPath(row.media_url,supabaseUrl) === path);
-        const rows = (direct || []).filter(row => uploadPath(row.media_url,supabaseUrl) === path).concat(matchingAttachments.length ? await checked(supabase.from('posts').select('id,user_name,media_type,visibility,is_deleted').in('id',matchingAttachments.map(x=>x.post_id))) : []);
-        allowed = rows.some(row => isNormalPost(row) && (!row.visibility || row.visibility === 'public' || row.user_name === req.userName || req.userName === adminName));
+        // 旧帖的 media_url 直接挂在 uploads 根目录（没有 posts/ 前缀），只能走这里。
+        // 原来用 ilike 模糊扫 posts / post_attachments 两张表，数据量一大就慢到超时，
+        // 接口只能回 503 —— 用户看到的就是「图片一直转圈，点重试也没用」。
+        // 改成按完整 URL 精确匹配，命中就走，不再全表扫描。
+        const full = String(supabaseUrl || '').replace(/\/+$/, '') + '/storage/v1/object/public/uploads/' + path;
+        const readable = row => isNormalPost(row) && (!row.visibility || row.visibility === 'public' || row.user_name === req.userName || req.userName === adminName);
+        const exact = await checked(supabase.from('posts').select('id,user_name,media_type,media_url,visibility,is_deleted').eq('media_url', full).limit(20));
+        allowed = (exact || []).some(readable);
+        if (!allowed) {
+          const linked = await checked(supabase.from('post_attachments').select('post_id').eq('media_url', full).limit(20));
+          if (linked && linked.length) {
+            const rows = await checked(supabase.from('posts').select('id,user_name,media_type,visibility,is_deleted').in('id', linked.map(x => x.post_id)));
+            allowed = (rows || []).some(readable);
+          }
+        }
         if (!allowed && req.userName && path.startsWith('chat/')) {
           const messages = await checked(supabase.rpc('read_visible_dm_posts',{p_actor:req.userName,p_pattern:'%' + path.replace(/[\\%_]/g,'\\$&') + '%',p_limit:100}));
           allowed = (messages || []).some(row => { try { return uploadPath(JSON.parse(row.content).media.url,supabaseUrl) === path; } catch (_) { return false; } });
@@ -40,7 +49,12 @@ function installUploadAccess(app, { supabase, supabaseUrl, optionalAuth, rateLim
       if (!allowed) return res.status(404).end();
       // Avatar paths are unique per upload, so browsers may reuse them for a day without asking again.
       const cacheControl = /^avatars\//.test(path) ? 'public, max-age=86400, stale-while-revalidate=604800' : undefined;
-      await streamOriginal(req,res,{supabase,bucket:'uploads',path,fetchImpl,allowDownload:path.startsWith('chat/'),cacheControl});
+      try {
+        await streamOriginal(req,res,{supabase,bucket:'uploads',path,fetchImpl,allowDownload:path.startsWith('chat/'),cacheControl,previews});
+      } catch (_) {
+        // 文件本身已经不在存储里时不能再回 503：前端会当成「临时失败」无限重试。
+        if (!res.headersSent) res.status(404).json({ ok:false, code:'media_missing' }); else res.destroy();
+      }
     } catch (_) { if (!res.headersSent) res.status(503).json({ok:false,code:'media_unavailable',retryable:true}); else res.destroy(); }
   });
 }

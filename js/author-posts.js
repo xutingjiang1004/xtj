@@ -36,7 +36,7 @@
     if (!url) return '';
     try {
       var u = new URL(url, location.href);
-      if (u.origin === location.origin && /^\/api\/(?:post\/[0-9a-f-]{36}\/media\/\d+|photo\/[0-9a-f-]{36}\/media)$/.test(u.pathname)) {
+      if (u.origin === location.origin && /^\/api\/(?:post\/[0-9a-f-]{36}\/media\/\d+|photo\/[0-9a-f-]{36}\/media|uploads\/media)$/.test(u.pathname)) {
         u.searchParams.set('preview', '1');
         u.searchParams.set('w', String(width));
         if (retry) u.searchParams.set('xtj_retry', Date.now().toString(36));
