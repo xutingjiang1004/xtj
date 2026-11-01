@@ -263,12 +263,25 @@ test('post share page turns a bare link into a card and falls back to the site c
   const html=renderPostSharePage(row,[],'https://xtj.example',preview);
   assert.match(html,/class="lcard music"/);
   assert.match(html,/<audio class="lc-audio" controls preload="none" src="https:\/\/audio\.example\/a\.m4a">/);
-  assert.match(html,/property="og:title" content="Promise"/);
+  // 标题统一「某某 分享的帖子」，歌名退到落地页卡片里。
+  assert.match(html,/property="og:title" content="xxz 分享的帖子"/);
+  assert.match(html,/property="og:description" content="来自 xxz 的帖子，点开即可查看"/);
   assert.match(html,/property="og:image" content="https:\/\/is1\.example\/cover\.jpg"/);
   assert.ok(!html.includes('https://music.apple.com/us/album/promise'),'裸链接不应再原样出现在正文里');
 
   const plain=renderPostSharePage({...row,content:'今天天气不错'},[],'https://xtj.example');
   assert.match(plain,/property="og:image" content="https:\/\/xtj\.example\/img\/share-cover-v2\.jpg"/);
+  // 纯文字帖：描述先放正文，再跟「来自某某的帖子」，发布人一眼可见。
+  assert.match(plain,/property="og:description" content="今天天气不错 · 来自 xxz 的帖子，点开即可查看"/);
+
+  // 有发布者头像时用头像，不再落到站点默认封面，也不该声明 1200 方图尺寸。
+  const withAvatar=renderPostSharePage({...row,content:'今天天气不错'},[],'https://xtj.example',null,{avatarUrl:'https://xtj.example/api/avatar/image/xxz?v=abc&size=large&format=jpg'});
+  assert.match(withAvatar,/property="og:image" content="https:\/\/xtj\.example\/api\/avatar\/image\/xxz\?v=abc&amp;size=large&amp;format=jpg"/);
+  assert.ok(!withAvatar.includes('og:image:width'),'头像封面不应声明默认封面尺寸');
+
+  // 带图片的帖子：描述只写来源，不重复正文。
+  const withImage=renderPostSharePage({...row,content:'这是一段很长的正文'},[{media_type:'image',share_media_url:'/api/post/x/media/0'}],'https://xtj.example');
+  assert.match(withImage,/property="og:description" content="来自 xxz 的帖子，点开即可查看"/);
   // 默认封面是 1:1，声明尺寸后微信不再二次裁切
   assert.match(plain,/property="og:image:width" content="1200"/);
   assert.match(plain,/property="og:image:height" content="1200"/);

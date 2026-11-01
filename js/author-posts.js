@@ -15,6 +15,15 @@
     return String(post.content || '');
   }
   function media(post) { return window.XtjPostMedia ? window.XtjPostMedia.getPostMediaItems(post) : []; }
+  // 与首页帖子一致的歌曲卡片：个人动态页此前只输出纯文本，音乐帖会退化成一串 URL。
+  var MUSIC_HOST = /^(?:(?:y\.)?music\.163\.com|163cn\.tv|(?:music|embed\.music|itunes)\.apple\.com|(?:(?:i2?|c6?)\.)?y\.qq\.com)$/i;
+  function hasMusicLink(text) {
+    var re = /https?:\/\/[^\s<>"'，。！？、）)\]】]+/gi, m;
+    while ((m = re.exec(String(text || '')))) {
+      try { var u = new URL(m[0]); if (MUSIC_HOST.test(u.hostname) && !u.username && !u.password) return true; } catch (_) {}
+    }
+    return false;
+  }
   function make(tag, className, text) {
     var node = document.createElement(tag); node.className = className;
     if (text != null) node.textContent = text;
@@ -29,7 +38,7 @@
       stamp.appendChild(make('span', 'author-post-day', valid ? String(date.getDate()).padStart(2, '0') : '—'));
       stamp.appendChild(make('span', 'author-post-month', valid ? (date.getMonth() + 1) + '月' : ''));
     }
-    var button = make('button', 'author-post-entry'); button.type = 'button';
+    var button = make('div', 'author-post-entry'); button.setAttribute('role', 'button'); button.tabIndex = 0;
     button.setAttribute('aria-label', '查看动态：' + (textOf(post).slice(0, 80) || '图片动态'));
     var items = media(post).filter(function (item) { return /^(image|photo)$/.test(item.media_type) && safeUrl(item.media_url); });
     function previewSrc(item) {
@@ -66,13 +75,28 @@
       button.appendChild(make('span', 'author-post-media-label', post.media_type === 'video' ? '视频' : '音频'));
     }
     var copy = make('span', 'author-post-copy');
-    if (textOf(post)) copy.appendChild(make('span', 'author-post-text', textOf(post)));
+    var rawText = textOf(post);
+    if (rawText) {
+      var textNode = make('span', 'author-post-text');
+      // 正文里是音乐链接时走和帖子页同一套渲染（封面 + 歌名 + 试听），
+      // 纯文字仍然只输出文本，保留 3 行截断。
+      if (typeof window.buildPostContentHtml === 'function' && hasMusicLink(rawText)) {
+        textNode.className = 'author-post-text is-rich';
+        textNode.innerHTML = window.buildPostContentHtml(rawText);
+      } else {
+        textNode.textContent = rawText;
+      }
+      copy.appendChild(textNode);
+    }
     var labels = [];
     if (post.visibility === 'private') labels.push('仅自己可见');
     if (post.location_name) labels.push(post.location_name);
     if (labels.length) copy.appendChild(make('span', 'author-post-meta', labels.join(' · ')));
     if (copy.childNodes.length) button.appendChild(copy);
     button.addEventListener('click', function () { if (state && current(state) && typeof window.openPostDetail === 'function') window.openPostDetail(post.id); });
+    button.addEventListener('keydown', function (event) {
+      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); button.click(); }
+    });
     row.append(stamp, button);
     return { row: row, day: day };
   }
@@ -129,6 +153,26 @@
     var signature = byId('authorPostsSignature');
     if (!signature) { signature=make('div','author-post-signature'); signature.id='authorPostsSignature'; byId('upcName').insertAdjacentElement('afterend',signature); }
     signature.textContent = s.profile && s.profile.signature || '';
+    renderGuestGate(s);
+    // 新插入的歌曲卡片需要触发一次解析（封面/歌名）；MutationObserver 也会兜一层。
+    if (window.xtjMusicCards) { try { window.xtjMusicCards.scan(list); } catch (_) {} }
+  }
+  // 未登录访客只看到最近 3 条，下面用一条分隔线说明「更多内容请登录查看」。
+  function renderGuestGate(s) {
+    var list = byId('authorPostsList'), gate = byId('authorPostsGuestGate');
+    if (!list) return;
+    if (!s.guestLimited) { if (gate) gate.remove(); return; }
+    if (!gate) {
+      gate = make('div', 'author-post-guest-gate'); gate.id = 'authorPostsGuestGate';
+      gate.appendChild(make('span', 'author-post-guest-text', '更多内容请登录查看'));
+      var login = make('button', 'author-post-guest-login', '登录'); login.type = 'button';
+      login.addEventListener('click', function (event) {
+        event.preventDefault(); event.stopPropagation();
+        if (typeof window.openAuthModal === 'function') window.openAuthModal('login');
+      });
+      gate.appendChild(login);
+    }
+    if (!gate.isConnected || gate.previousElementSibling !== list) list.insertAdjacentElement('afterend', gate);
   }
   function status(s, label, retry) {
     if (!current(s)) return;
@@ -168,7 +212,7 @@
   }
   function writeCache(s) {
     if (s.restricted || !s.posts.length) { dropCache(s); return; }
-    var key = cacheKey(s), entry = { t: Date.now(), posts: s.posts.slice(), cursor: s.cursor || null, hasMore: !!s.hasMore, profile: s.profile || null };
+    var key = cacheKey(s), entry = { t: Date.now(), posts: s.posts.slice(), cursor: s.cursor || null, hasMore: !!s.hasMore, guestLimited: !!s.guestLimited, profile: s.profile || null };
     memoryCache[key] = entry;
     try {
       var index = JSON.parse(localStorage.getItem(CACHE_INDEX) || '[]').filter(function (k) { return k !== key; });
@@ -186,11 +230,11 @@
       var data = await response.json();
       if (!current(s) || s.posts.length > 20 || s.loading) return;
       if (!response.ok || !data.ok || !Array.isArray(data.posts)) return;
-      s.profile = data.profile || s.profile; s.restricted = !!data.restricted;
+      s.profile = data.profile || s.profile; s.restricted = !!data.restricted; s.guestLimited = !!data.guest_limited;
       s.posts = s.restricted ? [] : data.posts.filter(function (post) { return post.user_name === s.author; });
       s.cursor = data.next_cursor; s.hasMore = !!data.has_more && !!s.cursor;
       s._renderedCount = 0; render(s);
-      status(s, s.restricted ? '对方已关闭个人动态页访问' : !s.posts.length ? '还没有可查看的动态' : s.hasMore ? '' : '已显示全部动态');
+      status(s, s.restricted ? '对方已关闭个人动态页访问' : !s.posts.length ? '还没有可查看的动态' : s.guestLimited || s.hasMore ? '' : '已显示全部动态');
       writeCache(s);
     } catch (_) { /* the saved copy stays on screen */ }
     finally { if (s.controller === controller) s.controller = null; }
@@ -211,11 +255,11 @@
       var beforeCount = s.posts.length;
       data.posts.forEach(function (post) { if (post.user_name === s.author && !seen.has(String(post.id))) { s.posts.push(post); seen.add(String(post.id)); } });
       var appended = s.posts.length > beforeCount;
-      s.profile = data.profile || s.profile; s.restricted = !!data.restricted;
+      s.profile = data.profile || s.profile; s.restricted = !!data.restricted; s.guestLimited = !!data.guest_limited;
       if (s.restricted) s.posts = [];
       s.cursor = data.next_cursor; s.hasMore = !!data.has_more && !!s.cursor; s.loading = false; s.retryable = true;
       render(s, appended && beforeCount > 0 && !s.restricted ? { appendFrom: beforeCount } : undefined);
-      status(s, s.restricted ? '对方已关闭个人动态页访问' : !s.posts.length ? '还没有可查看的动态' : s.hasMore ? '' : '已显示全部动态');
+      status(s, s.restricted ? '对方已关闭个人动态页访问' : !s.posts.length ? '还没有可查看的动态' : s.guestLimited || s.hasMore ? '' : '已显示全部动态');
       if (beforeCount === 0) writeCache(s);
     } catch (error) {
       if (!current(s)) return;
@@ -233,7 +277,7 @@
     if (detail && detail.classList.contains('active') && typeof window.closeModal === 'function') window.closeModal('postDetailModal');
     window.__xtjCloseAuthorPosts();
     if (!byId('authorPostsList')) return;
-    var owner = identity(); state = { author: author, owner: owner.owner, epoch: owner.epoch, generation: generation, posts: [], hasMore: false, loading: false, cursor: null, _renderedCount: 0, _renderYear: '', _renderDay: '', _coverKey: null };
+    var owner = identity(); state = { author: author, owner: owner.owner, epoch: owner.epoch, generation: generation, posts: [], hasMore: false, guestLimited: false, loading: false, cursor: null, _renderedCount: 0, _renderYear: '', _renderDay: '', _coverKey: null };
     var scroll = byId('authorPostsScroll'); if (scroll) scroll.scrollTop = 0;
     var saved = readCache(state);
     if (saved) { showSaved(state, saved); return; }
@@ -247,8 +291,8 @@
     load(state);
   };
   function showSaved(s, saved) {
-    s.posts = saved.posts.slice(); s.cursor = saved.cursor; s.hasMore = !!saved.hasMore; s.profile = saved.profile || s.profile;
-    render(s); status(s, s.hasMore ? '' : '已显示全部动态');
+    s.posts = saved.posts.slice(); s.cursor = saved.cursor; s.hasMore = !!saved.hasMore; s.guestLimited = !!saved.guestLimited; s.profile = saved.profile || s.profile;
+    render(s); status(s, s.hasMore || s.guestLimited ? '' : '已显示全部动态');
     if (s.author === s.owner || !(Date.now() - saved.t < CACHE_FRESH_MS)) revalidate(s);
   }
   // Start loading someone's page the moment a finger (or pointer) lands on their avatar, ahead of the click.

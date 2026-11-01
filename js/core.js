@@ -8021,6 +8021,8 @@ function renderProfileActivityList(kind) {
             let feedPage = 1;
             const FEED_PAGE_SIZE = 20;
             let feedEndReached = false;
+            // 未登录访客只能看到最新 10 条；末尾提示改成「登录查看更早的帖子」。
+            let feedGuestLimited = false;
             let feedAllPosts = [];
             let feedAllComments = [];
             let feedAllLikes = [];
@@ -8047,6 +8049,7 @@ function renderProfileActivityList(kind) {
                 feedLoadMoreFailed = false;
                 feedPage = 1;
                 feedEndReached = false;
+                feedGuestLimited = false;
                 feedNextOffset = 0;
                 feedNextCursor = null;
                 feedLoadedPages = [];
@@ -10405,6 +10408,7 @@ function renderProfileActivityList(kind) {
                         comments = early.comments || [];
                         likes = early.likes || [];
                         endReached = early.endReached || false;
+                        feedGuestLimited = !!early.guest_limited;
                         if (typeof early.total_post_count === 'number') window._xtjTotalPostCount = early.total_post_count;
                         serverNextOffset = early.next_offset != null ? Number(early.next_offset) : null;
                         serverNextCursor = early.next_cursor || null;
@@ -10419,6 +10423,7 @@ function renderProfileActivityList(kind) {
                                 comments = early2.comments || [];
                                 likes = early2.likes || [];
                                 endReached = early2.endReached || false;
+                                feedGuestLimited = !!early2.guest_limited;
                                 if (typeof early2.total_post_count === 'number') window._xtjTotalPostCount = early2.total_post_count;
                                 serverNextOffset = early2.next_offset != null ? Number(early2.next_offset) : null;
                                 serverNextCursor = early2.next_cursor || null;
@@ -10461,6 +10466,7 @@ function renderProfileActivityList(kind) {
                             comments = apiData.comments || [];
                             likes = apiData.likes || [];
                             endReached = apiData.endReached || false;
+                            feedGuestLimited = !!apiData.guest_limited;
                             if (typeof apiData.total_post_count === 'number') window._xtjTotalPostCount = apiData.total_post_count;
                             // 使用服务器返回的 next_offset，不自行计算、不再叠加 posts.length
                             serverNextOffset = apiData.next_offset != null ? Number(apiData.next_offset) : null;
@@ -12084,10 +12090,23 @@ function renderProfileActivityList(kind) {
                 if (!feed || document.getElementById("feedNoMore")) return;
                 var noMore = document.createElement("div");
                 noMore.id = "feedNoMore";
-                noMore.className = "loading";
-                noMore.textContent = "没有更多帖子";
-                noMore.style.padding = "30px";
-                noMore.style.textAlign = "center";
+                if (feedGuestLimited) {
+                    // 访客只看得到最新 10 条，到底了就给一个登录入口，而不是「没有更多帖子」。
+                    noMore.className = "loading feed-guest-gate";
+                    var tip = document.createElement("span");
+                    tip.textContent = "登录后可查看更早的帖子";
+                    var login = document.createElement("button");
+                    login.type = "button"; login.textContent = "登录";
+                    login.addEventListener("click", function () {
+                        if (typeof window.openAuthModal === "function") window.openAuthModal("login");
+                    });
+                    noMore.append(tip, login);
+                } else {
+                    noMore.className = "loading";
+                    noMore.textContent = "没有更多帖子";
+                    noMore.style.padding = "30px";
+                    noMore.style.textAlign = "center";
+                }
                 var sentinel = document.getElementById("feedSentinel");
                 feed.insertBefore(noMore, sentinel || null);
             }

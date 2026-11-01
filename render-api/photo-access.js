@@ -5,6 +5,7 @@ const { mediaTraffic } = require('./media-traffic');
 const { pipeline } = require('node:stream/promises');
 const { parsePostMediaUrl } = require('./post-media');
 const { loadPostAttachments } = require('./post-attachments');
+const { avatarImageUrl } = require('./avatar-image');
 const PHOTO_BUCKET = 'photo-wall';
 const PHOTO_COOKIE = 'xtj_photo_session';
 const POST_MEDIA_COOKIE = 'xtj_post_media_session';
@@ -316,7 +317,17 @@ function createPhotoAccess({ app, supabase, supabaseUrl, secret, authenticateUse
       const origin = (/^https?$/.test(proto) ? proto : 'https') + '://' + req.get('host');
       // 正文里第一条公网链接做成卡片：音乐可试听、网页显示封面与标题，避免好友只看到裸 URL。
       const preview = await linkPreview((String(postShareText(row)).match(POST_URL_RE) || [])[0]);
-      res.set({'Cache-Control':'no-store, private','Referrer-Policy':'no-referrer'}).type('html').send(renderPostSharePage(row, items, origin, preview));
+      // 纯文字帖的微信卡片图用发布者头像；查不到就用站点默认封面。
+      let avatarUrl = '';
+      try {
+        const avatarRow = await checked(supabase.from('posts').select('media_url')
+          .eq('user_name', row.user_name).eq('media_type', '__avatar__').eq('actor_key', '__avatar__')
+          .order('created_at', { ascending: false }).limit(1).maybeSingle());
+        const avatarPath = avatarRow && avatarRow.media_url ? avatarImageUrl(row.user_name, avatarRow.media_url) : '';
+        // 微信抓取端对 webp 支持不稳定，这里显式要 JPEG。
+        if (avatarPath) avatarUrl = origin + avatarPath + '&size=large&format=jpg';
+      } catch (_) { avatarUrl = ''; }
+      res.set({'Cache-Control':'no-store, private','Referrer-Policy':'no-referrer'}).type('html').send(renderPostSharePage(row, items, origin, preview, { avatarUrl }));
     } catch (_) { unavailable(res); }
   });
   return { photo, codec, authenticateMedia, migrate: () => migratePhotoStorage(supabase) };
@@ -515,18 +526,27 @@ function linkCardHtml(preview) {
 
 // 单个帖子的公开分享页：正文 + 图片（可点开缩放）+ 音视频，游客无需登录即可查看。
 // og:* 元信息让微信在聊天里展示帖子标题与摘要，而不是一条裸链接。
-function renderPostSharePage(row, items, origin, preview = null) {
+function renderPostSharePage(row, items, origin, preview = null, options = {}) {
   const text = postShareText(row).trim();
   const media = Array.isArray(items) ? items : [];
   const author = String(row.user_name || 'XTJ 用户');
+  const avatarUrl = String((options && options.avatarUrl) || '');
   // 标题与摘要里去掉裸链接本身，改用链接卡片的标题/简介，微信卡片才不会显示成一串网址。
   const plain = text.replace(POST_URL_RE, ' ').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
-  const title = (preview && preview.title) || (plain ? plain.slice(0, 50) : author + ' 分享的帖子');
-  const description = (preview && preview.desc) || (plain ? plain.slice(0, 120) : '来自 XTJ 的帖子，点开即可查看。');
   const firstImage = media.find(item => /^(image|photo)$/.test(String(item.media_type || '')));
-  const shareImage = firstImage ? origin + firstImage.share_media_url : ((preview && preview.image) || origin + '/img/share-cover-v2.jpg');
-  // 只有回退到站点默认封面时才声明 1200×1200，避免给真实图片标错尺寸。
-  const coverMeta = firstImage || (preview && preview.image) ? '' : '<meta property="og:image:width" content="1200"><meta property="og:image:height" content="1200">';
+  // 标题统一「某某 分享的帖子」。以前音乐帖标题是歌名、文字帖是正文，
+  // 微信里同一站点分享出去样式各不相同，也不知道是谁发的。
+  const title = author + ' 分享的帖子';
+  // 描述统一「正文 · 来自 某某 的帖子，点开即可查看」；带图片的帖子正文由图片承担，不再重复文字。
+  const descParts = [];
+  if (plain && !firstImage) descParts.push(plain.slice(0, 110));
+  descParts.push('来自 ' + author + ' 的帖子，点开即可查看');
+  const description = descParts.join(' · ');
+  // 纯文字帖没有配图时用发布者头像，而不是站点默认封面——好友一眼能看出是谁发的。
+  const shareImage = firstImage ? origin + firstImage.share_media_url
+    : ((preview && preview.image) || avatarUrl || origin + '/img/share-cover-v2.jpg');
+  // 只有回退到站点默认封面时才声明 1200×1200，避免给真实图片/头像标错尺寸。
+  const coverMeta = firstImage || (preview && preview.image) || avatarUrl ? '' : '<meta property="og:image:width" content="1200"><meta property="og:image:height" content="1200">';
   const card = linkCardHtml(preview);
   const textBlock = plain ? '<p class="text">' + html(plain) + '</p>' : '';
   const date = html(String(row.created_at || '').slice(0, 10));

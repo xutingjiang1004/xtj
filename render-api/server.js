@@ -14742,12 +14742,26 @@ app.get('/api/feed', optionalAuth, rateLimit(60000, 60), async (req, res) => {
   try {
     var page = Math.max(0, parseInt(req.query.page, 10) || 0);
     var limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 20));
+    // ★ 2026-11-02：未登录访客只看最新 10 条帖子，再往下引导登录。
+    //   已登录用户不受影响；管理员也按登录用户处理。
+    var GUEST_FEED_LIMIT = 10;
+    var guestLimited = !req.userName;
     var from = page * limit;
+    if (guestLimited) {
+      if (from >= GUEST_FEED_LIMIT) return res.json({ ok: true, posts: [], comments: [], likes: [], page: page, limit: limit,
+        next_offset: from, next_cursor: null, endReached: true, guest_limited: true, login_required: true, total_post_count: null });
+      limit = Math.max(1, Math.min(limit, GUEST_FEED_LIMIT - from));
+    }
     var cursorCreatedAt = String(req.query.cursor_created_at || '');
     var cursorId = String(req.query.cursor_id || '');
     var cursorTimestampValid = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/i.test(cursorCreatedAt) && Number.isFinite(Date.parse(cursorCreatedAt));
     var cursorMode = !!(cursorTimestampValid && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(cursorId));
     var requestedOffset = cursorMode ? Math.max(0, parseInt(req.query.offset, 10) || from) : from;
+    // 游标分页时 offset 由前端带回，这里再兜一次：访客超过 10 条直接停。
+    if (guestLimited && requestedOffset >= GUEST_FEED_LIMIT) {
+      return res.json({ ok: true, posts: [], comments: [], likes: [], page: page, limit: limit,
+        next_offset: requestedOffset, next_cursor: null, endReached: true, guest_limited: true, login_required: true, total_post_count: null });
+    }
 
     var isAdmin = req.userName === ADMIN_USERNAME;
     var isLoggedIn = !!req.userName;
@@ -14870,6 +14884,10 @@ app.get('/api/feed', optionalAuth, rateLimit(60000, 60), async (req, res) => {
       }
     }
 
+    // 访客上限兜底：搜索路径由 feed-search 自己分页，这里统一截到剩余额度。
+    if (guestLimited && posts.length > limit) {
+      posts = posts.slice(0, limit); nextCursor = null; endReached = true;
+    }
     try { posts = await loadPostAttachments(supabase, posts); }
     catch (error) { return res.status(503).json({ error: '帖子图片加载失败，请重试', code: error.code || 'attachments_unavailable', retryable: true }); }
     // Counts and the user's like are independent of a bounded comment preview.
@@ -14895,7 +14913,9 @@ app.get('/api/feed', optionalAuth, rateLimit(60000, 60), async (req, res) => {
       // rows forever. Advance by the number actually consumed from storage.
       next_offset: requestedOffset + scannedCount,
       next_cursor: nextCursor,
-      endReached: endReached,
+      endReached: guestLimited ? true : endReached,
+      guest_limited: guestLimited,
+      login_required: guestLimited,
       total_post_count: cursorMode ? null : totalCount
     });
   } catch (e) {
@@ -19781,14 +19801,19 @@ const AI_CHAT_HISTORY_FETCH_BUFFER = 24;
 const AI_CHAT_LATEST_CONVERSATION_SCAN_LIMIT = 60;
 
 // ===================== 访客 AI 开关 =====================
-// 由管理员在「AI 管理 → 智能体设置」控制（配置字段 allow_guest_ai，默认开启）。
+// 由管理员在「AI 管理 → 智能体设置」控制（配置字段 allow_guest_ai）。
+// ★ 2026-11-02：未登录访客的 AI 权限已关闭。此前为限时开放临时打开过 DB 开关，
+//   该开关不会自动过期，导致访客一直能用。现在改为硬开关：
+//   - 默认关闭，游客切到小猫 AI 页面可以打开界面，但发消息会提示「请先登录」；
+//   - 只有同时满足「环境变量 XTJ_ALLOW_GUEST_AI=1」与「后台开关打开」才放行，
+//     两个条件缺一不可，避免后台一次误保存又变成长期开放。
 // 开启后，未登录访客只能使用普通聊天，且不写任何数据库记录；
-// 关闭后访客请求立即回到 authenticateUser（必须登录）。
 // 历史、深入研究、自定义模型、站内工具等依赖账号的 AI 功能仍要求登录。
 const GUEST_AI_HOURLY_LIMIT = 100;
 const GUEST_AI_DAILY_TURNS = 200;
 const GUEST_AI_MESSAGE_MAX_LEN = 50000;
 async function guestAiEnabled() {
+  if (String(process.env.XTJ_ALLOW_GUEST_AI || '').trim() !== '1') return false;
   try {
     var config = await getAiConfig();
     return !!(config && config.allow_guest_ai === true);
@@ -20876,8 +20901,9 @@ const AI_DEFAULT_CONFIG = {
   //   现把 admin_debug 恢复为独立 key（与 6ae00e15 之前一致）。
   security: { hide_system_prompt_in_reasoning: true },  // 安全规则：思考过程中禁止复述系统提示词
   // 访客 AI 开关：管理员在后台「AI 管理 → 智能体设置」控制。
-  // 默认开启，保证 Supabase 读取失败时仍可用的内置行为；管理员保存 false 后关闭。
-  allow_guest_ai: true,
+  // ★ 2026-11-02：默认改为关闭（未登录访客不能使用 AI）。
+  //   即使这里被改回 true，guestAiEnabled() 还要求 XTJ_ALLOW_GUEST_AI=1 才放行。
+  allow_guest_ai: false,
   task_budget: {max_searches:30,max_duration_seconds:600},
   admin_debug: { show_effective_prompt: true, show_model_info: true, show_reasoning_length: true },
   updated_at: '',

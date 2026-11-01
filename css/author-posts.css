@@ -48,6 +48,19 @@
 .author-post-thumb.is-unavailable::after { content:'点击重试'; display:grid; place-items:center; height:100%; color:var(--text-muted); font-size:11px; }
 .author-post-copy { display:flex; flex-direction:column; gap:8px; flex:1; min-width:0; }
 .author-post-text { font-size:15px; line-height:1.6; white-space:pre-wrap; overflow-wrap:anywhere; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+/* 歌曲卡片不能参与 3 行截断，否则封面和播放键会被裁掉 */
+.author-post-text.is-rich { display:block; -webkit-line-clamp:unset; -webkit-box-orient:initial; overflow:visible; }
+.author-post-text.is-rich .xtj-music-card { margin-top:6px; }
+/* 未登录访客只看到 3 条，横线中间写明登录后可看全部 */
+.author-post-guest-gate { display:flex; flex-direction:column; align-items:center; gap:12px; padding:18px 0 26px; }
+.author-post-guest-text { display:flex; align-items:center; gap:12px; width:100%; font-size:12px; color:var(--text-secondary); white-space:nowrap; }
+.author-post-guest-text::before, .author-post-guest-text::after { content:''; flex:1 1 0; height:1px; background:currentColor; opacity:.24; }
+#userProfileModal .author-post-guest-login {
+  min-height:28px; padding:2px 12px; border:1px solid var(--primary)!important; border-radius:999px!important;
+  background:transparent!important; color:var(--primary)!important; font:inherit; font-size:12px; line-height:1.4;
+  box-shadow:none!important; backdrop-filter:none!important; -webkit-backdrop-filter:none!important; cursor:pointer;
+}
+#userProfileModal .author-post-guest-login::before, #userProfileModal .author-post-guest-login::after { content:none!important; }
 .author-post-meta { font-size:11px; color:var(--text-secondary); line-height:1.5; }
 .author-post-media-label { display:grid; place-items:center; flex:0 0 96px; height:72px; border-radius:5px; color:var(--primary); background:rgba(99,153,137,.08); font-size:14px; }
 .author-post-status { padding:20px; display:flex; align-items:center; justify-content:center; gap:10px; color:var(--text-secondary); font-size:12px; }
