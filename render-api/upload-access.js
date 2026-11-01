@@ -51,6 +51,9 @@ function installUploadAccess(app, { supabase, supabaseUrl, optionalAuth, rateLim
       }
       if (!allowed) return res.status(404).end();
       // Avatar paths are unique per upload, so browsers may reuse them for a day without asking again.
+      // 帖子媒体仍然保持默认的「每次重新校验」：这里的响应是鉴权后的私有内容，
+      // 给它 immutable 等于让浏览器在退出登录后继续复用字节，和 streamOriginal 的约定冲突。
+      // 真正要省的重复下载交给「不点播放就不加载」和后续的直链方案处理。
       const cacheControl = /^avatars\//.test(path) ? 'public, max-age=86400, stale-while-revalidate=604800' : undefined;
       const stream = bucket => mediaStreamer()(req,res,{supabase,bucket,path,fetchImpl,allowDownload:path.startsWith('chat/'),cacheControl,previews});
       try {

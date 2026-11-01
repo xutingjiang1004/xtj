@@ -66,7 +66,9 @@
               global: { fetch: function (input, options) { return transport(index, input, options); } }
             });
           }
-          var result = await uploader.storage.from('uploads').upload(path, file, { upsert: false });
+          // 文件名唯一、内容永不覆盖，直接给一年缓存：以后哪怕某条链路又直连存储，
+          // 也不会 1 小时就失效、反复重新下载视频。
+          var result = await uploader.storage.from('uploads').upload(path, file, { upsert: false, cacheControl: '31536000' });
           if (!result.error) { loaded[index] = file.size; update(total ? loaded.reduce(function (sum, value) { return sum + value; }, 0) / total * 90 : 0, '上传中'); }
           return result;
         },

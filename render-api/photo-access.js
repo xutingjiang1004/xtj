@@ -568,7 +568,9 @@ function renderPostSharePage(row, items, origin, preview = null, options = {}) {
     const kind = String(item.media_type || '');
     if (!url) return '';
     if (/^(image|photo)$/.test(kind)) return `<article><button class="photo" aria-label="查看第${index + 1}张图片"><img data-original="${html(url)}" src="${html(url + '?preview=1')}" alt="${html(text.slice(0, 60) || '帖子图片')}" loading="${index ? 'lazy' : 'eager'}"></button><button class="retry" hidden>图片未加载 · 点击重试</button></article>`;
-    if (kind === 'video') return `<section class="media"><video controls playsinline preload="metadata" src="${html(url)}"></video></section>`;
+    // 视频不预加载：preload=none 下，没点播放就不会向存储要一个字节。
+    // 封面用上传时截的首帧（1080 JPEG），既出图快，也避免默认黑块。
+    if (kind === 'video') return `<section class="media"><video controls playsinline preload="none"${firstImage ? ` poster="${html(origin + firstImage.share_media_url + '?preview=1&format=jpeg')}"` : ''} src="${html(url)}"></video></section>`;
     if (kind === 'audio') return `<section class="media"><audio controls preload="metadata" src="${html(url)}"></audio></section>`;
     return '';
   }).join('');

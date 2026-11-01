@@ -9403,9 +9403,13 @@ function renderProfileActivityList(kind) {
                 if (first.media_type === 'video') {
                     // 有封面就用封面，没有也要让浏览器解出首帧，不能再是纯黑底。
                     // 容器宽度跟随视频自身比例（竖屏就是窄条居中），不要用固定高度把它裁成横的。
+                    // 视频地址改走站点自己的取媒体接口：Supabase 公网地址只给 1 小时缓存，
+                    // 同源接口给 30 天，第二次播放直接从本机读，不再消耗任何流量。
                     var poster = sanitizeUrl(post.poster_url || '');
-                    return '<div class="media media--video"><video src="' + escapeHtml(safeMediaUrl) + '" controls preload="metadata" playsinline' +
-                        (poster ? ' poster="' + escapeHtml(poster) + '"' : '') + '></video></div>';
+                    var posterSrc = window.xtjPostPosterUrl ? window.xtjPostPosterUrl(poster) : poster;
+                    var streamUrl = window.xtjUploadDisplayUrl ? window.xtjUploadDisplayUrl(safeMediaUrl) : safeMediaUrl;
+                    return '<div class="media media--video"><video src="' + escapeHtml(streamUrl) + '" controls preload="' + (posterSrc ? 'none' : 'metadata') + '" playsinline' +
+                        (posterSrc ? ' poster="' + escapeHtml(posterSrc) + '"' : '') + ' data-xtj-video="1"></video></div>';
                 }
                 if (first.media_type === 'audio') return '<div class="media"><audio src="' + escapeHtml(safeMediaUrl) + '" controls preload="metadata"></audio></div>';
                 var visible = options && options.detail ? items : items.slice(0, 9);
@@ -11720,7 +11724,9 @@ function renderProfileActivityList(kind) {
                                 var prepared = await prepareResponse.json();
                                 assertPostPublishIdentity(flight);
                                 if (!prepareResponse.ok || !prepared.ok || prepared.storage_path !== path) throw new Error(prepared.error || '上传准备失败');
-                                var uploadRes = flight.progress ? await flight.progress.upload(sb, path, selectedFile, position) : await sb.storage.from('uploads').upload(path, selectedFile, { upsert: false });
+                                // 文件名唯一、内容不可覆盖：顺手给存储侧打一年缓存，
+                                // 以后任何直连场景都不会 1 小时失效、反复重下。
+                                var uploadRes = flight.progress ? await flight.progress.upload(sb, path, selectedFile, position) : await sb.storage.from('uploads').upload(path, selectedFile, { upsert: false, cacheControl: '31536000' });
                                 assertPostPublishIdentity(flight);
                                 if (uploadRes.error) throw uploadRes.error;
                                 var dimensions = selectedFile.type.startsWith('image/') ? await readPostImageDimensions(selectedFile) : {};
@@ -11746,7 +11752,7 @@ function renderProfileActivityList(kind) {
                                         var posterPrepared = await posterPrepare.json();
                                         assertPostPublishIdentity(flight);
                                         if (posterPrepare.ok && posterPrepared.ok) {
-                                            var posterUpload = await sb.storage.from('uploads').upload(posterPath, posterFile, { upsert: false });
+                                            var posterUpload = await sb.storage.from('uploads').upload(posterPath, posterFile, { upsert: false, cacheControl: '31536000' });
                                             if (posterUpload.error) throw posterUpload.error;
                                             var posterDims = await readPostImageDimensions(posterFile);
                                             assertPostPublishIdentity(flight);
