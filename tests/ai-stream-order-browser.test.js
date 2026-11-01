@@ -186,3 +186,72 @@ test('site search results collapse into one row with a count and expand on click
   assert.deepEqual(f.errors,[]);
  }finally{await f.close();}
 });
+
+test('interrupting a reply with a new message leaves no empty bubble, and the continue button is a rounded rectangle',{timeout:45000},async()=>{
+ const f=await aiPolishFixture(),p=f.page;
+ try{
+  await p.locator('#aiChatMsgInput').fill('泰勒最新消息');await p.locator('#aiChatSendBtn').click();await p.waitForFunction(()=>aiPolish.streams.length===1);
+  await emit(p,{type:'reasoning_start'});await emit(p,{type:'reasoning',text:'先搜索。'});await emit(p,{type:'content',text:'我搜一下。'});
+  await emit(p,{type:'tool_calls',tools:[{id:'s1',name:'search_web',args:{query:'Taylor Swift news'}}]});await p.waitForTimeout(300);
+  await p.locator('#aiChatMsgInput').fill('换个问题');await p.locator('#aiChatSendBtn').click();await p.waitForSelector('.ai-msg.assistant .ai-continue-btn');
+  const state=await p.evaluate(()=>{const n=document.querySelector('.ai-msg.assistant'),b=n.querySelector('.ai-msg-bubble:not(.ai-content-segment)'),btn=n.querySelector('.ai-continue-btn'),cs=getComputedStyle(btn),icon=getComputedStyle(n.querySelector('.ai-tool-step.is-error'),'::after');return{bubble:!!b&&getComputedStyle(b).display!=='none'&&b.getBoundingClientRect().height>0,radius:cs.borderTopLeftRadius,height:btn.getBoundingClientRect().height,iconBg:icon.backgroundColor};});
+  assert.equal(state.bubble,false);assert.equal(state.radius,'12px');assert.ok(state.height>=36);assert.equal(state.iconBg,'rgba(0, 0, 0, 0)');assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
+
+test('a clarification card sends the chosen option as the next message, locks afterwards, and never overwrites a draft',{timeout:45000},async()=>{
+ const f=await aiPolishFixture(),p=f.page;
+ try{
+  await p.locator('#aiChatMsgInput').fill('帮我订个行程');await p.locator('#aiChatSendBtn').click();await p.waitForFunction(()=>aiPolish.streams.length===1);
+  await emit(p,{type:'tool_calls',tools:[{id:'ask1',name:'ask_user',args:{question:'去哪个城市？',options:['福州','厦门','泉州']}}]});
+  await emit(p,{type:'tool_result',call_id:'ask1',tool_name:'ask_user',success:true,summary:'已向你确认'});
+  await emit(p,{type:'card',card:{protocol:'xtj.ai.ui.v1',id:'clarify1',type:'clarify',title:'需要你确认',tool_call_id:'ask1',data:{question:'去哪个城市？',options:['福州','厦门','泉州']}}});
+  await emit(p,{type:'content',text:'我需要确认一下目的地。'});await emit(p,{type:'done',content:'我需要确认一下目的地。',complete:true,saved:true,conversation_id:'CLR01',thinking_elapsed_ms:500,thinking_mode:'low'});
+  await p.waitForFunction(()=>!document.querySelector('.ai-msg.generating'));await p.waitForSelector('.ai-clarify-card .ai-clarify-option');
+  assert.equal(await p.locator('.ai-clarify-card .ai-clarify-option').count(),3);
+  assert.match(await p.locator('.ai-clarify-question').textContent(),/去哪个城市/);
+  // a draft in the composer is protected
+  await p.locator('#aiChatMsgInput').fill('我正在写的内容');await p.locator('.ai-clarify-option').nth(1).click();
+  assert.equal(await p.locator('#aiChatMsgInput').inputValue(),'我正在写的内容');assert.equal(await p.evaluate(()=>aiPolish.streams.length),1);
+  await p.locator('#aiChatMsgInput').fill('');await p.locator('.ai-clarify-option').nth(1).click();
+  await p.waitForFunction(()=>aiPolish.streams.length===2);
+  assert.equal(await p.evaluate(()=>aiPolish.streams[1].body.message),'厦门');
+  assert.equal(await p.locator('.ai-clarify-option.is-chosen').textContent(),'厦门');
+  assert.equal(await p.locator('.ai-clarify-option:not(:disabled)').count(),0);assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
+
+const flights=p=>p.evaluate(()=>[...document.querySelectorAll('.ai-msg.user')].map(n=>n.getAnimations().filter(a=>!(a instanceof CSSAnimation)).map(a=>({keyframes:a.effect.getKeyframes().map(k=>k.transform),duration:a.effect.getTiming().duration}))));
+test('a sent message flies from the composer to its place as one unit and ends at rest',{timeout:45000},async()=>{
+ const f=await aiPolishFixture(),p=f.page;
+ try{
+  await p.locator('#aiChatMsgInput').fill('从输入框飞过来');await p.locator('#aiChatSendBtn').click();
+  await p.waitForFunction(()=>document.querySelector('.ai-msg.user')?.getAnimations().some(a=>!(a instanceof CSSAnimation)));
+  const [list]=await flights(p),flight=list[0];
+  assert.match(flight.keyframes[0],/^translate\(-?[\d.]+px, [\d.]+px\) scale\(0?\.94\)$/);// starts below (the composer) and a little smaller
+  assert.equal(flight.keyframes.at(-1),'translate(0px, 0px) scale(1)');assert.ok(flight.duration>=300&&flight.duration<=460,'duration '+flight.duration);
+  assert.equal(await p.evaluate(()=>document.querySelector('.ai-msg.user').classList.contains('entering')),false);
+  await p.waitForFunction(()=>document.querySelector('.ai-msg.user').getAnimations().every(a=>a instanceof CSSAnimation));
+  assert.equal(await p.evaluate(()=>getComputedStyle(document.querySelector('.ai-msg.user')).transform),'none');
+  const box=await p.locator('.ai-msg.user').boundingBox();assert.ok(box.y>=0);assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
+test('reduced motion, regeneration-style sends and the continue button do not fly; a chosen clarification option flies from the option',{timeout:60000},async()=>{
+ const f=await aiPolishFixture(),p=f.page;
+ try{
+  await p.evaluate(()=>document.documentElement.setAttribute('data-xtj-motion','off'));
+  await p.locator('#aiChatMsgInput').fill('减少动态效果');await p.locator('#aiChatSendBtn').click();await p.waitForFunction(()=>aiPolish.streams.length===1);await p.waitForTimeout(150);
+  assert.deepEqual((await flights(p))[0],[]);
+  await p.evaluate(()=>document.documentElement.removeAttribute('data-xtj-motion'));
+  await emit(p,{type:'content',text:'部分回答'});await p.locator('.ai-chat-pause').click();await p.waitForSelector('.ai-continue-btn');
+  await p.locator('.ai-continue-btn').click();await p.waitForFunction(()=>aiPolish.streams.length===2);await p.waitForTimeout(200);
+  assert.deepEqual((await flights(p)).at(-1),[],'the continue button must not fly from the composer');
+  // a clarification option: the new message starts at the option, not at the composer
+  await emit(p,{type:'card',card:{protocol:'xtj.ai.ui.v1',id:'c9',type:'clarify',title:'需要你确认',data:{question:'去哪？',options:['福州','厦门']}}});
+  await emit(p,{type:'content',text:'请选择。'});await emit(p,{type:'done',content:'请选择。',complete:true,saved:true,conversation_id:'FLY01'});
+  await p.waitForFunction(()=>!document.querySelector('.ai-msg.generating'));await p.waitForSelector('.ai-clarify-option');
+  const before=await p.evaluate(()=>aiPolish.streams.length);await p.locator('.ai-clarify-option').first().click();await p.waitForFunction(n=>aiPolish.streams.length>n,before);
+  await p.waitForFunction(()=>[...document.querySelectorAll('.ai-msg.user')].at(-1).getAnimations().some(a=>!(a instanceof CSSAnimation)));
+  assert.equal((await flights(p)).at(-1).length,1);assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});

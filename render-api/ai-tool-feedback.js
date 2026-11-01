@@ -5,6 +5,7 @@ const OUTCOMES = {
   read_web_page: '已读取网页', web_extract: '已提取网页内容', read_document: '已读取文档',
   get_weather: '已查询天气', get_current_time: '已获取当前时间',
   calculate: '已完成计算', run_code: '已执行代码', process_json: '已处理数据',
+  save_memory: '已保存记忆', list_memories: '已读取记忆', forget_memory: '已删除记忆', ask_user: '已向你确认',
   task_plan: '已更新任务计划', make_file: '已生成文件', make_chart: '已生成图表',
   search_posts: '已搜索帖子', search_comments: '已搜索评论', search_photos: '已搜索照片',
   search_dm_messages: '已搜索私信', search_ai_history: '已搜索对话', search_users: '已搜索用户',

@@ -1134,6 +1134,8 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                             if ((now - fetchedAt) >= ttl) continue;
                             // has_avatar 必须有 url
                             if (state === 'has_avatar' && !entry.url) continue;
+                            // 旧版本把 base64 头像原图（可达几 MB）存进了这里：每次启动都要解析它，还会撑爆存储配额。丢掉，改走小图地址。
+                            if (typeof entry.url === 'string' && entry.url.indexOf('data:') === 0) continue;
                             result[keys[i]] = {
                                 state: state,
                                 url: entry.url || null,
@@ -1186,6 +1188,8 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                             (now - (entry.fetched_at || 0)) >= 30000) continue;
                         // has_avatar 必须有 url
                         if (entry.state === 'has_avatar' && !entry.url) continue;
+                        // base64 原图不入本地缓存（体积不可控，会撑爆配额让整张缓存写入失败）
+                        if (typeof entry.url === 'string' && entry.url.indexOf('data:') === 0) continue;
                         wrapped.data[keys[i]] = {
                             state: entry.state,
                             url: entry.url || null,
@@ -2759,6 +2763,8 @@ function isAdmin() {
                 dialog.setAttribute('role', 'dialog');
                 dialog.setAttribute('aria-modal', 'true');
                 var heading = document.createElement('h3'); heading.textContent = title || '请输入';
+                heading.id = 'xtjPromptTitle' + Date.now().toString(36);
+                dialog.setAttribute('aria-labelledby', heading.id);
                 var hint = document.createElement('p'); hint.textContent = message || '';
                 var input = document.createElement('input'); input.type = 'text'; input.value = initial || ''; input.maxLength = maxLength || 200;
                 var row = document.createElement('div'); row.className = 'xtj-prompt-actions';
@@ -2773,6 +2779,12 @@ function isAdmin() {
                 function onKey(event) {
                     if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(null); }
                     else if (event.key === 'Enter' && document.activeElement === input) { event.preventDefault(); close(input.value); }
+                    else if (event.key === 'Tab') {
+                        // Keep keyboard focus inside the dialog: Tab/Shift+Tab wrap between its controls.
+                        var stops = [input, cancel, ok], at = stops.indexOf(document.activeElement);
+                        event.preventDefault();
+                        stops[(at + (event.shiftKey ? stops.length - 1 : 1)) % stops.length].focus();
+                    }
                 }
                 document.addEventListener('keydown', onKey, true);
                 cancel.addEventListener('click', function () { close(null); });

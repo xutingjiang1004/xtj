@@ -1140,6 +1140,8 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                             if ((now - fetchedAt) >= ttl) continue;
                             // has_avatar 必须有 url
                             if (state === 'has_avatar' && !entry.url) continue;
+                            // 旧版本把 base64 头像原图（可达几 MB）存进了这里：每次启动都要解析它，还会撑爆存储配额。丢掉，改走小图地址。
+                            if (typeof entry.url === 'string' && entry.url.indexOf('data:') === 0) continue;
                             result[keys[i]] = {
                                 state: state,
                                 url: entry.url || null,
@@ -1192,6 +1194,8 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                             (now - (entry.fetched_at || 0)) >= 30000) continue;
                         // has_avatar 必须有 url
                         if (entry.state === 'has_avatar' && !entry.url) continue;
+                        // base64 原图不入本地缓存（体积不可控，会撑爆配额让整张缓存写入失败）
+                        if (typeof entry.url === 'string' && entry.url.indexOf('data:') === 0) continue;
                         wrapped.data[keys[i]] = {
                             state: entry.state,
                             url: entry.url || null,
@@ -2765,6 +2769,8 @@ function isAdmin() {
                 dialog.setAttribute('role', 'dialog');
                 dialog.setAttribute('aria-modal', 'true');
                 var heading = document.createElement('h3'); heading.textContent = title || '请输入';
+                heading.id = 'xtjPromptTitle' + Date.now().toString(36);
+                dialog.setAttribute('aria-labelledby', heading.id);
                 var hint = document.createElement('p'); hint.textContent = message || '';
                 var input = document.createElement('input'); input.type = 'text'; input.value = initial || ''; input.maxLength = maxLength || 200;
                 var row = document.createElement('div'); row.className = 'xtj-prompt-actions';
@@ -2779,6 +2785,12 @@ function isAdmin() {
                 function onKey(event) {
                     if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(null); }
                     else if (event.key === 'Enter' && document.activeElement === input) { event.preventDefault(); close(input.value); }
+                    else if (event.key === 'Tab') {
+                        // Keep keyboard focus inside the dialog: Tab/Shift+Tab wrap between its controls.
+                        var stops = [input, cancel, ok], at = stops.indexOf(document.activeElement);
+                        event.preventDefault();
+                        stops[(at + (event.shiftKey ? stops.length - 1 : 1)) % stops.length].focus();
+                    }
                 }
                 document.addEventListener('keydown', onKey, true);
                 cancel.addEventListener('click', function () { close(null); });
@@ -7919,7 +7931,7 @@ function renderProfileActivityList(kind) {
                         '" alt="' + escapeHtml(safeUser) + '" data-user-name="' + escapeHtml(safeUser) +
                         '" loading="lazy" decoding="async" style="opacity:0;transition:opacity 0.2s"' +
                         ' onload="this.style.opacity=\'1\';var p=this.closest(\'.avatar\')||this.closest(\'.profile-detail-avatar\');if(p){p.classList.add(\'has-image\');}"' +
-                        ' onerror="var p=this.closest(\'.avatar\')||this.closest(\'.profile-detail-avatar\');if(p){p.classList.remove(\'has-image\');this.remove();var f=p.querySelector(\'.avatar-fallback\');if(f)f.style.visibility=\'visible\'};var u=this.getAttribute(\'data-user-name\');if(u&&window.__xtjInvalidateAvatarCache)window.__xtjInvalidateAvatarCache(u)">' +
+                        ' onerror="var rn=+this.getAttribute(\'data-retry\')||0;if(rn<2){this.setAttribute(\'data-retry\',rn+1);var re=this,rb=(re.getAttribute(\'src\')||\'\').split(\'#\')[0];setTimeout(function(){re.src=rb+\'#r\'+(rn+1)},800*(rn+1));return}var p=this.closest(\'.avatar\')||this.closest(\'.profile-detail-avatar\');if(p){p.classList.remove(\'has-image\');this.remove();var f=p.querySelector(\'.avatar-fallback\');if(f)f.style.visibility=\'visible\'};var u=this.getAttribute(\'data-user-name\');if(u&&window.__xtjInvalidateAvatarCache)window.__xtjInvalidateAvatarCache(u)">' +
                         fallbackSpan;
                 }
                 return fallbackSpan;
@@ -15656,6 +15668,46 @@ function renderProfileActivityList(kind) {
                 }
             }
 
+            // Centered time dividers like iMessage / WeChat: before the first message, whenever the
+            // day changes and after a pause of five minutes. The small time inside each bubble stays.
+            var CHAT_TIME_SEP_GAP_MS = 5 * 60 * 1000;
+            function formatChatSeparatorTime(stamp) {
+                var d = new Date(stamp);
+                if (isNaN(d.getTime())) return '';
+                var now = new Date();
+                var pad = function(n) { return String(n).padStart(2, '0'); };
+                var hhmm = pad(d.getHours()) + ':' + pad(d.getMinutes());
+                var dayStart = function(x) { return new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime(); };
+                var days = Math.round((dayStart(now) - dayStart(d)) / 86400000);
+                if (days <= 0) return '今天 ' + hhmm;
+                if (days === 1) return '昨天 ' + hhmm;
+                if (days < 7) return '周' + '日一二三四五六'.charAt(d.getDay()) + ' ' + hhmm;
+                if (d.getFullYear() === now.getFullYear()) return (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + hhmm;
+                return d.getFullYear() + '年' + (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + hhmm;
+            }
+            function chatNeedsTimeSeparator(stamp, previousStamp) {
+                if (!isFinite(stamp)) return false;
+                if (!previousStamp) return true;
+                if (stamp - previousStamp >= CHAT_TIME_SEP_GAP_MS) return true;
+                return new Date(stamp).toDateString() !== new Date(previousStamp).toDateString();
+            }
+            function getChatTimeSeparatorNode(stamp, pool) {
+                var key = String(stamp), label = formatChatSeparatorTime(stamp);
+                var node = pool[key];
+                if (node) delete pool[key];
+                else {
+                    node = document.createElement('div');
+                    node.className = 'chat-time-sep';
+                    node.setAttribute('role', 'separator');
+                    node.setAttribute('data-sep-key', key);
+                    node.appendChild(document.createElement('span'));
+                }
+                var span = node.firstChild;
+                if (span.textContent !== label) span.textContent = label;
+                node.setAttribute('aria-label', label);
+                return node;
+            }
+
             function renderDockMessages(userName, msgs, forceScroll) {
                 scheduleChatReactions();
                 const el = document.getElementById('dockChatMessages');
@@ -15734,7 +15786,14 @@ function renderProfileActivityList(kind) {
                 });
                 var newReceived=msgs.filter(function(message,index){return message.user_name!==currentUser && !existingRows[getDockChatRowKey(message,index)];}).length;
                 var orderedNodes = [];
+                var existingTimeSeps = {}, previousMessageStamp = 0;
+                Array.prototype.forEach.call(el.querySelectorAll('.chat-time-sep[data-sep-key]'), function(node) {
+                    existingTimeSeps[node.getAttribute('data-sep-key')] = node;
+                });
                 msgs.forEach(function(message, index) {
+                    var messageStamp = Date.parse(message.created_at);
+                    if (chatNeedsTimeSeparator(messageStamp, previousMessageStamp)) orderedNodes.push(getChatTimeSeparatorNode(messageStamp, existingTimeSeps));
+                    if (isFinite(messageStamp)) previousMessageStamp = messageStamp;
                     var key = getDockChatRowKey(message, index);
                     var sig = buildDockChatRowSignature(message);
                     var node = existingRows[key];

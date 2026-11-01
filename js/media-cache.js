@@ -39,7 +39,8 @@
       try { worker.postMessage({ type: 'XTJ_CLEAR_ORIGINAL_MEDIA' }, [channel.port2]); }
       catch (_) { channel.port2.close(); done(); }
     });
-    if ('caches' in window) await caches.delete('xtj-original-media-v1').catch(function () {});
+    if ('caches' in window) { await caches.delete('xtj-original-media-v1').catch(function () {}); await caches.delete('xtj-signed-media-v1').catch(function () {}); }
+    try { localStorage.removeItem('xtj_feed_cache_v1'); } catch (_) {}
   };
   navigator.serviceWorker.addEventListener('message', function (event) {
     if (event.data && event.data.type === 'XTJ_SERVICE_RESTRICTED') window.__xtjServiceRestrictedUntil = Date.now() + 60000;

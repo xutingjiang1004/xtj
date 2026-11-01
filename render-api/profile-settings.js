@@ -16,6 +16,7 @@ const DEFAULTS = Object.freeze({
   default_visibility: "public",
   message_notifications: true,
   notification_preview: true,
+  ai_memory_enabled: true,
 });
 async function readProfileSettings(supabase, actor) {
   const auth = await readAuthRecord(supabase, actor, "__auth__", "id");
@@ -64,6 +65,7 @@ function validatePatch(body) {
         "guests_allowed",
         "message_notifications",
         "notification_preview",
+        "ai_memory_enabled",
       ].includes(key)
     ) {
       if (typeof value !== "boolean") throw Error("invalid_privacy");

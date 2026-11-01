@@ -280,44 +280,107 @@
     }, 8000);
   }
 
-  // Kick off immediately — do not wait for DOMContentLoaded / core.js
-  try {
-    var url = (window.location && window.location.origin ? window.location.origin : '') + '/api/feed?page=0&limit=' + FEED_LIMIT;
-    var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    var timer = setTimeout(function () {
-      try {
-        if (ctrl) ctrl.abort();
-      } catch (e) {}
-    }, TIMEOUT_MS);
+  // The last good first page stays on this device. A sleeping free-tier server can need
+  // 20-40 s to answer; after a short wait the visitor sees the previous posts instead of an
+  // empty "timed out" message, and the real answer replaces them when it arrives. Only the
+  // same account (or the same signed-out viewer) can ever read this copy.
+  var FEED_CACHE_KEY = 'xtj_feed_cache_v1';
+  var FEED_CACHE_MAX_AGE = 7 * 86400000;
+  var FEED_CACHE_MAX_CHARS = 700000;
+  var FEED_SLOW_MS = 2500;
+  var FEED_PATIENT_TIMEOUT_MS = 45000;
+  var FEED_RETRY_DELAYS = [8000, 15000, 30000, 60000];
+  var servedStale = false;
 
-    fetch(url, {
-      method: 'GET',
-      credentials: 'include',
-      headers: { Accept: 'application/json' },
-      signal: ctrl ? ctrl.signal : undefined,
-    })
-      .then(async function (res) {
-        var json = await res.json().catch(function () { return null; });
-        if (window.xtjObserveServiceResponse) window.xtjObserveServiceResponse(res, json);
-        if (!res.ok || !json || !json.ok) {
-          var error = new Error('feed_failed');
-          error.status = res.status; error.code = json && json.code || '';
-          error.retryable = !(json && json.retryable === false);
-          error.publicMessage = json && typeof json.error === 'string' ? json.error : '';
-          throw error;
-        }
-        return json;
-      })
-      .then(function (json) {
-        clearTimeout(timer);
-        if (!json || !json.ok) throw new Error((json && json.error) || 'feed_not_ok');
-        finishOk(json);
-      })
-      .catch(function (err) {
-        clearTimeout(timer);
-        finishErr(err || new Error('feed_failed'));
-      });
-  } catch (bootErr) {
-    finishErr(bootErr);
+  function readFeedCache() {
+    try {
+      var saved = JSON.parse(localStorage.getItem(FEED_CACHE_KEY) || 'null');
+      if (!saved || saved.user !== state.bootUser || !saved.data || !Array.isArray(saved.data.posts)) return null;
+      if (!(Date.now() - Number(saved.t) <= FEED_CACHE_MAX_AGE)) return null;
+      return saved.data;
+    } catch (_) { return null; }
   }
+  function writeFeedCache(data) {
+    try {
+      var raw = JSON.stringify({ t: Date.now(), user: state.bootUser, data: data });
+      if (raw.length <= FEED_CACHE_MAX_CHARS) localStorage.setItem(FEED_CACHE_KEY, raw);
+      else localStorage.removeItem(FEED_CACHE_KEY);
+    } catch (_) {}
+  }
+  function serveStale(cached) {
+    servedStale = true;
+    state.stale = true;
+    finishOk(cached);
+  }
+  function refreshCoreFeed() {
+    // Never yank the page while the visitor is typing or reading further down.
+    var active = document.activeElement;
+    if (pageHidden || (active && /^(TEXTAREA|INPUT)$/.test(active.tagName)) || (window.scrollY || 0) > 160) return;
+    try { if (typeof window.loadFeed === 'function' && window.__xtjCoreFeedReady) window.loadFeed(true); } catch (_) {}
+  }
+
+  function requestFeed(attempt) {
+    try {
+      var url = (window.location && window.location.origin ? window.location.origin : '') + '/api/feed?page=0&limit=' + FEED_LIMIT;
+      var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      var patient = servedStale || !!readFeedCache();
+      var timer = setTimeout(function () {
+        try {
+          if (ctrl) ctrl.abort();
+        } catch (e) {}
+      }, patient ? FEED_PATIENT_TIMEOUT_MS : TIMEOUT_MS);
+
+      fetch(url, {
+        method: 'GET',
+        credentials: 'include',
+        headers: { Accept: 'application/json' },
+        signal: ctrl ? ctrl.signal : undefined,
+      })
+        .then(async function (res) {
+          var json = await res.json().catch(function () { return null; });
+          if (window.xtjObserveServiceResponse) window.xtjObserveServiceResponse(res, json);
+          if (!res.ok || !json || !json.ok) {
+            var error = new Error('feed_failed');
+            error.status = res.status; error.code = json && json.code || '';
+            error.retryable = !(json && json.retryable === false);
+            error.publicMessage = json && typeof json.error === 'string' ? json.error : '';
+            throw error;
+          }
+          return json;
+        })
+        .then(function (json) {
+          clearTimeout(timer);
+          if (!json || !json.ok) throw new Error((json && json.error) || 'feed_not_ok');
+          writeFeedCache(json);
+          if (servedStale) {
+            servedStale = false;
+            state.stale = false;
+            state.data = json;
+            refreshCoreFeed();
+            return;
+          }
+          finishOk(json);
+        })
+        .catch(function (err) {
+          clearTimeout(timer);
+          var cached = state.status === 'loading' && err && err.status !== 401 && err.status !== 403 ? readFeedCache() : null;
+          if (cached) serveStale(cached);
+          if (servedStale) {
+            if (attempt < FEED_RETRY_DELAYS.length) setTimeout(function () { if (!pageHidden && servedStale) requestFeed(attempt + 1); }, FEED_RETRY_DELAYS[attempt]);
+            return;
+          }
+          finishErr(err || new Error('feed_failed'));
+        });
+    } catch (bootErr) {
+      finishErr(bootErr);
+    }
+  }
+
+  // Kick off immediately — do not wait for DOMContentLoaded / core.js
+  setTimeout(function () {
+    if (pageHidden || state.status !== 'loading') return;
+    var cached = readFeedCache();
+    if (cached) serveStale(cached);
+  }, FEED_SLOW_MS);
+  requestFeed(0);
 })();

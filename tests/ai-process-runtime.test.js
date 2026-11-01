@@ -491,7 +491,12 @@ test('research formats custom content from first packets and keeps live reasonin
  await page.waitForSelector('#dtMessages .ai-think-answer h2');await page.waitForSelector('#dtMessages .ai-think-answer strong');await page.waitForSelector('#dtMessages .ai-think-answer li');
  assert.equal(await page.locator('#dtMessages .ai-research-done').count(),0,'formatting must precede done');
  await page.evaluate(()=>researchEmit({type:'done',content:'## 实时结论\n\n**晴天**\n\n- 气温适宜\n',conversation_id:'new-cid'}));
- await page.waitForSelector('#dtMessages .ai-research-done');assert.ok(await page.locator('#dtMessages .ai-think-thinking').isVisible());assert.match(await page.locator('#dtMessages .ai-think-thinking-body').textContent(),/核对实际天气来源/);
+ await page.waitForSelector('#dtMessages .ai-research-done');
+ // 2026-11-01：研究过程不再摊在卡片里，点卡片在底部面板里查看。
+ assert.equal(await page.locator('#dtMessages .ai-think-thinking').isVisible(),false);assert.match(await page.locator('#dtMessages .ai-think-thinking-body').textContent(),/核对实际天气来源/);
+ await page.locator('#dtMessages .ai-research-header').click();await page.waitForSelector('.ai-rs-overlay.is-open');
+ assert.ok(await page.locator('.ai-rs-process .ai-think-thinking').isVisible());await page.locator('.ai-rs-process .ai-think-thinking > summary').click();
+ assert.match(await page.locator('.ai-rs-process .ai-think-thinking-body').textContent(),/核对实际天气来源/);
 });
 
 test('research pipeline formats report chunks and displays genuine stages before completion',async t=>{
