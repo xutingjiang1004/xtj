@@ -15,13 +15,14 @@ test('a slow original shows a wordless blossom progress bar, and a reopened orig
   try {
     const p = s.page;
     const open = () => p.evaluate((list) => { const items = list.map(id => { const u = location.origin + '/api/photo/' + id + '/media'; return { id, imageUrl: u, thumbUrl: window.xtjMediaPreviewUrl(u), user_name: 'alice', width: 800, height: 1000, created_at: new Date().toISOString() }; }); window.openPhotoPreview(0, { photos: items }); }, ids);
-    const bar = () => p.evaluate(() => { const b = document.querySelector('.pp-load-progress'); return b ? { p: Number(b.style.getPropertyValue('--p')), on: b.querySelectorAll('.on').length, text: b.textContent.trim(), show: b.classList.contains('show') } : null; });
+    const bar = () => p.evaluate(() => { const b = document.querySelector('.pp-load-progress'); const z = [...document.querySelectorAll('.pp-zoom-btn')].map(e => e.getBoundingClientRect()).filter(r => r.width > 0); return b ? { mid: Math.abs(((b.getBoundingClientRect().top + b.getBoundingClientRect().bottom) / 2) - ((Math.min(...z.map(r => r.top)) + Math.max(...z.map(r => r.bottom))) / 2)), p: Number(b.style.getPropertyValue('--p')), on: b.querySelectorAll('.on').length, text: b.textContent.trim(), show: b.classList.contains('show') } : null; });
     await open();
     await p.waitForFunction(() => document.getElementById('photoPreviewOverlay')?.classList.contains('active'));
-    await p.waitForTimeout(1300);
+    await p.waitForTimeout(1700);
     const mid = await bar();
     assert.ok(mid && mid.show, 'the bar appears while the original is loading');
-    assert.equal(mid.text, '', 'no words on the bar');
+    assert.equal(mid.text, '原图加载中…', 'the bar carries only the short label');
+    assert.ok(mid.mid < 4, 'off by ' + mid.mid + ': ' + 'the bar sits at the height between the zoom buttons');
     assert.ok(mid.p > 0 && mid.p < 1, 'progress is between empty and full');
     assert.ok(mid.on >= 1 && mid.on < 14, 'blossoms fill in with the progress');
     assert.match(await p.evaluate(() => document.getElementById('photoPreviewImage').currentSrc), /preview=1/, 'the preview stays up meanwhile');

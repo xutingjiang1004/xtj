@@ -133,7 +133,7 @@
             if (!host) return null;
             var el = document.createElement("div");
             el.className = "pp-load-progress"; el.setAttribute("aria-hidden", "true");
-            var html = '<span class="pp-load-fill"></span><span class="pp-load-flowers">';
+            var html = '<span class="pp-load-fill"></span><span class="pp-load-label">原图加载中…</span><span class="pp-load-flowers">';
             for (var i = 0; i < FLOWERS; i++) {
                 var seed = (i * 37 + 11) % 17;
                 html += '<i style="left:' + ((i + .5) / FLOWERS * 100).toFixed(2) + '%;--r:' + (seed * 21 - 150) + 'deg;--y:' + ((seed % 5) - 2) + 'px;--s:' + (.82 + (seed % 4) * .09).toFixed(2) + '">' +
@@ -141,7 +141,20 @@
             }
             el.innerHTML = html + "</span>";
             host.appendChild(el);
+            place(el, host);
             return el;
+        }
+        // 放在放大/缩小按钮那一栏的中间高度：按钮竖排时取两个按钮的中点，横排（桌面）时放在工具栏正上方。
+        function place(el, host) {
+            try {
+                var zs = Array.prototype.filter.call(host.querySelectorAll(".pp-zoom-btn"), function(b) { var r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0; });
+                if (zs.length < 2) return;
+                var hr = host.getBoundingClientRect(), a = zs[0].getBoundingClientRect(), b = zs[1].getBoundingClientRect();
+                var stacked = Math.abs(a.top - b.top) > Math.min(a.height, b.height) * .6, h = el.offsetHeight || 16, bottom;
+                if (stacked) bottom = hr.bottom - ((Math.min(a.top, b.top) + Math.max(a.bottom, b.bottom)) / 2 + h / 2);
+                else bottom = hr.bottom - Math.min(a.top, b.top) + 10;
+                el.style.bottom = Math.max(6, Math.round(bottom)) + "px";
+            } catch (err) {}
         }
         function apply(s) {
             if (!s.node) return;
@@ -177,6 +190,8 @@
                         if (s.dead) return;
                         s.node = build(); if (!s.node) return;
                         apply(s); void s.node.offsetWidth; s.node.classList.add("show");
+                        // 工具栏按钮刚打开时还在做入场动画，位置稳定后再校准一次高度。
+                        [450, 1000].forEach(function(ms) { setTimeout(function() { s.node && !s.dead && place(s.node, s.node.parentNode); }, ms); });
                     }, 250);
                     // 服务端没给总大小或读取失败时，进度缓慢趋近 90%，原图一就位就走到 100%。
                     s.creep = setInterval(function() { Date.now() - s.lastReal > 1200 && setP(s, s.p + (.9 - s.p) * .05); }, 140);

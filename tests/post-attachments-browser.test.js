@@ -116,7 +116,7 @@ for(const source of ['detail','gallery'])test(`deleting from ${source} removes t
     assert.equal(await page.locator('#ppDeleteBtn').getAttribute('aria-label'),'删除帖子');await page.locator('#ppDeleteBtn').click();
   }else await page.locator('#postDetailBody .action-btn.del').click();
   await page.locator('#delBtn').click();await page.waitForFunction(id=>!document.querySelector(`#feed .post[data-post-id="${id}"]`),id);
-  assert.equal(await page.locator('#postDetailModal').evaluate(el=>el.classList.contains('active')),false);assert.equal(await page.locator('#postDetailBody').textContent(),'');assert.equal(f.calls.filter(c=>c.path==='/api/post/delete').length,1);assert.equal(f.calls.find(c=>c.path==='/api/post/delete').body.post_id,id);assert.deepEqual(f.errors,[]);
+  await page.waitForFunction(()=>!document.getElementById('postDetailModal').classList.contains('active'));assert.equal(await page.locator('#postDetailModal').evaluate(el=>el.classList.contains('active')),false);assert.equal(await page.locator('#postDetailBody').textContent(),'');assert.equal(f.calls.filter(c=>c.path==='/api/post/delete').length,1);assert.equal(f.calls.find(c=>c.path==='/api/post/delete').body.post_id,id);assert.deepEqual(f.errors,[]);
  }finally{await f.close();}
 });
 
