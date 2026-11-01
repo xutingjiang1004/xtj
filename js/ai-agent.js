@@ -4785,6 +4785,37 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     messagesEl.appendChild(state);
   }
 
+  // 用户发消息时，气泡从输入框的位置「飞」到会话里它落定的位置：起点取发送瞬间输入框（或点选的选项）
+  // 的位置，终点取气泡落定后的位置，只用 transform / opacity（合成器执行，不触发重排）。
+  // 减少动态效果、浏览器不支持 WAAPI 或气泡不在可视区时，直接出现，不做动画。
+  function playUserSendFlight(userNode, fromRect) {
+    try {
+      if (!userNode || !fromRect || !fromRect.width || !fromRect.height || prefersReducedMotion()) return;
+      // 整条消息（气泡和下面的时间）一起飞，不然时间标签会提前停在终点，和气泡脱节。
+      var bubble = userNode;
+      if (typeof bubble.animate !== 'function') return;
+      userNode.classList.remove('entering'); // 飞入取代原来的淡入，避免两套动画叠在一起
+      requestAnimationFrame(function() {
+        if (!bubble.isConnected) return;
+        var to = bubble.getBoundingClientRect();
+        var viewHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+        if (!to.width || !to.height || to.bottom < 0 || to.top > viewHeight) return;
+        // 以气泡右下角为锚点：从输入框右下角附近出发，落到自己的位置。
+        var dx = (fromRect.right - 18) - to.right;
+        var dy = (fromRect.bottom - 12) - to.bottom;
+        var distance = Math.sqrt(dx * dx + dy * dy);
+        if (distance < 8) return;
+        var duration = Math.round(Math.min(460, Math.max(300, 250 + distance * 0.18)));
+        var motion = bubble.animate([
+          { transform: 'translate(' + dx.toFixed(1) + 'px, ' + dy.toFixed(1) + 'px) scale(.94)', opacity: 0, transformOrigin: '100% 100%' },
+          { opacity: 1, offset: 0.22, transformOrigin: '100% 100%' },
+          { transform: 'translate(0, 0) scale(1)', opacity: 1, transformOrigin: '100% 100%' }
+        ], { duration: duration, easing: 'cubic-bezier(.16, 1, .3, 1)', fill: 'backwards' });
+        bubble.__xtjSendFlight = motion;
+      });
+    } catch (eFlight) {}
+  }
+
   function appendMessage(messagesEl, msg) {
     if (!messagesEl) return null;
     var empty = messagesEl.querySelector('.ai-chat-empty');
@@ -9683,7 +9714,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           optionButton.classList.add('is-chosen');
           cqGroup.querySelectorAll('button').forEach(function(other) { other.disabled = true; });
           composer.value = option;
-          try { handleSendMessage(composer, S.sendBtnEl, S.messagesEl || messagesEl, null); }
+          try { handleSendMessage(composer, S.sendBtnEl, S.messagesEl || messagesEl, null, undefined, { flightFrom: optionButton.getBoundingClientRect() }); }
           catch (eClarify) {
             shell.removeAttribute('data-answered');
             cqGroup.querySelectorAll('button').forEach(function(other) { other.disabled = false; });
@@ -10236,6 +10267,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   async function handleSendMessage(input, sendBtn, messagesEl, fileData, onAccepted, options) {
     var text = String(input.value || '').trim();
     var originalUserText = text;
+    // 发送动画的起点：点选项发送时用那个选项，普通发送用输入框；继续生成、重新生成这类程序触发的发送不做动画。
+    var sendFlightFrom = null;
+    try {
+      if (options && options.flightFrom) sendFlightFrom = options.flightFrom;
+      else if (!(options && options.noFlight) && input === S.inputEl) sendFlightFrom = input.getBoundingClientRect();
+    } catch (eFrom) {}
     if (S._newChatBusy) { notify('正在创建新对话，请稍候'); return; }
     if (S.deletingConversations.has(S.conversationId)) { notify('正在删除当前对话，请稍候'); return; }
     if (S._aiChatFilesLoading && input === S.inputEl) { notify('正在读取附件，请稍候再发送'); return; }
@@ -10422,6 +10459,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var userNode = appendMessage(messagesEl, userMsg);
     S.autoScrollPinned = true;
     scrollToBottom(messagesEl, true);
+    playUserSendFlight(userNode, sendFlightFrom);
 
     // P5 修复: 创建单一助手节点，typing dots 放在节点内部
     // 从发送到完成，始终使用同一个 DOM 节点
@@ -11020,7 +11058,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           var host = msgHost || S.messagesEl || document.getElementById('aiChatMessages');
           if (inputEl) inputEl.value = '请在上文基础上继续写完，不要重复已说内容。';
           try {
-            if (typeof handleSendMessage === 'function') handleSendMessage(inputEl, sendEl, host, null);
+            if (typeof handleSendMessage === 'function') handleSendMessage(inputEl, sendEl, host, null, undefined, { noFlight: true });
             else notify('无法继续，请手动重发');
           } catch (eSend) {
             notify('继续失败，请手动重发');

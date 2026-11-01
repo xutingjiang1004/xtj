@@ -61,7 +61,8 @@ for (const [width, height, theme] of [[1280, 800, "light"], [1920, 900, "dark"],
         const n = document.getElementById("panelProfile");
         return n.scrollTop > 100 && n.scrollTop + n.clientHeight >= n.scrollHeight - 2;
       });
-      assert.equal(await page.locator("#xtjClearCacheBtn").evaluate(n => {
+      // 真正的最后一项（设置列表里新增行后，「清理本机缓存」不再是最后一行）。
+      assert.equal(await page.locator("#panelProfile .profile-general-settings > :last-child").evaluate(n => {
         const r = n.getBoundingClientRect(), p = document.getElementById("panelProfile").getBoundingClientRect();
         return r.top >= p.top && r.bottom <= p.bottom;
       }), true, "last general setting is reached by wheel scrolling");
