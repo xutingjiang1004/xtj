@@ -18055,16 +18055,21 @@ async function createLocationTask(userName, pageLoadId, latitude, longitude, cap
 }
 
 async function processLocationTasks() {
-  if (locationTaskRunning) return;
+  if (locationTaskRunning) return 'idle';
   locationTaskRunning = true;
+  var locationWorked = false;
   try {
     // 批量拉取任务，在JS层过滤pending/processing，避免任务饥饿
     // ★ P2 修复：旧实现每批固定取最旧 50 条且无游标——最旧一批全部终态时，
     // 后几批重复拉同一批，更晚创建的 pending 任务永远轮不到。用已扫描 id
     // 集合推进游标，保证每批都向前扫描（created_at 相同也不会漏）。
-    var batchLimit = 50;
+    // 免费版 Supabase 出站只有 5GB/月。原来每 30 秒拉 3 批 × 50 条，再在
+    // finally 里补拉 200 条 content，一天光这一个任务就要扫十几万行——
+    // 任务全部完成时也没有任何降频。这里降到单批 25 条，并把「是否干活」
+    // 交给自适应轮询器决定：空闲时退避到 5 分钟。
+    var batchLimit = 25;
     var processedCount = 0;
-    var maxBatches = 3; // 最多拉3批，防止无限循环
+    var maxBatches = 1;
     var scannedIds = [];
     for (var batch = 0; batch < maxBatches; batch++) {
       var taskQuery = supabase.from('posts')
@@ -18140,6 +18145,7 @@ async function processLocationTasks() {
           await supabase.from('posts').update({ content: JSON.stringify(task) }).eq('id', row.id);
         }
         processedCount++;
+        locationWorked = true;
       }
       // 如果这批里没有pending任务，继续拉下一批
       if (!hasPending) continue;
@@ -18151,33 +18157,34 @@ async function processLocationTasks() {
   } finally {
     try {await require('./location-history').resolvePendingHistory({supabase,resolver:resolveLatLngToAddress,sync:async function(row,resolved){await mergeResolvedPreciseLocation(row.user_name,row.page_load_id,resolved,row.capture_reason==='legacy_retained'?null:row.capture_id);}});} catch(error){console.warn('[LOC-GPS] pending history:',error&&error.message);}
     locationTaskRunning = false;
+    // 清理不再每轮执行：原来每 30 秒拉 200 条 content 做「保留最近100条」，
+    // 比任务本身还贵。改成每 30 分钟按时间删一次（不读 content）：
+    // 24 小时前的定位任务已经没有解析价值。
     try {
-      var { data: allTasks } = await supabase.from('posts')
-        .select('id, content')
-        .eq('media_type', LOCATION_TASK_MARKER)
-        .order('created_at', { ascending: false })
-        .limit(200);
-      if (allTasks && allTasks.length > 100) {
-        var toDelete = allTasks.slice(100).filter(function(row) {
-          var t = {}; try { t = JSON.parse(row.content || '{}'); } catch(_) {}
-          return t.status === 'completed' || t.status === 'permanent_failed';
-        });
-        for (var d = 0; d < toDelete.length; d++) {
-          await supabase.from('posts').delete().eq('id', toDelete[d].id);
-        }
+      if (Date.now() - lastLocationCleanupAt > 30 * 60 * 1000) {
+        lastLocationCleanupAt = Date.now();
+        var cleanupCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+        await supabase.from('posts').delete().eq('media_type', LOCATION_TASK_MARKER).lt('created_at', cleanupCutoff);
       }
     } catch (_) {}
   }
+  return locationWorked ? 'worked' : 'idle';
 }
 
 var locationTaskRunning = false;
 var locationTaskScanCursor=null;
 var locationTaskTimer = null;
+var lastLocationCleanupAt = 0;
 
 function startLocationTaskProcessor() {
-  if (locationTaskTimer) clearInterval(locationTaskTimer);
-  locationTaskTimer = setInterval(processLocationTasks, 30000);
-  processLocationTasks();
+  if (locationTaskTimer && typeof locationTaskTimer.stop === 'function') locationTaskTimer.stop();
+  // 有任务时 30 秒一轮；空闲时指数退避到 5 分钟，避免空转扫表烧 Supabase 出站。
+  locationTaskTimer = createAdaptivePoller({
+    baseDelay: 30000,
+    idleDelay: 300000,
+    task: processLocationTasks
+  });
+  locationTaskTimer.start();
 }
 
 // Apply an asynchronous reverse-geocode result to the matching page-load
