@@ -268,8 +268,13 @@ test('post share page turns a bare link into a card and falls back to the site c
   assert.ok(!html.includes('https://music.apple.com/us/album/promise'),'裸链接不应再原样出现在正文里');
 
   const plain=renderPostSharePage({...row,content:'今天天气不错'},[],'https://xtj.example');
-  assert.match(plain,/property="og:image" content="https:\/\/xtj\.example\/img\/share-cover\.png"/);
+  assert.match(plain,/property="og:image" content="https:\/\/xtj\.example\/img\/share-cover-v2\.jpg"/);
+  // 默认封面是 1:1，声明尺寸后微信不再二次裁切
+  assert.match(plain,/property="og:image:width" content="1200"/);
+  assert.match(plain,/property="og:image:height" content="1200"/);
   assert.match(plain,/rel="apple-touch-icon" sizes="180x180" href="https:\/\/xtj\.example\/img\/icon-180\.png"/);
+  // 真实图片封面不该被标成 1200 方图
+  assert.ok(!html.includes('og:image:width'),'帖子自带图片时不应声明默认封面尺寸');
 
   assert.equal(publicLink('http://127.0.0.1/x'),null);
   assert.equal(publicLink('http://192.168.1.4/x'),null);
