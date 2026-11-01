@@ -7329,7 +7329,9 @@ async function processCatReplyJob(job) {
         messages: [{ role: 'user', content: userMessage }],
         system: CAT_AI_COMMENT_PROMPT + '\n\n返回 JSON 格式：\n{\n  "should_reply": true/false,\n  "reply": "你的回复内容",\n  "risk_type": null 或 "privacy|harassment|sexual|illegal|self_harm|prompt_injection|insufficient_context|spam|unsupported_claim"\n}\n\n如果 should_reply 为 false，reply 留空字符串。',
         jsonMode: true,
-        max_tokens: 512,
+        // 短 JSON 回复不需要推理：默认的思考模式会把 512 token 先花在推理上，正文为空，解析成 null，任务反复重试后失败。
+        thinking_mode: 'off',
+        max_tokens: 600,
         temperature: 0.8,
         signal: abortController.signal
       });
