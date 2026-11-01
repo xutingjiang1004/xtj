@@ -12174,7 +12174,9 @@ app.post('/api/user/register', securityRateLimit(60000, 5), async (req, res) => 
     var userNameVal = validateString(req.body && req.body.user_name, MAX_USERNAME_LEN, '用户名');
     if (userNameVal && userNameVal.error) return res.status(400).json({ error: userNameVal.error });
     var password = req.body && req.body.password;
-    if (!userNameVal || !/^[\u4e00-\u9fa5a-zA-Z0-9_]{2,20}$/.test(userNameVal)) {
+    // 昵称允许中文/字母/数字/下划线/Emoji；长度按码点算，避免一个表情被当成两个字。
+    var userNameChars = Array.from(userNameVal || '').length;
+    if (!userNameVal || userNameChars < 2 || userNameChars > 20 || !/^(?:[\u4e00-\u9fa5A-Za-z0-9_]|[\uD800-\uDBFF][\uDC00-\uDFFF]|[\u2600-\u27BF\u2B00-\u2BFF\u2190-\u21FF\u00A9\u00AE\u2122\uFE0F\u200D\u20E3])+$/.test(userNameVal)) {
       return res.status(400).json({ error: '昵称格式不正确' });
     }
     // ★ 安全:管理员用户名是保留字,禁止通过普通注册流程占用。
@@ -13997,6 +13999,55 @@ app.post('/api/post/create', authenticateUser, rateLimit(60000, 20), async (req,
   }
 });
 
+// 位置候选：把 Nominatim 的地址字段拆成从「门牌」到「省份」的多档，最多 10 条。
+// 之前只给省市区 / 街道 / 路 3 条，用户往往选不到自己所在的那个点位。
+function composeLocationName(parts) {
+  var out = [];
+  for (var i = 0; i < parts.length; i++) {
+    var part = String(parts[i] == null ? '' : parts[i]).trim();
+    if (!part) continue;
+    var last = out.length ? out[out.length - 1] : '';
+    if (last && (last === part || last.slice(-part.length) === part)) continue;
+    if (last && part.indexOf(last) === 0) { out[out.length - 1] = part; continue; }
+    out.push(part);
+  }
+  return out.join('');
+}
+
+function buildPostLocationOptions(address, data, province, city, district) {
+  address = address || {};
+  var road = address.road || address.pedestrian || address.footway || address.residential || address.path || address.cycleway || '';
+  var house = address.house_number || '';
+  var quarter = address.quarter || address.neighbourhood || address.suburb || address.village || address.hamlet || '';
+  var poi = String((data && data.name) || '').trim();
+  // suburb/neighbourhood 常常是同一块地的不同写法，重复列出来会出现
+  // 「海棠溪街道海棠溪」这种没有信息量的候选。
+  var quarterNested = !!(quarter && district && (district.indexOf(quarter) >= 0 || quarter.indexOf(district) >= 0));
+  var seen = Object.create(null);
+  var options = [];
+  function add(level, parts) {
+    var name = composeLocationName(parts);
+    if (!name || name.length > 60 || seen[name]) return;
+    seen[name] = true;
+    options.push({ level: level, name: name, province: province, city: city, district: district });
+  }
+  // 由近到远：门牌 → POI → 小区+路 → 路 → 小区 → 街道 → 区 → 市 → 省
+  if (road && house) add('address', [road, house, '号']);
+  if (poi && poi !== road && poi !== quarter) add('poi', [poi]);
+  if (quarter && road && !quarterNested) add('address', [quarter, road]);
+  if (road) add('road', [road]);
+  if (quarter && !quarterNested) add('street', [quarter]);
+  if (district && road) add('street', [district, road]);
+  if (district && quarter && !quarterNested) add('street', [district, quarter]);
+  if (city && district) add('district', [city, district]);
+  if (district) add('district', [district]);
+  if (province && city) add('city', [province, city]);
+  if (city) add('city', [city]);
+  if (province) add('province', [province]);
+  if (!options.length) add('address', [(data && data.display_name) || '']);
+  return options.slice(0, 10);
+}
+
 // POST /api/location/reverse - 经纬度反向地址解析（用户发布帖子时选择位置）
 // 超时 8 秒，最多重试 2 次，区分超时/无结果/接口错误
 app.post('/api/location/reverse', authenticateUser, rateLimit(60000, 10), async (req, res) => {
@@ -14049,11 +14100,8 @@ app.post('/api/location/reverse', authenticateUser, rateLimit(60000, 10), async 
         continue;
       }
 
-      // 构建选项列表
-      var options = [];
-      if (province && city) options.push({ level: 'city', name: province + city, province: province, city: city, district: '' });
-      if (city && district) options.push({ level: 'district', name: city + district, province: province, city: city, district: district });
-      if (addrName && addrName.length < 40) options.push({ level: 'address', name: addrName, province: province, city: city, district: district });
+      // 构建选项列表（最多 10 条，前端首屏露出 5 条，其余下滑可及）
+      var options = buildPostLocationOptions(address, data, province, city, district);
       await require('./location-history').resolveLocationFix(supabase,locationFix,addrName || [province,city,district].join(''),null).catch(function(e){console.warn('[location] address status',e.message);});
       return res.json({
         ok: true,

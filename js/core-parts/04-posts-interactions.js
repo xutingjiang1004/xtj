@@ -5749,8 +5749,9 @@
                 var optionsEl = document.getElementById('postLocationOptions');
                 if (!panel || !optionsEl) return;
                 optionsEl.innerHTML = '';
-                var options = geoData.options || [];
+                var options = (geoData.options || []).slice(0, 10);
                 if (options.length === 0) {
+                    if (geoData.address) options.push({ level: 'address', name: geoData.address, province: geoData.province, city: geoData.city, district: geoData.district });
                     if (geoData.province && geoData.city) {
                         options.push({ level: 'city', name: geoData.province + geoData.city, province: geoData.province, city: geoData.city });
                     }

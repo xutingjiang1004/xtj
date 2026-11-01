@@ -1051,23 +1051,33 @@
 .post-location-info {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 6px;
   margin-bottom: 8px;
   padding: 0 2px;
 }
 .post-location-display {
   font-size: 12px;
+  line-height: 1.5;
   color: var(--text-secondary, #666);
   display: flex;
   align-items: center;
   gap: 4px;
+  min-width: 0;
 }
 .post-location-icon {
   flex-shrink: 0;
+  width: 14px;
+  text-align: center;
+  font-size: 12px;
 }
 .post-ip-region {
-  font-size: 11px;
+  font-size: 12px;
+  line-height: 1.5;
   color: var(--text-muted, #999);
+}
+/* 有精确定位时，IP 行缩进到与地址文字左边缘对齐 */
+.post-location-display + .post-ip-region {
+  padding-left: 18px;
 }
 /* 发布框位置UI */
 .post-location-row {
@@ -1125,6 +1135,13 @@
   font-size: 12px;
   color: var(--text-muted, #999);
   border-bottom: 1px solid var(--border-color, #e0e0e0);
+}
+/* 首屏露出 5 条，更多候选下滑查看，最多 10 条 */
+.post-location-options {
+  max-height: 200px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
 }
 .post-location-option {
   padding: 10px 14px;
