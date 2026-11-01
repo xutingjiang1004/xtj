@@ -9402,14 +9402,18 @@ function renderProfileActivityList(kind) {
                 var first = items[0], safeMediaUrl = sanitizeUrl(first.media_url);
                 if (first.media_type === 'video') {
                     // 有封面就用封面，没有也要让浏览器解出首帧，不能再是纯黑底。
-                    // 容器宽度跟随视频自身比例（竖屏就是窄条居中），不要用固定高度把它裁成横的。
-                    // 视频地址改走站点自己的取媒体接口：Supabase 公网地址只给 1 小时缓存，
-                    // 同源接口给 30 天，第二次播放直接从本机读，不再消耗任何流量。
+                    // 信息流里默认缩成画中画大小（约半宽居中），点封面才展开播放，
+                    // 否则一条竖屏视频会把整屏占满，下面的帖子根本刷不到。
+                    var isDetail = !!(options && options.detail);
                     var poster = sanitizeUrl(post.poster_url || '');
                     var posterSrc = window.xtjPostPosterUrl ? window.xtjPostPosterUrl(poster) : poster;
                     var streamUrl = window.xtjUploadDisplayUrl ? window.xtjUploadDisplayUrl(safeMediaUrl) : safeMediaUrl;
-                    return '<div class="media media--video"><video src="' + escapeHtml(streamUrl) + '" controls preload="' + (posterSrc ? 'none' : 'metadata') + '" playsinline' +
-                        (posterSrc ? ' poster="' + escapeHtml(posterSrc) + '"' : '') + ' data-xtj-video="1"></video></div>';
+                    return '<div class="media media--video' + (isDetail ? '' : ' is-feed') + '">' +
+                        '<video src="' + escapeHtml(streamUrl) + '"' + (isDetail ? ' controls' : '') +
+                        ' preload="' + (posterSrc ? 'none' : 'metadata') + '" playsinline' +
+                        (posterSrc ? ' poster="' + escapeHtml(posterSrc) + '"' : '') + ' data-xtj-video="1"></video>' +
+                        (isDetail ? '' : '<button type="button" class="video-cover" aria-label="播放视频"><span class="video-cover-icon"></span></button>') +
+                        '</div>';
                 }
                 if (first.media_type === 'audio') return '<div class="media"><audio src="' + escapeHtml(safeMediaUrl) + '" controls preload="metadata"></audio></div>';
                 var visible = options && options.detail ? items : items.slice(0, 9);
@@ -11381,6 +11385,20 @@ function renderProfileActivityList(kind) {
                 }
             }
             document.addEventListener('click', handlePostActionClick);
+            // 信息流里的视频是画中画大小的封面，点一下才展开成正常尺寸并开始播放。
+            // 收起状态下 video 没有 controls，避免原生控件条压在小封面上。
+            document.addEventListener('click', function(e) {
+                var cover = e.target.closest && e.target.closest('.media--video.is-feed .video-cover');
+                if (!cover) return;
+                e.preventDefault();
+                e.stopPropagation();
+                var wrap = cover.closest('.media--video');
+                var player = wrap && wrap.querySelector('video');
+                if (!player) return;
+                wrap.classList.add('is-expanded');
+                player.controls = true;
+                try { player.play(); } catch (_) {}
+            });
             // The detail dialog stops bubbling at its glass box. Delegate
             // inside its body too, without dispatching an action twice.
             var postDetailActionRoot = document.getElementById('postDetailBody');

@@ -77,8 +77,8 @@
   // 否则浏览器只给一块黑底 + 播放键，分享出去也只能退回发布者头像。
   function capturePoster(entry, done) {
     var video = document.createElement('video');
-    var settled = false, drawing = false;
-    var timer = setTimeout(function () { finish(null); }, 9000);
+    var settled = false, drawing = false, tries = 0;
+    var timer = setTimeout(function () { finish(null); }, 12000);
     function finish(blob) {
       if (settled) return; settled = true;
       clearTimeout(timer);
@@ -88,7 +88,8 @@
     function draw() {
       if (drawing || settled) return;
       var w = video.videoWidth, h = video.videoHeight;
-      if (!w || !h) return;
+      // readyState < 2 时 drawImage 画出来是一张纯黑图，iOS 上尤其常见。宁可多等一会儿。
+      if (!w || !h || video.readyState < 2) { retry(); return; }
       drawing = true;
       var scale = Math.min(1, 720 / Math.max(w, h));
       var canvas = document.createElement('canvas');
@@ -97,16 +98,44 @@
       try { canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height); } catch (_) { return finish(null); }
       canvas.toBlob(function (blob) { finish(blob); }, 'image/jpeg', 0.82);
     }
-    video.muted = true; video.playsInline = true; video.preload = 'auto';
-    video.addEventListener('loadeddata', function () {
-      // 有些编码首帧就是黑的，往后挪一点点再截，画面才是真正的第一帧。
-      var target = Math.min(0.12, (video.duration || 1) / 10);
-      try { video.currentTime = target; } catch (_) { return draw(); }
-      setTimeout(draw, 1200);
+    function retry() {
+      if (settled || drawing) return;
+      if (tries++ >= 8) { finish(null); return; }
+      setTimeout(draw, 250);
+    }
+    function grabFrame() {
+      if (video.requestVideoFrameCallback) video.requestVideoFrameCallback(function () { draw(); });
+      setTimeout(draw, 120);
+    }
+    video.muted = true;
+    video.defaultMuted = true;
+    video.setAttribute('muted', '');
+    video.playsInline = true;
+    video.setAttribute('playsinline', '');
+    video.setAttribute('webkit-playsinline', '');
+    video.preload = 'auto';
+    video.addEventListener('loadedmetadata', function () {
+      var target = Math.min(0.1, (video.duration || 1) / 10);
+      if (target > 0) { try { video.currentTime = target; } catch (_) {} }
+      // iOS Safari 既不预加载也不解码，只有真的 play() 一下才会渲染出画面。
+      // muted + playsinline 下允许自动播放，截到帧立刻暂停，用户看不到闪动。
+      try {
+        var played = video.play();
+        if (played && played.then) {
+          played.then(function () {
+            grabFrame();
+            setTimeout(function () { try { video.pause(); } catch (_) {} }, 400);
+          }, function () { retry(); });
+        } else {
+          setTimeout(function () { grabFrame(); try { video.pause(); } catch (_) {} }, 200);
+        }
+      } catch (_) { retry(); }
     });
-    video.addEventListener('seeked', draw);
+    video.addEventListener('loadeddata', function () { setTimeout(draw, 80); });
+    video.addEventListener('seeked', function () { setTimeout(draw, 80); });
     video.addEventListener('error', function () { finish(null); });
     video.src = entry.url;
+    try { video.load(); } catch (_) {}
   }
   function retainImage(file) {
     var entry = entries.find(function(e) { return e.file === file; });
@@ -138,7 +167,9 @@
       var isVideo = fileType.startsWith('video/'), isAudio = fileType.startsWith('audio/');
       var media = document.createElement(isVideo ? 'video' : (isAudio ? 'audio' : 'img'));
       media.src = entry.url;
-      if (isVideo) { media.muted = true; media.playsInline = true; media.preload = 'metadata'; if (entry.posterUrl) media.poster = entry.posterUrl; }
+      // 预览用的是本地 blob，不消耗网络，直接让浏览器解出画面；
+      // 以前用 metadata，iOS 下永远停在黑底。
+      if (isVideo) { media.muted = true; media.playsInline = true; media.setAttribute('playsinline', ''); media.preload = 'auto'; if (entry.posterUrl) media.poster = entry.posterUrl; else node.classList.add('is-video-pending'); }
       if (isAudio) { media.controls = true; media.preload = 'metadata'; node.classList.add('is-audio'); }
       if (!isVideo && !isAudio) { media.alt = '待发布图片 ' + (index + 1); media.decoding = 'sync'; }
       var remove = document.createElement('button'); remove.type = 'button'; remove.className = 'post-media-remove'; remove.textContent = '×';
@@ -172,7 +203,7 @@
           entry.posterUrl = URL.createObjectURL(blob);
         } catch (_) { return; }
         var thumb = entry.node && entry.node.querySelector('video');
-        if (thumb) { thumb.poster = entry.posterUrl; return; }
+        if (thumb) { thumb.poster = entry.posterUrl; entry.node.classList.remove('is-video-pending'); return; }
         render();
       });
     });

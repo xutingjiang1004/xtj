@@ -17175,6 +17175,83 @@ html.perf-lite .profile-detail-info-item {
   border-radius: 16px;
   background: #000;
 }
+
+/* 信息流视频：默认缩成画中画大小（约半宽、居中），点封面才展开播放。
+   竖屏 9:16 一旦满宽就是 850px 高，直接把整屏占满，下面的帖子刷不到。 */
+.media.media--video.is-feed {
+  position: relative;
+  width: min(52%, 250px);
+  max-width: 100%;
+  margin-left: auto;
+  margin-right: auto;
+  background: transparent;
+  transition: width .24s ease;
+  cursor: pointer;
+}
+.media.media--video.is-feed video {
+  width: 100%;
+  height: auto;
+  max-height: none;
+  pointer-events: none;
+}
+.media.media--video.is-feed.is-expanded {
+  width: 100%;
+  max-width: 100%;
+  cursor: default;
+}
+.media.media--video.is-feed.is-expanded video {
+  width: 100%;
+  height: auto;
+  max-height: none;
+  pointer-events: auto;
+}
+.media--video.is-feed .video-cover {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  cursor: pointer;
+  border-radius: 16px;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.media--video.is-feed .video-cover-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, .92);
+  box-shadow: 0 3px 12px rgba(0, 0, 0, .3);
+  display: grid;
+  place-items: center;
+}
+.media--video.is-feed .video-cover-icon::after {
+  content: '';
+  display: block;
+  margin-left: 3px;
+  border-style: solid;
+  border-width: 8px 0 8px 13px;
+  border-color: transparent transparent transparent #121212;
+}
+.media--video.is-feed.is-expanded .video-cover { display: none; }
+
+/* 选完视频、封面还没截出来时给一句提示，不要只留一块纯黑。 */
+.post-media-preview-thumb.is-video-pending::before {
+  content: '视频';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 14px;
+  z-index: 2;
+  text-align: center;
+  font-size: 12px;
+  letter-spacing: .04em;
+  color: rgba(255, 255, 255, .78);
+  pointer-events: none;
+}
 .post-detail-media video,
 .post-detail-main-card .post-detail-media video {
   width: auto;
