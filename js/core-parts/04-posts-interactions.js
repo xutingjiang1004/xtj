@@ -6838,6 +6838,9 @@
                 refreshPendingFeedIpPosts(currentPages);
                 renderFilterSummary(filteredPosts.length);
                 if (typeof setupFeedInfiniteScroll === 'function') setupFeedInfiniteScroll();
+                // 未登录访客只拿到最新 10 条，这一屏就是全部：直接把登录入口补在列表末尾，
+                // 不必等哨兵进入视口（有些机型滚到底也不会再触发一次 IntersectionObserver）。
+                if (feedGuestLimited) ensureFeedNoMoreNotice();
 
                 loadAvatarsForUsers(Array.from(allUsers)).then(function() { applyLoadedAvatarsToFeed(); });
                 setTimeout(function() { prefetchStatData(); }, 1000);
