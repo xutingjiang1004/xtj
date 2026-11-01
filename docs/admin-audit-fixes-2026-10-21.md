@@ -8,6 +8,7 @@
 
 - 原审计 A01–A12 的代码修复、生成产物和回归用例已完成。原审计基线为 `f899b335715e15018dd665c1d8be2c7b2cf22d63`。
 - 本轮新增数据库迁移只在隔离的本地 PostgreSQL 执行过，**本轮尚未应用到生产，线上迁移台账也未核验**。
+- **2026-11-01 更新（只读核对线上，项目 `ithowxqignlhkwaykglt`）：`20261021160504_admin_management_consistency` 已在迁移台账中，`admin_report_page(text,timestamptz,uuid,integer)`、`review_security_alert(uuid,text,text)` 和索引 `posts_admin_report_page_idx` 均存在，只有 `service_role` 可执行（`anon`、`authenticated` 不可），均为 SECURITY INVOKER。下文各处“仍待应用”是 10-22／10-23 的历史记录，已过期；当前没有待应用的迁移。
 - 没有手动触发部署、恢复已暂停的 Render、切换域名或修改生产配置。仓库 `render.yaml` 配置 `branch: main`、`autoDeploy: true`；托管平台实际设置和运行状态本轮未核验。推送可能触发平台既有自动流程，不能据此宣称新版服务已可用。
 - 修复阶段相关回归 115 项通过；完整 `npm test` 曾失败，单独复测通过不能替代完整链路通过。详细结果见下文。
 - 本地完成 68 张修复后截图，未进行生产账号操作或实体 iPhone/iPad 验收。

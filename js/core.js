@@ -2292,12 +2292,19 @@ function isAdmin() {
         lazyAiChatLauncher();
 
         function getAiChatSkeleton() {
+            // The page shape appears at once (title bar, message area, input bar) while the AI module
+            // loads in the background; the module replaces this markup when it is ready.
             // ★ 返回入口必须常驻：模块未加载时 ai-agent 的 closeAiChat 还不存在，
             //   骨架屏没有退出口会让整页看起来死锁（用户实际只能刷新）。
-            return '<button type="button" class="ai-chat-skeleton-back" onclick="window.__xtjAbortAiChatOpen&&window.__xtjAbortAiChatOpen()" aria-label="返回帖子" style="position:fixed;top:18px;left:18px;z-index:2147483000;display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:999px;border:1px solid rgba(0,0,0,.10);background:rgba(255,255,255,.94);color:#333;font-size:14px;line-height:1;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.08);">← 返回</button>'
-                + '<div class="ai-chat-container" style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:80px 20px 160px;background:var(--bg-primary, #fff);">'
-                + '<div class="ai-chat-loading" style="font-size:15px;color:var(--text-secondary, #888);margin-bottom:20px;text-align:center;"></div>'
-                + '<div class="ai-chat-error" style="display:none;max-width:360px;text-align:center;color:var(--text-primary, #333);"></div>'
+            return '<div class="ai-chat-container ai-chat-shell" style="box-sizing:border-box;min-height:100%;height:100%;display:flex;flex-direction:column;color:var(--text-main,#14261d);">'
+                + '<div style="display:flex;align-items:center;gap:6px;padding:calc(env(safe-area-inset-top,0px) + 8px) 10px 8px;min-height:52px;box-sizing:border-box;">'
+                + '<button type="button" class="ai-chat-skeleton-back" onclick="window.__xtjAbortAiChatOpen&&window.__xtjAbortAiChatOpen()" aria-label="返回帖子" style="width:44px;height:44px;display:inline-flex;align-items:center;justify-content:center;border:0;background:transparent;color:inherit;font-size:28px;line-height:1;cursor:pointer;">‹</button>'
+                + '<div style="font-size:17px;font-weight:600;">小猫AI</div></div>'
+                + '<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:24px 20px;text-align:center;">'
+                + '<div style="font-size:20px;font-weight:600;opacity:.85;">有什么想聊的？</div>'
+                + '<div class="ai-chat-loading" style="font-size:14px;color:var(--text-secondary,#6b7d73);"></div>'
+                + '<div class="ai-chat-error" style="display:none;max-width:360px;text-align:center;color:var(--text-primary,#333);"></div></div>'
+                + '<div style="padding:10px 16px calc(14px + env(safe-area-inset-bottom,0px));box-sizing:border-box;"><div aria-hidden="true" style="max-width:760px;margin:0 auto;box-sizing:border-box;min-height:52px;padding:14px 16px;border-radius:18px;border:1px solid rgba(120,140,130,.28);background:rgba(255,255,255,.55);color:var(--text-secondary,#6b7d73);font-size:15px;text-align:left;">问点什么…</div></div>'
                 + '</div>';
         }
 
@@ -2375,6 +2382,16 @@ function isAdmin() {
         }
         // 在消息页面加载后触发预加载
         window.__xtjScheduleAiPreload = scheduleAiPreload;
+        // The AI module used to be fetched only on the first tap, so the first open showed an empty
+        // shell for seconds. Warm it once the page is idle (skipped on data saver / 2G-3G, see above),
+        // and again the moment a finger lands on any AI entry, before the click is even delivered.
+        scheduleAiPreload();
+        ['pointerdown', 'touchstart'].forEach(function(type) {
+            document.addEventListener(type, function(event) {
+                var target = event.target && event.target.closest ? event.target.closest('[data-tab="ai-chat"],[data-desktop-action="ai-chat"],.desktop-ai-prompt') : null;
+                if (target) ensureAiAgentLoaded().catch(function() {});
+            }, { passive: true, capture: true });
+        });
 
         function lazyPhotoUploadLauncher() {
             ensurePhotoWallUploadLoaded().then(function() {

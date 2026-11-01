@@ -132,6 +132,59 @@
       if (hadFocus) { try { button.focus(); } catch (_) {} }
     }
   }
+  // A personal-activity page that was just opened is kept on this device. Reopening shows it at
+  // once; another person's page is not requested again for ten minutes, your own page is
+  // refreshed quietly in the background. Only the first page is kept, per viewer and author.
+  var CACHE_PREFIX = 'xtj_author_posts_v1:', CACHE_INDEX = CACHE_PREFIX + 'index';
+  var CACHE_FRESH_MS = 10 * 60 * 1000, CACHE_MAX_AGE = 3 * 86400000, CACHE_MAX_ENTRIES = 6;
+  var memoryCache = Object.create(null);
+  function cacheKey(s) { return String(s.owner || '') + '|' + s.author; }
+  function readCache(s) {
+    var key = cacheKey(s), hit = memoryCache[key];
+    if (!hit) {
+      try { var raw = localStorage.getItem(CACHE_PREFIX + key); hit = raw ? JSON.parse(raw) : null; } catch (_) { hit = null; }
+      if (hit) memoryCache[key] = hit;
+    }
+    if (!hit || !Array.isArray(hit.posts) || !(Date.now() - hit.t <= CACHE_MAX_AGE)) return null;
+    return hit;
+  }
+  function dropCache(s) {
+    var key = cacheKey(s); delete memoryCache[key];
+    try {
+      localStorage.removeItem(CACHE_PREFIX + key);
+      var index = JSON.parse(localStorage.getItem(CACHE_INDEX) || '[]').filter(function (k) { return k !== key; });
+      localStorage.setItem(CACHE_INDEX, JSON.stringify(index));
+    } catch (_) {}
+  }
+  function writeCache(s) {
+    if (s.restricted || !s.posts.length) { dropCache(s); return; }
+    var key = cacheKey(s), entry = { t: Date.now(), posts: s.posts.slice(), cursor: s.cursor || null, hasMore: !!s.hasMore, profile: s.profile || null };
+    memoryCache[key] = entry;
+    try {
+      var index = JSON.parse(localStorage.getItem(CACHE_INDEX) || '[]').filter(function (k) { return k !== key; });
+      index.push(key);
+      while (index.length > CACHE_MAX_ENTRIES) { var old = index.shift(); delete memoryCache[old]; localStorage.removeItem(CACHE_PREFIX + old); }
+      localStorage.setItem(CACHE_PREFIX + key, JSON.stringify(entry));
+      localStorage.setItem(CACHE_INDEX, JSON.stringify(index));
+    } catch (_) {}
+  }
+  // Fetch the first page again without any loading text and swap it in when it differs.
+  async function revalidate(s) {
+    var controller = new AbortController(); s.controller = controller;
+    try {
+      var response = await window.xtjOptionalAuthFetch('/api/profile/posts/' + encodeURIComponent(s.author) + '?limit=20', { timeoutMs: 18000, signal: controller.signal, authOwner: s.owner, authEpoch: s.epoch });
+      var data = await response.json();
+      if (!current(s) || s.posts.length > 20 || s.loading) return;
+      if (!response.ok || !data.ok || !Array.isArray(data.posts)) return;
+      s.profile = data.profile || s.profile; s.restricted = !!data.restricted;
+      s.posts = s.restricted ? [] : data.posts.filter(function (post) { return post.user_name === s.author; });
+      s.cursor = data.next_cursor; s.hasMore = !!data.has_more && !!s.cursor;
+      s._renderedCount = 0; render(s);
+      status(s, s.restricted ? '对方已关闭个人动态页访问' : !s.posts.length ? '还没有可查看的动态' : s.hasMore ? '' : '已显示全部动态');
+      writeCache(s);
+    } catch (_) { /* the saved copy stays on screen */ }
+    finally { if (s.controller === controller) s.controller = null; }
+  }
   async function load(s) {
     if (!current(s) || s.loading) return;
     s.loading = true; status(s, '正在加载动态…');
@@ -153,6 +206,7 @@
       s.cursor = data.next_cursor; s.hasMore = !!data.has_more && !!s.cursor; s.loading = false; s.retryable = true;
       render(s, appended && beforeCount > 0 && !s.restricted ? { appendFrom: beforeCount } : undefined);
       status(s, s.restricted ? '对方已关闭个人动态页访问' : !s.posts.length ? '还没有可查看的动态' : s.hasMore ? '' : '已显示全部动态');
+      if (beforeCount === 0) writeCache(s);
     } catch (error) {
       if (!current(s)) return;
       s.loading = false; s.retryable = error.retryable !== false; status(s, error.message || '动态暂时无法加载', true);
@@ -171,16 +225,24 @@
     if (!byId('authorPostsList')) return;
     var owner = identity(); state = { author: author, owner: owner.owner, epoch: owner.epoch, generation: generation, posts: [], hasMore: false, loading: false, cursor: null, _renderedCount: 0, _renderYear: '', _renderDay: '', _coverKey: null };
     var scroll = byId('authorPostsScroll'); if (scroll) scroll.scrollTop = 0;
+    var saved = readCache(state);
+    if (saved) {
+      state.posts = saved.posts.slice(); state.cursor = saved.cursor; state.hasMore = !!saved.hasMore; state.profile = saved.profile || state.profile;
+      render(state); status(state, state.hasMore ? '' : '已显示全部动态');
+      if (author === state.owner || !(Date.now() - saved.t < CACHE_FRESH_MS)) revalidate(state);
+      return;
+    }
     load(state);
   };
   window.__xtjUpdateAuthorPost = function (post) {
     if (!state || !current(state) || !post || post.user_name !== state.author) return;
     state.posts = state.posts.map(function (old) { return String(old.id)===String(post.id) ? Object.assign({}, old, post) : old; });
+    dropCache(state);
     render(state);
   };
   window.__xtjRemoveAuthorPost = function (id) {
     if (!state || !current(state)) return;
-    state.posts = state.posts.filter(function (post) { return String(post.id) !== String(id); }); render(state);
+    state.posts = state.posts.filter(function (post) { return String(post.id) !== String(id); }); dropCache(state); render(state);
     status(state, state.posts.length ? '' : '还没有可查看的动态');
   };
   window.addEventListener('xtj:profile-settings-saved', function(event) { if(state && current(state) && state.author===event.detail.owner) { state.profile=event.detail.settings; render(state); } });
