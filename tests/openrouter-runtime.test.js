@@ -14,9 +14,8 @@ function configure(t) {
   process.env.OPENROUTER_API_KEY = TEST_KEY;
   t.after(() => { if (old === undefined) delete process.env.OPENROUTER_API_KEY; else process.env.OPENROUTER_API_KEY = old; });
 }
-// ★ 2026-10-27 限时公开：公开期截止用绝对时间戳。测试必须显式指定，
-//   否则会随真实时间漂移（当前真实时间仍在默认窗口内，会让「过期」用例假通过）。
-const PUBLIC_UNTIL = '2026-10-28T00:40:00+08:00';
+// 公开期截止用绝对时间戳，测试必须显式指定；用远期时间，避免真实时间越过默认窗口后「公开期内」用例变红。
+const PUBLIC_UNTIL = '2099-01-01T00:00:00+08:00';
 const EXPIRED_UNTIL = '2026-10-01T00:00:00+08:00';
 const expiredEnv=()=>({OPENROUTER_API_KEY:TEST_KEY,OPENROUTER_PUBLIC_UNTIL:EXPIRED_UNTIL});
 function withPublicUntil(t, value) {
@@ -55,7 +54,7 @@ function routeFixture(options={}) {
     aiTaskPolicy:{MAX_TOOL_ROUNDS:3},aiToolsForWorkMode:()=>[{type:'function',function:{name:'get_weather',parameters:{type:'object',properties:{}}}}],
     runRequiredSearch:async()=>{},assistantOutput,finalReplyContainsInternalProtocolGlobal:()=>false,looksLikeToolArgsFragment:()=>false,parseDsmlToolCallsGlobal:()=>({calls:[]}),
     executeToolCall:async(_call,context)=>{toolContexts.push(context);return {tool_name:'get_weather',content:'真实工具结果',cards:[]};},
-    toolFeedback,normalizeToolResultItems:()=>[],getProcessEvents:()=>[],
+    toolFeedback,normalizeToolResultItems:()=>[],getProcessEvents:()=>[],settleThinkingElapsed:require('../render-api/ai-process-events').settleThinkingElapsed,
     saveCustomChatTurn,saveInterruptedChatTurn,saveDeepThinkChatTurn,
     buildMsgMeta:(role,convId,usage,reasoning,seq,_search,_elapsed,extra)=>JSON.stringify({role,convId,usage,reasoning,seq,...extra}),
     supabase:{from:()=>({insert:async value=>{rows.push(...value);return{error:null};}})},
