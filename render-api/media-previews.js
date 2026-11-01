@@ -8,8 +8,22 @@ function sourceInfo(data) {
   return { tag: cleanTag(data && (data.etag || data.eTag) || meta.eTag || meta.etag || data && data.version),
     size: Number((data && data.size) ?? meta.size), type: String(data && (data.contentType || data.content_type) || meta.mimetype || '') };
 }
-function previewTag(bucket, path, tag) {
-  return '"xtj-' + crypto.createHash('sha256').update(VARIANT + '\0' + bucket + '\0' + path + '\0' + tag).digest('hex') + '"';
+function previewTag(bucket, path, tag, variant = '') {
+  return '"xtj-' + crypto.createHash('sha256').update(VARIANT + variant + '\0' + bucket + '\0' + path + '\0' + tag).digest('hex') + '"';
+}
+// 缩略图与列表大图分开出图：个人动态只要 96px，没必要排进 1080px 的队列，
+// 更没必要让微信去抓 1.2MB 的原图。
+const WIDTHS = [240, 480, 1080];
+function wantedWidth(value) {
+  const width = parseInt(value, 10);
+  return WIDTHS.includes(width) ? width : 1080;
+}
+function wantedFormat(value) {
+  const format = String(value || '').toLowerCase();
+  return format === 'jpeg' || format === 'jpg' ? 'jpeg' : 'webp';
+}
+function variantKey(width, format) {
+  return (width === 1080 ? '' : ':w' + width) + (format === 'webp' ? '' : ':jpeg');
 }
 function matches(value, tag) { return String(value || '').split(',').some(v => v.trim().replace(/^W\//, '') === tag); }
 
@@ -33,7 +47,10 @@ function createMediaPreviews({ supabase, sharp, fetchImpl = fetch, traffic = med
   }
   function schedule(work, signal) {
     if (signal?.aborted) return Promise.reject(signal.reason);
-    if (queue.length >= 16) return Promise.reject(Error('preview_busy'));
+    // 原来是 16，一页帖子图片就能把队列占满，随后个人动态页的缩略图请求
+    // 直接被拒（preview_busy → 图片破图），点重试还是同一个结果。
+    // 排队上限放宽到 64，让请求等前面的编码结束，而不是当场失败。
+    if (queue.length >= 64) return Promise.reject(Error('preview_busy'));
     return new Promise((resolve, reject) => {
       const item = { work, resolve, reject, at: now(), stop: null };
       const remove = error => {
@@ -59,15 +76,20 @@ function createMediaPreviews({ supabase, sharp, fetchImpl = fetch, traffic = med
     } catch (error) { item.reject(error); }
     finally { working = false; void pump(); }
   }
-  async function encode(input) {
+  async function encode(input, width = 1080, format = 'webp') {
     // An independent display copy. Originals are never rewritten or replaced.
     // 2026-10-28：列表统一用 1080px / q80 —— 之前 1920/q90 单张约 540-740KB，
     // 一页 3 张就 2MB，既拖慢首屏，也让免费实例的串行编码长期占满进程。
     // 点开大图仍走原图字节（不带 preview 参数），分辨率与画质不受此影响。
+    // 2026-11-02：缩略图（w=240）与微信封面（format=jpeg）单独出图，
+    // 微信抓取端对 webp 支持不稳定，直接用 webp 会抓不到封面。
     // One decoder at a time bounds free-instance memory.
-    return sharp(input, { animated: false, limitInputPixels: 64 * 1024 * 1024 })
-      .rotate().resize({ width: 1080, height: 1080, fit: 'inside', withoutEnlargement: true })
-      .webp({ quality: 80, alphaQuality: 100, effort: 4 }).timeout({ seconds: 15 }).toBuffer();
+    const resized = sharp(input, { animated: false, limitInputPixels: 64 * 1024 * 1024 })
+      .rotate().resize({ width, height: width, fit: 'inside', withoutEnlargement: true });
+    if (format === 'jpeg') {
+      return resized.jpeg({ quality: width <= 480 ? 78 : 84, mozjpeg: true }).timeout({ seconds: 15 }).toBuffer();
+    }
+    return resized.webp({ quality: width <= 240 ? 72 : width <= 480 ? 76 : 80, alphaQuality: 100, effort: 4 }).timeout({ seconds: 15 }).toBuffer();
   }
   async function download(bucket, path, expected, signal) {
     signal.throwIfAborted();
@@ -103,9 +125,10 @@ function createMediaPreviews({ supabase, sharp, fetchImpl = fetch, traffic = med
       else signal.addEventListener('abort', aborted, { once: true });
     });
   }
-  async function body(bucket, path, source, signal) {
+  async function body(bucket, path, source, signal, width = 1080, format = 'webp') {
     signal.throwIfAborted();
-    const key = previewTag(bucket, path, source.tag), saved = get(key);
+    const variant = variantKey(width, format);
+    const key = previewTag(bucket, path, source.tag, variant), saved = get(key);
     if (saved) { traffic.previewHit(); return saved; }
     let entry = pending.get(key);
     if (!entry) {
@@ -117,7 +140,7 @@ function createMediaPreviews({ supabase, sharp, fetchImpl = fetch, traffic = med
         if (ready) { traffic.previewHit(); return ready; }
         const input = await download(bucket, path, source, entry.controller.signal);
         entry.controller.signal.throwIfAborted();
-        const result = await encode(input);
+        const result = await encode(input, width, format);
         // libvips work already in progress is bounded by its timeout. Retain
         // its finished copy even if the last client disconnected meanwhile;
         // every later use still checks current permissions and source version.
@@ -140,20 +163,23 @@ function createMediaPreviews({ supabase, sharp, fetchImpl = fetch, traffic = med
   return {
     async stream(req, res, { bucket, path }) {
       if (res.destroyed) return;
+      const width = wantedWidth(req.query && req.query.w);
+      const format = wantedFormat(req.query && req.query.format);
+      const mime = format === 'jpeg' ? 'image/jpeg' : 'image/webp';
       const controller = new AbortController(), closed = () => controller.abort(Error('preview_cancelled'));
       res.on('close', closed);
       try {
         if (traffic.identify) traffic.identify(bucket,path,req.params && req.params.id);
-        const source = await info(bucket, path), etag = previewTag(bucket, path, source.tag);
+        const source = await info(bucket, path), etag = previewTag(bucket, path, source.tag, variantKey(width, format));
         if (controller.signal.aborted) return;
-        res.set({ 'Cache-Control': 'private, no-cache, must-revalidate', ETag: etag, 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'X-XTJ-Media-Variant': VARIANT });
+        res.set({ 'Cache-Control': 'private, no-cache, must-revalidate', ETag: etag, 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'X-XTJ-Media-Variant': VARIANT + variantKey(width, format) });
         // A deterministic validator survives server restarts. Fresh permission
         // checks happen in the caller, and fresh source metadata is checked above.
         if (matches(req.headers['if-none-match'], etag)) { traffic.revalidated(); return res.status(304).end(); }
-        if (req.method === 'HEAD') return res.status(200).type('image/webp').end();
-        const result = await body(bucket, path, source, controller.signal);
+        if (req.method === 'HEAD') return res.status(200).type(mime).end();
+        const result = await body(bucket, path, source, controller.signal, width, format);
         if (req.destroyed || res.destroyed) return;
-        return res.status(200).set('Content-Length', String(result.length)).type('image/webp').end(result);
+        return res.status(200).set('Content-Length', String(result.length)).type(mime).end(result);
       } catch (error) { if (!controller.signal.aborted) throw error; }
       finally { res.removeListener('close', closed); }
     },

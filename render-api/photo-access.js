@@ -543,8 +543,10 @@ function renderPostSharePage(row, items, origin, preview = null, options = {}) {
   descParts.push('来自 ' + author + ' 的帖子，点开即可查看');
   const description = descParts.join(' · ');
   // 纯文字帖没有配图时用发布者头像，而不是站点默认封面——好友一眼能看出是谁发的。
-  const shareImage = firstImage ? origin + firstImage.share_media_url
-    : ((preview && preview.image) || avatarUrl || origin + '/img/share-cover-v2.jpg');
+  // 有图帖必须给微信一张「能抓到的图」：原图常常 1-4MB、4032px，微信抓取端会直接放弃，
+  // 卡片就变成灰块。这里固定用 1080 宽 JPEG 预览（约 100KB），格式也避开 webp。
+  const shareCover = firstImage ? origin + firstImage.share_media_url + '?preview=1&format=jpeg' : '';
+  const shareImage = shareCover || (preview && preview.image) || avatarUrl || origin + '/img/share-cover-v2.jpg';
   // 只有回退到站点默认封面时才声明 1200×1200，避免给真实图片/头像标错尺寸。
   const coverMeta = firstImage || (preview && preview.image) || avatarUrl ? '' : '<meta property="og:image:width" content="1200"><meta property="og:image:height" content="1200">';
   const card = linkCardHtml(preview);

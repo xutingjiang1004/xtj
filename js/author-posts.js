@@ -29,6 +29,26 @@
     if (text != null) node.textContent = text;
     return node;
   }
+  // 动态列表只需要 96px 缩略图：走 w=240 预览档，不和首页 1080px 大图抢同一条串行出图队列。
+  // retry 时带 cache-buster，否则浏览器会复用上一次的失败结果，点了重试也还是破图。
+  function sizedPreview(value, width, retry) {
+    var url = safeUrl(value);
+    if (!url) return '';
+    try {
+      var u = new URL(url, location.href);
+      if (u.origin === location.origin && /^\/api\/(?:post\/[0-9a-f-]{36}\/media\/\d+|photo\/[0-9a-f-]{36}\/media)$/.test(u.pathname)) {
+        u.searchParams.set('preview', '1');
+        u.searchParams.set('w', String(width));
+        if (retry) u.searchParams.set('xtj_retry', Date.now().toString(36));
+        return u.href;
+      }
+    } catch (_) {}
+    return retry && window.xtjRetryOriginalImageUrl ? window.xtjRetryOriginalImageUrl(url) : url;
+  }
+  function previewSrc(item, retry) {
+    var raw = item.preview_url || (window.xtjMediaPreviewUrl ? window.xtjMediaPreviewUrl(item.media_url) : item.media_url);
+    return sizedPreview(raw, 240, retry) || sizedPreview(item.media_url, 240, retry);
+  }
   function renderRow(post, previous) {
     var date = new Date(post.created_at), valid = Number.isFinite(date.getTime());
     var day = valid ? date.toLocaleDateString('sv-SE') : '';
@@ -41,10 +61,6 @@
     var button = make('div', 'author-post-entry'); button.setAttribute('role', 'button'); button.tabIndex = 0;
     button.setAttribute('aria-label', '查看动态：' + (textOf(post).slice(0, 80) || '图片动态'));
     var items = media(post).filter(function (item) { return /^(image|photo)$/.test(item.media_type) && safeUrl(item.media_url); });
-    function previewSrc(item) {
-      var raw = item.preview_url || (window.xtjMediaPreviewUrl ? window.xtjMediaPreviewUrl(item.media_url) : item.media_url);
-      return safeUrl(raw) || safeUrl(item.media_url);
-    }
     if (items.length) {
       var mosaic = make('span', 'author-post-mosaic' + (items.length === 1 ? ' is-single' : items.length === 2 ? ' is-pair' : ''));
       items.slice(0, 4).forEach(function (item, index) {
@@ -52,8 +68,16 @@
         var src = previewSrc(item);
         img.src = src; img.alt = ''; img.loading = 'lazy'; img.decoding = 'async';
         if (item.width && item.height) { img.width = item.width; img.height = item.height; }
+        var attempt = 0;
         img.addEventListener('load', function () { cell.classList.remove('is-unavailable'); img.hidden = false; });
         img.addEventListener('error', function () {
+          // 服务端出图是串行的，首屏几张缩略图可能排在长队列后面；一次失败不代表图坏了。
+          // 隔一会儿带 cache-buster 再要一次，队列消化完就能出来。
+          if (attempt < 3 && cell.isConnected && !cell.classList.contains('is-unavailable')) {
+            attempt++;
+            setTimeout(function () { if (cell.isConnected) img.src = previewSrc(item, true); }, 900 * attempt);
+            return;
+          }
           var failed = function () { cell.classList.add('is-unavailable'); img.hidden = true; };
           if (!window.xtjRecoverMediaImage || !window.xtjRecoverMediaImage(img, img.src, failed)) failed();
         });
@@ -63,8 +87,8 @@
           event.stopPropagation();
           cell.classList.remove('is-unavailable');
           img.hidden = false;
-          img.removeAttribute('src');
-          img.src = src;
+          attempt = 0;
+          img.src = previewSrc(item, true);
         });
         cell.appendChild(img);
         if (index === Math.min(3, items.length - 1) && items.length > 4) cell.appendChild(make('span', 'author-post-photo-count', '+' + (items.length - 4)));
@@ -136,7 +160,7 @@
       cover.replaceChildren();
       if (coverItem) {
         // The cover only needs the preview-sized copy; the original loads when someone taps it to look closer.
-        var coverPreview = window.xtjMediaPreviewUrl ? window.xtjMediaPreviewUrl(coverKey) : coverKey;
+        var coverPreview = sizedPreview(window.xtjMediaPreviewUrl ? window.xtjMediaPreviewUrl(coverKey) : coverKey, 480);
         var img = document.createElement('img'); img.alt = ''; img.src = coverPreview; img.decoding = 'async';
         img.addEventListener('error', function () { img.remove(); cover.removeAttribute('role'); cover.removeAttribute('tabindex'); cover.setAttribute('aria-hidden', 'true'); }); cover.appendChild(img);
         cover.setAttribute('data-full-src', coverKey); cover.setAttribute('data-thumb-src', coverPreview);

@@ -253,7 +253,8 @@ test('post share page keeps zoomable image markup and renders video and audio pl
   assert.match(html,/<video controls/);assert.match(html,/<audio controls/);
   assert.ok(!html.includes('正文 <script>alert(1)</script>'),'正文必须转义');
   assert.ok(!html.includes('<b>作者</b>'),'作者名必须转义');
-  assert.match(html,/property="og:image" content="https:\/\/xtj\.example\/api\/post\/x\/media\/2"/);
+  // 微信抓 1-4MB 原图会放弃，封面必须是可抓取的 JPEG 预览
+  assert.match(html,/property="og:image" content="https:\/\/xtj\.example\/api\/post\/x\/media\/2\?preview=1&amp;format=jpeg"/);
 });
 
 test('post share page turns a bare link into a card and falls back to the site cover',async()=>{
