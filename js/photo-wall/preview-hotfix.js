@@ -1624,13 +1624,8 @@
         syncPreviewImageFit(img);
         // Loading is source readiness, never a transition's temporary opacity.
         var ready=img.complete&&img.naturalWidth>0;
+        // 2026-11-01 用户不喜欢「光扫过」的骨架加载动画：加载反馈只用底部的樱花进度条，这里不再显示任何骨架。
         loader.hidden=true;
-        if (!ready && img.getAttribute('src') && !root.classList.contains('pp-img-error')) {
-          var source=img.getAttribute('src');
-          delayed=setTimeout(function(){
-            if(img.getAttribute('src')===source && !(img.complete&&img.naturalWidth>0) && !root.classList.contains('pp-img-error')) loader.hidden=false;
-          },180);
-        }
       }
       img.addEventListener('load',sync); img.addEventListener('error',function(){clearTimeout(delayed);loader.hidden=true;});
       new MutationObserver(sync).observe(img,{attributes:true,attributeFilter:['src','style']});

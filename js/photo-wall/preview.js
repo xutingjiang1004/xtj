@@ -428,8 +428,25 @@
                 if (e.id === "photoPreviewImage") beginOriginal(); else e._ppBeginOriginal = beginOriginal;
                 return;
             }
-            e.src = forceReload && displaySource === t && window.xtjRetryOriginalImageUrl ? window.xtjRetryOriginalImageUrl(t) : displaySource;
-            e.complete && e.naturalWidth > 0 && handleLoad();
+            var directLoad = function() {
+                e.src = forceReload && displaySource === t && window.xtjRetryOriginalImageUrl ? window.xtjRetryOriginalImageUrl(t) : displaySource;
+                e.complete && e.naturalWidth > 0 && handleLoad();
+            };
+            // 没有预览图可垫底的当前这张：先读原图并显示进度条，读完（或读不了）再交给 <img>，错误重试照旧由 <img> 负责。
+            if (e.id === "photoPreviewImage" && !forceReload && !loadedOriginals[t] && !/^(blob|data):/i.test(displaySource)) {
+                var directBar = ppBar.start(t), directWatch = watchOriginal(displaySource, directBar.set, t), directSettled = !1;
+                e._ppCleanup = function() { if (!directSettled) { directWatch.release(); directBar.cancel(); } cleanup(); };
+                directWatch.promise.then(function() {
+                    if (directSettled || e._ppLoadGen !== a || e._ppUrl !== t) return;
+                    directSettled = !0; directWatch.release();
+                    displaySource = originalDisplayUrl(t);
+                    e._ppCleanup = cleanup;
+                    e.addEventListener("load", function done() { e.removeEventListener("load", done); directBar.finish(); });
+                    directLoad();
+                });
+                return;
+            }
+            directLoad();
         }
     }
     function O(e) {
@@ -1245,10 +1262,27 @@
                         setTimeout(startFullLoad, 1500);
                     }
                 } else {
-                    J.src = originalDisplayUrl(S.imageUrl);
-                    J.addEventListener("load", handleOpenLoad), J.addEventListener("error", handleOpenError), $ = setTimeout(function() {
+                    var plainUrl = S.imageUrl, plainShown = !1;
+                    var plainStart = function() {
+                        if (plainShown || _._openLoadGen !== ee) return;
+                        plainShown = !0;
+                        J.src = originalDisplayUrl(plainUrl);
+                        J.addEventListener("load", handleOpenLoad), J.addEventListener("error", handleOpenError);
+                    };
+                    $ = setTimeout(function() {
                         _._openLoadGen === ee && (cleanupOpenListeners(), re());
                     }, 8e3);
+                    // 没有预览图：先读原图并显示进度条（读完交给 <img> 显示）；读不了就直接让 <img> 去加载。
+                    if (!loadedOriginals[plainUrl] && !/^(blob|data):/i.test(originalDisplayUrl(plainUrl))) {
+                        var plainBar = ppBar.start(plainUrl), plainWatch = watchOriginal(originalDisplayUrl(plainUrl), plainBar.set, plainUrl);
+                        J._ppFullPreloadCleanup = function() { plainShown = !0; plainWatch.release(); plainBar.cancel(); };
+                        plainWatch.promise.then(function() {
+                            if (plainShown || _._openLoadGen !== ee) return;
+                            J._ppFullPreloadCleanup = null; plainWatch.release();
+                            J.addEventListener("load", function done() { J.removeEventListener("load", done); plainBar.finish(); });
+                            plainStart();
+                        });
+                    } else plainStart();
                 }
             } else re();
         } } else if (e) {

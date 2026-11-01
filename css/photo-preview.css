@@ -656,8 +656,11 @@ html.xtj-photo-preview-ready #photoPreviewOverlay .pp-nav-arrow svg { flex: 0 0 
    - The toolbar / close button blur is paused during a gesture: a backdrop blur over a moving picture is recomputed
      every frame. A slightly denser fill stands in for it and is swapped back when the finger lifts. */
 html.xtj-photo-preview-ready #photoPreviewOverlay.active #ppSlideTrack { will-change: transform; }
-html.xtj-photo-preview-ready #photoPreviewOverlay.pp-gesturing #photoPreviewImage,
-html.xtj-photo-preview-ready #photoPreviewOverlay.pp-animate-image #photoPreviewImage { will-change: transform; }
+/* 放大之后不再把照片单独提升成合成层：提升后浏览器按「没放大」的尺寸给它解码、栅格，手指放大拖拽时只是把那张小图拉大，
+   所以会糊，松手才变清楚。不提升时变换在绘制时就带上放大倍数，整个过程都是清楚的。没放大（拖动下滑关闭、左右翻页）时照旧提升，保持流畅。 */
+html.xtj-photo-preview-ready #photoPreviewOverlay.pp-gesturing #photoPreviewImage:not(.zoomed),
+html.xtj-photo-preview-ready #photoPreviewOverlay.pp-animate-image #photoPreviewImage:not(.zoomed) { will-change: transform; }
+html.xtj-photo-preview-ready #photoPreviewOverlay #photoPreviewImage.zoomed { will-change: auto !important; image-rendering: auto; }
 html.xtj-photo-preview-ready #photoPreviewOverlay.pp-gesturing .pp-preview-toolbar {
   -webkit-backdrop-filter: none; backdrop-filter: none; background: rgba(12, 18, 28, 0.55);
 }
@@ -698,3 +701,6 @@ html.xtj-photo-preview-ready #photoPreviewOverlay.pp-gesturing .pp-preview-toolb
   /* 进度走过的部分把字盖住：只露出还没走到的那一段 */
   clip-path: inset(0 0 0 calc(var(--p) * 100%)); transition: clip-path .42s cubic-bezier(.22, .8, .3, 1);
 }
+
+/* 2026-11-01：去掉照片加载时「光扫过」的骨架动画（用户不喜欢）；加载反馈只留底部樱花进度条。 */
+#photoPreviewOverlay .pp-image-loading, #photoPreviewOverlay .pp-image-loading .pp-sweep { display: none !important; animation: none !important; }
