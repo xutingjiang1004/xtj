@@ -1464,7 +1464,7 @@
                 var INNER_VISUAL = 'img, .avatar, .avatar-wrap, canvas, video, svg, .post-media-cell, .upc-avatar';
                 var ANIMATED = { userProfileModal: 1, postDetailModal: 1, profileActivityModal: 1, profileDetailModal: 1, statModal: 1 };
                 // 窗口里和「被点的图」对应的那个元素：图飞到它那里。
-                var HERO_TARGET = { userProfileModal: '#upcAvatar', postDetailModal: '.post-detail-media img, .post-detail-media-card img' };
+                var HERO_TARGET = { userProfileModal: '#upcAvatar img, #upcAvatar', postDetailModal: '.post-detail-media img, .post-detail-media-card img' };
                 var lastTap = { spec: null, at: 0 }, origins = Object.create(null);
                 var EASE = 'cubic-bezier(.3,.2,.1,1)';
                 var TIMING = { big: { open: 430, close: 320 }, small: { open: 430, close: 320 } };
