@@ -10,8 +10,9 @@ function contentPosterUrl(content) {
   if (!parsed || parsed.__type !== '__xtj_post_v2__' || !parsed.meta) return null;
   const url = typeof parsed.meta.poster_url === 'string' ? parsed.meta.poster_url.trim() : '';
   if (!url || url.length > 2048 || !/^https:\/\//i.test(url)) return null;
-  // 只认存储里的 posts/ 图片，避免把任意地址渲染成封面。
-  if (!/\/storage\/v1\/object\/public\/uploads\/posts\//.test(url) && !/\/api\/uploads\/media\?path=posts(%2F|\/)/i.test(url)) return null;
+  // 只认存储里的封面图（新帖在 posters/，老帖在 posts/），避免把任意地址渲染成封面。
+  if (!/\/storage\/v1\/object\/public\/uploads\/posters\//.test(url) && !/\/storage\/v1\/object\/public\/uploads\/posts\//.test(url)
+    && !/\/api\/uploads\/media\?path=(posters|posts)(%2F|\/)/i.test(url)) return null;
   return url;
 }
 function validatePostAttachments(value, origin) {

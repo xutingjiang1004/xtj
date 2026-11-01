@@ -172,7 +172,7 @@ function createMediaPreviews({ supabase, sharp, fetchImpl = fetch, traffic = med
         if (traffic.identify) traffic.identify(bucket,path,req.params && req.params.id);
         const source = await info(bucket, path), etag = previewTag(bucket, path, source.tag, variantKey(width, format));
         if (controller.signal.aborted) return;
-        res.set({ 'Cache-Control': 'private, no-cache, must-revalidate', ETag: etag, 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'X-XTJ-Media-Variant': VARIANT + variantKey(width, format) });
+        res.set({ 'Cache-Control': 'private, max-age=3600, must-revalidate', ETag: etag, 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'X-XTJ-Media-Variant': VARIANT + variantKey(width, format) });
         // A deterministic validator survives server restarts. Fresh permission
         // checks happen in the caller, and fresh source metadata is checked above.
         if (matches(req.headers['if-none-match'], etag)) { traffic.revalidated(); return res.status(304).end(); }

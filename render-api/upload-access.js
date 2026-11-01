@@ -18,7 +18,9 @@ function installUploadAccess(app, { supabase, supabaseUrl, optionalAuth, rateLim
     const path = String(req.query.path || '');
     if (!path || path.length > 1024 || /[\\%\u0000-\u001f\u007f]/.test(path) || path.split('/').some(p => !p || p === '.' || p === '..')) return res.status(404).end();
     try {
-      let allowed = /^(avatars|site-support)\//.test(path);
+      // posters/ 是视频首帧封面：它只是公开帖子的缩略图，和 avatars 一样按公开资源处理，
+      // 否则每张封面都要回表匹配帖子内容，既慢又容易 404（页面看到的就是一块黑底）。
+      let allowed = /^(avatars|site-support|posters)\//.test(path);
       if (path.startsWith('profile-images/')) {
         const url = supabase.storage.from('uploads').getPublicUrl(path).data.publicUrl;
         const covers = await checked(supabase.from('account_profile_settings').select('user_name,account_id,settings').eq('settings->>cover_url',url));
@@ -43,6 +45,15 @@ function installUploadAccess(app, { supabase, supabaseUrl, optionalAuth, rateLim
             const rows = await checked(supabase.from('posts').select('id,user_name,media_type,visibility,is_deleted').in('id', linked.map(x => x.post_id)));
             allowed = (rows || []).some(readable);
           }
+        }
+        // 视频封面存在帖子内容里（既不是 media_url 也不是附件），上面两条都查不到。
+        // 老帖的封面还在 posts/ 下，这里只对封面文件名做一次内容匹配；新帖已改存 posters/。
+        if (!allowed && /^posts\/[^/]*_poster-[\w.-]+\.(?:jpe?g|png|webp)$/i.test(path)) {
+          // PostgREST 的 ilike 通配符是 *（不是 SQL 的 %）：传 % 只会被当成普通字符，
+          // 匹配永远为空，封面便一直 404。这里统一用 *，并转义文件名里的 _ 与 *。
+          const posterRows = await checked(supabase.from('posts').select('id,user_name,media_type,visibility,is_deleted')
+            .eq('media_type', 'video').ilike('content', '*' + path.replace(/[\\%_*]/g, '\\$&') + '*').limit(10));
+          allowed = (posterRows || []).some(readable);
         }
         if (!allowed && req.userName && path.startsWith('chat/')) {
           const messages = await checked(supabase.rpc('read_visible_dm_posts',{p_actor:req.userName,p_pattern:'%' + path.replace(/[\\%_]/g,'\\$&') + '%',p_limit:100}));

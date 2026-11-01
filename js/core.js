@@ -11769,7 +11769,8 @@ function renderProfileActivityList(kind) {
                                 var posterFile = null;
                                 try { posterFile = window.XtjPostComposerMedia.posterFile(selectedPostMedia[0]); } catch (_) { posterFile = null; }
                                 if (posterFile && posterFile.size > 0 && posterFile.size <= window.XtjPostMedia.MAX_POST_FILE_BYTES) {
-                                    var posterPath = buildStorageUploadPath('posts', posterFile.name);
+                                    // 封面单独放 posters/：这个前缀按公开缩略图处理，不用回表匹配帖子。
+                                    var posterPath = buildStorageUploadPath('posters', posterFile.name);
                                     var posterUpload = await sb.storage.from('uploads').upload(posterPath, posterFile, { upsert: false, cacheControl: '31536000' })
                                         .catch(function () { return { error: true }; });
                                     assertPostPublishIdentity(flight);
