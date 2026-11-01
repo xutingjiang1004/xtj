@@ -116,7 +116,7 @@ for(const source of ['detail','gallery'])test(`deleting from ${source} removes t
     assert.equal(await page.locator('#ppDeleteBtn').getAttribute('aria-label'),'删除帖子');await page.locator('#ppDeleteBtn').click();
   }else await page.locator('#postDetailBody .action-btn.del').click();
   await page.locator('#delBtn').click();await page.waitForFunction(id=>!document.querySelector(`#feed .post[data-post-id="${id}"]`),id);
-  assert.equal(await page.locator('#postDetailModal').evaluate(el=>el.classList.contains('active')),false);assert.equal(await page.locator('#postDetailBody').textContent(),'');assert.equal(f.calls.filter(c=>c.path==='/api/post/delete').length,1);assert.equal(f.calls.find(c=>c.path==='/api/post/delete').body.post_id,id);assert.deepEqual(f.errors,[]);
+  await page.waitForFunction(()=>!document.getElementById('postDetailModal').classList.contains('active'));assert.equal(await page.locator('#postDetailModal').evaluate(el=>el.classList.contains('active')),false);assert.equal(await page.locator('#postDetailBody').textContent(),'');assert.equal(f.calls.filter(c=>c.path==='/api/post/delete').length,1);assert.equal(f.calls.find(c=>c.path==='/api/post/delete').body.post_id,id);assert.deepEqual(f.errors,[]);
  }finally{await f.close();}
 });
 
@@ -200,9 +200,9 @@ test('the gallery still pinches the photo in and out while the page scale remain
    window.testPhotoPointer=function(type,id,x){document.getElementById('photoPreviewImage').dispatchEvent(new PointerEvent(type,{bubbles:true,cancelable:true,pointerId:id,pointerType:'touch',clientX:x,clientY:400,buttons:type==='pointerup'?0:1}));};
    testPhotoPointer('pointerdown',1,120);testPhotoPointer('pointerdown',2,220);testPhotoPointer('pointermove',1,80);testPhotoPointer('pointermove',2,260);
   });
-  await page.waitForFunction(()=>parseFloat(document.getElementById('photoPreviewOverlay').style.getPropertyValue('--pp-scale'))>1.5);
+  await page.waitForFunction(()=>parseFloat(document.getElementById('photoPreviewImage').style.getPropertyValue('--pp-scale'))>1.5);
   await page.evaluate(()=>{testPhotoPointer('pointerup',1,80);testPhotoPointer('pointerup',2,260);testPhotoPointer('pointerdown',3,80);testPhotoPointer('pointerdown',4,260);testPhotoPointer('pointermove',3,170);testPhotoPointer('pointermove',4,220);});
-  await page.waitForFunction(()=>parseFloat(document.getElementById('photoPreviewOverlay').style.getPropertyValue('--pp-scale'))<=1);
+  await page.waitForFunction(()=>parseFloat(document.getElementById('photoPreviewImage').style.getPropertyValue('--pp-scale'))<=1);
   await page.evaluate(()=>{testPhotoPointer('pointerup',3,170);testPhotoPointer('pointerup',4,220);});
   assert.equal(await page.evaluate(()=>visualViewport.scale),1);assert.deepEqual(f.errors,[]);
  }finally{await f.close();}

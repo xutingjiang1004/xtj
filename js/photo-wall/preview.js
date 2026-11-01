@@ -47,6 +47,7 @@
     var C = {}, _ = {}, H = {}, S = 3, previewCacheOrder = [], PREVIEW_CACHE_LIMIT = 12, PREVIEW_CACHE_PIXELS = 32 * 1024 * 1024;
     function cachePreviewImage(e, t) {
         if (!e || !t) return;
+        t.naturalWidth > 0 && markOriginalLoaded(e);
         var pixelCost = t.naturalWidth * t.naturalHeight;
         if (pixelCost > PREVIEW_CACHE_PIXELS) return;
         // Cache detached images only: slide nodes change URL on every navigation.
@@ -76,6 +77,135 @@
             delete C[e];
         });
     });
+    // ---- 2026-11-01 原图加载进度条 + 已加载原图记录 ----
+    // loadedOriginals：本次访问中已完整加载过的原图地址。再次打开这些图时不再先显示预览图，
+    // 直接读设备上的原图（Service Worker 里是 304 校验，不重复下载）。
+    var loadedOriginals = Object.create(null), loadedOriginalOrder = [];
+    function markOriginalLoaded(url) {
+        if (!url || loadedOriginals[url]) return;
+        loadedOriginals[url] = 1; loadedOriginalOrder.push(url);
+        while (loadedOriginalOrder.length > 300) delete loadedOriginals[loadedOriginalOrder.shift()];
+    }
+    // 把原图读进设备缓存（Service Worker / 浏览器缓存）并报告进度；之后 <img> 再取同一地址只是一次校验。
+    // 同一地址同时只读一次：查看器在 4 秒兜底、切图等时刻会换一个加载者，新加载者接着看同一条下载，不会重头再来。
+    var warming = Object.create(null);
+    function watchOriginal(url, onProgress) {
+        var entry = warming[url];
+        if (!entry) {
+            entry = warming[url] = { p: 0, subs: [], killTimer: 0, ctl: window.AbortController ? new AbortController() : null };
+            var finish;
+            entry.promise = new Promise(function(resolve) { finish = function(ok) { if (warming[url] === entry) delete warming[url]; resolve(ok); }; });
+            if (!url || /^(blob|data):/i.test(url) || typeof fetch !== "function") finish(!1);
+            else fetch(url, { credentials: "same-origin", signal: entry.ctl ? entry.ctl.signal : undefined }).then(function(res) {
+                if (!res.ok) return finish(!1);
+                var total = Number(res.headers.get("Content-Length")) || 0, loaded = 0;
+                if (!res.body || !res.body.getReader) return res.arrayBuffer().then(function() { finish(!0); }, function() { finish(!1); });
+                var reader = res.body.getReader();
+                (function pump() {
+                    reader.read().then(function(r) {
+                        if (r.done) return finish(!0);
+                        loaded += r.value ? r.value.length : 0;
+                        if (total) { entry.p = Math.min(.98, loaded / total); entry.subs.slice().forEach(function(cb) { cb(entry.p); }); }
+                        pump();
+                    }, function() { finish(!1); });
+                })();
+            }, function() { finish(!1); });
+        }
+        clearTimeout(entry.killTimer); entry.killTimer = 0;
+        entry.subs.push(onProgress); entry.p && onProgress(entry.p);
+        return {
+            promise: entry.promise,
+            release: function() {
+                var i = entry.subs.indexOf(onProgress);
+                if (i < 0) return;
+                entry.subs.splice(i, 1);
+                // 没有人再等这条下载了：稍等一下（可能马上有新加载者接手），再中止。
+                if (!entry.subs.length) entry.killTimer = setTimeout(function() {
+                    if (warming[url] === entry && !entry.subs.length) { delete warming[url]; try { entry.ctl && entry.ctl.abort(); } catch (err) {} }
+                }, 400);
+            }
+        };
+    }
+    var ppBar = (function() {
+        var FLOWERS = 14, st = null, seq = 0;
+        function build() {
+            var host = document.getElementById("photoPreviewOverlay");
+            if (!host) return null;
+            var el = document.createElement("div");
+            el.className = "pp-load-progress"; el.setAttribute("aria-hidden", "true");
+            var html = '<span class="pp-load-fill"></span><span class="pp-load-label">原图加载中…</span><span class="pp-load-flowers">';
+            for (var i = 0; i < FLOWERS; i++) {
+                var seed = (i * 37 + 11) % 17;
+                html += '<i style="left:' + ((i + .5) / FLOWERS * 100).toFixed(2) + '%;--r:' + (seed * 21 - 150) + 'deg;--y:' + ((seed % 5) - 2) + 'px;--s:' + (.82 + (seed % 4) * .09).toFixed(2) + '">' +
+                    '<svg viewBox="0 0 20 20" focusable="false"><g fill="currentColor"><ellipse cx="10" cy="4.6" rx="3.1" ry="4.4"/><ellipse cx="10" cy="4.6" rx="3.1" ry="4.4" transform="rotate(72 10 10)"/><ellipse cx="10" cy="4.6" rx="3.1" ry="4.4" transform="rotate(144 10 10)"/><ellipse cx="10" cy="4.6" rx="3.1" ry="4.4" transform="rotate(216 10 10)"/><ellipse cx="10" cy="4.6" rx="3.1" ry="4.4" transform="rotate(288 10 10)"/></g><circle cx="10" cy="10" r="1.7" fill="#d9577f"/></svg></i>';
+            }
+            el.innerHTML = html + "</span>";
+            host.appendChild(el);
+            place(el, host);
+            return el;
+        }
+        // 放在放大/缩小按钮那一栏的中间高度：按钮竖排时取两个按钮的中点，横排（桌面）时放在工具栏正上方。
+        function place(el, host) {
+            try {
+                var zs = Array.prototype.filter.call(host.querySelectorAll(".pp-zoom-btn"), function(b) { var r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0; });
+                if (zs.length < 2) return;
+                var hr = host.getBoundingClientRect(), a = zs[0].getBoundingClientRect(), b = zs[1].getBoundingClientRect();
+                var stacked = Math.abs(a.top - b.top) > Math.min(a.height, b.height) * .6, h = el.offsetHeight || 16, bottom;
+                if (stacked) bottom = hr.bottom - ((Math.min(a.top, b.top) + Math.max(a.bottom, b.bottom)) / 2 + h / 2);
+                else bottom = hr.bottom - Math.min(a.top, b.top) + 10;
+                el.style.bottom = Math.max(6, Math.round(bottom)) + "px";
+            } catch (err) {}
+        }
+        function apply(s) {
+            if (!s.node) return;
+            s.node.style.setProperty("--p", s.p.toFixed(3));
+            var flowers = s.node.querySelectorAll(".pp-load-flowers i");
+            for (var i = 0; i < flowers.length; i++) flowers[i].classList.toggle("on", (i + .5) / FLOWERS <= s.p + .001);
+        }
+        function setP(s, p, real) {
+            if (s.dead) return;
+            real && (s.lastReal = Date.now());
+            p > s.p && (s.p = Math.min(.98, p), apply(s));
+        }
+        function kill(s, delay) {
+            if (s.dead) return;
+            s.dead = !0; clearInterval(s.creep); clearTimeout(s.showTimer); clearTimeout(s.cancelTimer);
+            if (st === s) st = null;
+            var node = s.node;
+            if (!node) return;
+            setTimeout(function() {
+                node.classList.remove("show");
+                setTimeout(function() { node.parentNode && node.parentNode.removeChild(node); }, 420);
+            }, delay);
+        }
+        return {
+            // 开始（或接手）某张原图的进度显示。进度条只在加载超过 ~0.25 秒时才出现，原图很快就位时不打扰。
+            start: function(url) {
+                var s = st;
+                if (s && !s.dead && s.url === url) { clearTimeout(s.cancelTimer); s.cancelTimer = 0; }
+                else {
+                    s && kill(s, 0);
+                    s = st = { url: url, p: 0, node: null, dead: !1, lastReal: 0 };
+                    s.showTimer = setTimeout(function() {
+                        if (s.dead) return;
+                        s.node = build(); if (!s.node) return;
+                        apply(s); void s.node.offsetWidth; s.node.classList.add("show");
+                        // 工具栏按钮刚打开时还在做入场动画，位置稳定后再校准一次高度。
+                        [450, 1000].forEach(function(ms) { setTimeout(function() { s.node && !s.dead && place(s.node, s.node.parentNode); }, ms); });
+                    }, 250);
+                    // 服务端没给总大小或读取失败时，进度缓慢趋近 90%，原图一就位就走到 100%。
+                    s.creep = setInterval(function() { Date.now() - s.lastReal > 1200 && setP(s, s.p + (.9 - s.p) * .05); }, 140);
+                }
+                var token = s.owner = ++seq;
+                return {
+                    set: function(p) { setP(s, p, !0); },
+                    finish: function() { if (s.owner !== token || s.dead) return; s.p = 1; apply(s); kill(s, s.node ? 380 : 0); },
+                    // 稍作等待：换加载者时新加载者会立刻接手同一个进度条，不会闪一下消失再出现。
+                    cancel: function() { if (s.owner !== token || s.dead) return; clearTimeout(s.cancelTimer); s.cancelTimer = setTimeout(function() { kill(s, 0); }, 160); }
+                };
+            }
+        };
+    })();
     function U(e) {
         if (!e) return Promise.resolve();
         if (C[e]) return Promise.resolve();
@@ -194,22 +324,23 @@
             }
             e._ppCleanup = cleanup, e.addEventListener("load", handleLoad), e.addEventListener("error", handleError), e._ppListenerUrl = t;
             var displaySource = window.XtjPostOriginals ? window.XtjPostOriginals.displayUrl(t) : t;
-            var firstSource = forceReload ? "" : previewFirstUrl(t);
+            var firstSource = forceReload || loadedOriginals[t] ? "" : previewFirstUrl(t);
             if (firstSource) {
                 // Show the preview now, fetch and decode the original behind it, then swap with no blank frame.
                 e.removeEventListener("load", handleLoad); e.removeEventListener("error", handleError); e._ppListenerUrl = null;
                 e.style.transition = "none"; e.src = firstSource; e.style.opacity = "1";
-                var fullImage = new Image(), swapped = !1;
+                var fullImage = new Image(), swapped = !1, bar = null, watch = null;
+                if (e.id === "photoPreviewImage") { bar = ppBar.start(displaySource); watch = watchOriginal(displaySource, bar.set); }
                 fullImage.decoding = "async";
                 try { fullImage.fetchPriority = e.id === "photoPreviewImage" ? "high" : "low"; } catch (err) {}
                 e._ppCleanup = function() {
                     fullImage.onload = null; fullImage.onerror = null;
-                    if (!swapped) { try { fullImage.src = ""; } catch (err) {} }
+                    if (!swapped) { try { fullImage.src = ""; } catch (err) {} watch && watch.release(); bar && bar.cancel(); }
                     cleanup();
                 };
                 var swapToOriginal = function() {
                     if (swapped) return;
-                    swapped = !0; fullImage.onload = null; fullImage.onerror = null;
+                    swapped = !0; fullImage.onload = null; fullImage.onerror = null; watch && watch.release(); bar && bar.finish();
                     if (e._ppLoadGen !== a || e._ppUrl !== t) return;
                     e.style.backgroundImage = "url(" + JSON.stringify(firstSource) + ")"; e.style.backgroundSize = "100% 100%"; e.style.backgroundRepeat = "no-repeat";
                     e._ppCleanup = cleanup; e.addEventListener("load", handleLoad); e.addEventListener("error", handleError); e._ppListenerUrl = t;
@@ -218,8 +349,12 @@
                 };
                 fullImage.onload = function() { (typeof fullImage.decode === "function" ? fullImage.decode() : Promise.resolve()).then(swapToOriginal, swapToOriginal); };
                 fullImage.onerror = swapToOriginal;
-                fullImage.src = displaySource;
-                fullImage.complete && fullImage.naturalWidth > 0 && swapToOriginal();
+                var startOriginal = function() {
+                    if (swapped || e._ppLoadGen !== a || e._ppUrl !== t) return;
+                    fullImage.src = displaySource;
+                    fullImage.complete && fullImage.naturalWidth > 0 && swapToOriginal();
+                };
+                if (watch) watch.promise.then(startOriginal); else startOriginal();
                 return;
             }
             e.src = forceReload && displaySource === t && window.xtjRetryOriginalImageUrl ? window.xtjRetryOriginalImageUrl(t) : displaySource;
@@ -906,7 +1041,7 @@
                 // 性能优化：原图未解码完成前，先用已缓存的缩略图秒开（墙格卡片通常已加载同一缩略图），
                 // 同时在后台解码原图，就绪后无缝替换，避免每次打开都长时间等待原图下载而黑屏。
                 var thumbSrc = S.thumbUrl || S.thumb || '';
-                var hasThumb = !!(thumbSrc && thumbSrc !== S.imageUrl);
+                var hasThumb = !!(thumbSrc && thumbSrc !== S.imageUrl && !loadedOriginals[S.imageUrl]);
                 J.style.transition = "none", J.style.opacity = "0";
                 if (oe && oe.complete && oe.naturalWidth > 0) {
                     J._ppUrl = S.imageUrl;
@@ -949,10 +1084,12 @@
                     // 用独立的预加载 Image 探测原图就绪，就绪后切主图，避免缩略图切换时闪白。
                     // 预加载对象与槽位同生命周期；切图/关闭时移除回调，旧请求不能操作新预览。
                     var preImg = new Image();
-                    var preDone = !1;
+                    var preDone = !1, preBar = null, preWatch = null;
                     function cleanupFullPreload(cancelRequest) {
                         var wasPending = !preDone;
                         preDone = !0;
+                        if (preWatch) { preWatch.release(); preWatch = null; }
+                        if (preBar) { preBar.cancel(); preBar = null; }
                         preImg.onload = null;
                         preImg.onerror = null;
                         if (cancelRequest && wasPending) {
@@ -962,7 +1099,9 @@
                     }
                     function swapToFull() {
                         if (preDone) return;
+                        var doneBar = preBar; preBar = null;
                         cleanupFullPreload(!1);
+                        doneBar && doneBar.finish();
                         cachePreviewImage(openFullUrl, preImg);
                         if (!(_._openLoadGen === ee && t === S && J && J.isConnected)) return;
                         if (J._ppUrl !== openFullUrl) {
@@ -1016,9 +1155,16 @@
                     function startFullLoad() {
                         if (fullStarted || preDone) return;
                         fullStarted = !0;
-                        preImg.src = openFullUrl;
-                        // 若原图已在浏览器缓存中，onload 可能同步触发前就已 complete
-                        if (preImg.complete && preImg.naturalWidth > 0) swapToFull();
+                        var loadFull = function() {
+                            if (preDone) return;
+                            preImg.src = openFullUrl;
+                            // 若原图已在浏览器缓存中，onload 可能同步触发前就已 complete
+                            if (preImg.complete && preImg.naturalWidth > 0) swapToFull();
+                        };
+                        var warmUrl = window.XtjPostOriginals ? window.XtjPostOriginals.displayUrl(openFullUrl) : openFullUrl;
+                        preBar = ppBar.start(warmUrl);
+                        preWatch = watchOriginal(warmUrl, preBar.set);
+                        preWatch.promise.then(loadFull);
                     }
                     if (J.complete && J.naturalWidth > 0) startFullLoad();
                     else {

@@ -111,9 +111,19 @@
     if (cover && s._coverKey !== coverKey) {
       cover.replaceChildren();
       if (coverItem) {
-        var img = document.createElement('img'); img.alt = ''; img.src = coverKey; img.decoding = 'async';
-        img.addEventListener('error', function () { img.remove(); }); cover.appendChild(img);
-      }
+        // The cover only needs the preview-sized copy; the original loads when someone taps it to look closer.
+        var coverPreview = window.xtjMediaPreviewUrl ? window.xtjMediaPreviewUrl(coverKey) : coverKey;
+        var img = document.createElement('img'); img.alt = ''; img.src = coverPreview; img.decoding = 'async';
+        img.addEventListener('error', function () { img.remove(); cover.removeAttribute('role'); cover.removeAttribute('tabindex'); cover.setAttribute('aria-hidden', 'true'); }); cover.appendChild(img);
+        cover.setAttribute('data-full-src', coverKey); cover.setAttribute('data-thumb-src', coverPreview);
+        cover.setAttribute('role', 'button'); cover.setAttribute('tabindex', '0'); cover.setAttribute('aria-label', '查看背景图大图'); cover.removeAttribute('aria-hidden');
+        if (!cover.__xtjViewBound) {
+          cover.__xtjViewBound = true;
+          var openCover = function () { if (typeof window.openPostImagePreview === 'function' && cover.getAttribute('data-full-src')) window.openPostImagePreview(cover.getAttribute('data-full-src'), cover); };
+          cover.addEventListener('click', openCover);
+          cover.addEventListener('keydown', function (event) { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openCover(); } });
+        }
+      } else { cover.removeAttribute('role'); cover.removeAttribute('tabindex'); cover.removeAttribute('data-full-src'); cover.setAttribute('aria-hidden', 'true'); }
       s._coverKey = coverKey;
     }
     var signature = byId('authorPostsSignature');
@@ -226,14 +236,47 @@
     var owner = identity(); state = { author: author, owner: owner.owner, epoch: owner.epoch, generation: generation, posts: [], hasMore: false, loading: false, cursor: null, _renderedCount: 0, _renderYear: '', _renderDay: '', _coverKey: null };
     var scroll = byId('authorPostsScroll'); if (scroll) scroll.scrollTop = 0;
     var saved = readCache(state);
-    if (saved) {
-      state.posts = saved.posts.slice(); state.cursor = saved.cursor; state.hasMore = !!saved.hasMore; state.profile = saved.profile || state.profile;
-      render(state); status(state, state.hasMore ? '' : '已显示全部动态');
-      if (author === state.owner || !(Date.now() - saved.t < CACHE_FRESH_MS)) revalidate(state);
+    if (saved) { showSaved(state, saved); return; }
+    var waiting = prefetching[cacheKey(state)];
+    if (waiting) {
+      // A request started when the finger landed on the avatar is already on its way: wait for it instead of asking twice.
+      var target = state; status(target, '正在加载动态…');
+      waiting.then(function () { if (!current(target)) return; var hit = readCache(target); if (hit) showSaved(target, hit); else load(target); });
       return;
     }
     load(state);
   };
+  function showSaved(s, saved) {
+    s.posts = saved.posts.slice(); s.cursor = saved.cursor; s.hasMore = !!saved.hasMore; s.profile = saved.profile || s.profile;
+    render(s); status(s, s.hasMore ? '' : '已显示全部动态');
+    if (s.author === s.owner || !(Date.now() - saved.t < CACHE_FRESH_MS)) revalidate(s);
+  }
+  // Start loading someone's page the moment a finger (or pointer) lands on their avatar, ahead of the click.
+  var prefetching = Object.create(null);
+  window.__xtjPrefetchAuthorPosts = function (author) {
+    if (!author || typeof window.xtjOptionalAuthFetch !== 'function') return;
+    var owner = identity(), s = { author: author, owner: owner.owner, epoch: owner.epoch }, key = cacheKey(s);
+    var hit = readCache(s);
+    if (prefetching[key] || (hit && Date.now() - hit.t < CACHE_FRESH_MS)) return;
+    var controller = new AbortController();
+    prefetching[key] = window.xtjOptionalAuthFetch('/api/profile/posts/' + encodeURIComponent(author) + '?limit=20', { timeoutMs: 18000, signal: controller.signal, authOwner: s.owner, authEpoch: s.epoch })
+      .then(function (response) { return response.json().then(function (data) { return { response: response, data: data }; }); })
+      .then(function (result) {
+        var data = result.data;
+        if (!result.response.ok || !data.ok || !Array.isArray(data.posts) || data.restricted) return;
+        var now = identity(); if (now.owner !== s.owner || now.epoch !== s.epoch) return;
+        s.posts = data.posts.filter(function (post) { return post.user_name === author; }); s.cursor = data.next_cursor; s.hasMore = !!data.has_more && !!s.cursor; s.profile = data.profile || null; s.restricted = false;
+        writeCache(s);
+      })
+      .catch(function () {})
+      .then(function () { delete prefetching[key]; });
+  };
+  ['pointerdown', 'touchstart'].forEach(function (type) {
+    document.addEventListener(type, function (event) {
+      var node = event.target && event.target.closest ? event.target.closest('[data-user-name][onclick*="openUserProfile"]') : null;
+      if (node) window.__xtjPrefetchAuthorPosts(node.getAttribute('data-user-name'));
+    }, { passive: true, capture: true });
+  });
   window.__xtjUpdateAuthorPost = function (post) {
     if (!state || !current(state) || !post || post.user_name !== state.author) return;
     state.posts = state.posts.map(function (old) { return String(old.id)===String(post.id) ? Object.assign({}, old, post) : old; });

@@ -44,6 +44,16 @@
                 
                 var avatarEl = document.getElementById('upcAvatar');
                 if (!avatarEl) return;
+                // Tap the picture to see it large (the 1080px rendition; the 192px one is shown first).
+                avatarEl.setAttribute('role', 'button'); avatarEl.setAttribute('tabindex', '0'); avatarEl.setAttribute('aria-label', '查看头像大图');
+                avatarEl.onclick = function() {
+                    var small = getAvatarUrl(upcTargetUser);
+                    if (!small || !avatarEl.querySelector('img') || typeof window.openPostImagePreview !== 'function') return;
+                    var large = /\/api\/avatar\/image\//.test(small) ? small + (small.indexOf('?') >= 0 ? '&' : '?') + 'size=large' : small;
+                    avatarEl.setAttribute('data-thumb-src', small);
+                    window.openPostImagePreview(large, avatarEl);
+                };
+                avatarEl.onkeydown = function(event) { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); avatarEl.onclick(); } };
                 // localStorage 取头像缓存，失败用字母占位
                 var showAvatar = getAvatarUrl(userName);
                 if (!showAvatar && userName === currentUser) {
@@ -56,7 +66,7 @@
                     } catch(e) {}
                 }
                 if (showAvatar) {
-                    avatarEl.innerHTML = '<img loading="lazy" decoding="async" src="' + escapeHtml(sanitizeUrl(showAvatar)) + '" alt="头像">';
+                    avatarEl.innerHTML = '<img decoding="async" src="' + escapeHtml(sanitizeUrl(showAvatar)) + '" alt="头像">';
                 } else {
                     avatarEl.innerHTML = '<span id="upcAvatarText">' + escapeHtml(String(userName || '?').charAt(0).toUpperCase()) + '</span>';
                 }
@@ -90,7 +100,7 @@
                             if (cv[currentUser]) {
                                 avatarCache[currentUser] = cv[currentUser];
                                 if (document.getElementById('userProfileModal').classList.contains('active')) {
-                                    avatarEl.innerHTML = '<img loading="lazy" decoding="async" src="' + escapeHtml(sanitizeUrl(cv[currentUser].url)) + '" alt="头像">';
+                                    avatarEl.innerHTML = '<img decoding="async" src="' + escapeHtml(sanitizeUrl(cv[currentUser].url)) + '" alt="头像">';
                                 }
                             }
                         } catch(e) {}
@@ -109,8 +119,10 @@
                         }
                         if (document.getElementById('userProfileModal').classList.contains('active')) {
                             var url = (userName === currentUser && getAvatarUrl(currentUser)) ? getAvatarUrl(currentUser) : avatarUrl;
-                            var imgHtml = '<img loading="lazy" decoding="async" src="' + escapeHtml(sanitizeUrl(url)) + '" alt="头像" onerror="this.style.display=\'none\';var s=document.createElement(\'span\');s.textContent=this.alt[0]?this.alt[0].toUpperCase():\'?\';s.className=\'avatar-fallback\';this.parentNode.appendChild(s);">';
-                            avatarEl.innerHTML = imgHtml;
+                            var imgHtml = '<img decoding="async" src="' + escapeHtml(sanitizeUrl(url)) + '" alt="头像" onerror="this.style.display=\'none\';var s=document.createElement(\'span\');s.textContent=this.alt[0]?this.alt[0].toUpperCase():\'?\';s.className=\'avatar-fallback\';this.parentNode.appendChild(s);">';
+                            // The same picture is already on screen: leave it alone instead of tearing it down and reloading it.
+                            var shownImg = avatarEl.querySelector('img');
+                            if (!(shownImg && shownImg.getAttribute('src') === sanitizeUrl(url))) avatarEl.innerHTML = imgHtml;
                             // 写入本地缓存
                             if (userName === currentUser) {
                                 try { var cv = readAvatarCacheFromStorage(); cv[currentUser] = { state: 'has_avatar', url: url, fetched_at: Date.now() }; writeAvatarCacheToStorage(cv); } catch(_) {}

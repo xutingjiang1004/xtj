@@ -1446,6 +1446,104 @@
             };
             resetPostActionModals();
 
+            // ===== The profile page and the post detail open from what was tapped and close back to it =====
+            (function() {
+                var ORIGIN_PRIORITY = ['.post-media-cell', '.author-post-entry', '.author-post-row', '.comment-item', '[data-user-name]', '.avatar-wrap', '.avatar.clickable', '.photo-wall-item', '.post'];
+                var ANIMATED = { userProfileModal: 1, postDetailModal: 1 };
+                var lastTap = { el: null, at: 0 }, origins = Object.create(null);
+                function remember(event) {
+                    var target = event.target;
+                    if (!target || !target.closest) return;
+                    for (var i = 0; i < ORIGIN_PRIORITY.length; i++) {
+                        var el = target.closest(ORIGIN_PRIORITY[i]);
+                        if (el) { lastTap = { el: el, at: Date.now() }; return; }
+                    }
+                }
+                document.addEventListener('pointerdown', remember, true);
+                document.addEventListener('keydown', function(event) { if (event.key === 'Enter' || event.key === ' ') remember(event); }, true);
+                function motionOk() {
+                    return !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) && document.documentElement.getAttribute('data-xtj-motion') !== 'off';
+                }
+                function visibleRect(el) {
+                    if (!el || !el.isConnected) return null;
+                    var r = el.getBoundingClientRect();
+                    if (r.width < 4 || r.height < 4 || r.bottom < 0 || r.top > window.innerHeight || r.right < 0 || r.left > window.innerWidth) return null;
+                    return r;
+                }
+                // Transform that makes the box look like the tapped element: same centre, uniform scale, rounded like it.
+                function boxFrom(box, from) {
+                    var to = box.getBoundingClientRect();
+                    if (!to.width || !to.height) return null;
+                    var scale = Math.max(.06, Math.min(.92, Math.min(from.width / to.width, from.height / to.height)));
+                    var dx = (from.left + from.width / 2) - (to.left + to.width / 2), dy = (from.top + from.height / 2) - (to.top + to.height / 2);
+                    var finalRadius = parseFloat(window.getComputedStyle(box).borderTopLeftRadius) || 24;
+                    var startRadius = Math.min(Math.min(from.width, from.height) / 2 / scale, 400);
+                    return { transform: 'translate(' + dx + 'px, ' + dy + 'px) scale(' + scale + ')', startRadius: startRadius + 'px', finalRadius: finalRadius + 'px' };
+                }
+                function cancelRunning(el) { try { el.getAnimations({ subtree: true }).forEach(function(a) { if (a.__xtjOrigin) a.cancel(); }); } catch (_) {} }
+                function track(animation) { animation.__xtjOrigin = true; return animation; }
+                function runOpen(id, from) {
+                    var el = document.getElementById(id), box = el && el.querySelector('.modal-box');
+                    if (!box || !box.animate) return;
+                    var frame = boxFrom(box, from);
+                    if (!frame) return;
+                    var blur = box.style.backdropFilter, blurWebkit = box.style.webkitBackdropFilter;
+                    box.style.backdropFilter = 'none'; box.style.webkitBackdropFilter = 'none';
+                    var anim = track(box.animate([
+                        { transform: frame.transform, opacity: .25, borderRadius: frame.startRadius },
+                        { transform: 'none', opacity: 1, borderRadius: frame.finalRadius }
+                    ], { duration: 440, easing: 'cubic-bezier(.2,.8,.2,1)', fill: 'backwards' }));
+                    track(el.animate([{ backgroundColor: 'rgba(0,0,0,0)' }, { backgroundColor: window.getComputedStyle(el).backgroundColor }], { duration: 300, easing: 'ease-out', fill: 'backwards' }));
+                    anim.onfinish = anim.oncancel = function() { box.style.backdropFilter = blur; box.style.webkitBackdropFilter = blurWebkit; };
+                }
+                function runClose(el, box, to, done) {
+                    var frame = boxFrom(box, to);
+                    if (!frame) { done(); return; }
+                    cancelRunning(el);
+                    box.style.backdropFilter = 'none'; box.style.webkitBackdropFilter = 'none';
+                    var anim = track(box.animate([
+                        { transform: 'none', opacity: 1, borderRadius: frame.finalRadius },
+                        { transform: frame.transform, opacity: .2, borderRadius: frame.startRadius }
+                    ], { duration: 340, easing: 'cubic-bezier(.4,0,.2,1)', fill: 'forwards' }));
+                    track(el.animate([{ backgroundColor: window.getComputedStyle(el).backgroundColor }, { backgroundColor: 'rgba(0,0,0,0)' }], { duration: 300, easing: 'ease-in', fill: 'forwards' }));
+                    var finished = false;
+                    function end() {
+                        if (finished) return; finished = true;
+                        done();
+                        cancelRunning(el);
+                        box.style.backdropFilter = ''; box.style.webkitBackdropFilter = '';
+                    }
+                    anim.onfinish = end;
+                    setTimeout(end, 480);
+                }
+                var baseOpen = window.openModal, baseClose = window.closeModal;
+                window.openModal = function(id) {
+                    var from = null, originEl = null;
+                    if (ANIMATED[id] && motionOk() && lastTap.el && Date.now() - lastTap.at < 6000) { originEl = lastTap.el; from = visibleRect(originEl); }
+                    var already = document.getElementById(id);
+                    var wasActive = !!(already && already.classList.contains('active'));
+                    var result = baseOpen.apply(this, arguments);
+                    if (ANIMATED[id]) origins[id] = from ? originEl : null;
+                    if (from && !wasActive) runOpen(id, from);
+                    return result;
+                };
+                window.closeModal = function(id) {
+                    if (ANIMATED[id] && motionOk()) {
+                        var el = document.getElementById(id);
+                        if (el && el.__xtjClosing) return;
+                        var box = el && el.classList.contains('active') ? el.querySelector('.modal-box') : null;
+                        var to = box && box.animate ? visibleRect(origins[id]) : null;
+                        if (to) {
+                            el.__xtjClosing = true;
+                            var args = arguments, self = this;
+                            runClose(el, box, to, function() { el.__xtjClosing = false; baseClose.apply(self, args); });
+                            return;
+                        }
+                    }
+                    return baseClose.apply(this, arguments);
+                };
+            })();
+
             // ===================== 图片查看器 =====================
             const ivZoomState = { scale: 1, tx: 0, ty: 0 };
             let ivIsZooming = false;
@@ -1538,7 +1636,7 @@
                     imageUrl: safeImageUrl,
                     // 缩略图与原图同源：聊天图没有独立缩略图，传相同的 URL 会让 preview.js
                     // 走 hasThumb=false 分支（避免多一次无意义预加载）。
-                    thumbUrl: safeImageUrl,
+                    thumbUrl: (el && sanitizeUrl(String(el.getAttribute('data-thumb-src') || ''))) || safeImageUrl,
                     username: userName || '',
                     timestamp: createdAt || '',
                     views: views,
