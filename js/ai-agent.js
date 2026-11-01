@@ -4262,6 +4262,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       });
       node._done = true;
       stopResearchCardAnimation(node);
+      // 历史里的研究记录：用原问题（或报告首个标题）做卡片主题，来源进入卡片和底部面板。
+      node._researchQuery = msg.research_query || '';
+      var historyHeading = /^\s{0,3}#{1,3}\s+(.+?)\s*#*\s*$/m.exec(String(msg.content || ''));
+      if (historyHeading) node._researchTitle = historyHeading[1].replace(/[*_`\[\]]/g, '').trim();
+      setResearchCardSources(node, msg.research_sources || []);
     } else {
       node = el('div', { class: 'ai-think-card collapsed' });
       node.innerHTML =
@@ -4350,6 +4355,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       footer.appendChild(badge);
       if (agentCount > 0) footer.appendChild(el('span', { class: 'ai-msg-agent-badge', text: agentCount + ' agent' }));
       if (msg.search_count > 0) footer.appendChild(el('span', { class: 'ai-msg-search-badge', text: '已搜索：' + (msg.search_count || 0) }));
+      if (node.classList.contains('ai-rc') && (node._rcSources || []).length) {
+        var historySourcesBtn = el('button', { type: 'button', class: 'ai-msg-search-badge ai-rc-sources-btn', text: node._rcSources.length + ' 个来源 ›' });
+        historySourcesBtn.addEventListener('click', function() { openResearchSheet(node, historySourcesBtn); });
+        footer.appendChild(historySourcesBtn);
+      }
       if (msg.usage) {
         var usageLine = buildUsageLine(msg.usage);
         if (usageLine) footer.appendChild(el('span', { class: 'ai-msg-usage', text: usageLine }));
@@ -5783,6 +5793,304 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   var AI_RESEARCH_THINKING_TEXTS = ['正在拆解问题', '正在分析上下文', '正在组织思路', '正在构建回答结构'];
   var AI_RESEARCH_RESEARCH_TEXTS = ['正在检索相关信息', '正在归纳研究要点', '正在生成研究结论'];
 
+  // ===================== 深入研究：精简卡片 + 底部面板（对齐 Claude） =====================
+  var AI_RESEARCH_ICON = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m20 20-4.9-4.9"/><path d="m7.6 11.8 2-2.2 1.7 1.5 2.2-2.6"/></svg>';
+  var AI_RESEARCH_CLOCK_ICON = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5" stroke-dasharray="2.4 2.4"/><path d="M12 7.5V12l3 1.8"/></svg>';
+
+  function researchDuration(ms) {
+    var total = Math.max(0, Math.round((Number(ms) || 0) / 1000));
+    if (total < 1) return '';
+    if (total < 60) return total + '秒';
+    var minutes = Math.floor(total / 60), seconds = total % 60;
+    return seconds ? (minutes + '分' + seconds + '秒') : (minutes + '分钟');
+  }
+
+  function researchTopic(card) {
+    var topic = String(card._researchTitle || card._researchQuery || '').replace(/\s+/g, ' ').trim();
+    if (!topic) topic = '深入研究';
+    return topic.length > 60 ? topic.slice(0, 59) + '…' : topic;
+  }
+
+  // 来源按域名汇总：[{host, count}]，数量多的在前。
+  function researchDomainStats(card) {
+    if (card._rcStats && card._rcStats.length === (card._rcSources || []).length) return card._rcStats.rows;
+    var counts = Object.create(null);
+    (card._rcSources || []).forEach(function(src) { if (src.host) counts[src.host] = (counts[src.host] || 0) + 1; });
+    var rows = Object.keys(counts).map(function(host) { return { host: host, count: counts[host] }; })
+      .sort(function(a, b) { return b.count - a.count || (a.host < b.host ? -1 : 1); });
+    card._rcStats = { length: (card._rcSources || []).length, rows: rows };
+    return rows;
+  }
+
+  // 不请求任何外部 favicon：用域名首字母 + 由域名稳定生成的柔和底色。
+  function researchMonogram(host) {
+    var hash = 0;
+    for (var i = 0; i < host.length; i++) hash = (hash * 31 + host.charCodeAt(i)) >>> 0;
+    var node = el('span', { class: 'ai-rc-fav', 'aria-hidden': 'true', text: (host.match(/[a-z0-9一-龥]/i) || ['?'])[0].toUpperCase() });
+    node.style.setProperty('--rc-hue', String(hash % 360));
+    return node;
+  }
+
+  function setResearchCardSources(card, list) {
+    if (!card) return;
+    var items = [];
+    (Array.isArray(list) ? list : []).forEach(function(src) {
+      if (!src) return;
+      var url = safeSearchUrl(src.url || src.link || '');
+      var host = safeSearchHost(url);
+      items.push({ title: String(src.title || src.name || host || '来源').slice(0, 160), url: url, host: host });
+    });
+    card._rcSources = items;
+    card._rcStats = null;
+    syncResearchRc(card);
+    refreshResearchSheet(card);
+  }
+
+  // 卡片：主题、来源头像叠放、「N 个来源 · 用时」、进行中三个点。
+  function syncResearchRc(card) {
+    if (!card || !card.classList || !card.classList.contains('ai-rc')) return;
+    var topicEl = card.querySelector('.ai-rc-topic'), metaEl = card.querySelector('.ai-rc-meta-line'), favsEl = card.querySelector('.ai-rc-favs');
+    if (!topicEl || !metaEl) return;
+    var state = (card._researchState && card._researchState.state) || 'preparing';
+    var failed = state === 'timeout' || state === 'interrupted' || state === 'cancelled' || state === 'error';
+    var finished = state === 'done';
+    var count = (card._rcSources || []).length;
+    var topic = researchTopic(card);
+    if (topicEl.textContent !== topic) topicEl.textContent = topic;
+    var parts = [];
+    if (failed) {
+      var legacyTitle = card.querySelector('.ai-research-title');
+      parts.push((legacyTitle && legacyTitle.textContent) || '研究中断');
+    } else if (!finished) {
+      parts.push(state === 'responding' ? '正在撰写报告' : '研究中');
+    }
+    if (count) parts.push(count + ' 个来源');
+    var elapsed = finished ? (card._researchState && card._researchState.durationMs) : (card._researchState && card._researchState.elapsedMs);
+    if (!failed && researchDuration(elapsed)) parts.push(researchDuration(elapsed));
+    var line = parts.join(' · ');
+    if (metaEl.textContent !== line) metaEl.textContent = line;
+    card.setAttribute('data-rc-state', failed ? 'failed' : (finished ? 'done' : 'running'));
+    if (favsEl) {
+      var hosts = researchDomainStats(card).slice(0, 3).map(function(row) { return row.host; });
+      var key = hosts.join('|');
+      if (favsEl.getAttribute('data-key') !== key) {
+        favsEl.setAttribute('data-key', key);
+        favsEl.textContent = '';
+        hosts.forEach(function(host) { favsEl.appendChild(researchMonogram(host)); });
+      }
+    }
+  }
+
+  function buildResearchIntro() {
+    var wrap = el('div', { class: 'ai-rc-intro' });
+    var launch = el('div', { class: 'ai-rc-launch' });
+    launch.innerHTML = AI_RESEARCH_CLOCK_ICON + '<span>正在启动深入研究</span>';
+    wrap.appendChild(launch);
+    wrap.appendChild(el('div', { class: 'ai-rc-intro-text', text: '我先启动深入研究，把你提到的问题一起查清楚。' }));
+    return wrap;
+  }
+
+  // 时间线：研究计划已创建 → 已收集 N 个来源 → 正在综合 → 完成；失败时最后一步标红。
+  function researchTimeline(card) {
+    var st = card._researchState || {}, state = st.state || 'preparing', stage = card._rcStage || '';
+    var count = (card._rcSources || []).length;
+    var finished = state === 'done', writing = state === 'responding' || stage === 'synthesize';
+    var failed = state === 'timeout' || state === 'interrupted' || state === 'cancelled' || state === 'error';
+    var items = [];
+    var planned = finished || writing || stage === 'rewrite_done' || stage === 'collect' || stage === 'gapfill' || count > 0;
+    items.push({ key: 'plan', state: planned ? 'done' : 'active', text: planned ? '研究计划已创建' : '正在拆解研究问题…' });
+    if (planned && (count > 0 || stage === 'collect' || stage === 'gapfill' || writing || finished)) {
+      var collected = writing || finished;
+      items.push({ key: 'collect', state: collected ? 'done' : 'active', text: '已收集 ' + count + ' 个来源' + (collected ? '' : '，仍在继续…'), sources: true, sub: stage === 'gapfill' && !collected ? '发现信息缺口，正在补充查证…' : '' });
+    }
+    if (writing || finished) items.push({ key: 'write', state: finished ? 'done' : 'active', text: finished ? '报告已生成' : '正在综合生成报告…' });
+    if (finished) items.push({ key: 'finish', state: 'done', text: '研究完成' + (researchDuration(st.durationMs) ? ' · 用时 ' + researchDuration(st.durationMs) : '') });
+    if (failed) {
+      items.forEach(function(item) { if (item.state === 'active') item.state = 'stopped'; });
+      var legacyTitle = card.querySelector('.ai-research-title'), legacyStatus = card.querySelector('.ai-research-status');
+      items.push({ key: 'fail', state: 'error', text: (legacyTitle && legacyTitle.textContent) || '研究中断', sub: (legacyStatus && legacyStatus.textContent) || '' });
+    }
+    return items;
+  }
+
+  function refreshResearchSheet(card) {
+    var sheet = S._rcSheet;
+    if (!sheet || sheet.card !== card || sheet.frame) return;
+    sheet.frame = requestAnimationFrame(function() { sheet.frame = 0; if (S._rcSheet === sheet) renderResearchSheet(sheet); });
+  }
+
+  function renderResearchSheet(sheet) {
+    var card = sheet.card;
+    if (!card.isConnected) { closeResearchSheet(false); return; }
+    sheet.title.textContent = researchTopic(card);
+    // 时间线按 key 对齐更新：节点保持不变，圆点和条形图的过渡才连贯。
+    var items = researchTimeline(card), seen = {};
+    items.forEach(function(item, index) {
+      seen[item.key] = true;
+      var li = sheet.steps[item.key];
+      if (!li) {
+        li = el('li', { class: 'ai-rs-step', 'data-key': item.key });
+        li.appendChild(el('span', { class: 'ai-rs-dot', 'aria-hidden': 'true' }));
+        var body = el('div', { class: 'ai-rs-step-body' });
+        body.appendChild(el('div', { class: 'ai-rs-step-text' }));
+        body.appendChild(el('div', { class: 'ai-rs-step-sub' }));
+        li.appendChild(body);
+        sheet.steps[item.key] = li;
+      }
+      if (sheet.timeline.children[index] !== li) sheet.timeline.insertBefore(li, sheet.timeline.children[index] || null);
+      li.className = 'ai-rs-step is-' + item.state;
+      var textEl = li.querySelector('.ai-rs-step-text'), subEl = li.querySelector('.ai-rs-step-sub');
+      if (textEl.textContent !== item.text) textEl.textContent = item.text;
+      subEl.textContent = item.sub || ''; subEl.hidden = !item.sub;
+      if (item.sources) { if (sheet.sourcesBox.parentNode !== li.lastChild) li.lastChild.appendChild(sheet.sourcesBox); }
+    });
+    Object.keys(sheet.steps).forEach(function(key) { if (!seen[key]) { sheet.steps[key].remove(); delete sheet.steps[key]; } });
+    var haveCollect = !!seen.collect;
+    sheet.sourcesBox.hidden = !haveCollect || !(card._rcSources || []).length;
+    if (!haveCollect && sheet.sourcesBox.parentNode) sheet.sourcesBox.remove();
+    // 主要来源：按域名汇总的前 4 个，条形图宽度按数量占比。
+    var rows = researchDomainStats(card).slice(0, 4), max = rows.length ? rows[0].count : 1, keep = {};
+    rows.forEach(function(row, index) {
+      keep[row.host] = true;
+      var li = sheet.domainRows[row.host];
+      if (!li) {
+        li = el('li', { class: 'ai-rs-domain' });
+        li.appendChild(researchMonogram(row.host));
+        li.appendChild(el('span', { class: 'ai-rs-domain-name', text: row.host }));
+        li.appendChild(el('span', { class: 'ai-rs-domain-count' }));
+        var track = el('span', { class: 'ai-rs-domain-track', 'aria-hidden': 'true' });
+        track.appendChild(el('i', { class: 'ai-rs-domain-bar' }));
+        li.appendChild(track);
+        sheet.domainRows[row.host] = li;
+      }
+      if (sheet.domainList.children[index] !== li) sheet.domainList.insertBefore(li, sheet.domainList.children[index] || null);
+      li.querySelector('.ai-rs-domain-count').textContent = String(row.count);
+      li.querySelector('.ai-rs-domain-bar').style.width = Math.max(6, Math.round(row.count / max * 100)) + '%';
+    });
+    Object.keys(sheet.domainRows).forEach(function(host) { if (!keep[host]) { sheet.domainRows[host].remove(); delete sheet.domainRows[host]; } });
+    var total = (card._rcSources || []).length;
+    sheet.brief.hidden = true;
+    sheet.count.textContent = total ? total + ' 个来源' : '';
+    sheet.count.hidden = !total;
+    // 全部来源列表：数量变化时才重建。
+    sheet.allBox.hidden = !total;
+    if (sheet.allCount !== total) {
+      sheet.allCount = total;
+      sheet.allSummary.textContent = '查看全部 ' + total + ' 个来源';
+      sheet.allList.textContent = '';
+      (card._rcSources || []).slice(0, 100).forEach(function(src) {
+        var li = el('li', { class: 'ai-rs-all-item' });
+        if (src.url) li.appendChild(el('a', { href: src.url, target: '_blank', rel: 'noopener noreferrer', text: src.title }));
+        else li.appendChild(el('span', { text: src.title }));
+        if (src.host) li.appendChild(el('small', { text: src.host }));
+        sheet.allList.appendChild(li);
+      });
+    }
+    var refs = ensureResearchCardRefs(card);
+    var stopVisible = refs && refs.stop && refs.stop.style.display !== 'none';
+    sheet.actions.hidden = !stopVisible;
+  }
+
+  function closeResearchSheet(restoreFocus) {
+    var sheet = S._rcSheet;
+    if (!sheet) return;
+    S._rcSheet = null;
+    if (sheet.frame) cancelAnimationFrame(sheet.frame);
+    document.removeEventListener('keydown', sheet.onKey, true);
+    // 把借用的「研究过程」和「停止」按钮还给卡片。
+    var card = sheet.card, refs = card && ensureResearchCardRefs(card);
+    try {
+      if (refs && refs.details && sheet.process.contains(refs.details)) {
+        var body = card.querySelector('.ai-think-body');
+        if (body) body.insertBefore(refs.details, body.firstChild);
+      }
+      if (refs && refs.stop && sheet.actions.contains(refs.stop)) {
+        var visual = card.querySelector('.ai-research-visual');
+        if (visual) visual.appendChild(refs.stop);
+      }
+    } catch (eReturn) {}
+    document.body.classList.remove('xtj-rs-open');
+    var overlay = sheet.overlay;
+    overlay.classList.remove('is-open');
+    var reduced = prefersReducedMotion();
+    setTimeout(function() { overlay.remove(); }, reduced ? 0 : 280);
+    if (restoreFocus !== false && sheet.opener && sheet.opener.isConnected && sheet.opener.focus) { try { sheet.opener.focus({ preventScroll: true }); } catch (eFocus) {} }
+  }
+
+  function openResearchSheet(card, opener) {
+    if (!isResearchCard(card)) return;
+    if (S._rcSheet) { if (S._rcSheet.card === card) return; closeResearchSheet(false); }
+    var overlay = el('div', { class: 'ai-rs-overlay' });
+    overlay.innerHTML =
+      '<div class="ai-rs-sheet" role="dialog" aria-modal="true" aria-labelledby="aiRsTitle">' +
+        '<div class="ai-rs-handle" aria-hidden="true"></div>' +
+        '<div class="ai-rs-head"><button type="button" class="ai-rs-close" aria-label="关闭"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button><h3 class="ai-rs-title" id="aiRsTitle"></h3></div>' +
+        '<div class="ai-rs-scroll"><ol class="ai-rs-timeline"></ol><p class="ai-rs-brief"></p><div class="ai-rs-count" aria-live="polite"></div>' +
+        '<details class="ai-rs-all"><summary></summary><ol class="ai-rs-all-list"></ol></details>' +
+        '<div class="ai-rs-process"></div><div class="ai-rs-actions"></div></div>' +
+      '</div>';
+    var root = overlay.firstChild;
+    var sourcesBox = el('section', { class: 'ai-rs-sources' });
+    sourcesBox.appendChild(el('h4', { text: '主要来源' }));
+    var domainList = el('ul', { class: 'ai-rs-domains' });
+    sourcesBox.appendChild(domainList);
+    var sheet = {
+      card: card, overlay: overlay, root: root, opener: opener || document.activeElement, frame: 0,
+      title: root.querySelector('.ai-rs-title'), timeline: root.querySelector('.ai-rs-timeline'), brief: root.querySelector('.ai-rs-brief'),
+      count: root.querySelector('.ai-rs-count'), allBox: root.querySelector('.ai-rs-all'), allSummary: root.querySelector('.ai-rs-all summary'), allList: root.querySelector('.ai-rs-all-list'),
+      process: root.querySelector('.ai-rs-process'), actions: root.querySelector('.ai-rs-actions'),
+      steps: {}, domainRows: {}, domainList: domainList, sourcesBox: sourcesBox, allCount: -1
+    };
+    var refs = ensureResearchCardRefs(card);
+    if (refs && refs.details) { refs.details.open = false; sheet.process.appendChild(refs.details); }
+    if (refs && refs.stop) sheet.actions.appendChild(refs.stop);
+    S._rcSheet = sheet;
+    var closeBtn = root.querySelector('.ai-rs-close');
+    closeBtn.addEventListener('click', function() { closeResearchSheet(true); });
+    overlay.addEventListener('mousedown', function(event) { if (event.target === overlay) closeResearchSheet(true); });
+    sheet.onKey = function(event) {
+      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeResearchSheet(true); return; }
+      if (event.key !== 'Tab') return;
+      var focusable = Array.prototype.filter.call(root.querySelectorAll('button, a[href], summary, input'), function(node) { return !node.disabled && !node.hidden && node.offsetParent !== null; });
+      if (!focusable.length) return;
+      var first = focusable[0], last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    document.addEventListener('keydown', sheet.onKey, true);
+    // 手机上可以按住顶部把手/标题向下拖动关闭。
+    var dragStart = null;
+    function onDown(event) {
+      if (!(window.matchMedia && window.matchMedia('(max-width: 820px)').matches) || event.target.closest('.ai-rs-close')) return;
+      dragStart = { y: event.clientY, t: Date.now(), dy: 0 };
+      try { event.currentTarget.setPointerCapture(event.pointerId); } catch (eCapture) {}
+      root.style.transition = 'none';
+    }
+    function onMove(event) {
+      if (!dragStart) return;
+      dragStart.dy = Math.max(0, event.clientY - dragStart.y);
+      root.style.transform = 'translateY(' + dragStart.dy + 'px)';
+    }
+    function onUp() {
+      if (!dragStart) return;
+      var drag = dragStart; dragStart = null;
+      root.style.transition = '';
+      var velocity = drag.dy / Math.max(1, Date.now() - drag.t);
+      if (drag.dy > 96 || velocity > 0.6) { root.style.transform = ''; closeResearchSheet(true); }
+      else root.style.transform = '';
+    }
+    ['.ai-rs-handle', '.ai-rs-head'].forEach(function(selector) {
+      var zone = root.querySelector(selector);
+      zone.addEventListener('pointerdown', onDown); zone.addEventListener('pointermove', onMove);
+      zone.addEventListener('pointerup', onUp); zone.addEventListener('pointercancel', onUp);
+    });
+    document.body.appendChild(overlay);
+    document.body.classList.add('xtj-rs-open');
+    renderResearchSheet(sheet);
+    requestAnimationFrame(function() { requestAnimationFrame(function() { overlay.classList.add('is-open'); }); });
+    setTimeout(function() { try { closeBtn.focus({ preventScroll: true }); } catch (eF) {} }, 30);
+  }
+
   function isResearchCard(card) {
     return !!(card && card._researchState && card.classList && card.classList.contains('ai-research-card'));
   }
@@ -6071,6 +6379,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       return;
     }
     refs.meta.textContent = thinkingElapsedLabel(state.elapsedMs);
+    syncResearchRc(card);
   }
 
   function setResearchCardState(card, nextState, opts) {
@@ -6176,6 +6485,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     syncResearchCardAnimatorState(card);
     if (refs.stop) refs.stop.style.display = (state.state === 'preparing' || state.state === 'thinking' || state.state === 'researching') ? '' : 'none';
     if (refs.retry) refs.retry.style.display = (state.state === 'timeout' || state.state === 'interrupted' || state.state === 'cancelled') ? '' : 'none';
+    syncResearchRc(card);
   }
 
   function createResearchCardAnimator(card) {
@@ -6424,14 +6734,18 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
   function buildResearchCardShell(options) {
     options = options || {};
-    var card = el('div', { class: 'ai-think-card ai-progress-card ai-research-card dt-simple-card collapsed generating ' + (options.extraClass || '') });
+    var card = el('div', { class: 'ai-think-card ai-progress-card ai-research-card ai-rc dt-simple-card collapsed generating ' + (options.extraClass || '') });
+    // 2026-11-01：精简的研究卡片（对齐 Claude）：图标 + 研究主题 + 来源头像叠放与「N 个来源 · 用时」+ 右箭头，
+    // 点开是底部面板（时间线 + 主要来源）。旧的状态标签、进度、粒子等元素保留在 DOM 里供状态机读写，但不显示。
     card.innerHTML =
-      '<div class="ai-think-header ai-research-header">' +
-        '<span class="ai-think-icon ai-research-icon">' + AI_THINK_ICON + '</span>' +
+      '<div class="ai-think-header ai-research-header" role="button" tabindex="0" aria-haspopup="dialog" aria-label="查看研究进度">' +
+        '<span class="ai-think-icon ai-research-icon ai-rc-icon">' + AI_RESEARCH_ICON + '</span>' +
+        '<span class="ai-rc-text"><span class="ai-rc-topic"></span><span class="ai-rc-sub"><span class="ai-rc-favs" aria-hidden="true"></span><span class="ai-rc-meta-line"></span></span></span>' +
         '<span class="ai-think-title ai-research-title">深入研究中</span>' +
         '<span class="ai-think-meta ai-research-meta"></span>' +
-        '<span class="ai-think-chevron ai-research-chevron">▾</span>' +
+        '<span class="ai-think-chevron ai-research-chevron ai-rc-chevron" aria-hidden="true">›</span>' +
       '</div>' +
+      '<div class="ai-rc-wait" aria-hidden="true"><i></i><i></i><i></i></div>' +
       '<div class="ai-research-visual">' +
         '<canvas class="ai-research-particles" aria-hidden="true"></canvas>' +
         '<div class="ai-research-orbit" aria-hidden="true"></div>' +
@@ -6440,7 +6754,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         '<div class="ai-research-steps">' +
           AI_RESEARCH_STEPS.map(function(step) { return '<span>' + step + '</span>'; }).join('') +
         '</div>' +
-        '<button type="button" class="ai-research-stop">停止思考</button>' +
+        '<button type="button" class="ai-research-stop">停止研究</button>' +
         '<button type="button" class="ai-progress-stop ai-research-retry" style="display:none">\u91cd\u8bd5</button>' +
       '</div>' +
       '<div class="ai-think-body">' +
@@ -6481,11 +6795,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       refs.header.addEventListener('click', function(ev) {
         var target = ev.target;
         if (target && target.closest && target.closest('.ai-research-stop')) return;
-        if (!card._researchState.canToggle) return;
-        var nextExpanded = card.classList.contains('collapsed');
-        card._researchState.persistExpanded = nextExpanded;
-        card._researchState.userPinnedOpen = nextExpanded;
-        setResearchDisclosure(card, nextExpanded);
+        openResearchSheet(card, refs.header);
+      });
+      refs.header.addEventListener('keydown', function(ev) {
+        if (ev.key !== 'Enter' && ev.key !== ' ') return;
+        ev.preventDefault();
+        openResearchSheet(card, refs.header);
       });
     }
     if (refs && refs.retry) {
@@ -6508,6 +6823,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }
     setResearchDisclosure(card, !!options.expanded && !!options.canToggle);
     setResearchCardState(card, options.state || 'preparing', options);
+    syncResearchRc(card);
     return card;
   }
 
@@ -6530,7 +6846,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         syncResearchElapsed(researchCard, Date.now() - researchCard._researchState.startedAt);
       }, 1000);
       researchCard._researchState.elapsedTimer = elapsedTimer;
-      researchCard._researchState.animator = createResearchCardAnimator(researchCard);
+      researchCard._researchState.animator = null; // 精简卡片不再跑粒子动画
       researchCard._cleanupTimer = function() {
         stopResearchCardAnimation(researchCard);
       };
@@ -6818,6 +7134,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     card._researchState.durationMs = durationMs;
     card._researchState.searchCount = card._researchBoard?Number(card._researchBoard.search_calls)||0:0;
     card._reportText=String(answerText||'');
+    // 来源进入卡片（头像叠放 + 来源数）和底部面板，不再在报告上方铺一长串链接；报告首个标题作为卡片标题。
+    setResearchCardSources(card, srcs);
+    var headingMatch = /^\s{0,3}#{1,3}\s+(.+?)\s*#*\s*$/m.exec(String(answerText || ''));
+    if (headingMatch) card._researchTitle = headingMatch[1].replace(/[*_`\[\]]/g, '').trim();
+    else if (!card._researchQuery && labelText) card._researchTitle = String(labelText).replace(/^历史研究记录[：:]\s*/, '');
 
     var answerEl = card.querySelector('.ai-think-answer');
     if (answerEl && answerText) {
@@ -6835,15 +7156,6 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }
 
     card.querySelectorAll('.ai-tavily-sources').forEach(function(old){old.remove();});
-    var sourcesBox = buildTavilySourcesBox(srcs);
-    if (sourcesBox) {
-      var thinkBody = card.querySelector('.ai-think-body');
-      var answerEl2 = card.querySelector('.ai-think-answer');
-      if (thinkBody) {
-        if (answerEl2) thinkBody.insertBefore(sourcesBox, answerEl2);
-        else thinkBody.appendChild(sourcesBox);
-      }
-    }
 
     var footer = card.querySelector('.ai-msg-footer');
     if (footer) {
@@ -6851,14 +7163,15 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       footer.appendChild(el('span', { class: 'ai-msg-time', text: fmtTime(card._researchCreatedAt||new Date(startedAtMs||Date.now()).toISOString()) }));
       footer.appendChild(el('span', { class: 'ai-msg-thinking-badge', text: '深入研究' }));
       // 搜索数量：网页搜索 N（如 网页搜索 100）
-      footer.appendChild(el('span', { class: 'ai-msg-search-badge', text: '参考来源 ' + srcs.length }));
+      var sourcesBadge = el('button', { type: 'button', class: 'ai-msg-search-badge ai-rc-sources-btn', text: srcs.length + ' 个来源 ›' });
+      sourcesBadge.addEventListener('click', function() { openResearchSheet(card, sourcesBadge); });
+      footer.appendChild(sourcesBadge);
       // ★ 优化：结果不满意时可"重新研究"（后端 refresh=true 跳过 24h 缓存重新跑）
       if (card._researchRefreshFn) {
         var refreshBtn = el('button', {
           type: 'button',
           class: 'ai-msg-refresh-research',
-          text: '↻ 重新研究',
-          style: 'margin-left:8px;padding:2px 10px;border-radius:999px;border:1px solid rgba(140,196,158,.35);background:rgba(255,255,255,.06);color:var(--ai-text,#35544b);font-size:11px;cursor:pointer;'
+          text: '↻ 重新研究'
         });
         refreshBtn.addEventListener('click', function() {
           if (refreshBtn.disabled) return;
@@ -6876,8 +7189,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var exportBtn = el('button', {
         type: 'button',
         class: 'ai-msg-export-research',
-        text: '复制全文',
-        style: 'margin-left:8px;padding:2px 10px;border-radius:999px;border:1px solid rgba(140,196,158,.35);background:rgba(255,255,255,.06);color:var(--ai-text,#35544b);font-size:11px;cursor:pointer;'
+        text: '复制全文'
       });
       exportBtn.addEventListener('click', function() {
         var text = '';
@@ -7012,8 +7324,38 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (savedResearchModel) S.dtResearchModel = savedResearchModel;
       } catch (eRm) {}
     }
+    // 研究强度和模型收进输入框上方的一行摘要（如「深度 · V4 Pro」），点开才显示选项，输入区保持干净。
+    if (inputBar && !panel.querySelector('.dt-research-options')) {
+      var modeBarNode = panel.querySelector('.dt-research-mode-bar'), modelBarNode = panel.querySelector('.dt-research-model-bar');
+      if (modeBarNode && modelBarNode) {
+        var optionsWrap = el('div', { class: 'dt-research-options' });
+        var optionsToggle = el('button', { type: 'button', class: 'dt-research-options-toggle', 'aria-expanded': 'false', 'aria-label': '研究设置' });
+        optionsToggle.innerHTML = '<span class="dt-research-options-label"></span><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
+        optionsToggle.addEventListener('click', function() {
+          var open = !optionsWrap.classList.contains('is-open');
+          optionsWrap.classList.toggle('is-open', open);
+          optionsToggle.setAttribute('aria-expanded', String(open));
+        });
+        inputBar.parentNode.insertBefore(optionsWrap, inputBar);
+        optionsWrap.appendChild(optionsToggle);
+        optionsWrap.appendChild(modeBarNode);
+        optionsWrap.appendChild(modelBarNode);
+      }
+    }
     refreshResearchModelOptions(panel);
     syncResearchModeUi(panel);
+    syncResearchOptionsSummary(panel);
+  }
+
+  function syncResearchOptionsSummary(panel) {
+    panel = panel || document.getElementById('panelDeepThink');
+    var label = panel && panel.querySelector('.dt-research-options-label');
+    if (!label) return;
+    var modes = { mini: '快速', pro: '深度', auto: '自动' };
+    var sel = panel.querySelector('.dt-research-model-select');
+    var modelText = '';
+    if (sel && sel.selectedOptions && sel.selectedOptions[0]) modelText = String(sel.selectedOptions[0].textContent || '').split(/\s*[·\-]\s*/)[0].trim();
+    label.textContent = (modes[S.dtResearchMode] || '深度') + ' · ' + (modelText || '默认模型');
   }
 
   // 内置研究模型（对齐后端 DEEPSEEK_MODEL_REASONER / DEEPSEEK_MODEL_FAST）
@@ -7079,6 +7421,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     sel.style.background = isDark ? 'rgba(24,44,38,.92)' : 'rgba(255,255,255,.9)';
     sel.style.color = isDark ? '#d6ece5' : '#2f4b45';
     sel.style.borderColor = isDark ? 'rgba(140,196,158,.28)' : 'rgba(140,196,158,.34)';
+    syncResearchOptionsSummary(panel);
   }
 
   function syncResearchModeUi(panel) {
@@ -7095,6 +7438,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }
     var hintEl = panel.querySelector('.dt-research-mode-hint');
     if (hintEl && activeHint) hintEl.textContent = activeHint;
+    syncResearchOptionsSummary(panel);
   }
 
   function isDeepThinkDarkTheme() {
@@ -7655,6 +7999,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     function handleResearchStage(stage, message) {
       if (!isResearchCard(progressCard)) return;
       var msg = message != null ? String(message) : '';
+      progressCard._rcStage = String(stage || '');
+      refreshResearchSheet(progressCard);
       if (stage === 'rewrite') {
         setResearchCardState(progressCard, 'thinking', {
           statusText: msg || '正在优化研究问题…',
@@ -7745,6 +8091,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (answerRenderer) { try { answerRenderer.cancel(); } catch (_) {} answerRenderer = null; }
       try { if (progressCard._cleanupTimer) progressCard._cleanupTimer(); } catch (e) {}
       try { progressCard._done = true; } catch (e) {}
+      try { if (progressCard._rcIntro) progressCard._rcIntro.remove(); } catch (e) {}
       try { progressCard.remove(); } catch (e) {}
       if (S.deepThinkProgressCard === progressCard) S.deepThinkProgressCard = null;
       if (controller && S.deepThinkJob === controller) S.deepThinkJob = null;
@@ -7764,7 +8111,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       }
       appendResearchThinkingEntry(progressCard, '研究启动', '已收到研究任务，正在连接多智能体流水线…', { forceNew: true });
       S.deepThinkProgressCard = progressCard;
+      progressCard._rcIntro = buildResearchIntro();
+      dtMessagesEl.appendChild(progressCard._rcIntro);
       dtMessagesEl.appendChild(progressCard);
+      syncResearchRc(progressCard);
       scrollToBottom(dtMessagesEl, true);
 
       // Reuse the ordinary lifecycle so refresh owns its controller, send lock
@@ -7807,7 +8157,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             }
           }
         }
-        if (prog.sources) sources = prog.sources;
+        if (prog.sources) { sources = prog.sources; setResearchCardSources(progressCard, sources); }
       }, { model: researchModel, researchModel: opts.researchModel, mode: opts.mode || 'hybrid', rewrite: opts.rewrite !== false, controller: controller, refresh: opts.refresh === true, requestId: reqId, checkpointId: opts.checkpointId,attachments:opts.attachments,webSearch:opts.webSearch,networkMode:opts.networkMode });
       var result = await researchPromise;
       if (S._dtCurrentReqId !== reqId || !customModelIdentityCurrent(flowIdentity) || S.dtLifecycleId !== flowLifecycle) return 'done';
