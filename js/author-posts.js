@@ -291,6 +291,13 @@
     load(state);
   };
   function showSaved(s, saved) {
+    // 访客身份下，旧缓存不可信：那时还没有「访客只看 3 条」的限制，
+    // 直接复用会让访客看到全部动态，也看不到登录提示。
+    if (!s.owner && (saved.guestLimited === undefined || saved.posts.length > 3)) {
+      dropCache(s);
+      load(s);
+      return;
+    }
     s.posts = saved.posts.slice(); s.cursor = saved.cursor; s.hasMore = !!saved.hasMore; s.guestLimited = !!saved.guestLimited; s.profile = saved.profile || s.profile;
     render(s); status(s, s.hasMore || s.guestLimited ? '' : '已显示全部动态');
     if (s.author === s.owner || !(Date.now() - saved.t < CACHE_FRESH_MS)) revalidate(s);
@@ -309,7 +316,7 @@
         var data = result.data;
         if (!result.response.ok || !data.ok || !Array.isArray(data.posts) || data.restricted) return;
         var now = identity(); if (now.owner !== s.owner || now.epoch !== s.epoch) return;
-        s.posts = data.posts.filter(function (post) { return post.user_name === author; }); s.cursor = data.next_cursor; s.hasMore = !!data.has_more && !!s.cursor; s.profile = data.profile || null; s.restricted = false;
+        s.posts = data.posts.filter(function (post) { return post.user_name === author; }); s.cursor = data.next_cursor; s.hasMore = !!data.has_more && !!s.cursor; s.guestLimited = !!data.guest_limited; s.profile = data.profile || null; s.restricted = false;
         writeCache(s);
       })
       .catch(function () {})
