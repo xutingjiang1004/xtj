@@ -1467,7 +1467,7 @@
                 var HERO_TARGET = { userProfileModal: '#upcAvatar', postDetailModal: '.post-detail-media img, .post-detail-media-card img' };
                 var lastTap = { spec: null, at: 0 }, origins = Object.create(null);
                 var EASE = 'cubic-bezier(.3,.2,.1,1)';
-                var TIMING = { big: { open: 540, close: 420 }, small: { open: 400, close: 320 } };
+                var TIMING = { big: { open: 430, close: 320 }, small: { open: 430, close: 320 } };
 
                 function px(value, size) {
                     var v = String(value || '').trim();
