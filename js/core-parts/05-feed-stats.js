@@ -52,14 +52,28 @@
                     var id=String(message.id);
                     if(dmNotificationIds.has(id))return;
                     if(dmSnapshotReady&&!getDMMessageReadAt(message)&&window.__xtjDmMuteReady&&!window.__xtjMutedChatPeers[message.user_name])
-                        showNotification(message.user_name,getDockChatMessagePreview(message),id);
+                        showNotification(message.user_name,getDockChatMessagePreview(message),id,message.created_at);
                     dmNotificationIds.add(id);
                 });
                 dmSnapshotReady=true;
                 while(dmNotificationIds.size>500)dmNotificationIds.delete(dmNotificationIds.values().next().value);
             }
 
-            function showNotification(userName, message, messageId) {
+            // Incoming message from a realtime event: show the banner unless the sender is muted. When the mute list has not
+            // been loaded yet (the first message right after start) load it once instead of silently dropping the banner.
+            function notifyIncomingDm(userName, preview, id, sentAt) {
+                function go() { if (!window.__xtjMutedChatPeers[userName]) showNotification(userName, preview, id, sentAt); }
+                if (window.__xtjDmMuteReady) { go(); return; }
+                var owner = window.currentUser;
+                fetchDmListShared(180).then(function() { if (owner === window.currentUser && window.__xtjDmMuteReady) go(); }).catch(function() {});
+            }
+            function notificationTimeLabel(sentAt) {
+                var stamp = Date.parse(sentAt);
+                if (!isFinite(stamp) || Math.abs(Date.now() - stamp) < 60000) return '现在';
+                return formatMsgTime(sentAt);
+            }
+
+            function showNotification(userName, message, messageId, sentAt) {
                 resetDmNotificationIdentity();
                 if(messageId){if(dmNotificationIds.has(String(messageId)))return;dmNotificationIds.add(String(messageId));}
                 if (!userName || !message) return;
@@ -70,6 +84,8 @@
 
                 const container = document.getElementById('notificationContainer');
                 if (!container) return;
+                // One banner at a time, like iOS: a newer message replaces the one on screen.
+                activeNotifications.slice().forEach(function(n) { if (n.dismiss) n.dismiss(); });
 
                 const bubble = document.createElement('div');
                 bubble.className = 'notification-bubble';
@@ -84,7 +100,7 @@
                 bubble.innerHTML = `
                     <div class="notification-avatar">${avatarHtml}</div>
                     <div class="notification-content">
-                        <div class="notification-name">${escapeHtml(userName)}</div>
+                        <div class="notification-head"><span class="notification-name">${escapeHtml(userName)}</span><span class="notification-time">${escapeHtml(notificationTimeLabel(sentAt))}</span></div>
                         <div class="notification-text">${escapeHtml(truncatedMsg)}</div>
                     </div>
                 `;
@@ -95,8 +111,10 @@
                 // 叠加 startDMPolling 造成重复请求。现在：点击即置幂等标记并取消计时器。
                 let autoHideTimer = null;
                 let clicked = false;
+                let dragged = false;
                 bubble.addEventListener('click', () => {
                     if (clicked) return; // 幂等：连点只生效一次
+                    if (dragged) { dragged = false; return; }
                     clicked = true;
                     if (autoHideTimer) { clearTimeout(autoHideTimer); autoHideTimer = null; }
                     switchDockTab('chat');
@@ -121,7 +139,35 @@
                 }, 16);
 
                 const notifId = Date.now() + Math.random();
-                activeNotifications.push({ id: notifId, element: bubble });
+                function dismissNow() {
+                    if (autoHideTimer) { clearTimeout(autoHideTimer); autoHideTimer = null; }
+                    clicked = true;
+                    bubble.style.transform = '';
+                    bubble.classList.remove('show');
+                    bubble.classList.add('hide');
+                    setTimeout(() => {
+                        if (bubble.parentNode) bubble.remove();
+                        activeNotifications = activeNotifications.filter(n => n.id !== notifId);
+                    }, 320);
+                }
+                activeNotifications.push({ id: notifId, element: bubble, dismiss: dismissNow });
+                // Swipe up to dismiss, as on iOS; a short drag springs back.
+                let swipeY = null, swipeDy = 0;
+                bubble.addEventListener('pointerdown', (event) => { swipeY = event.clientY; swipeDy = 0; });
+                bubble.addEventListener('pointermove', (event) => {
+                    if (swipeY === null) return;
+                    swipeDy = Math.min(0, event.clientY - swipeY);
+                    if (swipeDy < -4) { dragged = true; bubble.style.transition = 'none'; bubble.style.transform = 'translateY(' + swipeDy + 'px)'; }
+                });
+                const endSwipe = () => {
+                    if (swipeY === null) return;
+                    swipeY = null; bubble.style.transition = '';
+                    if (swipeDy < -28) { dismissNow(); return; }
+                    bubble.style.transform = '';
+                    setTimeout(() => { dragged = false; }, 0);
+                };
+                bubble.addEventListener('pointerup', endSwipe);
+                bubble.addEventListener('pointercancel', endSwipe);
 
                 autoHideTimer = setTimeout(() => {
                     // S：若用户已点击过，说明该条目已被处理，跳过自动隐藏（避免对已移除
@@ -741,7 +787,7 @@
                             if (m.user_name !== window.currentUser && m.media_url !== window.currentUser) return;
                             var otherUser = m.user_name === window.currentUser ? m.media_url : m.user_name;
                             if (payload.eventType === 'INSERT' && m.media_url === window.currentUser && m.user_name !== window.currentUser) {
-                                if (window.__xtjDmMuteReady && !window.__xtjMutedChatPeers[m.user_name]) showNotification(m.user_name, getDockChatMessagePreview(m), m.id);
+                                notifyIncomingDm(m.user_name, getDockChatMessagePreview(m), m.id, m.created_at);
                             }
                             window.dockChatListCacheTime = 0;
                             if (dockChatActiveUser && dockChatActiveUser === otherUser) {
@@ -863,7 +909,7 @@
                     }
                     if (!isMine && !convOpen) {
                         updateUnreadBadge();
-                        if (window.__xtjDmMuteReady && !window.__xtjMutedChatPeers[message.user_name]) showNotification(message.user_name, getDockChatMessagePreview(message), message.id);
+                        notifyIncomingDm(message.user_name, getDockChatMessagePreview(message), message.id, message.created_at);
                     }
                 } catch (e) { console.warn("[dm-realtime] apply failed:", e && e.message); }
             }

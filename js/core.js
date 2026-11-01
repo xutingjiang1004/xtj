@@ -3500,6 +3500,16 @@ function isAdmin() {
                 
                 var avatarEl = document.getElementById('upcAvatar');
                 if (!avatarEl) return;
+                // Tap the picture to see it large (the 1080px rendition; the 192px one is shown first).
+                avatarEl.setAttribute('role', 'button'); avatarEl.setAttribute('tabindex', '0'); avatarEl.setAttribute('aria-label', '查看头像大图');
+                avatarEl.onclick = function() {
+                    var small = getAvatarUrl(upcTargetUser);
+                    if (!small || !avatarEl.querySelector('img') || typeof window.openPostImagePreview !== 'function') return;
+                    var large = /\/api\/avatar\/image\//.test(small) ? small + (small.indexOf('?') >= 0 ? '&' : '?') + 'size=large' : small;
+                    avatarEl.setAttribute('data-thumb-src', small);
+                    window.openPostImagePreview(large, avatarEl);
+                };
+                avatarEl.onkeydown = function(event) { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); avatarEl.onclick(); } };
                 // localStorage 取头像缓存，失败用字母占位
                 var showAvatar = getAvatarUrl(userName);
                 if (!showAvatar && userName === currentUser) {
@@ -7053,6 +7063,104 @@ function renderProfileActivityList(kind) {
             };
             resetPostActionModals();
 
+            // ===== The profile page and the post detail open from what was tapped and close back to it =====
+            (function() {
+                var ORIGIN_PRIORITY = ['.post-media-cell', '.author-post-entry', '.author-post-row', '.comment-item', '[data-user-name]', '.avatar-wrap', '.avatar.clickable', '.photo-wall-item', '.post'];
+                var ANIMATED = { userProfileModal: 1, postDetailModal: 1 };
+                var lastTap = { el: null, at: 0 }, origins = Object.create(null);
+                function remember(event) {
+                    var target = event.target;
+                    if (!target || !target.closest) return;
+                    for (var i = 0; i < ORIGIN_PRIORITY.length; i++) {
+                        var el = target.closest(ORIGIN_PRIORITY[i]);
+                        if (el) { lastTap = { el: el, at: Date.now() }; return; }
+                    }
+                }
+                document.addEventListener('pointerdown', remember, true);
+                document.addEventListener('keydown', function(event) { if (event.key === 'Enter' || event.key === ' ') remember(event); }, true);
+                function motionOk() {
+                    return !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) && document.documentElement.getAttribute('data-xtj-motion') !== 'off';
+                }
+                function visibleRect(el) {
+                    if (!el || !el.isConnected) return null;
+                    var r = el.getBoundingClientRect();
+                    if (r.width < 4 || r.height < 4 || r.bottom < 0 || r.top > window.innerHeight || r.right < 0 || r.left > window.innerWidth) return null;
+                    return r;
+                }
+                // Transform that makes the box look like the tapped element: same centre, uniform scale, rounded like it.
+                function boxFrom(box, from) {
+                    var to = box.getBoundingClientRect();
+                    if (!to.width || !to.height) return null;
+                    var scale = Math.max(.06, Math.min(.92, Math.min(from.width / to.width, from.height / to.height)));
+                    var dx = (from.left + from.width / 2) - (to.left + to.width / 2), dy = (from.top + from.height / 2) - (to.top + to.height / 2);
+                    var finalRadius = parseFloat(window.getComputedStyle(box).borderTopLeftRadius) || 24;
+                    var startRadius = Math.min(Math.min(from.width, from.height) / 2 / scale, 400);
+                    return { transform: 'translate(' + dx + 'px, ' + dy + 'px) scale(' + scale + ')', startRadius: startRadius + 'px', finalRadius: finalRadius + 'px' };
+                }
+                function cancelRunning(el) { try { el.getAnimations({ subtree: true }).forEach(function(a) { if (a.__xtjOrigin) a.cancel(); }); } catch (_) {} }
+                function track(animation) { animation.__xtjOrigin = true; return animation; }
+                function runOpen(id, from) {
+                    var el = document.getElementById(id), box = el && el.querySelector('.modal-box');
+                    if (!box || !box.animate) return;
+                    var frame = boxFrom(box, from);
+                    if (!frame) return;
+                    var blur = box.style.backdropFilter, blurWebkit = box.style.webkitBackdropFilter;
+                    box.style.backdropFilter = 'none'; box.style.webkitBackdropFilter = 'none';
+                    var anim = track(box.animate([
+                        { transform: frame.transform, opacity: .25, borderRadius: frame.startRadius },
+                        { transform: 'none', opacity: 1, borderRadius: frame.finalRadius }
+                    ], { duration: 440, easing: 'cubic-bezier(.2,.8,.2,1)', fill: 'backwards' }));
+                    track(el.animate([{ backgroundColor: 'rgba(0,0,0,0)' }, { backgroundColor: window.getComputedStyle(el).backgroundColor }], { duration: 300, easing: 'ease-out', fill: 'backwards' }));
+                    anim.onfinish = anim.oncancel = function() { box.style.backdropFilter = blur; box.style.webkitBackdropFilter = blurWebkit; };
+                }
+                function runClose(el, box, to, done) {
+                    var frame = boxFrom(box, to);
+                    if (!frame) { done(); return; }
+                    cancelRunning(el);
+                    box.style.backdropFilter = 'none'; box.style.webkitBackdropFilter = 'none';
+                    var anim = track(box.animate([
+                        { transform: 'none', opacity: 1, borderRadius: frame.finalRadius },
+                        { transform: frame.transform, opacity: .2, borderRadius: frame.startRadius }
+                    ], { duration: 340, easing: 'cubic-bezier(.4,0,.2,1)', fill: 'forwards' }));
+                    track(el.animate([{ backgroundColor: window.getComputedStyle(el).backgroundColor }, { backgroundColor: 'rgba(0,0,0,0)' }], { duration: 300, easing: 'ease-in', fill: 'forwards' }));
+                    var finished = false;
+                    function end() {
+                        if (finished) return; finished = true;
+                        done();
+                        cancelRunning(el);
+                        box.style.backdropFilter = ''; box.style.webkitBackdropFilter = '';
+                    }
+                    anim.onfinish = end;
+                    setTimeout(end, 480);
+                }
+                var baseOpen = window.openModal, baseClose = window.closeModal;
+                window.openModal = function(id) {
+                    var from = null, originEl = null;
+                    if (ANIMATED[id] && motionOk() && lastTap.el && Date.now() - lastTap.at < 6000) { originEl = lastTap.el; from = visibleRect(originEl); }
+                    var already = document.getElementById(id);
+                    var wasActive = !!(already && already.classList.contains('active'));
+                    var result = baseOpen.apply(this, arguments);
+                    if (ANIMATED[id]) origins[id] = from ? originEl : null;
+                    if (from && !wasActive) runOpen(id, from);
+                    return result;
+                };
+                window.closeModal = function(id) {
+                    if (ANIMATED[id] && motionOk()) {
+                        var el = document.getElementById(id);
+                        if (el && el.__xtjClosing) return;
+                        var box = el && el.classList.contains('active') ? el.querySelector('.modal-box') : null;
+                        var to = box && box.animate ? visibleRect(origins[id]) : null;
+                        if (to) {
+                            el.__xtjClosing = true;
+                            var args = arguments, self = this;
+                            runClose(el, box, to, function() { el.__xtjClosing = false; baseClose.apply(self, args); });
+                            return;
+                        }
+                    }
+                    return baseClose.apply(this, arguments);
+                };
+            })();
+
             // ===================== 图片查看器 =====================
             const ivZoomState = { scale: 1, tx: 0, ty: 0 };
             let ivIsZooming = false;
@@ -7145,7 +7253,7 @@ function renderProfileActivityList(kind) {
                     imageUrl: safeImageUrl,
                     // 缩略图与原图同源：聊天图没有独立缩略图，传相同的 URL 会让 preview.js
                     // 走 hasThumb=false 分支（避免多一次无意义预加载）。
-                    thumbUrl: safeImageUrl,
+                    thumbUrl: (el && sanitizeUrl(String(el.getAttribute('data-thumb-src') || ''))) || safeImageUrl,
                     username: userName || '',
                     timestamp: createdAt || '',
                     views: views,
@@ -11808,14 +11916,28 @@ function renderProfileActivityList(kind) {
                     var id=String(message.id);
                     if(dmNotificationIds.has(id))return;
                     if(dmSnapshotReady&&!getDMMessageReadAt(message)&&window.__xtjDmMuteReady&&!window.__xtjMutedChatPeers[message.user_name])
-                        showNotification(message.user_name,getDockChatMessagePreview(message),id);
+                        showNotification(message.user_name,getDockChatMessagePreview(message),id,message.created_at);
                     dmNotificationIds.add(id);
                 });
                 dmSnapshotReady=true;
                 while(dmNotificationIds.size>500)dmNotificationIds.delete(dmNotificationIds.values().next().value);
             }
 
-            function showNotification(userName, message, messageId) {
+            // Incoming message from a realtime event: show the banner unless the sender is muted. When the mute list has not
+            // been loaded yet (the first message right after start) load it once instead of silently dropping the banner.
+            function notifyIncomingDm(userName, preview, id, sentAt) {
+                function go() { if (!window.__xtjMutedChatPeers[userName]) showNotification(userName, preview, id, sentAt); }
+                if (window.__xtjDmMuteReady) { go(); return; }
+                var owner = window.currentUser;
+                fetchDmListShared(180).then(function() { if (owner === window.currentUser && window.__xtjDmMuteReady) go(); }).catch(function() {});
+            }
+            function notificationTimeLabel(sentAt) {
+                var stamp = Date.parse(sentAt);
+                if (!isFinite(stamp) || Math.abs(Date.now() - stamp) < 60000) return '现在';
+                return formatMsgTime(sentAt);
+            }
+
+            function showNotification(userName, message, messageId, sentAt) {
                 resetDmNotificationIdentity();
                 if(messageId){if(dmNotificationIds.has(String(messageId)))return;dmNotificationIds.add(String(messageId));}
                 if (!userName || !message) return;
@@ -11826,6 +11948,8 @@ function renderProfileActivityList(kind) {
 
                 const container = document.getElementById('notificationContainer');
                 if (!container) return;
+                // One banner at a time, like iOS: a newer message replaces the one on screen.
+                activeNotifications.slice().forEach(function(n) { if (n.dismiss) n.dismiss(); });
 
                 const bubble = document.createElement('div');
                 bubble.className = 'notification-bubble';
@@ -11840,7 +11964,7 @@ function renderProfileActivityList(kind) {
                 bubble.innerHTML = `
                     <div class="notification-avatar">${avatarHtml}</div>
                     <div class="notification-content">
-                        <div class="notification-name">${escapeHtml(userName)}</div>
+                        <div class="notification-head"><span class="notification-name">${escapeHtml(userName)}</span><span class="notification-time">${escapeHtml(notificationTimeLabel(sentAt))}</span></div>
                         <div class="notification-text">${escapeHtml(truncatedMsg)}</div>
                     </div>
                 `;
@@ -11851,8 +11975,10 @@ function renderProfileActivityList(kind) {
                 // 叠加 startDMPolling 造成重复请求。现在：点击即置幂等标记并取消计时器。
                 let autoHideTimer = null;
                 let clicked = false;
+                let dragged = false;
                 bubble.addEventListener('click', () => {
                     if (clicked) return; // 幂等：连点只生效一次
+                    if (dragged) { dragged = false; return; }
                     clicked = true;
                     if (autoHideTimer) { clearTimeout(autoHideTimer); autoHideTimer = null; }
                     switchDockTab('chat');
@@ -11877,7 +12003,35 @@ function renderProfileActivityList(kind) {
                 }, 16);
 
                 const notifId = Date.now() + Math.random();
-                activeNotifications.push({ id: notifId, element: bubble });
+                function dismissNow() {
+                    if (autoHideTimer) { clearTimeout(autoHideTimer); autoHideTimer = null; }
+                    clicked = true;
+                    bubble.style.transform = '';
+                    bubble.classList.remove('show');
+                    bubble.classList.add('hide');
+                    setTimeout(() => {
+                        if (bubble.parentNode) bubble.remove();
+                        activeNotifications = activeNotifications.filter(n => n.id !== notifId);
+                    }, 320);
+                }
+                activeNotifications.push({ id: notifId, element: bubble, dismiss: dismissNow });
+                // Swipe up to dismiss, as on iOS; a short drag springs back.
+                let swipeY = null, swipeDy = 0;
+                bubble.addEventListener('pointerdown', (event) => { swipeY = event.clientY; swipeDy = 0; });
+                bubble.addEventListener('pointermove', (event) => {
+                    if (swipeY === null) return;
+                    swipeDy = Math.min(0, event.clientY - swipeY);
+                    if (swipeDy < -4) { dragged = true; bubble.style.transition = 'none'; bubble.style.transform = 'translateY(' + swipeDy + 'px)'; }
+                });
+                const endSwipe = () => {
+                    if (swipeY === null) return;
+                    swipeY = null; bubble.style.transition = '';
+                    if (swipeDy < -28) { dismissNow(); return; }
+                    bubble.style.transform = '';
+                    setTimeout(() => { dragged = false; }, 0);
+                };
+                bubble.addEventListener('pointerup', endSwipe);
+                bubble.addEventListener('pointercancel', endSwipe);
 
                 autoHideTimer = setTimeout(() => {
                     // S：若用户已点击过，说明该条目已被处理，跳过自动隐藏（避免对已移除
@@ -12497,7 +12651,7 @@ function renderProfileActivityList(kind) {
                             if (m.user_name !== window.currentUser && m.media_url !== window.currentUser) return;
                             var otherUser = m.user_name === window.currentUser ? m.media_url : m.user_name;
                             if (payload.eventType === 'INSERT' && m.media_url === window.currentUser && m.user_name !== window.currentUser) {
-                                if (window.__xtjDmMuteReady && !window.__xtjMutedChatPeers[m.user_name]) showNotification(m.user_name, getDockChatMessagePreview(m), m.id);
+                                notifyIncomingDm(m.user_name, getDockChatMessagePreview(m), m.id, m.created_at);
                             }
                             window.dockChatListCacheTime = 0;
                             if (dockChatActiveUser && dockChatActiveUser === otherUser) {
@@ -12619,7 +12773,7 @@ function renderProfileActivityList(kind) {
                     }
                     if (!isMine && !convOpen) {
                         updateUnreadBadge();
-                        if (window.__xtjDmMuteReady && !window.__xtjMutedChatPeers[message.user_name]) showNotification(message.user_name, getDockChatMessagePreview(message), message.id);
+                        notifyIncomingDm(message.user_name, getDockChatMessagePreview(message), message.id, message.created_at);
                     }
                 } catch (e) { console.warn("[dm-realtime] apply failed:", e && e.message); }
             }

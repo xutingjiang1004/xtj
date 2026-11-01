@@ -274,3 +274,7 @@ html[data-xtj-motion="off"] #pubBtn .post-publish-progress-copy { animation:none
 button.comment-reply-context { min-height:44px;border:0;padding:4px 0;background:transparent;box-shadow:none; }
 [data-theme="dark"] .post-visibility-badge.public { color:#d0f5df;background:rgba(28,53,40,.95);border-color:rgba(164,217,187,.35); }
 [data-theme="dark"] .post-stats-visibility-public { color:#bce9d0; }
+
+/* Personal activity page: the avatar and the background image open in the viewer. */
+#userProfileModal #upcAvatar[role="button"], #userProfileModal #authorPostsCover[role="button"] { cursor: zoom-in; -webkit-tap-highlight-color: transparent; }
+#userProfileModal #authorPostsCover[role="button"]:focus-visible, #userProfileModal #upcAvatar[role="button"]:focus-visible { outline: 2px solid var(--primary, #287b55); outline-offset: 2px; }

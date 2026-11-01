@@ -111,9 +111,19 @@
     if (cover && s._coverKey !== coverKey) {
       cover.replaceChildren();
       if (coverItem) {
-        var img = document.createElement('img'); img.alt = ''; img.src = coverKey; img.decoding = 'async';
-        img.addEventListener('error', function () { img.remove(); }); cover.appendChild(img);
-      }
+        // The cover only needs the preview-sized copy; the original loads when someone taps it to look closer.
+        var coverPreview = window.xtjMediaPreviewUrl ? window.xtjMediaPreviewUrl(coverKey) : coverKey;
+        var img = document.createElement('img'); img.alt = ''; img.src = coverPreview; img.decoding = 'async';
+        img.addEventListener('error', function () { img.remove(); cover.removeAttribute('role'); cover.removeAttribute('tabindex'); cover.setAttribute('aria-hidden', 'true'); }); cover.appendChild(img);
+        cover.setAttribute('data-full-src', coverKey); cover.setAttribute('data-thumb-src', coverPreview);
+        cover.setAttribute('role', 'button'); cover.setAttribute('tabindex', '0'); cover.setAttribute('aria-label', '查看背景图大图'); cover.removeAttribute('aria-hidden');
+        if (!cover.__xtjViewBound) {
+          cover.__xtjViewBound = true;
+          var openCover = function () { if (typeof window.openPostImagePreview === 'function' && cover.getAttribute('data-full-src')) window.openPostImagePreview(cover.getAttribute('data-full-src'), cover); };
+          cover.addEventListener('click', openCover);
+          cover.addEventListener('keydown', function (event) { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openCover(); } });
+        }
+      } else { cover.removeAttribute('role'); cover.removeAttribute('tabindex'); cover.removeAttribute('data-full-src'); cover.setAttribute('aria-hidden', 'true'); }
       s._coverKey = coverKey;
     }
     var signature = byId('authorPostsSignature');

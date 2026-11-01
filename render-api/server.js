@@ -6919,7 +6919,8 @@ function extractCatQuestion(content) {
 async function fetchCatReplyByParent(parentCommentId) {
   try {
     var res = await supabase.from('comments')
-      .select('id::text, post_id, user_name, content, created_at, updated_at, parent_comment_id::text, generated_by_ai')
+      // The deployed comments table has no updated_at column; asking for it failed every lookup and stalled all cat replies.
+      .select('id::text, post_id, user_name, content, created_at, parent_comment_id::text, generated_by_ai')
       .eq('parent_comment_id', String(parentCommentId))
       .eq('generated_by_ai', true)
       .eq('user_name', CAT_AI_USERNAME)

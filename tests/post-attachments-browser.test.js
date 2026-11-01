@@ -200,9 +200,9 @@ test('the gallery still pinches the photo in and out while the page scale remain
    window.testPhotoPointer=function(type,id,x){document.getElementById('photoPreviewImage').dispatchEvent(new PointerEvent(type,{bubbles:true,cancelable:true,pointerId:id,pointerType:'touch',clientX:x,clientY:400,buttons:type==='pointerup'?0:1}));};
    testPhotoPointer('pointerdown',1,120);testPhotoPointer('pointerdown',2,220);testPhotoPointer('pointermove',1,80);testPhotoPointer('pointermove',2,260);
   });
-  await page.waitForFunction(()=>parseFloat(document.getElementById('photoPreviewOverlay').style.getPropertyValue('--pp-scale'))>1.5);
+  await page.waitForFunction(()=>parseFloat(document.getElementById('photoPreviewImage').style.getPropertyValue('--pp-scale'))>1.5);
   await page.evaluate(()=>{testPhotoPointer('pointerup',1,80);testPhotoPointer('pointerup',2,260);testPhotoPointer('pointerdown',3,80);testPhotoPointer('pointerdown',4,260);testPhotoPointer('pointermove',3,170);testPhotoPointer('pointermove',4,220);});
-  await page.waitForFunction(()=>parseFloat(document.getElementById('photoPreviewOverlay').style.getPropertyValue('--pp-scale'))<=1);
+  await page.waitForFunction(()=>parseFloat(document.getElementById('photoPreviewImage').style.getPropertyValue('--pp-scale'))<=1);
   await page.evaluate(()=>{testPhotoPointer('pointerup',3,170);testPhotoPointer('pointerup',4,220);});
   assert.equal(await page.evaluate(()=>visualViewport.scale),1);assert.deepEqual(f.errors,[]);
  }finally{await f.close();}

@@ -52,3 +52,14 @@ test('a stale version link gets a short cache, unknown and foreign avatars are r
   await request(f.app).get('/api/avatar/image/nobody?v=x').expect(404);
   await request(f.app).get('/api/avatar/image/evil?v=x').expect(503);
 });
+
+test('a large rendition is served on request, never enlarged, and cached separately from the small one',async()=>{
+  const f=await fixture();
+  const v=version(photoUrl),get=q=>request(f.app).get('/api/avatar/image/bob?v='+v+q).buffer(true).parse((r,cb)=>{const c=[];r.on('data',d=>c.push(d));r.on('end',()=>cb(null,Buffer.concat(c)));});
+  const small=await get('').expect(200),large=await get('&size=large').expect(200);
+  assert.deepEqual([(await sharp(small.body).metadata()).width],[192]);
+  const meta=await sharp(large.body).metadata();assert.equal(meta.width,900,'a 900px original is not enlarged to 1080');
+  assert.notEqual(small.headers.etag,large.headers.etag);
+  const again=await request(f.app).get('/api/avatar/image/bob?v='+v+'&size=large').set('If-None-Match',large.headers.etag).expect(304);
+  assert.equal(again.status,304);
+});

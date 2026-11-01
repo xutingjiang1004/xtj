@@ -3221,6 +3221,22 @@ html #ppConfirmOverlay.photo-delete-confirm.closing .pp-confirm-dialog > * { ani
 }
 /* Sitewide messages stay above content and photo viewers. */
 #notificationContainer { z-index:12000; }
+/* Message banner: frosted glass with a soft specular edge, enters from above and leaves upwards, one at a time. */
+#notificationContainer { padding: calc(8px + env(safe-area-inset-top, 0px)) 12px 0; }
+#notificationContainer .notification-bubble { max-width: 520px; padding: 12px 14px; gap: 12px; border-radius: 22px; touch-action: none; user-select: none; -webkit-user-select: none;
+  background: linear-gradient(180deg, rgba(255,255,255,.72), rgba(244,251,247,.54)); backdrop-filter: blur(26px) saturate(190%); -webkit-backdrop-filter: blur(26px) saturate(190%);
+  border: 1px solid rgba(255,255,255,.66); box-shadow: 0 14px 40px rgba(16,48,34,.16), 0 2px 8px rgba(16,48,34,.08), inset 0 1px 0 rgba(255,255,255,.9), inset 0 -1px 0 rgba(255,255,255,.35);
+  transform: translateY(-130%) scale(.96); opacity: 0; transition: transform .42s cubic-bezier(.16,1,.3,1), opacity .3s ease; will-change: transform, opacity; }
+#notificationContainer .notification-bubble.show { transform: translateY(0) scale(1); opacity: 1; }
+#notificationContainer .notification-bubble.hide { transform: translateY(-130%) scale(.96); opacity: 0; transition: transform .3s cubic-bezier(.4,0,1,1), opacity .24s ease; }
+#notificationContainer .notification-avatar { width: 44px; height: 44px; font-size: 18px; box-shadow: 0 2px 8px rgba(5,150,105,.25); }
+#notificationContainer .notification-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 2px; }
+#notificationContainer .notification-name { margin: 0; font-size: 15px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#notificationContainer .notification-time { flex: none; font-size: 12px; color: var(--text-muted, rgba(60,80,70,.7)); }
+#notificationContainer .notification-text { max-width: none; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 14px; line-height: 1.38; color: var(--text-main, #14261d); opacity: .86; }
+[data-theme="dark"] #notificationContainer .notification-bubble { background: linear-gradient(180deg, rgba(40,46,52,.76), rgba(24,28,34,.62)); border-color: rgba(255,255,255,.14);
+  box-shadow: 0 14px 40px rgba(0,0,0,.5), 0 2px 8px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.12), inset 0 -1px 0 rgba(0,0,0,.25); }
+@media (prefers-reduced-motion: reduce) { #notificationContainer .notification-bubble, #notificationContainer .notification-bubble.hide { transition: opacity .2s ease; transform: none; } }
 @media(prefers-reduced-motion:reduce) { #notificationContainer .notification-bubble { transition:none!important;animation:none!important; } }
 html[data-xtj-motion="off"] #notificationContainer .notification-bubble { transition:none!important;animation:none!important; }
 

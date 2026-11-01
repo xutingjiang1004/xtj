@@ -44,6 +44,16 @@
                 
                 var avatarEl = document.getElementById('upcAvatar');
                 if (!avatarEl) return;
+                // Tap the picture to see it large (the 1080px rendition; the 192px one is shown first).
+                avatarEl.setAttribute('role', 'button'); avatarEl.setAttribute('tabindex', '0'); avatarEl.setAttribute('aria-label', '查看头像大图');
+                avatarEl.onclick = function() {
+                    var small = getAvatarUrl(upcTargetUser);
+                    if (!small || !avatarEl.querySelector('img') || typeof window.openPostImagePreview !== 'function') return;
+                    var large = /\/api\/avatar\/image\//.test(small) ? small + (small.indexOf('?') >= 0 ? '&' : '?') + 'size=large' : small;
+                    avatarEl.setAttribute('data-thumb-src', small);
+                    window.openPostImagePreview(large, avatarEl);
+                };
+                avatarEl.onkeydown = function(event) { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); avatarEl.onclick(); } };
                 // localStorage 取头像缓存，失败用字母占位
                 var showAvatar = getAvatarUrl(userName);
                 if (!showAvatar && userName === currentUser) {

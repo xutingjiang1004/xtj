@@ -9,7 +9,7 @@
 const crypto = require('node:crypto');
 const { uploadPath } = require('./upload-access');
 
-const SIZE = 192, MAX_SOURCE = 16 * 1024 * 1024, CACHE_MAX = 200;
+const SIZE = 192, LARGE_SIZE = 1080, MAX_SOURCE = 16 * 1024 * 1024, CACHE_MAX = 200, LARGE_CACHE_MAX = 16;
 
 function version(mediaUrl) {
   return crypto.createHash('sha1').update(String(mediaUrl || '')).digest('hex').slice(0, 10);
@@ -24,7 +24,10 @@ function registerAvatarImage(app, { supabase, supabaseUrl, sharp, rateLimit, fet
   const cache = new Map(), inflight = new Map();
   function remember(key, value) {
     cache.delete(key);
-    if (cache.size >= CACHE_MAX) cache.delete(cache.keys().next().value);
+    const large = key.endsWith(':L');
+    // The big "view the picture" renditions are kept in a much smaller share of the memory.
+    let sameKind = 0; for (const k of cache.keys()) if (k.endsWith(':L') === large) sameKind++;
+    if (sameKind >= (large ? LARGE_CACHE_MAX : CACHE_MAX)) { for (const k of cache.keys()) if (k.endsWith(':L') === large) { cache.delete(k); break; } }
     cache.set(key, value);
   }
   async function source(mediaUrl) {
@@ -47,13 +50,14 @@ function registerAvatarImage(app, { supabase, supabaseUrl, sharp, rateLimit, fet
       return buffer;
     } finally { clearTimeout(timer); }
   }
-  function render(mediaUrl) {
-    const key = version(mediaUrl);
+  function render(mediaUrl, large = false) {
+    const key = version(mediaUrl) + (large ? ':L' : '');
     if (cache.has(key)) return Promise.resolve(cache.get(key));
     if (inflight.has(key)) return inflight.get(key);
     const work = source(mediaUrl)
       .then(input => sharp(input, { animated: false, limitInputPixels: 64 * 1024 * 1024 }).rotate()
-        .resize({ width: SIZE, height: SIZE, fit: 'cover' }).webp({ quality: 82, effort: 3 }).timeout({ seconds: 10 }).toBuffer())
+        .resize(large ? { width: LARGE_SIZE, height: LARGE_SIZE, fit: 'inside', withoutEnlargement: true } : { width: SIZE, height: SIZE, fit: 'cover' })
+        .webp({ quality: large ? 86 : 82, effort: 3 }).timeout({ seconds: 10 }).toBuffer())
       .then(buffer => { const value = { buffer, etag: '"' + key + '"' }; remember(key, value); return value; })
       .finally(() => inflight.delete(key));
     inflight.set(key, work);
@@ -71,12 +75,13 @@ function registerAvatarImage(app, { supabase, supabaseUrl, sharp, rateLimit, fet
       const mediaUrl = data && data[0] && data[0].media_url;
       if (!mediaUrl) return res.status(404).end();
       const current = version(mediaUrl);
-      const image = await render(mediaUrl);
+      const large = String(req.query.size || '') === 'large';
+      const image = await render(mediaUrl, large);
       // The version in the URL names the exact avatar: a match is immutable, a stale link only gets a short life.
       const exact = String(req.query.v || '') === current;
       res.set({ 'Cache-Control': exact ? 'public, max-age=31536000, immutable' : 'public, max-age=60', 'Content-Type': 'image/webp',
-        'X-Content-Type-Options': 'nosniff', ETag: image.etag });
-      if (req.headers['if-none-match'] === image.etag) return res.status(304).end();
+        'X-Content-Type-Options': 'nosniff', ETag: large ? image.etag.replace(/"$/, ':L"') : image.etag });
+      if (req.headers['if-none-match'] === (large ? image.etag.replace(/"$/, ':L"') : image.etag)) return res.status(304).end();
       return res.send(image.buffer);
     } catch (_) {
       return res.status(503).json({ ok: false, retryable: true });
