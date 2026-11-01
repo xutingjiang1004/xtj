@@ -2981,6 +2981,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (_quotaCode === 'search_limit') {
         return '今日网页搜索次数已达上限，开通 Pro 可无限搜索';
       }
+      // 并发闸 / 按 IP 的频率限制不是「额度」：额度无限的账号也会遇到，文案要如实说。
+      if (_quotaCode === 'ai_concurrent_limit') return '上一个 AI 请求还在进行中，等它结束后再试';
+      if (/^rate_limited$/i.test(String(_quotaCode || ''))) {
+        var _retryAfter = Math.max(0, Math.round(Number(r.retry_after || (r.data && r.data.retry_after)) || 0));
+        return '请求有点频繁，请' + (_retryAfter ? (_retryAfter > 90 ? Math.ceil(_retryAfter / 60) + ' 分钟' : _retryAfter + ' 秒') : '稍等一会') + '后再试';
+      }
       return '小猫调用额度已达上限，请稍后再试或开通 Pro';
     }
     if (r.status === 502) return 'AI 服务调用失败，请检查配置或服务日志';
@@ -5859,8 +5865,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     if (topicEl.textContent !== topic) topicEl.textContent = topic;
     var parts = [];
     if (failed) {
-      var legacyTitle = card.querySelector('.ai-research-title');
-      parts.push((legacyTitle && legacyTitle.textContent) || '研究中断');
+      var legacyTitle = card.querySelector('.ai-research-title'), legacyDetail = card.querySelector('.ai-research-status');
+      var detailText = state === 'interrupted' && legacyDetail ? String(legacyDetail.textContent || '').trim() : '';
+      // 有具体原因（如限流、上一个请求未结束）就直接写出来，不再一律显示「连接中断」。
+      parts.push(detailText && detailText !== '本次深度研究未完成。' ? detailText : ((legacyTitle && legacyTitle.textContent) || '研究中断'));
     } else if (!finished) {
       parts.push(state === 'responding' ? '正在撰写报告' : '研究中');
     }
@@ -5879,6 +5887,70 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         hosts.forEach(function(host) { favsEl.appendChild(researchMonogram(host)); });
       }
     }
+  }
+
+  // 实时活动：卡片外面直接滚动显示「搜索了什么 / 正在读哪个网页」，最新一条在底部，最多显示 4 条；
+  // 研究结束时整块平滑收起。只做 transform / opacity 动画，不触发整页重排。
+  var AI_RC_LIVE_MAX = 4;
+  var AI_RC_SEARCH_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6"/><path d="m20 20-4.5-4.5"/></svg>';
+
+  function ensureResearchLive(card) {
+    if (!card || !card.classList || !card.classList.contains('ai-rc')) return null;
+    var live = card.querySelector('.ai-rc-live');
+    if (live) return live;
+    live = el('div', { class: 'ai-rc-live', 'aria-live': 'off' });
+    var list = el('ul', { class: 'ai-rc-live-list' });
+    live.appendChild(list);
+    var anchor = card.querySelector('.ai-rc-wait');
+    if (anchor) card.insertBefore(live, anchor); else card.appendChild(live);
+    return live;
+  }
+
+  function pushResearchActivity(card, evt) {
+    if (!card || !evt) return;
+    var live = ensureResearchLive(card);
+    if (!live) return;
+    var kind = evt.kind === 'read' ? 'read' : 'search';
+    var host = String(evt.host || '').slice(0, 80);
+    var text = kind === 'search' ? String(evt.text || '').trim() : (String(evt.title || '').trim() || host || String(evt.url || ''));
+    if (!text) return;
+    var key = kind + '|' + (kind === 'search' ? text : (evt.url || host));
+    if (card._rcLiveSeen && card._rcLiveSeen[key]) return;
+    (card._rcLiveSeen || (card._rcLiveSeen = Object.create(null)))[key] = true;
+    var list = live.firstChild;
+    // 上一条完成：停止脉冲、变淡。
+    var last = list.lastElementChild;
+    if (last) last.classList.remove('is-active');
+    var li = el('li', { class: 'ai-rc-live-item is-active is-' + kind });
+    var icon = el('span', { class: 'ai-rc-live-icon', 'aria-hidden': 'true' });
+    if (kind === 'search') icon.innerHTML = AI_RC_SEARCH_ICON; else icon.appendChild(researchMonogram(host || '?'));
+    li.appendChild(icon);
+    var body = el('span', { class: 'ai-rc-live-text' });
+    body.appendChild(el('span', { class: 'ai-rc-live-verb', text: kind === 'search' ? '搜索' : '读取' }));
+    body.appendChild(el('span', { class: 'ai-rc-live-main', text: text.length > 90 ? text.slice(0, 89) + '…' : text }));
+    if (kind === 'read' && host && text !== host) body.appendChild(el('span', { class: 'ai-rc-live-host', text: host }));
+    li.appendChild(body);
+    list.appendChild(li);
+    card._rcActivityCount = (card._rcActivityCount || 0) + 1;
+    // 超出的旧条目先淡出收起，再移除，避免一次性跳变。
+    var visible = list.querySelectorAll('.ai-rc-live-item:not(.is-leaving)');
+    if (visible.length > AI_RC_LIVE_MAX) {
+      var old = visible[0];
+      old.classList.add('is-leaving');
+      setTimeout(function() { if (old.parentNode) old.remove(); }, 320);
+    }
+    live.classList.add('has-items');
+    card.setAttribute('data-rc-live', 'on');
+  }
+
+  // 研究结束 / 失败：整块平滑收起（grid 行高动画），之后移除。
+  function finishResearchLive(card) {
+    var live = card && card.querySelector && card.querySelector('.ai-rc-live');
+    if (!live || live.classList.contains('is-closing')) return;
+    var last = live.querySelector('.is-active'); if (last) last.classList.remove('is-active');
+    live.classList.add('is-closing');
+    card.removeAttribute('data-rc-live');
+    setTimeout(function() { if (live.parentNode) live.remove(); }, 420);
   }
 
   function buildResearchIntro() {
@@ -6410,6 +6482,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
     if (state.state === 'responding' || state.state === 'done' || state.state === 'timeout' || state.state === 'interrupted' || state.state === 'cancelled') {
       card.classList.remove('generating');
+      finishResearchLive(card);
       state.canToggle = true;
       var shouldExpandTerminal = state.persistExpanded ? true : !!opts.expanded;
       if (!shouldExpandTerminal && (state.state === 'timeout' || state.state === 'interrupted' || state.state === 'cancelled')) {
@@ -7276,6 +7349,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           opt.addEventListener('click', function() {
             S.dtResearchMode = modeVal;
             syncResearchModeUi(panel);
+            closeResearchOptions(panel, 140);
           });
           seg.appendChild(opt);
         })(modes[mi][0], modes[mi][1], modes[mi][2]);
@@ -7309,6 +7383,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         // ★ 2026-09-25：同步到服务端，换设备/清缓存后选择仍在
         persistResearchModelPref(v);
         syncResearchModelUi(panel);
+        closeResearchOptions(panel, 140);
       });
       modelBar.appendChild(modelSel);
       var modelHint = el('div', {
@@ -7332,19 +7407,51 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         var optionsToggle = el('button', { type: 'button', class: 'dt-research-options-toggle', 'aria-expanded': 'false', 'aria-label': '研究设置' });
         optionsToggle.innerHTML = '<span class="dt-research-options-label"></span><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
         optionsToggle.addEventListener('click', function() {
-          var open = !optionsWrap.classList.contains('is-open');
-          optionsWrap.classList.toggle('is-open', open);
-          optionsToggle.setAttribute('aria-expanded', String(open));
+          setResearchOptionsOpen(panel, !optionsWrap.classList.contains('is-open'));
         });
+        // 点到选项外面、按 Esc 都收起；只绑定一次。
+        if (!S._dtResearchOptionsBound) {
+          S._dtResearchOptionsBound = true;
+          document.addEventListener('pointerdown', function(ev) {
+            var host = document.querySelector('#panelDeepThink .dt-research-options.is-open');
+            if (host && !host.contains(ev.target)) setResearchOptionsOpen(document.getElementById('panelDeepThink'), false);
+          }, true);
+          document.addEventListener('keydown', function(ev) {
+            if (ev.key !== 'Escape') return;
+            var host = document.querySelector('#panelDeepThink .dt-research-options.is-open');
+            if (!host) return;
+            setResearchOptionsOpen(document.getElementById('panelDeepThink'), false);
+            var t = host.querySelector('.dt-research-options-toggle'); if (t && t.focus) t.focus();
+          });
+        }
         inputBar.parentNode.insertBefore(optionsWrap, inputBar);
         optionsWrap.appendChild(optionsToggle);
-        optionsWrap.appendChild(modeBarNode);
-        optionsWrap.appendChild(modelBarNode);
+        var optionsPop = el('div', { class: 'dt-research-options-pop', role: 'group', 'aria-label': '研究强度与模型' });
+        optionsPop.appendChild(modeBarNode);
+        optionsPop.appendChild(modelBarNode);
+        optionsWrap.appendChild(optionsPop);
       }
     }
     refreshResearchModelOptions(panel);
     syncResearchModeUi(panel);
     syncResearchOptionsSummary(panel);
+  }
+
+  // 研究设置是浮在摘要上方的小面板：选好强度或模型后自动收起，不占输入区。
+  function setResearchOptionsOpen(panel, open) {
+    var wrap = panel && panel.querySelector('.dt-research-options');
+    if (!wrap) return;
+    if (wrap._closeTimer) { clearTimeout(wrap._closeTimer); wrap._closeTimer = 0; }
+    wrap.classList.toggle('is-open', !!open);
+    var toggle = wrap.querySelector('.dt-research-options-toggle');
+    if (toggle) toggle.setAttribute('aria-expanded', String(!!open));
+  }
+  function closeResearchOptions(panel, delay) {
+    var wrap = panel && panel.querySelector('.dt-research-options');
+    if (!wrap || !wrap.classList.contains('is-open')) return;
+    if (!delay) { setResearchOptionsOpen(panel, false); return; }
+    if (wrap._closeTimer) clearTimeout(wrap._closeTimer);
+    wrap._closeTimer = setTimeout(function() { wrap._closeTimer = 0; setResearchOptionsOpen(panel, false); }, delay);
   }
 
   function syncResearchOptionsSummary(panel) {
@@ -7354,7 +7461,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var modes = { mini: '快速', pro: '深度', auto: '自动' };
     var sel = panel.querySelector('.dt-research-model-select');
     var modelText = '';
-    if (sel && sel.selectedOptions && sel.selectedOptions[0]) modelText = String(sel.selectedOptions[0].textContent || '').split(/\s*[·\-]\s*/)[0].trim();
+    if (sel && sel.value === 'pro') modelText = 'V4 Pro';
+    else if (sel && sel.value === 'flash') modelText = 'V4.1 Flash';
+    else if (sel && sel.selectedOptions && sel.selectedOptions[0]) modelText = String(sel.selectedOptions[0].textContent || '').split(/\s+·\s+/)[0].trim();
     label.textContent = (modes[S.dtResearchMode] || '深度') + ' · ' + (modelText || '默认模型');
   }
 
@@ -7770,6 +7879,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (onProgress) { try { onProgress({ sources: sources }); } catch (e) {} }
       } else if (evt.type === 'research_stage') {
         if (onProgress) { try { onProgress({ stage: String(evt.stage || ''), message: evt.message != null ? String(evt.message) : '' }); } catch (e) {} }
+      } else if (evt.type === 'research_activity') {
+        if (onProgress) { try { onProgress({ activity: evt }); } catch (e) {} }
       } else if(evt.type==='research_board'){if(onProgress)onProgress({board:evt});
       } else if(evt.type==='research_document'){if(onProgress)onProgress({document:evt.document});
       } else if (evt.type === 'research_checkpoint') {
@@ -8136,7 +8247,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           return;
         }
         if (!prog) return;
-        if(prog.board){progressCard._researchBoard=prog.board;var features=assistantFeatures();if(features)features.renderBoard(progressCard,prog.board);if(progressCard._researchState)progressCard._researchState.searchCount=Number(prog.board.search_calls)||0;}
+        if(prog.board){progressCard._researchBoard=prog.board;if(progressCard._researchState)progressCard._researchState.searchCount=Number(prog.board.search_calls)||0;}
+        if (prog.activity) pushResearchActivity(progressCard, prog.activity);
         if(prog.document)appendResearchThinkingEntry(progressCard,'资料提取','['+prog.document.id+'] '+prog.document.name+' · '+(prog.document.status==='read'?'已读取':'未读出')+(prog.document.limitation?'：'+prog.document.limitation:''),{forceNew:true});
         if (prog.checkpoint) { progressCard.dataset.checkpointId = prog.checkpoint; }
         if (prog.thinking) appendResearchThinkingEntry(progressCard, prog.thinking.role, cleanReasoningText(prog.thinking.chunk), {stream:true, streamDelta:true, receivedAt:prog.receivedAt});
@@ -8163,7 +8275,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (S._dtCurrentReqId !== reqId || !customModelIdentityCurrent(flowIdentity) || S.dtLifecycleId !== flowLifecycle) return 'done';
       answer = (result && result.answer) || '';
       sources = (result && Array.isArray(result.sources)) ? result.sources : sources;
-      if(result&&result.board){progressCard._researchBoard=result.board;var finalFeatures=assistantFeatures();if(finalFeatures)finalFeatures.renderBoard(progressCard,result.board);}
+      if(result&&result.board){progressCard._researchBoard=result.board;}
       progressCard._researchMessageId=result&&result.message_id;progressCard._researchDocuments=result&&result.documents||[];consumeAiAttachment(fileData);
       renderResearchResult();
       if (answer.trim() && progressCard.isConnected && !controller.signal.aborted && window.XTJHaptics) window.XTJHaptics.play('success');
@@ -8199,9 +8311,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       //   外层把最后一个错误渲染为「连接中断」，用户看到的文案与真实原因完全不符。
       //   现在直接终结在研究会话卡上，给出可执行的准确提示。
       var errCode = String((err && (err.code || err.error)) || '');
-      var isConcurrent = errCode === 'concurrent' || /上一个(研究)?请求|请等待上一个/.test(errMsg);
-      var isQuota = /quota_exceeded|search_limit|rate_limited|daily_limit|hourly_limit|pro_required|insufficient|not_enough/.test(errCode)
-        || /次数已达上限|额度|开通 Pro|访问过于频繁/.test(errMsg);
+      var isConcurrent = errCode === 'concurrent' || errCode === 'ai_concurrent_limit' || /上一个(研究)?请求|请等待上一个|已有进行中的 AI 请求/.test(errMsg);
+      var isQuota = /quota_exceeded|search_limit|rate_limited|daily_limit|hourly_limit|pro_required|insufficient|not_enough/i.test(errCode)
+        || /次数已达上限|额度|开通 Pro|访问过于频繁|请求过于频繁/.test(errMsg) || (err && err.status === 429);
       if (isConcurrent || isQuota || /^task_(?:search_)?budget_/.test(errCode) || errCode==='network_disabled' || String(opts && opts.researchModel || '') === CUSTOM_MODEL_PREFIX + OPENROUTER_MODEL_UID || /^checkpoint_/.test(errCode) || errCode === 'research_incomplete' || (progressCard && progressCard.dataset && progressCard.dataset.checkpointId) || (err && err.retryable === false) || answer) {
         console.warn('[AI] Tavily research 终结于不可回退错误:', errCode || errMsg);
         var terminalMsg = isConcurrent
@@ -8798,7 +8910,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         node.appendChild(content);
       } else if (msg.role === 'assistant') node = buildThinkCardFromHistory(msg, msgs, true);
       if (node) {
-        if(msg.is_research){node._researchBoard=msg.research_board;node._researchDocuments=msg.documents||[];node._researchQuery=msg.research_query;node._researchCreatedAt=msg.created_at;if(msg.id)node.dataset.aiHistoryId=String(msg.id);renderTavilyResearchReport(node,msg.content,msg.research_sources,null,'历史研究记录');if(assistantFeatures()&&msg.research_board)assistantFeatures().renderBoard(node,msg.research_board);}
+        if(msg.is_research){node._researchBoard=msg.research_board;node._researchDocuments=msg.documents||[];node._researchQuery=msg.research_query;node._researchCreatedAt=msg.created_at;if(msg.id)node.dataset.aiHistoryId=String(msg.id);renderTavilyResearchReport(node,msg.content,msg.research_sources,null,'历史研究记录');}
         if (msg.id) node.dataset.aiHistoryId = String(msg.id);
         fragment.appendChild(node);
       }
