@@ -3512,10 +3512,11 @@ html body #panelAiChat :is(.ai-plus-btn, .ai-context-trigger, .ai-chat-voice, .a
 
 /* ---- Dialogs: one scrim and one opaque card for every site dialog (including the ones opened from the posts page). ----
    The photo viewer's own panels and the "delete photo" glass confirm keep their dedicated looks. */
-html body :is(#delModal, #ppConfirmOverlay, #statModal, #postDetailModal, #profileActivityModal, #profileDetailModal, #userProfileModal, #loginModal, #registerModal, .xtj-prompt-overlay) {
+/* The :not(#xtj-scrim) tail only raises specificity: older id+class scrims (12% delete glass, 20% login, 18% + blur stat) used to win. */
+html body :is(#delModal, #ppConfirmOverlay:not(.photo-delete-confirm), #statModal, #postDetailModal, #profileActivityModal, #profileDetailModal, #userProfileModal, #loginModal, #registerModal, .xtj-prompt-overlay):not(#xtj-scrim) {
   background: rgba(10, 25, 18, .40) !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
 }
-html[data-theme="dark"] body :is(#delModal, #ppConfirmOverlay, #statModal, #postDetailModal, #profileActivityModal, #profileDetailModal, #userProfileModal, #loginModal, #registerModal, .xtj-prompt-overlay) {
+html[data-theme="dark"] body :is(#delModal, #ppConfirmOverlay:not(.photo-delete-confirm), #statModal, #postDetailModal, #profileActivityModal, #profileDetailModal, #userProfileModal, #loginModal, #registerModal, .xtj-prompt-overlay):not(#xtj-scrim) {
   background: rgba(0, 0, 0, .62) !important;
 }
 html body :is(#delModal .modal-box, #statModal .modal-box, #postDetailModal .modal-box, #profileActivityModal .modal-box, #loginModal .modal-box, #registerModal .modal-box, #ppConfirmOverlay:not(.photo-delete-confirm) .pp-confirm-dialog, .xtj-prompt-dialog) {
