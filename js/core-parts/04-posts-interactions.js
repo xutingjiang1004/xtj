@@ -3521,6 +3521,7 @@
                 var svgTranslate = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/></svg>';
                 var svgAi = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3l1.9 5.8 1.9-5.8a2 2 0 0 1 1.3-1.3l5.8-1.9-5.8-1.9a2 2 0 0 1-1.3-1.3z"/></svg>';
                 var svgReport = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" x2="4" y1="22" y2="15"/></svg>';
+                var svgShare = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" x2="15.42" y1="13.51" y2="17.49"/><line x1="15.41" x2="8.59" y1="6.51" y2="10.49"/></svg>';
                 var post = feedAllPosts.find(function(p) { return String(p.id) === String(postId); });
                 if (!post && window.currentPost && String(window.currentPost.id) === String(postId)) post = window.currentPost;
                 var postText = post ? String(post.content || '') : '';
@@ -3529,7 +3530,8 @@
                 var hasImages = post && window.XtjPostMedia && window.XtjPostMedia.getPostMediaItems(post).some(function (item) { return /^(image|photo)$/.test(item.media_type); });
                 var btnTranslate = hasText ? '<button type="button" role="menuitem" data-post-tool="translate" data-post-id="' + escapeHtml(postId) + '">' + svgTranslate + '<span>翻译帖子</span></button>' : '';
                 var btnAi = hasText || hasImages ? '<button type="button" role="menuitem" data-post-tool="ask-ai" data-post-id="' + escapeHtml(postId) + '">' + svgAi + '<span>锐评 AI</span></button>' : '';
-                menu.innerHTML = btnTranslate + btnAi +
+                var btnShare = '<button type="button" role="menuitem" data-post-tool="share" data-post-id="' + escapeHtml(postId) + '">' + svgShare + '<span>分享帖子</span></button>';
+                menu.innerHTML = btnShare + btnTranslate + btnAi +
                                  '<button type="button" role="menuitem" data-post-tool="report" data-post-id="' + escapeHtml(postId) + '">' + svgReport + '<span>举报帖子</span></button>';
                 document.body.appendChild(menu);
                 activatePostToolsMenu({ menu: menu, trigger: trigger, animation: null }, true);
@@ -5457,6 +5459,144 @@
                     if (!handled && btn) { btn.disabled = false; btn.textContent = nextVisibility === "private" ? "🌐 设为公开" : "🔒 设为私密"; }
                 }
             };
+            // ============== 帖子分享（生成公开链接，微信好友点开即可查看） ==============
+            var postShareOverlay = null;
+            var postShareReturnFocus = null;
+            function getPostShareSource(postId) {
+                var post = (feedAllPosts || []).find(function(p) { return String(p && p.id) === String(postId); });
+                if (!post && window.currentPost && String(window.currentPost.id) === String(postId)) post = window.currentPost;
+                if (!post && window.__xtjPostDetailSnapshot && String(window.__xtjPostDetailSnapshot.id) === String(postId)) post = window.__xtjPostDetailSnapshot;
+                return post || null;
+            }
+            function postSharePlainText(post) {
+                var text = post ? String(post.content || '') : '';
+                try { var payload = JSON.parse(text); if (payload && payload.__type === '__xtj_post_v2__') text = String(payload.text || ''); } catch (_) {}
+                return text.trim();
+            }
+            function onPostShareKeydown(e) {
+                if (e.key === 'Escape') { e.preventDefault(); closePostShare(); }
+            }
+            function closePostShare() {
+                if (!postShareOverlay) return;
+                var overlay = postShareOverlay;
+                postShareOverlay = null;
+                document.removeEventListener('keydown', onPostShareKeydown, true);
+                overlay.remove();
+                if (postShareReturnFocus && postShareReturnFocus.isConnected) { try { postShareReturnFocus.focus(); } catch (_) {} }
+                postShareReturnFocus = null;
+            }
+            function copyPostShareLink(link, button) {
+                if (!button || button.disabled) return;
+                button.disabled = true;
+                var done = function(copied) {
+                    button.disabled = false;
+                    if (copied) {
+                        button.textContent = '已复制';
+                        button.classList.add('is-copied');
+                        showToast('链接已复制，去微信粘贴给好友吧');
+                        setTimeout(function() {
+                            if (!button.isConnected) return;
+                            button.textContent = '复制链接';
+                            button.classList.remove('is-copied');
+                        }, 2200);
+                    } else {
+                        var input = postShareOverlay && postShareOverlay.querySelector('.post-share-link');
+                        if (input) { input.focus(); input.select(); }
+                        showToast('请长按链接手动复制');
+                    }
+                };
+                var fallback = function() {
+                    var input = document.createElement('textarea');
+                    input.value = link;
+                    input.setAttribute('readonly', '');
+                    input.style.cssText = 'position:fixed;top:0;left:-9999px;opacity:0';
+                    document.body.appendChild(input);
+                    input.select();
+                    input.setSelectionRange(0, input.value.length);
+                    var copied = false;
+                    try { copied = document.execCommand('copy'); } catch (_) {}
+                    input.remove();
+                    done(copied);
+                };
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(link).then(function() { done(true); }, fallback);
+                } else fallback();
+            }
+            window.closePostShare = closePostShare;
+            window.openPostShare = function(postId) {
+                var id = String(postId || '');
+                if (!id) return;
+                var post = getPostShareSource(id);
+                if (post && post.visibility === 'private') { showToast('私密帖子仅自己可见，不能分享'); return; }
+                closePostShare();
+                postShareReturnFocus = document.activeElement;
+                var link = new URL('/share/posts/' + encodeURIComponent(id), window.location.origin).href;
+                var text = postSharePlainText(post);
+                var author = post && post.user_name ? String(post.user_name) : 'XTJ 用户';
+                var overlay = document.createElement('div');
+                // 用 ID 承载样式：本文件后段的「全局玻璃按钮重置」选择器特异性较高，
+                // 纯类名会被它覆盖（关闭按钮被压回文档流、主按钮失去绿色渐变）。
+                overlay.id = 'postShareOverlay';
+                overlay.className = 'post-share-overlay';
+                overlay.innerHTML =
+                    '<div class="post-share-dialog" role="dialog" aria-modal="true" aria-labelledby="postShareTitle">' +
+                        '<button type="button" class="post-share-close" aria-label="关闭分享">×</button>' +
+                        '<h3 id="postShareTitle">分享帖子</h3>' +
+                        '<p class="post-share-sub">发给微信好友，对方点开链接就能看</p>' +
+                        '<div class="post-share-card">' +
+                            '<div class="post-share-card-main">' +
+                                '<p class="post-share-author"></p>' +
+                                '<p class="post-share-text"></p>' +
+                            '</div>' +
+                            '<img class="post-share-thumb" alt="帖子图片" hidden>' +
+                        '</div>' +
+                        '<label class="post-share-link-label" for="postShareLinkInput">帖子链接</label>' +
+                        '<div class="post-share-link-row">' +
+                            '<input id="postShareLinkInput" class="post-share-link" type="text" readonly>' +
+                        '</div>' +
+                        '<div class="post-share-actions">' +
+                            '<button type="button" class="post-share-copy">复制链接</button>' +
+                            '<button type="button" class="post-share-native" hidden>发送给朋友</button>' +
+                        '</div>' +
+                        '<p class="post-share-hint">复制后粘贴到微信聊天，好友点开即可查看这篇帖子，无需登录。</p>' +
+                    '</div>';
+                overlay.querySelector('.post-share-author').textContent = author;
+                var excerpt = text.length > 140 ? text.slice(0, 140) + '…' : text;
+                overlay.querySelector('.post-share-text').textContent = excerpt || '这篇帖子包含图片或音视频，点开链接查看完整内容。';
+                overlay.querySelector('.post-share-text').classList.toggle('is-placeholder', !excerpt);
+                var linkInput = overlay.querySelector('.post-share-link');
+                linkInput.value = link;
+                linkInput.addEventListener('focus', function() { linkInput.select(); });
+                // 缩略图走与分享页相同的公开媒体地址，私密帖子已在上方拦截。
+                if (post && window.XtjPostMedia && typeof window.XtjPostMedia.getPostMediaItems === 'function') {
+                    var items = window.XtjPostMedia.getPostMediaItems(post) || [];
+                    for (var i = 0; i < items.length; i++) {
+                        if (!/^(image|photo)$/.test(String(items[i].media_type || ''))) continue;
+                        var thumb = overlay.querySelector('.post-share-thumb');
+                        thumb.src = '/api/post/' + encodeURIComponent(id) + '/media/' + i + '?preview=1';
+                        thumb.hidden = false;
+                        thumb.addEventListener('error', function() { this.hidden = true; });
+                        break;
+                    }
+                }
+                overlay.querySelector('.post-share-copy').addEventListener('click', function() {
+                    copyPostShareLink(link, overlay.querySelector('.post-share-copy'));
+                });
+                var nativeButton = overlay.querySelector('.post-share-native');
+                if (typeof navigator.share === 'function') {
+                    nativeButton.hidden = false;
+                    nativeButton.addEventListener('click', function() {
+                        navigator.share({ title: 'XTJ · ' + author + ' 的帖子', text: excerpt || author + ' 在 XTJ 分享的帖子', url: link }).catch(function() {});
+                    });
+                }
+                overlay.querySelector('.post-share-close').addEventListener('click', closePostShare);
+                overlay.addEventListener('click', function(e) { if (e.target === overlay) closePostShare(); });
+                document.addEventListener('keydown', onPostShareKeydown, true);
+                document.body.appendChild(overlay);
+                postShareOverlay = overlay;
+                var copyButton = overlay.querySelector('.post-share-copy');
+                if (copyButton && typeof copyButton.focus === 'function') { try { copyButton.focus(); } catch (_) {} }
+            };
             // ============== Global click delegation ==============
             function handlePostActionClick(e) {
                 var postToolTrigger = e.target.closest('.post-tools-trigger');
@@ -5468,9 +5608,15 @@
                 var postToolAction = e.target.closest('[data-post-tool]');
                 if (postToolAction) {
                     e.preventDefault();
-                    if (!window.currentUser) { showToast('请先登录'); return; }
                     var postTool = postToolAction.getAttribute('data-post-tool');
                     var postToolPostId = postToolAction.getAttribute('data-post-id');
+                    // 分享的是公开帖子链接，游客也能转发给好友，不要求先登录。
+                    if (postTool === 'share') {
+                        closePostToolsMenu();
+                        if (typeof window.openPostShare === 'function') window.openPostShare(postToolPostId);
+                        return;
+                    }
+                    if (!window.currentUser) { showToast('请先登录'); return; }
                     closePostToolsMenu();
                     if (postTool === 'translate' && typeof window.requestPostTranslation === 'function') {
                         window.requestPostTranslation(postToolPostId);

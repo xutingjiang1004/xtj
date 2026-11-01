@@ -218,3 +218,40 @@ test('a stalled attachment read cannot keep an old public permission alive for l
     assert.equal(second.status,404);assert.deepEqual(f.reads,['posts','post_attachments','posts']);
   }finally{clearTimeout(timer);release();await first;}
 });
+
+test('post share page renders public text posts for guests with WeChat preview metadata',async()=>{
+  const f=fixture();
+  f.publicPost.media_type='text';
+  f.publicPost.content='你好，这是一篇公开的文字帖子\n第二行';
+  const page=await request(f.app).get('/share/posts/'+f.publicPost.id).expect(200);
+  assert.match(page.text,/公开的文字帖子/);assert.match(page.text,/第二行/);
+  assert.match(page.text,/XTJ · 帖子分享/);
+  assert.match(page.text,/property="og:title"/);assert.match(page.text,/property="og:description"/);
+  assert.match(page.text,/name="description"/);
+  // 分享页要给微信好友一个回站入口（蓝色链接不算，必须是主按钮样式）。
+  assert.match(page.text,/class="cta"[^>]*>打开 XTJ 看更多</);
+  assert.match(page.text,/\.cta\{display:block/);
+  assert.ok(!page.text.includes(A),'分享页不能泄露照片墙资源 ID');
+  f.publicPost.content=JSON.stringify({__type:'__xtj_post_v2__',text:'包装后的正文'});
+  const wrapped=await request(f.app).get('/share/posts/'+f.publicPost.id).expect(200);
+  assert.match(wrapped.text,/包装后的正文/);assert.ok(!wrapped.text.includes('__xtj_post_v2__'),'不能回显帖子 JSON 包装');
+  f.publicPost.visibility='private';await request(f.app).get('/share/posts/'+f.publicPost.id).expect(404);
+  f.publicPost.visibility='public';f.publicPost.is_deleted=true;await request(f.app).get('/share/posts/'+f.publicPost.id).expect(404);
+  f.publicPost.is_deleted=false;f.publicPost.media_type='__dm__';await request(f.app).get('/share/posts/'+f.publicPost.id).expect(404);
+});
+
+test('post share page keeps zoomable image markup and renders video and audio players safely',async()=>{
+  const f=fixture();
+  const page=await request(f.app).get('/share/posts/'+f.publicPost.id).expect(200);
+  assert.match(page.text,/公开帖子/);
+  assert.equal((page.text.match(/data-original="/g)||[]).length,2,'相册两张图都应保留原图地址');
+  assert.match(page.text,/class="retry" hidden/);
+  const { renderPostSharePage } = require('../render-api/photo-access');
+  const row={id:f.publicPost.id,user_name:'<b>作者</b>',content:'正文 <script>alert(1)</script>',created_at:'2026-11-01T00:00:00Z',media_type:'album'};
+  const items=[{media_type:'video',share_media_url:'/api/post/x/media/0'},{media_type:'audio',share_media_url:'/api/post/x/media/1'},{media_type:'image',share_media_url:'/api/post/x/media/2'}];
+  const html=renderPostSharePage(row,items,'https://xtj.example');
+  assert.match(html,/<video controls/);assert.match(html,/<audio controls/);
+  assert.ok(!html.includes('正文 <script>alert(1)</script>'),'正文必须转义');
+  assert.ok(!html.includes('<b>作者</b>'),'作者名必须转义');
+  assert.match(html,/property="og:image" content="https:\/\/xtj\.example\/api\/post\/x\/media\/2"/);
+});

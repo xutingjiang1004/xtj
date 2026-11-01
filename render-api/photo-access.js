@@ -307,10 +307,14 @@ function createPhotoAccess({ app, supabase, supabaseUrl, secret, authenticateUse
     try {
       if (!UUID.test(req.params.id)) return missing(res);
       const row = await checked(supabase.from('posts').select('id,user_name,media_type,media_url,content,visibility,is_deleted,created_at').eq('id',req.params.id).maybeSingle());
-      if (!row || row.is_deleted === true || !['image','photo','album'].includes(row.media_type) || (row.visibility && row.visibility !== 'public') || !normalPostAllowed(row)) return missing(res);
+      // 分享页面向游客公开，但只放行公开且未删除的普通帖子；
+      // 文字、图片、视频、音频帖子共用同一个分享地址，微信好友点开即可查看。
+      if (!row || row.is_deleted === true || !['','text','image','video','audio','photo','album',null].includes(row.media_type) || (row.visibility && row.visibility !== 'public') || !normalPostAllowed(row)) return missing(res);
       const posts = await loadPostAttachments(supabase,[row]);
-      const rows = (posts[0].media_items || []).map((item,index) => ({ ...row, share_media_url:'/api/post/' + row.id + '/media/' + index, content:JSON.stringify({caption:index ? '' : metadata(row).text || (String(row.content).startsWith('{') ? '' : row.content)}) }));
-      res.set({'Cache-Control':'no-store, private','Referrer-Policy':'no-referrer'}).type('html').send(renderSharePage(rows));
+      const items = (posts[0].media_items || []).map((item,index) => ({ ...item, share_media_url:'/api/post/' + row.id + '/media/' + index }));
+      const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'https').split(',')[0].trim();
+      const origin = (/^https?$/.test(proto) ? proto : 'https') + '://' + req.get('host');
+      res.set({'Cache-Control':'no-store, private','Referrer-Policy':'no-referrer'}).type('html').send(renderPostSharePage(row, items, origin));
     } catch (_) { unavailable(res); }
   });
   return { photo, codec, authenticateMedia, migrate: () => migratePhotoStorage(supabase) };
@@ -320,4 +324,32 @@ function renderSharePage(rows, token) {
   const images = rows.map((row,index) => `<article><p class="author">${html(row.user_name)} <time>${html(String(row.created_at || '').slice(0,10))}</time></p><button class="photo" aria-label="查看第${index+1}张照片"><img data-original="${html(row.share_media_url || '/api/photo/shared/' + token + '/' + row.id + '/media')}" src="${html((row.share_media_url || '/api/photo/shared/' + token + '/' + row.id + '/media') + '?preview=1')}" alt="${html(metadata(row).caption || '作者分享的照片')}" loading="${index ? 'lazy' : 'eager'}"></button>${metadata(row).caption ? '<p>' + html(metadata(row).caption) + '</p>' : ''}<button class="retry" hidden>图片未加载 · 点击重试</button></article>`).join('');
   return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="referrer" content="no-referrer"><title>分享的照片 · XTJ</title><style>body{margin:0;background:#f0faf7;color:#233c37;font:16px/1.6 system-ui,sans-serif}header,main,footer{max-width:960px;margin:auto;padding:20px}header{display:flex;justify-content:space-between}a{color:#247d6c}main{display:grid;gap:24px}article{background:#ffffff70;border-radius:18px;padding:18px}p{white-space:pre-wrap;overflow-wrap:anywhere}.author{margin:0 0 12px}time{margin-left:12px;color:#718680;font-size:13px}button{font:inherit;color:inherit;cursor:pointer}.photo{display:block;width:100%;border:0;padding:0;background:transparent}.photo img{display:block;max-width:100%;max-height:70vh;width:auto;height:auto;margin:auto;border-radius:12px}.retry{border:0;background:transparent}footer{color:#718680;font-size:14px}dialog{padding:0;border:0;background:transparent;max-width:100vw;max-height:100dvh}dialog::backdrop{background:#10211feb}.viewer{display:flex;align-items:center;justify-content:center;width:100vw;height:100dvh;overflow:auto}.viewer img{max-width:100%;max-height:100%;object-fit:contain}.close{position:fixed;right:20px;top:20px;border:0;background:#ffffffdf;border-radius:50%;width:44px;height:44px;font-size:24px}.viewer{touch-action:none}.viewer.is-zoomed{touch-action:auto}.viewer img.zoomed{max-width:none;max-height:none}@media(min-width:720px){main{grid-template-columns:repeat(2,minmax(0,1fr))}}</style><script src="/js/media-cache.min.js?v=hq1920-v1" defer></script><script src="/js/photo-share.min.js?v=hq1920-v1" defer></script></head><body><header><strong>XTJ · 照片分享</strong><a href="/">打开网站</a></header><main>${images || '<p>这份分享已过期，或照片已被作者移除。</p>'}</main><footer>${rows.length ? '本次分享包含' + rows.length + '张照片，更多照片需登录网站查看。' : ''}</footer><dialog><div class="viewer"><img alt="照片预览"></div><button class="close" aria-label="关闭预览">×</button></dialog></body></html>`;
 }
-module.exports = { PHOTO_BUCKET, PHOTO_COOKIE, POST_MEDIA_COOKIE, setPhotoSession, photoStoragePath, safePhotoPath, originalPhotoPath, livePhoto, canReadPhoto, canReadSharedPhoto, photoMediaUrl, photoPayload, shareCodec, protectPhotoPath, migratePhotoStorage, streamOriginal, createPhotoAccess, renderSharePage };
+// 帖子正文可能是 v2 JSON 包装，分享页只取其中的纯文本，绝不回显原始 JSON。
+function postShareText(row) {
+  const raw = String(row && row.content || '');
+  if (!raw.trim().startsWith('{')) return raw;
+  const data = metadata(row);
+  return String(data.text || data.caption || '');
+}
+// 单个帖子的公开分享页：正文 + 图片（可点开缩放）+ 音视频，游客无需登录即可查看。
+// og:* 元信息让微信在聊天里展示帖子标题与摘要，而不是一条裸链接。
+function renderPostSharePage(row, items, origin) {
+  const text = postShareText(row).trim();
+  const media = Array.isArray(items) ? items : [];
+  const author = String(row.user_name || 'XTJ 用户');
+  const title = text ? text.slice(0, 50) : author + ' 分享的帖子';
+  const description = text ? text.slice(0, 120) : '来自 XTJ 的帖子，点开即可查看。';
+  const firstImage = media.find(item => /^(image|photo)$/.test(String(item.media_type || '')));
+  const body = media.map((item, index) => {
+    const url = String(item.share_media_url || '');
+    const kind = String(item.media_type || '');
+    if (!url) return '';
+    if (/^(image|photo)$/.test(kind)) return `<article><button class="photo" aria-label="查看第${index + 1}张图片"><img data-original="${html(url)}" src="${html(url + '?preview=1')}" alt="${html(text.slice(0, 60) || '帖子图片')}" loading="${index ? 'lazy' : 'eager'}"></button><button class="retry" hidden>图片未加载 · 点击重试</button></article>`;
+    if (kind === 'video') return `<section class="media"><video controls playsinline preload="metadata" src="${html(url)}"></video></section>`;
+    if (kind === 'audio') return `<section class="media"><audio controls preload="metadata" src="${html(url)}"></audio></section>`;
+    return '';
+  }).join('');
+  const shareUrl = origin + '/share/posts/' + encodeURIComponent(row.id);
+  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="referrer" content="no-referrer"><title>${html(title)} · XTJ</title><meta name="description" content="${html(description)}"><meta property="og:type" content="article"><meta property="og:site_name" content="XTJ"><meta property="og:title" content="${html(title)}"><meta property="og:description" content="${html(description)}"><meta property="og:url" content="${html(shareUrl)}">${firstImage ? '<meta property="og:image" content="' + html(origin + firstImage.share_media_url) + '">' : ''}<style>body{margin:0;background:#f0faf7;color:#233c37;font:16px/1.7 system-ui,sans-serif}header,main,footer{max-width:680px;margin:auto;padding:20px}header{display:flex;justify-content:space-between;align-items:center}a{color:#247d6c;text-decoration:none}main{display:grid;gap:16px}.post-card,article,.media{background:#ffffff80;border:1px solid #ffffffb0;border-radius:18px;padding:18px;margin:0}p{white-space:pre-wrap;overflow-wrap:anywhere}.author{margin:0 0 10px;font-weight:600}time{margin-left:12px;color:#718680;font-size:13px;font-weight:400}.text{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font-size:17px}.empty{color:#718680;margin:0}button{font:inherit;color:inherit;cursor:pointer}.photo{display:block;width:100%;border:0;padding:0;background:transparent}.photo img{display:block;max-width:100%;max-height:70vh;width:auto;height:auto;margin:auto;border-radius:12px}.retry{border:0;background:transparent}.media video{display:block;width:100%;max-height:70vh;border-radius:12px;background:#10211f}.media audio{width:100%}.cta{display:block;text-align:center;padding:14px 18px;border-radius:14px;background:linear-gradient(135deg,#3d9a6c,#2f7d57);color:#fff !important;font-weight:700;text-decoration:none;box-shadow:0 8px 20px rgba(61,154,108,.28)}.cta:active{transform:translateY(1px)}footer{color:#718680;font-size:14px}dialog{padding:0;border:0;background:transparent;max-width:100vw;max-height:100dvh}dialog::backdrop{background:#10211feb}.viewer{display:flex;align-items:center;justify-content:center;width:100vw;height:100dvh;overflow:auto}.viewer img{max-width:100%;max-height:100%;object-fit:contain}.close{position:fixed;right:20px;top:20px;border:0;background:#ffffffdf;border-radius:50%;width:44px;height:44px;font-size:24px}.viewer{touch-action:none}.viewer.is-zoomed{touch-action:auto}.viewer img.zoomed{max-width:none;max-height:none}</style><script src="/js/media-cache.min.js?v=hq1920-v1" defer></script><script src="/js/photo-share.min.js?v=hq1920-v1" defer></script></head><body><header><strong>XTJ · 帖子分享</strong><a href="/">打开网站</a></header><main><section class="post-card"><p class="author">${html(author)}<time>${html(String(row.created_at || '').slice(0, 10))}</time></p>${text ? '<p class="text">' + html(text) + '</p>' : '<p class="empty">这篇帖子包含 ' + media.length + ' 个媒体文件</p>'}</section>${body}<a class="cta" href="${html(origin)}">打开 XTJ 看更多</a></main><footer>这篇帖子来自 XTJ，打开网站可以看到更多精彩内容。</footer><dialog><div class="viewer"><img alt="图片预览"></div><button class="close" aria-label="关闭预览">×</button></dialog></body></html>`;
+}
+module.exports = { PHOTO_BUCKET, PHOTO_COOKIE, POST_MEDIA_COOKIE, setPhotoSession, photoStoragePath, safePhotoPath, originalPhotoPath, livePhoto, canReadPhoto, canReadSharedPhoto, photoMediaUrl, photoPayload, shareCodec, protectPhotoPath, migratePhotoStorage, streamOriginal, createPhotoAccess, renderSharePage, renderPostSharePage };
