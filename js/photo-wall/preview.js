@@ -115,6 +115,21 @@
         image.classList.remove("pp-placeholder"), image.style.transition = "none";
         resetSource && (image.removeAttribute("src"), image.style.opacity = "0");
     }
+    // The preview-sized copy of a photo in the current list, when one differs from the original. Navigating to a
+    // photo whose original is still downloading shows this at once instead of an empty screen.
+    function previewFirstUrl(url) {
+        try {
+            var list = n;
+            if (!url || !Array.isArray(list)) return "";
+            for (var k = 0; k < list.length; k++) {
+                if (list[k] && list[k].imageUrl === url) {
+                    var th = list[k].thumbUrl || list[k].thumb || "";
+                    return th && th !== url ? th : "";
+                }
+            }
+        } catch (err) {}
+        return "";
+    }
     function D(e, t, forceReload) {
         if (e) {
             if (e.id !== 'photoPreviewImage' && window.xtjMediaSaveData && window.xtjMediaSaveData()) t = null;
@@ -137,6 +152,7 @@
                 e._ppObjectUrl && (URL.revokeObjectURL(e._ppObjectUrl), e._ppObjectUrl = null);
                 e.style.transition = "none";
                 e.style.opacity = "0";
+                e.style.backgroundImage = "";
                 e.classList.remove("pp-placeholder");
                 try { e.removeAttribute("src"); } catch (err) {}
             }
@@ -163,8 +179,9 @@
                     if (e._ppLoadGen !== a || e._ppUrl !== t) return;
                     e.style.transition = "none";
                     e.style.opacity = "1";
+                    e.style.backgroundImage = "";
                 }, function() {
-                    if (e._ppLoadGen === a && e._ppUrl === t && e.complete && e.naturalWidth > 0) e.style.opacity = "1";
+                    if (e._ppLoadGen === a && e._ppUrl === t && e.complete && e.naturalWidth > 0) { e.style.opacity = "1"; e.style.backgroundImage = ""; }
                 });
             }
             function handleError() {
@@ -177,6 +194,34 @@
             }
             e._ppCleanup = cleanup, e.addEventListener("load", handleLoad), e.addEventListener("error", handleError), e._ppListenerUrl = t;
             var displaySource = window.XtjPostOriginals ? window.XtjPostOriginals.displayUrl(t) : t;
+            var firstSource = forceReload ? "" : previewFirstUrl(t);
+            if (firstSource) {
+                // Show the preview now, fetch and decode the original behind it, then swap with no blank frame.
+                e.removeEventListener("load", handleLoad); e.removeEventListener("error", handleError); e._ppListenerUrl = null;
+                e.style.transition = "none"; e.src = firstSource; e.style.opacity = "1";
+                var fullImage = new Image(), swapped = !1;
+                fullImage.decoding = "async";
+                try { fullImage.fetchPriority = e.id === "photoPreviewImage" ? "high" : "low"; } catch (err) {}
+                e._ppCleanup = function() {
+                    fullImage.onload = null; fullImage.onerror = null;
+                    if (!swapped) { try { fullImage.src = ""; } catch (err) {} }
+                    cleanup();
+                };
+                var swapToOriginal = function() {
+                    if (swapped) return;
+                    swapped = !0; fullImage.onload = null; fullImage.onerror = null;
+                    if (e._ppLoadGen !== a || e._ppUrl !== t) return;
+                    e.style.backgroundImage = "url(" + JSON.stringify(firstSource) + ")"; e.style.backgroundSize = "100% 100%"; e.style.backgroundRepeat = "no-repeat";
+                    e._ppCleanup = cleanup; e.addEventListener("load", handleLoad); e.addEventListener("error", handleError); e._ppListenerUrl = t;
+                    e.src = displaySource;
+                    e.complete && e.naturalWidth > 0 && handleLoad();
+                };
+                fullImage.onload = function() { (typeof fullImage.decode === "function" ? fullImage.decode() : Promise.resolve()).then(swapToOriginal, swapToOriginal); };
+                fullImage.onerror = swapToOriginal;
+                fullImage.src = displaySource;
+                fullImage.complete && fullImage.naturalWidth > 0 && swapToOriginal();
+                return;
+            }
             e.src = forceReload && displaySource === t && window.xtjRetryOriginalImageUrl ? window.xtjRetryOriginalImageUrl(t) : displaySource;
             e.complete && e.naturalWidth > 0 && handleLoad();
         }

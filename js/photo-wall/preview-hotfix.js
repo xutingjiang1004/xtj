@@ -301,11 +301,29 @@
     });
   }
 
+  // The picture's position/scale and the slide track offset change on every frame of a gesture. Written on the
+  // overlay root they invalidate the style of every control inside it; written on the element that reads them,
+  // only that element is recalculated. The overlay opacity stays on the root, which is what reads it.
+  var imageVarHost = null;
+  var IMAGE_VARS = { '--pp-img-x': 1, '--pp-img-y': 1, '--pp-scale': 1, '--pp-rotate': 1 };
   function setPreviewVars(patch) {
     var root = overlay();
     if (!root || !patch) return;
+    var img = previewImage(), track = slideTrack();
+    // Slots swap ids when a neighbour is promoted: never leave this picture's zoom on a node that was the centre before.
+    if (imageVarHost && imageVarHost !== img) Object.keys(IMAGE_VARS).forEach(function(key) { imageVarHost.style.removeProperty(key); });
+    imageVarHost = img;
     Object.keys(patch).forEach(function(key) {
-      root.style.setProperty(key, String(patch[key]));
+      var host = IMAGE_VARS[key] ? img : key === '--pp-track-x' ? track : root;
+      (host || root).style.setProperty(key, String(patch[key]));
+    });
+  }
+  function clearPreviewVars() {
+    var root = overlay(), previousHost = imageVarHost;
+    imageVarHost = null;
+    [root, previewImage(), slideTrack(), previousHost].forEach(function(node) {
+      if (!node) return;
+      ['--pp-overlay-opacity', '--pp-track-x', '--pp-img-x', '--pp-img-y', '--pp-scale', '--pp-rotate'].forEach(function(key) { node.style.removeProperty(key); });
     });
   }
 
@@ -1089,12 +1107,7 @@
         root.classList.remove('active', 'closing', 'pp-closing', 'pp-hotfix-closing', 'pp-hotfix-basic-close', 'pp-post-mode', 'pp-info-open');
         root.classList.remove('pp-animate-root', 'pp-animate-track', 'pp-animate-image');
         root.style.pointerEvents = '';
-        root.style.removeProperty('--pp-overlay-opacity');
-        root.style.removeProperty('--pp-track-x');
-        root.style.removeProperty('--pp-img-x');
-        root.style.removeProperty('--pp-img-y');
-        root.style.removeProperty('--pp-scale');
-        root.style.removeProperty('--pp-rotate');
+        clearPreviewVars();
         root.setAttribute('aria-hidden', 'true');
         root.inert = true;
       }

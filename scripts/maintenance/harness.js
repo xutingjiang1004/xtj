@@ -92,11 +92,12 @@ function buildData(user, origin = DEFAULT_ORIGIN, now = FIXED_NOW) {
 // options: viewport, theme ('light'|'dark'), user (null = logged out), mobile (touch + mobile UA), dsf (device scale
 // factor), reducedMotion, origin, fixedTime (freeze Date.now at FIXED_NOW), extraRoutes(url, req, body, data) -> a
 // route.fulfill() object to override one mocked endpoint, init (function run before the page scripts), settleMs,
-// keepNoise (also collect the console messages that only the mocked environment causes).
+// keepNoise (also collect the console messages that only the mocked environment causes), beforeGoto(page, ctx) to add routes
+// (for example a slow script) before the first navigation.
 async function open(options = {}) {
   const {
     viewport = { width: 390, height: 844 }, theme = 'light', user = 'alice', mobile = true, dsf, reducedMotion = 'no-preference',
-    origin = DEFAULT_ORIGIN, fixedTime = false, log = true, extraRoutes, init, settleMs = 1800, keepNoise = false,
+    origin = DEFAULT_ORIGIN, fixedTime = false, log = true, extraRoutes, init, settleMs = 1800, keepNoise = false, beforeGoto,
   } = options;
   await ensureServer(origin);
   const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'], executablePath: process.env.CHROMIUM_PATH || undefined });
@@ -141,6 +142,7 @@ async function open(options = {}) {
     else if (p.startsWith('/test-supabase/')) payload = [];
     return route.fulfill({ status: 200, json: payload });
   });
+  if (beforeGoto) await beforeGoto(page, ctx);
   await page.goto(origin + '/', { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(settleMs);
   return { browser, ctx, page, calls, errors, consoleMsgs, failed, data, origin, async close() { await browser.close(); } };
