@@ -952,6 +952,22 @@
     });
   }
 
+  // 「照片详情」卡片从被点的 ⓘ 按钮展开、关闭时缩回按钮：算出把卡片（已在最终位置）放到按钮上的 transform，交给 CSS 过渡。
+  function infoOriginTransform(content) {
+    try {
+      var engine = window.xtjOrigin;
+      if (!engine || !content || !engine.motionOk()) return '';
+      var button = document.querySelector('#photoPreviewOverlay .pp-info-btn');
+      var from = engine.rectOfElement(button);
+      if (!from) return '';
+      var keepTransform = content.style.transform, keepTransition = content.style.transition;
+      content.style.transition = 'none'; content.style.transform = 'none';
+      var box = content.getBoundingClientRect();
+      content.style.transform = keepTransform; content.style.transition = keepTransition;
+      var result = engine.transformFor(box, from);
+      return result ? result.css : '';
+    } catch (_) { return ''; }
+  }
   function closePhotoInfoInternal(silent) {
     var modal = infoModal();
     var root = overlay();
@@ -965,6 +981,8 @@
     }
     var content = modal.querySelector('.pp-info-modal-content');
     var body = infoBody();
+    var closeOrigin = !silent && content ? infoOriginTransform(content) : '';
+    if (content) { if (closeOrigin) content.style.setProperty('--pp-info-from', closeOrigin); else content.style.removeProperty('--pp-info-from'); }
     modal.classList.remove('active');
     modal.classList.add('closing');
     modal.style.pointerEvents = 'none';
@@ -985,7 +1003,7 @@
       if (!silent && body) body.innerHTML = '';
       if (!silent && state.infoReturnFocus && document.contains(state.infoReturnFocus)) state.infoReturnFocus.focus();
       state.infoReturnFocus = null;
-    }, 240);
+    }, closeOrigin ? 340 : 240);
   }
 
   function showPhotoInfoInternal() {
@@ -1027,6 +1045,7 @@
       modal.style.maxWidth = '100%';
     } catch (eAnchor) {}
     modal.style.display = 'flex';
+    if (content) { var openOrigin = infoOriginTransform(content); if (openOrigin) content.style.setProperty('--pp-info-from', openOrigin); else content.style.removeProperty('--pp-info-from'); }
     modal.setAttribute('aria-hidden', 'false');
     modal.style.pointerEvents = 'auto';
     state.infoOpen = true;

@@ -283,6 +283,12 @@
     dropCache(state);
     render(state);
   };
+  // 帖子详情先用这里已有的数据立刻画出来，再等服务器的完整数据。
+  window.__xtjAuthorPostLookup = function (id) {
+    if (!state || !current(state)) return null;
+    for (var i = 0; i < state.posts.length; i++) if (String(state.posts[i].id) === String(id)) return state.posts[i];
+    return null;
+  };
   window.__xtjRemoveAuthorPost = function (id) {
     if (!state || !current(state)) return;
     state.posts = state.posts.filter(function (post) { return String(post.id) !== String(id); }); dropCache(state); render(state);

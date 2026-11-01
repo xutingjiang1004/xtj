@@ -13,9 +13,19 @@ test('the job queue poll relies on the retry-backoff migration being present in 
   assert.match(block('async function processNextCatJob(', 900), /next_retry_at/);
   assert.ok(fs.readFileSync('supabase/migrations/038_cat_ai_retry_backoff.sql', 'utf8').includes('ADD COLUMN IF NOT EXISTS next_retry_at'));
 });
-test('the cat is told when a post carries media it cannot see, so it does not invent what is in the picture', () => {
-  assert.match(block('const CAT_AI_COMMENT_PROMPT', 1600), /看不到画面[\s\S]*绝不编造画面内容/);
+test('the cat sees the post pictures when it can, and is told honestly when it cannot', () => {
+  const prompt = block('const CAT_AI_COMMENT_PROMPT', 2200);
+  assert.match(prompt, /images_attached 大于 0[\s\S]*真的看图/);
+  assert.match(prompt, /看不到画面/);
   const context = block('async function getCatPostContext(', 700);
-  assert.match(context, /select\('id, content, user_name, media_type'\)/);
-  assert.match(block('async function getCatPostContext(', 3200), /attachment_kind/);
+  assert.match(context, /select\('id, content, user_name, media_type, media_url'\)/);
+  const full = block('async function getCatPostContext(', 3800);
+  assert.match(full, /attachment_kind/); assert.match(full, /images_attached/); assert.match(full, /catPostImageParts/);
+  const call = block('async function processCatReplyJob(', 9000);
+  assert.match(call, /DEEPSEEK_MODEL_VISION/); assert.match(call, /retrying text-only/);
+});
+test('post pictures reach the model only as short-lived signed links of the server-owned attachments', () => {
+  const src = fs.readFileSync('render-api/cat-post-images.js', 'utf8');
+  assert.match(src, /createSignedUrl\(path, 120\)/); assert.match(src, /parsePostMediaUrl/); assert.match(src, /MAX_CAT_IMAGES = 3/);
+  assert.match(src, /url\.origin !== origin/);
 });

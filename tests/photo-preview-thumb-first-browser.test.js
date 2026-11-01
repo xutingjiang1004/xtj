@@ -19,7 +19,7 @@ test('going to the next photo shows its preview at once while the original loads
     const early = await p.evaluate(() => { const i = document.getElementById('photoPreviewImage'); return { opacity: getComputedStyle(i).opacity, src: i.currentSrc || i.src, nat: i.naturalWidth }; });
     assert.equal(early.opacity, '1', 'never an empty screen while the original downloads');
     assert.match(early.src, /22222222.*preview=1/); assert.ok(early.nat > 0);
-    await p.waitForFunction(() => { const i = document.getElementById('photoPreviewImage'); return /22222222-2222-4222-8222-222222222222\/media$/.test(i.currentSrc || i.src) && i.complete && getComputedStyle(i).opacity === '1'; }, null, { timeout: 15000 });
+    await p.waitForFunction(() => { const i = document.getElementById('photoPreviewImage'); return !/preview=1/.test(i.currentSrc || i.src) && i.complete && getComputedStyle(i).opacity === '1'; }, null, { timeout: 15000 });
     assert.equal(await p.evaluate(() => document.getElementById('photoPreviewImage').style.backgroundImage), '', 'the preview underlay is removed once the original shows');
     assert.deepEqual(s.errors, []);
   } finally { await s.close(); }

@@ -9319,7 +9319,25 @@
                 var body = document.getElementById('postDetailBody');
                 var modal = document.getElementById('postDetailModal');
                 if (title) title.textContent = '帖子详情';
+                // 先用本机已有的这条帖子（首页列表或个人动态页里的）把正文和图片立刻画出来，点赞/评论等完整数据到了再换上，
+                // 不让人对着骨架屏干等；本机没有这条帖子时仍显示加载骨架。
+                var quickPost = null;
+                try {
+                    quickPost = (Array.isArray(feedAllPosts) ? feedAllPosts : []).find(function(p) { return p && String(p.id) === String(postId); }) ||
+                        (typeof window.__xtjAuthorPostLookup === 'function' ? window.__xtjAuthorPostLookup(postId) : null);
+                } catch (_) { quickPost = null; }
+                var quickShown = false;
                 if (body) body.innerHTML = getXtjLoadingHtml('加载中..', '加载中..', 'feed');
+                if (quickPost && quickPost.user_name && quickPost.created_at && body) {
+                    try {
+                        renderPostDetail(Object.assign({}, quickPost, { views: quickPost.view_count != null ? quickPost.view_count : (quickPost.views || 0) }), [], []);
+                        ['likes', 'comments'].forEach(function(kind) {
+                            var panel = body.querySelector('.post-detail-' + kind + '-panel');
+                            if (panel) panel.innerHTML = '<div class="post-detail-more" role="status">正在加载…</div>';
+                        });
+                        quickShown = true;
+                    } catch (_) { body.innerHTML = getXtjLoadingHtml('加载中..', '加载中..', 'feed'); }
+                }
                 if (modal) {
                     modal.removeAttribute('inert');
                     modal.setAttribute('aria-hidden', 'false');
@@ -9348,7 +9366,10 @@
                         apiRes = await window.xtjFetch(apiUrl, { credentials: 'include', headers: detailHeaders }, 18000);
                     }
                     if (!apiRes.ok && (!apiRes.headers.get('content-type') || !apiRes.headers.get('content-type').includes('application/json'))) {
-                        if (isCurrentDetail() && body) body.innerHTML = '<div class="stat-empty">无法获取帖子详情（' + apiRes.status + '）。</div>';
+                        if (isCurrentDetail() && body) {
+                            if (quickShown && body.querySelector('.post-detail-shell')) body.querySelectorAll('.post-detail-more').forEach(function(note) { note.textContent = '点赞和评论加载失败（' + apiRes.status + '）'; });
+                            else body.innerHTML = '<div class="stat-empty">无法获取帖子详情（' + apiRes.status + '）。</div>';
+                        }
                         return;
                     }
                     var apiData;
@@ -9388,9 +9409,16 @@
                         return;
                     }
                     trackView(postId);
+                    var keepScroll = quickShown && body ? body.scrollTop : 0;
                     renderPostDetail(post, likes, comments);
+                    if (keepScroll && body) body.scrollTop = keepScroll;
                 } catch (e) {
-                    if (isCurrentDetail() && body) body.innerHTML = '<div class="stat-empty">加载失败，请重试</div>';
+                    if (isCurrentDetail() && body) {
+                        // 已经画出了本机的帖子内容时，只把点赞/评论区域改成失败提示，正文留着。
+                        if (quickShown && body.querySelector('.post-detail-shell')) {
+                            body.querySelectorAll('.post-detail-more').forEach(function(note) { note.textContent = '点赞和评论加载失败，请稍后重试'; });
+                        } else body.innerHTML = '<div class="stat-empty">加载失败，请重试</div>';
+                    }
                     console.error(e);
                 } finally {
                     if (isCurrentDetail() && body) {

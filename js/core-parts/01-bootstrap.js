@@ -2098,12 +2098,23 @@ function isAdmin() {
 
             var open = false;
 
+            var menuToken = 0;
             function setOpen(next) {
+                var was = open;
                 open = !!next;
-                menu.hidden = !open;
+                var token = ++menuToken, engine = window.xtjOrigin;
                 menu.setAttribute('aria-hidden', open ? 'false' : 'true');
                 trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
                 nav.classList.toggle('is-open', open);
+                if (engine) engine.cancel(menu);
+                // 菜单从按钮展开、收回按钮（只在窗口真的要显示/隐藏时动）。
+                var origin = engine && engine.motionOk() ? engine.rectOfElement(trigger) : null;
+                if (open) {
+                    menu.hidden = false;
+                    if (origin && !was) engine.morphIn(menu, origin);
+                } else if (!menu.hidden && origin) {
+                    if (!engine.morphOut(menu, origin, function() { if (menuToken === token) { menu.hidden = true; engine.cancel(menu); menu.style.willChange = ''; } })) menu.hidden = true;
+                } else menu.hidden = true;
             }
 
             function runTool(tool) {
