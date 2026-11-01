@@ -3512,7 +3512,7 @@ function isAdmin() {
                     } catch(e) {}
                 }
                 if (showAvatar) {
-                    avatarEl.innerHTML = '<img loading="lazy" decoding="async" src="' + escapeHtml(sanitizeUrl(showAvatar)) + '" alt="头像">';
+                    avatarEl.innerHTML = '<img decoding="async" src="' + escapeHtml(sanitizeUrl(showAvatar)) + '" alt="头像">';
                 } else {
                     avatarEl.innerHTML = '<span id="upcAvatarText">' + escapeHtml(String(userName || '?').charAt(0).toUpperCase()) + '</span>';
                 }
@@ -3546,7 +3546,7 @@ function isAdmin() {
                             if (cv[currentUser]) {
                                 avatarCache[currentUser] = cv[currentUser];
                                 if (document.getElementById('userProfileModal').classList.contains('active')) {
-                                    avatarEl.innerHTML = '<img loading="lazy" decoding="async" src="' + escapeHtml(sanitizeUrl(cv[currentUser].url)) + '" alt="头像">';
+                                    avatarEl.innerHTML = '<img decoding="async" src="' + escapeHtml(sanitizeUrl(cv[currentUser].url)) + '" alt="头像">';
                                 }
                             }
                         } catch(e) {}
@@ -3565,8 +3565,10 @@ function isAdmin() {
                         }
                         if (document.getElementById('userProfileModal').classList.contains('active')) {
                             var url = (userName === currentUser && getAvatarUrl(currentUser)) ? getAvatarUrl(currentUser) : avatarUrl;
-                            var imgHtml = '<img loading="lazy" decoding="async" src="' + escapeHtml(sanitizeUrl(url)) + '" alt="头像" onerror="this.style.display=\'none\';var s=document.createElement(\'span\');s.textContent=this.alt[0]?this.alt[0].toUpperCase():\'?\';s.className=\'avatar-fallback\';this.parentNode.appendChild(s);">';
-                            avatarEl.innerHTML = imgHtml;
+                            var imgHtml = '<img decoding="async" src="' + escapeHtml(sanitizeUrl(url)) + '" alt="头像" onerror="this.style.display=\'none\';var s=document.createElement(\'span\');s.textContent=this.alt[0]?this.alt[0].toUpperCase():\'?\';s.className=\'avatar-fallback\';this.parentNode.appendChild(s);">';
+                            // The same picture is already on screen: leave it alone instead of tearing it down and reloading it.
+                            var shownImg = avatarEl.querySelector('img');
+                            if (!(shownImg && shownImg.getAttribute('src') === sanitizeUrl(url))) avatarEl.innerHTML = imgHtml;
                             // 写入本地缓存
                             if (userName === currentUser) {
                                 try { var cv = readAvatarCacheFromStorage(); cv[currentUser] = { state: 'has_avatar', url: url, fetched_at: Date.now() }; writeAvatarCacheToStorage(cv); } catch(_) {}
@@ -22386,14 +22388,18 @@ function renderProfileActivityList(kind) {
                     window.__xtjPostDetailPaging[kind] = { offset: 0, size: kind === 'likes' ? 50 : 30, has_more: !!meta.has_more, cursor: meta.next_cursor || null, loading: false };
                 });
                 body.innerHTML = statPostDetailMarkup(post, likes || [], comments || []);
-                if (window.__xtjEnsureAvatars) window.__xtjEnsureAvatars((comments || []).map(function(row) { return row.user_name; }).concat([post.user_name]), body);
+                if (window.__xtjEnsureAvatars) window.__xtjEnsureAvatars((comments || []).map(function(row) { return row.user_name; }).concat((likes || []).map(function(row) { return row.user_name; }), [post.user_name]), body);
+                // Everything is shown in one list: the rest of a long list streams in behind the first page.
+                ['likes', 'comments'].forEach(function(kind) {
+                    var paging = window.__xtjPostDetailPaging[kind];
+                    if (paging && paging.has_more && paging.cursor) window.__xtjPagePostDetail(kind, 1);
+                });
             };
 
             function detailRelationsMarkup(post, kind, relationRows) {
                 var rows = relationRows || (kind === 'likes' ? window.__xtjPostDetailLikes || [] : window.__xtjPostDetailComments || []);
                 var state = (window.__xtjPostDetailPaging || {})[kind] || { offset: 0, size: kind === 'likes' ? 50 : 30 };
-                state.offset = Math.max(0, Math.min(state.offset, Math.max(0, rows.length - 1)));
-                var shown = rows.slice(state.offset, state.offset + state.size);
+                var shown = rows;
                 var total = Number(post[kind === 'likes' ? 'like_count' : 'comment_count']);
                 if (!Number.isFinite(total)) total = rows.length;
                 var html = '<div class="post-detail-panel-title">' + (kind === 'likes' ? '点赞用户' : '评论记录') + ' <span>' + total + '</span></div>';
@@ -22403,16 +22409,11 @@ function renderProfileActivityList(kind) {
                     if (recent.length) html += '<section class="post-detail-recent-comments" aria-label="新评论"><div class="post-detail-mini-copy">新评论</div>' + buildPostCommentsHtml(post, recent, { detail: true }) + '</section>';
                     html += shown.length ? buildPostCommentsHtml(post, shown, { detail: true }) : '<div class="stat-empty post-detail-empty">暂无评论</div>';
                 }
-                else html += shown.length ? shown.map(function(l) {
-                    return '<article class="post-detail-mini-row"><div class="post-detail-mini-main"><div class="post-detail-mini-name">' + escapeHtml(l.user_name) + '</div><div class="post-detail-mini-copy">留下了喜欢</div></div><span class="post-detail-mini-time">' + window.safeParseDate(l.created_at).toLocaleString() + '</span></article>';
-                }).join('') : '<div class="stat-empty post-detail-empty">暂无点赞</div>';
-                if (rows.length || state.has_more) {
-                    html += '<nav class="post-detail-pagination" aria-label="' + (kind === 'likes' ? '点赞名单分页' : '评论分页') + '">' +
-                        '<span role="status">' + (shown.length ? (state.offset + 1) + '–' + (state.offset + shown.length) : '0') + ' / ' + total + '</span>' +
-                        '<button type="button" ' + (state.offset <= 0 || state.loading ? 'disabled ' : '') + 'onclick="__xtjPagePostDetail(\'' + kind + '\', -1)">上一页</button>' +
-                        '<button type="button" ' + (state.loading || !state.has_more && state.offset + state.size >= rows.length ? 'disabled ' : '') + 'onclick="__xtjPagePostDetail(\'' + kind + '\', 1)">' + (state.loading ? '加载中…' : '下一页') + '</button>' +
-                        (state.error ? '<span role="status">' + escapeHtml(state.error) + '</span>' : '') + '</nav>';
-                }
+                else html += shown.length ? '<div class="post-detail-likes-grid">' + shown.map(function(l) {
+                    return '<article class="post-detail-mini-row post-detail-like-row">' + getAvatarHtml(l.user_name, null) + '<div class="post-detail-mini-main"><div class="post-detail-mini-name">' + escapeHtml(l.user_name) + '</div><div class="post-detail-mini-copy">' + escapeHtml(formatMsgTime(l.created_at)) + '</div></div></article>';
+                }).join('') + '</div>' : '<div class="stat-empty post-detail-empty">暂无点赞</div>';
+                if (state.loading || state.has_more && !state.error) html += '<div class="post-detail-more" role="status">正在加载更多…</div>';
+                if (state.error) html += '<div class="post-detail-more" role="status">' + escapeHtml(state.error) + ' <button type="button" onclick="__xtjPagePostDetail(\'' + kind + '\', 1)">重试</button></div>';
                 return html;
             }
             function comparePostDetailComments(a,b) {
@@ -22431,7 +22432,7 @@ function renderProfileActivityList(kind) {
                 if(!post||!state)return;
                 var index=(window.__xtjPostDetailComments||[]).findIndex(function(row){return String(row.id)===String(commentId);});
                 if(index<0)return;
-                state.offset=Math.floor(index/state.size)*state.size;window.__xtjPatchPostDetailInteractions(post.id);
+                window.__xtjPatchPostDetailInteractions(post.id);
                 requestAnimationFrame(function(){if(window.__xtjPostDetailSnapshot!==post)return;var nodes=document.querySelectorAll('#postDetailBody .comment-item[data-comment-id]');
                     Array.from(nodes).some(function(node){if(node.getAttribute('data-comment-id')!==String(commentId))return false;node.scrollIntoView({block:'center'});node.tabIndex=-1;node.focus({preventScroll:true});return true;});});
             };
@@ -22439,8 +22440,7 @@ function renderProfileActivityList(kind) {
                 var post = window.__xtjPostDetailSnapshot, state = (window.__xtjPostDetailPaging || {})[kind];
                 if (!post || !state || state.loading) return;
                 var rows = kind === 'likes' ? window.__xtjPostDetailLikes : window.__xtjPostDetailComments;
-                var next = Math.max(0, state.offset + direction * state.size);
-                if (direction < 0 || next + state.size <= rows.length || !state.has_more && next < rows.length) { state.offset = next; state.error = ''; window.__xtjPatchPostDetailInteractions(post.id); return; }
+                var next = 0;
                 if (!state.has_more || !state.cursor) return;
                 var owner = currentUser, epoch = _authStateEpoch, seq = _postDetailReqSeq;
                 var version = typeof feedInteractionMutationVersion === 'number' ? feedInteractionMutationVersion : 0;
@@ -22459,9 +22459,8 @@ function renderProfileActivityList(kind) {
                         window.__xtjPostDetailRecentComments = (window.__xtjPostDetailRecentComments || []).filter(function(row) { return !seen.has(String(row.id)); });
                     }
                     state.has_more = !!body.has_more; state.cursor = body.next_cursor || null;
-                    state.offset = Math.min(next, Math.max(0, rows.length - 1));
                 } catch(error) { if (current()) state.error = error.message || '加载失败，请重试'; }
-                finally { if (current()) { state.loading = false; window.__xtjPatchPostDetailInteractions(post.id); } }
+                finally { if (current()) { state.loading = false; window.__xtjPatchPostDetailInteractions(post.id); if (state.has_more && state.cursor && !state.error && (state.pagesLoaded = (state.pagesLoaded || 0) + 1) < 60) window.__xtjPagePostDetail(kind, 1); } }
             };
 
             window.__xtjPatchPostDetailInteractions = function(postId) {
@@ -22476,7 +22475,7 @@ function renderProfileActivityList(kind) {
                 if (panel && keptReply && window.__xtjReattachReplyBox) window.__xtjReattachReplyBox(panel, keptReply);
                 if (panel && window.__xtjEnsureAvatars) window.__xtjEnsureAvatars(comments.map(function(row) { return row.user_name; }), panel);
                 var likesPanel = body.querySelector('.post-detail-likes-panel');
-                if (likesPanel) likesPanel.innerHTML = detailRelationsMarkup(post, 'likes');
+                if (likesPanel) { likesPanel.innerHTML = detailRelationsMarkup(post, 'likes'); if (window.__xtjEnsureAvatars) window.__xtjEnsureAvatars(likes.map(function(row) { return row.user_name; }), likesPanel); }
                 var stats = body.querySelector('.post-detail-stats');
                 if (stats) stats.innerHTML = buildPostStatsLine(post, Number.isFinite(Number(post.like_count)) ? Number(post.like_count) : likes.length, Number.isFinite(Number(post.comment_count)) ? Number(post.comment_count) : comments.length);
             };

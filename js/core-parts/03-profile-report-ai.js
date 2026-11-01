@@ -56,7 +56,7 @@
                     } catch(e) {}
                 }
                 if (showAvatar) {
-                    avatarEl.innerHTML = '<img loading="lazy" decoding="async" src="' + escapeHtml(sanitizeUrl(showAvatar)) + '" alt="头像">';
+                    avatarEl.innerHTML = '<img decoding="async" src="' + escapeHtml(sanitizeUrl(showAvatar)) + '" alt="头像">';
                 } else {
                     avatarEl.innerHTML = '<span id="upcAvatarText">' + escapeHtml(String(userName || '?').charAt(0).toUpperCase()) + '</span>';
                 }
@@ -90,7 +90,7 @@
                             if (cv[currentUser]) {
                                 avatarCache[currentUser] = cv[currentUser];
                                 if (document.getElementById('userProfileModal').classList.contains('active')) {
-                                    avatarEl.innerHTML = '<img loading="lazy" decoding="async" src="' + escapeHtml(sanitizeUrl(cv[currentUser].url)) + '" alt="头像">';
+                                    avatarEl.innerHTML = '<img decoding="async" src="' + escapeHtml(sanitizeUrl(cv[currentUser].url)) + '" alt="头像">';
                                 }
                             }
                         } catch(e) {}
@@ -109,8 +109,10 @@
                         }
                         if (document.getElementById('userProfileModal').classList.contains('active')) {
                             var url = (userName === currentUser && getAvatarUrl(currentUser)) ? getAvatarUrl(currentUser) : avatarUrl;
-                            var imgHtml = '<img loading="lazy" decoding="async" src="' + escapeHtml(sanitizeUrl(url)) + '" alt="头像" onerror="this.style.display=\'none\';var s=document.createElement(\'span\');s.textContent=this.alt[0]?this.alt[0].toUpperCase():\'?\';s.className=\'avatar-fallback\';this.parentNode.appendChild(s);">';
-                            avatarEl.innerHTML = imgHtml;
+                            var imgHtml = '<img decoding="async" src="' + escapeHtml(sanitizeUrl(url)) + '" alt="头像" onerror="this.style.display=\'none\';var s=document.createElement(\'span\');s.textContent=this.alt[0]?this.alt[0].toUpperCase():\'?\';s.className=\'avatar-fallback\';this.parentNode.appendChild(s);">';
+                            // The same picture is already on screen: leave it alone instead of tearing it down and reloading it.
+                            var shownImg = avatarEl.querySelector('img');
+                            if (!(shownImg && shownImg.getAttribute('src') === sanitizeUrl(url))) avatarEl.innerHTML = imgHtml;
                             // 写入本地缓存
                             if (userName === currentUser) {
                                 try { var cv = readAvatarCacheFromStorage(); cv[currentUser] = { state: 'has_avatar', url: url, fetched_at: Date.now() }; writeAvatarCacheToStorage(cv); } catch(_) {}
