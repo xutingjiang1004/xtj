@@ -5621,7 +5621,14 @@
                 if (post && post.visibility === 'private') { showToast('私密帖子仅自己可见，不能分享'); return; }
                 closePostShare();
                 postShareReturnFocus = document.activeElement;
-                var link = new URL('/share/posts/' + encodeURIComponent(id), window.location.origin).href;
+                var shareTarget = new URL('/share/posts/' + encodeURIComponent(id), window.location.origin);
+                // 卡片标题显示「谁分享的帖子」，所以把分享者一起带进链接；
+                // 服务端读 from，微信抓取时就能拿到正确的人名。
+                try {
+                    var sharer = String(currentUser || (window.readUserName && window.readUserName()) || '').trim();
+                    if (sharer) shareTarget.searchParams.set('from', sharer);
+                } catch (_) {}
+                var link = shareTarget.href;
                 var text = postSharePlainText(post);
                 var author = post && post.user_name ? String(post.user_name) : 'XTJ 用户';
                 var overlay = document.createElement('div');

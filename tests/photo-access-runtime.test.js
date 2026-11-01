@@ -280,6 +280,11 @@ test('post share page turns a bare link into a card and falls back to the site c
   assert.match(withAvatar,/property="og:image" content="https:\/\/xtj\.example\/api\/avatar\/image\/xxz\?v=abc&amp;size=large&amp;format=jpg"/);
   assert.ok(!withAvatar.includes('og:image:width'),'头像封面不应声明默认封面尺寸');
 
+  // 转发场景：标题写转发者，描述里的「来自」仍是原作者，两者不能混。
+  const forwarded=renderPostSharePage({...row,user_name:'🧢',content:'你要干啥？'},[],'https://xtj.example',null,{sharer:'xxz'});
+  assert.match(forwarded,/property="og:title" content="xxz 分享的帖子"/);
+  assert.match(forwarded,/property="og:description" content="你要干啥？ · 来自 🧢 的帖子，点开即可查看"/);
+
   // 带图片的帖子：描述只写来源，不重复正文。
   const withImage=renderPostSharePage({...row,content:'这是一段很长的正文'},[{media_type:'image',share_media_url:'/api/post/x/media/0'}],'https://xtj.example');
   assert.match(withImage,/property="og:description" content="来自 xxz 的帖子，点开即可查看"/);

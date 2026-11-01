@@ -168,7 +168,8 @@ async function streamOriginal(req, res, { supabase, bucket, path, fetchImpl = fe
   const range = req.headers.range;
   if (range && !/^bytes=(?:\d+-\d*|-\d+)$/.test(range)) return res.status(416).end();
   const signed = await supabase.storage.from(bucket).createSignedUrl(path, 60);
-  if (!signed || signed.error || !signed.data || !signed.data.signedUrl) throw Error('media_storage_unavailable');
+  // 带上存储返回的原始原因（Object not found / 权限 / 网络），否则上层只能看到一个笼统的 unavailable。
+  if (!signed || signed.error || !signed.data || !signed.data.signedUrl) throw Error('media_storage_unavailable:' + String((signed && signed.error && (signed.error.message || signed.error.statusCode)) || 'no_url'));
   const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 120000);
   const closed = () => controller.abort(); res.on('close', closed);
   try {
@@ -327,7 +328,7 @@ function createPhotoAccess({ app, supabase, supabaseUrl, secret, authenticateUse
         // 微信抓取端对 webp 支持不稳定，这里显式要 JPEG。
         if (avatarPath) avatarUrl = origin + avatarPath + '&size=large&format=jpg';
       } catch (_) { avatarUrl = ''; }
-      res.set({'Cache-Control':'no-store, private','Referrer-Policy':'no-referrer'}).type('html').send(renderPostSharePage(row, items, origin, preview, { avatarUrl }));
+      res.set({'Cache-Control':'no-store, private','Referrer-Policy':'no-referrer'}).type('html').send(renderPostSharePage(row, items, origin, preview, { avatarUrl, sharer:String(req.query.from || '') }));
     } catch (_) { unavailable(res); }
   });
   return { photo, codec, authenticateMedia, migrate: () => migratePhotoStorage(supabase) };
@@ -531,12 +532,14 @@ function renderPostSharePage(row, items, origin, preview = null, options = {}) {
   const media = Array.isArray(items) ? items : [];
   const author = String(row.user_name || 'XTJ 用户');
   const avatarUrl = String((options && options.avatarUrl) || '');
+  // 分享卡片上的「谁」是点分享的那个人，不是发帖人。
+  // 把链接转发给朋友后，朋友看到的是「我朋友转发了一篇某某的帖子」，标题写转发者才符合直觉。
+  const sharer = String((options && options.sharer) || '').trim().slice(0, 60);
   // 标题与摘要里去掉裸链接本身，改用链接卡片的标题/简介，微信卡片才不会显示成一串网址。
   const plain = text.replace(POST_URL_RE, ' ').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
   const firstImage = media.find(item => /^(image|photo)$/.test(String(item.media_type || '')));
-  // 标题统一「某某 分享的帖子」。以前音乐帖标题是歌名、文字帖是正文，
-  // 微信里同一站点分享出去样式各不相同，也不知道是谁发的。
-  const title = author + ' 分享的帖子';
+  // 标题统一「某某 分享的帖子」；某某优先取分享者，拿不到分享者才退回帖子作者。
+  const title = (sharer || author) + ' 分享的帖子';
   // 描述统一「正文 · 来自 某某 的帖子，点开即可查看」；带图片的帖子正文由图片承担，不再重复文字。
   const descParts = [];
   if (plain && !firstImage) descParts.push(plain.slice(0, 110));

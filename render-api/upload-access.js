@@ -49,11 +49,26 @@ function installUploadAccess(app, { supabase, supabaseUrl, optionalAuth, rateLim
       if (!allowed) return res.status(404).end();
       // Avatar paths are unique per upload, so browsers may reuse them for a day without asking again.
       const cacheControl = /^avatars\//.test(path) ? 'public, max-age=86400, stale-while-revalidate=604800' : undefined;
+      const stream = bucket => streamOriginal(req,res,{supabase,bucket,path,fetchImpl,allowDownload:path.startsWith('chat/'),cacheControl,previews});
       try {
-        await streamOriginal(req,res,{supabase,bucket:'uploads',path,fetchImpl,allowDownload:path.startsWith('chat/'),cacheControl,previews});
-      } catch (_) {
-        // 文件本身已经不在存储里时不能再回 503：前端会当成「临时失败」无限重试。
-        if (!res.headersSent) res.status(404).json({ ok:false, code:'media_missing' }); else res.destroy();
+        await stream('uploads');
+      } catch (error) {
+        if (res.headersSent || req.destroyed) { if (!res.destroyed) res.destroy(); return; }
+        // 老照片有可能已经在私有的 photo-wall 桶里（迁移脚本搬过），
+        // 只在 uploads 明确找不到时兜底试一次，不改变任何鉴权判定。
+        let recovered = false;
+        try {
+          const alt = await supabase.storage.from('photo-wall').exists(path);
+          if (alt && alt.data === true) { await stream('photo-wall'); recovered = true; }
+        } catch (_) {}
+        if (recovered || res.headersSent) return;
+        // 前端/排查都要能区分「文件真的没了」和「存储临时不可用」，
+        // 之前两种情况一律 503，结果既误导用户也误导排查。
+        const reason = String((error && error.message) || 'unknown').slice(0, 80);
+        const transient = /unavailable|timeout|aborted/i.test(reason) && !/not.?found|missing/i.test(reason);
+        res.set('X-XTJ-Media-Error', reason);
+        if (transient) return res.status(503).json({ ok:false, code:'media_unavailable', retryable:true });
+        return res.status(404).json({ ok:false, code:'media_missing' });
       }
     } catch (_) { if (!res.headersSent) res.status(503).json({ok:false,code:'media_unavailable',retryable:true}); else res.destroy(); }
   });
