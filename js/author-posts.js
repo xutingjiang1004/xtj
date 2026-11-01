@@ -78,14 +78,16 @@
             setTimeout(function () { if (cell.isConnected) img.src = previewSrc(item, true); }, 900 * attempt);
             return;
           }
-          var failed = function () { cell.classList.add('is-unavailable'); img.hidden = true; };
+          // 重试 3 次仍然失败，多半是这条老帖的图片文件已经不在存储里了（接口返回 404）。
+          // 文案要说清楚，别让用户一直点「点击重试」却永远转不出来。
+          var failed = function () { cell.classList.add('is-unavailable', 'is-missing'); img.hidden = true; };
           if (!window.xtjRecoverMediaImage || !window.xtjRecoverMediaImage(img, img.src, failed)) failed();
         });
         cell.addEventListener('click', function (event) {
           if (!cell.classList.contains('is-unavailable')) return;
           event.preventDefault();
           event.stopPropagation();
-          cell.classList.remove('is-unavailable');
+          cell.classList.remove('is-unavailable', 'is-missing');
           img.hidden = false;
           attempt = 0;
           img.src = previewSrc(item, true);
