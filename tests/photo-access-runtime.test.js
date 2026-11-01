@@ -255,3 +255,25 @@ test('post share page keeps zoomable image markup and renders video and audio pl
   assert.ok(!html.includes('<b>作者</b>'),'作者名必须转义');
   assert.match(html,/property="og:image" content="https:\/\/xtj\.example\/api\/post\/x\/media\/2"/);
 });
+
+test('post share page turns a bare link into a card and falls back to the site cover',async()=>{
+  const { renderPostSharePage, publicLink } = require('../render-api/photo-access');
+  const row={id:'x',user_name:'xxz',content:'https://music.apple.com/us/album/promise/1866523223?i=1866523227',created_at:'2026-11-01T00:00:00Z',media_type:''};
+  const preview={kind:'music',host:'Apple Music',url:'https://music.apple.com/promise',title:'Promise',desc:'Wonstein',image:'https://is1.example/cover.jpg',audio:'https://audio.example/a.m4a'};
+  const html=renderPostSharePage(row,[],'https://xtj.example',preview);
+  assert.match(html,/class="lcard music"/);
+  assert.match(html,/<audio class="lc-audio" controls preload="none" src="https:\/\/audio\.example\/a\.m4a">/);
+  assert.match(html,/property="og:title" content="Promise"/);
+  assert.match(html,/property="og:image" content="https:\/\/is1\.example\/cover\.jpg"/);
+  assert.ok(!html.includes('https://music.apple.com/us/album/promise'),'裸链接不应再原样出现在正文里');
+
+  const plain=renderPostSharePage({...row,content:'今天天气不错'},[],'https://xtj.example');
+  assert.match(plain,/property="og:image" content="https:\/\/xtj\.example\/img\/share-cover\.png"/);
+  assert.match(plain,/rel="apple-touch-icon" sizes="180x180" href="https:\/\/xtj\.example\/img\/icon-180\.png"/);
+
+  assert.equal(publicLink('http://127.0.0.1/x'),null);
+  assert.equal(publicLink('http://192.168.1.4/x'),null);
+  assert.equal(publicLink('http://localhost:3000/x'),null);
+  assert.equal(publicLink('http://169.254.169.254/latest'),null);
+  assert.ok(publicLink('https://music.apple.com/x'));
+});
