@@ -1,6 +1,9 @@
 'use strict';
-const { streamOriginal } = require('./photo-access');
+// 不要在模块顶层解构 streamOriginal：photo-access ↔ upload-access 存在循环依赖，
+// 顶层解构时对方还没执行到 module.exports，拿到的是 undefined，
+// 结果是 /api/uploads/media 下所有旧图一律失败（报 streamOriginal is not a function）。
 const { isNormalPost } = require('./post-query');
+function mediaStreamer() { return require('./photo-access').streamOriginal; }
 function uploadPath(value, origin) {
   try {
     const url = new URL(value), expected = new URL(origin);
@@ -49,7 +52,7 @@ function installUploadAccess(app, { supabase, supabaseUrl, optionalAuth, rateLim
       if (!allowed) return res.status(404).end();
       // Avatar paths are unique per upload, so browsers may reuse them for a day without asking again.
       const cacheControl = /^avatars\//.test(path) ? 'public, max-age=86400, stale-while-revalidate=604800' : undefined;
-      const stream = bucket => streamOriginal(req,res,{supabase,bucket,path,fetchImpl,allowDownload:path.startsWith('chat/'),cacheControl,previews});
+      const stream = bucket => mediaStreamer()(req,res,{supabase,bucket,path,fetchImpl,allowDownload:path.startsWith('chat/'),cacheControl,previews});
       try {
         await stream('uploads');
       } catch (error) {
