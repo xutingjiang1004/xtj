@@ -120,7 +120,9 @@ test('real tool executor gates native Search/Fetch and keeps rich model evidence
   const page=await execute({function:{name:'read_web_page',arguments:'{"url":"https://example.com/source"}'}},context);
   assert.match(page.content,/# 实际正文/);assert.match(page.content,/不可信/);assert.equal(localReads,0);assert.equal(gates,2);assert.equal(sent.length,2);
   allowed=false;const blocked=await execute({function:{name:'search_web',arguments:'{"query":"blocked"}'}},context);assert.match(blocked.error,/额度/);assert.equal(sent.length,2);
-  await execute({function:{name:'read_web_page',arguments:'{"url":"https://example.com/source"}'}},context);assert.equal(localReads,1);assert.equal(sent.length,2);
+  // 同一请求里相同网址的第二次读取走请求内缓存；换一个网址才能验证「额度被挡后回退到本地读取」。
+  await execute({function:{name:'read_web_page',arguments:'{"url":"https://example.com/source"}'}},context);assert.equal(localReads,0);assert.equal(sent.length,2);
+  await execute({function:{name:'read_web_page',arguments:'{"url":"https://example.com/another"}'}},context);assert.equal(localReads,1);assert.equal(sent.length,2);
 });
 test('request-scoped web fees stay isolated and are retained in actual assistant history metadata',async t=>{
   configure(t);const {EventEmitter}=require('node:events'),fs=require('node:fs');
