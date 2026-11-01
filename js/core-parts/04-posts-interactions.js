@@ -2343,7 +2343,7 @@
                         '" alt="' + escapeHtml(safeUser) + '" data-user-name="' + escapeHtml(safeUser) +
                         '" loading="lazy" decoding="async" style="opacity:0;transition:opacity 0.2s"' +
                         ' onload="this.style.opacity=\'1\';var p=this.closest(\'.avatar\')||this.closest(\'.profile-detail-avatar\');if(p){p.classList.add(\'has-image\');}"' +
-                        ' onerror="var p=this.closest(\'.avatar\')||this.closest(\'.profile-detail-avatar\');if(p){p.classList.remove(\'has-image\');this.remove();var f=p.querySelector(\'.avatar-fallback\');if(f)f.style.visibility=\'visible\'};var u=this.getAttribute(\'data-user-name\');if(u&&window.__xtjInvalidateAvatarCache)window.__xtjInvalidateAvatarCache(u)">' +
+                        ' onerror="var rn=+this.getAttribute(\'data-retry\')||0;if(rn<2){this.setAttribute(\'data-retry\',rn+1);var re=this,rb=(re.getAttribute(\'src\')||\'\').split(\'#\')[0];setTimeout(function(){re.src=rb+\'#r\'+(rn+1)},800*(rn+1));return}var p=this.closest(\'.avatar\')||this.closest(\'.profile-detail-avatar\');if(p){p.classList.remove(\'has-image\');this.remove();var f=p.querySelector(\'.avatar-fallback\');if(f)f.style.visibility=\'visible\'};var u=this.getAttribute(\'data-user-name\');if(u&&window.__xtjInvalidateAvatarCache)window.__xtjInvalidateAvatarCache(u)">' +
                         fallbackSpan;
                 }
                 return fallbackSpan;

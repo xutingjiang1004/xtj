@@ -14832,9 +14832,13 @@ app.get('/api/avatar/:userName', authenticateUser, async (req, res) => {
     if (!data || data.length === 0) {
       return res.json({ ok: true, avatar_url: null });
     }
-    return res.json({ ok: true, avatar_url: mediaGatewayUrl(data[0].media_url, SUPABASE_URL) || null });
+    return res.json({ ok: true, avatar_url: avatarImageUrl(targetUser, data[0].media_url) || null });
   } catch (e) { console.error('[API] avatar get:', e.message); return res.status(500).json({ error: '查询失败' }); }
 });
+
+// 头像统一缩成 192px 小图并按版本长缓存（见 avatar-image.js）；接口只返回这个地址，不再回传 base64 原图。
+const { avatarImageUrl, registerAvatarImage } = require('./avatar-image');
+registerAvatarImage(app, { supabase: supabase, supabaseUrl: SUPABASE_URL, sharp: sharp, rateLimit: rateLimit });
 
 // GET /api/avatar/public/:userName - 公开头像（无需登录，限流）
 app.get('/api/avatar/public/:userName', rateLimit(60000, 300), async (req, res) => {
@@ -14852,7 +14856,7 @@ app.get('/api/avatar/public/:userName', rateLimit(60000, 300), async (req, res) 
     if (!data || data.length === 0) {
       return res.json({ ok: true, avatar_url: null });
     }
-    return res.json({ ok: true, avatar_url: mediaGatewayUrl(data[0].media_url, SUPABASE_URL) || null });
+    return res.json({ ok: true, avatar_url: avatarImageUrl(targetUser, data[0].media_url) || null });
   } catch (e) { console.error('[API] public avatar get:', e.message); return res.status(500).json({ error: '查询失败' }); }
 });
 
@@ -14875,7 +14879,7 @@ app.post('/api/avatar/batch', rateLimit(60000, 60), async (req, res) => {
     (data || []).forEach(function(row) {
       if (row.media_url && !seen[row.user_name]) {
         seen[row.user_name] = true;
-        result[row.user_name] = mediaGatewayUrl(row.media_url, SUPABASE_URL);
+        result[row.user_name] = avatarImageUrl(row.user_name, row.media_url);
       }
     });
     // P6: 对请求中但无头像的用户返回 null，与单用户接口行为一致。
