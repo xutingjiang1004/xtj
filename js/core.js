@@ -15668,6 +15668,46 @@ function renderProfileActivityList(kind) {
                 }
             }
 
+            // Centered time dividers like iMessage / WeChat: before the first message, whenever the
+            // day changes and after a pause of five minutes. The small time inside each bubble stays.
+            var CHAT_TIME_SEP_GAP_MS = 5 * 60 * 1000;
+            function formatChatSeparatorTime(stamp) {
+                var d = new Date(stamp);
+                if (isNaN(d.getTime())) return '';
+                var now = new Date();
+                var pad = function(n) { return String(n).padStart(2, '0'); };
+                var hhmm = pad(d.getHours()) + ':' + pad(d.getMinutes());
+                var dayStart = function(x) { return new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime(); };
+                var days = Math.round((dayStart(now) - dayStart(d)) / 86400000);
+                if (days <= 0) return '今天 ' + hhmm;
+                if (days === 1) return '昨天 ' + hhmm;
+                if (days < 7) return '周' + '日一二三四五六'.charAt(d.getDay()) + ' ' + hhmm;
+                if (d.getFullYear() === now.getFullYear()) return (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + hhmm;
+                return d.getFullYear() + '年' + (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + hhmm;
+            }
+            function chatNeedsTimeSeparator(stamp, previousStamp) {
+                if (!isFinite(stamp)) return false;
+                if (!previousStamp) return true;
+                if (stamp - previousStamp >= CHAT_TIME_SEP_GAP_MS) return true;
+                return new Date(stamp).toDateString() !== new Date(previousStamp).toDateString();
+            }
+            function getChatTimeSeparatorNode(stamp, pool) {
+                var key = String(stamp), label = formatChatSeparatorTime(stamp);
+                var node = pool[key];
+                if (node) delete pool[key];
+                else {
+                    node = document.createElement('div');
+                    node.className = 'chat-time-sep';
+                    node.setAttribute('role', 'separator');
+                    node.setAttribute('data-sep-key', key);
+                    node.appendChild(document.createElement('span'));
+                }
+                var span = node.firstChild;
+                if (span.textContent !== label) span.textContent = label;
+                node.setAttribute('aria-label', label);
+                return node;
+            }
+
             function renderDockMessages(userName, msgs, forceScroll) {
                 scheduleChatReactions();
                 const el = document.getElementById('dockChatMessages');
@@ -15746,7 +15786,14 @@ function renderProfileActivityList(kind) {
                 });
                 var newReceived=msgs.filter(function(message,index){return message.user_name!==currentUser && !existingRows[getDockChatRowKey(message,index)];}).length;
                 var orderedNodes = [];
+                var existingTimeSeps = {}, previousMessageStamp = 0;
+                Array.prototype.forEach.call(el.querySelectorAll('.chat-time-sep[data-sep-key]'), function(node) {
+                    existingTimeSeps[node.getAttribute('data-sep-key')] = node;
+                });
                 msgs.forEach(function(message, index) {
+                    var messageStamp = Date.parse(message.created_at);
+                    if (chatNeedsTimeSeparator(messageStamp, previousMessageStamp)) orderedNodes.push(getChatTimeSeparatorNode(messageStamp, existingTimeSeps));
+                    if (isFinite(messageStamp)) previousMessageStamp = messageStamp;
                     var key = getDockChatRowKey(message, index);
                     var sig = buildDockChatRowSignature(message);
                     var node = existingRows[key];

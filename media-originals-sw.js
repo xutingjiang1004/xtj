@@ -81,9 +81,64 @@ async function originalResponse(event, key) {
   }
   return response;
 }
+// Private Storage images (chat attachments, profile images) are shown through
+// signed links. The signature changes every time the server signs the object,
+// so the browser's HTTP cache never recognised the same picture and downloaded
+// it again on every chat open. Key the device copy by bucket and object path
+// instead. Object names carry a timestamp/random part and are never reused, and
+// the cache can only be read by a page that already holds a valid signed link.
+const SIGNED_CACHE = 'xtj-signed-media-v1';
+const SIGNED_MAX_BYTES = 160 * 1024 * 1024;
+const SIGNED_MAX_FILE_BYTES = 24 * 1024 * 1024;
+const SIGNED_MAX_AGE = 30 * 86400000;
+let signedWrites = Promise.resolve(), signedCorsBroken = false;
+function signedKey(request) {
+  if (request.method !== 'GET' || request.destination !== 'image' || request.headers.has('range')) return null;
+  let url;
+  try { url = new URL(request.url); } catch (_) { return null; }
+  if (url.protocol !== 'https:' || !/\.supabase\.co$/i.test(url.hostname)) return null;
+  const match = url.pathname.match(/^\/storage\/v1\/object\/sign\/([^/]+)\/(.+)$/);
+  return match ? new Request(self.location.origin + '/__xtj_signed__/' + match[1] + '/' + match[2]) : null;
+}
+async function trimSigned(cache) {
+  const entries = [];
+  for (const key of await cache.keys()) {
+    const saved = await cache.match(key);
+    if (saved) entries.push({ key, size: Number(saved.headers.get('X-XTJ-Cached-Bytes')) || 0, at: Number(saved.headers.get('X-XTJ-Cached-At')) || 0 });
+  }
+  entries.sort((a, b) => a.at - b.at);
+  let bytes = entries.reduce((sum, entry) => sum + entry.size, 0);
+  for (const entry of entries) {
+    if (Date.now() - entry.at <= SIGNED_MAX_AGE && bytes <= SIGNED_MAX_BYTES) break;
+    await cache.delete(entry.key); bytes -= entry.size;
+  }
+}
+async function signedResponse(event, key) {
+  try {
+    const cache = await caches.open(SIGNED_CACHE), saved = await cache.match(key);
+    if (saved && Date.now() - Number(saved.headers.get('X-XTJ-Cached-At')) <= SIGNED_MAX_AGE) return saved;
+  } catch (_) {} // Full or disabled storage must not stop pictures from loading.
+  if (signedCorsBroken) return fetch(event.request);
+  let response;
+  try { response = await fetch(event.request.url, { mode: 'cors', credentials: 'omit' }); }
+  catch (_) { signedCorsBroken = true; return fetch(event.request); }
+  const bytes = Number(response.headers.get('Content-Length'));
+  if (response.status === 200 && /^image\//i.test(response.headers.get('Content-Type') || '') && bytes > 0 && bytes <= SIGNED_MAX_FILE_BYTES) {
+    const headers = new Headers(response.headers);
+    headers.delete('Content-Encoding');
+    headers.set('X-XTJ-Cached-At', String(Date.now())); headers.set('X-XTJ-Cached-Bytes', String(bytes));
+    const copy = new Response(response.clone().body, { status: 200, headers });
+    event.waitUntil((signedWrites = signedWrites.catch(() => {}).then(async () => {
+      const cache = await caches.open(SIGNED_CACHE); await cache.put(key, copy); await trimSigned(cache);
+    })).catch(() => {}));
+  }
+  return response;
+}
 self.addEventListener('fetch', event => {
   const key = originalKey(event.request);
-  if (key) event.respondWith(originalResponse(event, key));
+  if (key) { event.respondWith(originalResponse(event, key)); return; }
+  const signed = signedKey(event.request);
+  if (signed) event.respondWith(signedResponse(event, signed));
 });
 self.addEventListener('message', event => {
   const source = event.source;
@@ -91,7 +146,7 @@ self.addEventListener('message', event => {
   if (event.data?.type === 'XTJ_CLEAR_ORIGINAL_MEDIA') {
     originalGeneration++;
     if (originalSeedController) originalSeedController.abort();
-    event.waitUntil(originalWrite(() => caches.delete(ORIGINAL_CACHE)).catch(() => {}).then(() => event.ports?.[0]?.postMessage({ ok: true })));
+    event.waitUntil(originalWrite(() => caches.delete(ORIGINAL_CACHE)).catch(() => {}).then(() => caches.delete(SIGNED_CACHE)).catch(() => {}).then(() => event.ports?.[0]?.postMessage({ ok: true })));
   }
   if (event.data?.type === 'XTJ_SEED_ORIGINAL_MEDIA') {
     const generation = originalGeneration;
