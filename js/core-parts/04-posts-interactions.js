@@ -903,7 +903,7 @@
                         // Phase 3-P0-1: 修复 @小猫 正则。原 lookahead (?=\s|$|[^\w\u4e00-\u9fa5]) 要求
                         // 小猫后跟非汉字字符，导致 @小猫帮我看看 不匹配（"帮"是汉字）。
                         // 改为负向断言 (?![猫])：仅排除 小猫咪，@小猫帮我看看 可匹配。
-                        if (content && /[@＠]小猫(?![猫咪])/.test(content) && insertedComment) {
+                        if (content && insertedComment && (/[@＠]小猫(?![猫咪])/.test(content) || (reply && reply.parentIsAi))) {
                             pollCatAiReply(insertedComment.id, targetPostId);
                         }
                     } catch (e) {
@@ -961,6 +961,8 @@
                 window.openComment(postId, {
                     parentId: item.getAttribute('data-comment-id'),
                     parentName: item.getAttribute('data-user-name') || '',
+                    // 回复小猫的评论：不用再 @ 它，它也会接着回。
+                    parentIsAi: item.classList.contains('cat-ai-comment'),
                     postEl: holder, anchor: item
                 });
             };
@@ -1446,13 +1448,31 @@
             };
             resetPostActionModals();
 
-            // ===== Windows open from what was tapped and close back to it (shared by modals, the photo info card, menus) =====
-            // 动画只用 transform 和 opacity（合成层，不重绘）；起点是被点的那个小元素（头像/缩略图/按钮，或手指落点），不是整行的中心。
+            // ===== Shared-element window motion (Apple "zoom transition" / matchedGeometryEffect idea) =====
+            // 一个窗口从被点的元素长出来，关闭时沿原路回到那个元素：
+            //   * 窗口的外框在视口里从「被点元素的矩形」连续变到「最终矩形」（位置和大小一起插值，起点终点都对得上）；
+            //   * 被点的是头像/缩略图时，同一张图（ghost）跟着一起飞到新窗口里它对应的位置，窗口内容在它后面渐显；
+            //   * 窗口里的内容用一层同色「遮罩」先盖住再淡出，不会出现一张缩得很小的页面缩略图在飞；
+            //   * 背景压暗（scrim）单独淡入淡出，不再让整个窗口跟着变半透明；
+            //   * 动画在「初始姿态已经画出来」之后的下一帧才开始计时：打开时主线程忙（渲染列表、解码图片）不会把动画吃掉一大截；
+            //   * 关闭结束时窗口在同一个任务里直接隐藏，页面自带的关闭过渡不再把窗口再显示一遍（以前会闪一下）。
+            // 只用 transform / opacity（合成层），动画期间暂停窗口里的模糊。
             (function() {
                 var ORIGIN_PRIORITY = ['.post-media-cell', '.author-post-entry', '.author-post-row', '.comment-item', '[data-user-name]', '.avatar-wrap', '.avatar.clickable', '.photo-wall-item', '.pp-info-btn', '.ai-plus-btn', 'button', '[role="button"]', 'a[href]', '.post'];
                 var INNER_VISUAL = 'img, .avatar, .avatar-wrap, canvas, video, svg, .post-media-cell, .upc-avatar';
                 var ANIMATED = { userProfileModal: 1, postDetailModal: 1, profileActivityModal: 1, profileDetailModal: 1, statModal: 1 };
+                // 窗口里和「被点的图」对应的那个元素：图飞到它那里。
+                var HERO_TARGET = { userProfileModal: '#upcAvatar', postDetailModal: '.post-detail-media img, .post-detail-media-card img' };
                 var lastTap = { spec: null, at: 0 }, origins = Object.create(null);
+                var EASE = 'cubic-bezier(.3,.2,.1,1)';
+                var TIMING = { big: { open: 540, close: 420 }, small: { open: 400, close: 320 } };
+
+                function px(value, size) {
+                    var v = String(value || '').trim();
+                    if (!v) return 0;
+                    if (v.slice(-1) === '%') return (parseFloat(v) || 0) / 100 * size;
+                    return parseFloat(v) || 0;
+                }
                 function keyOf(el) {
                     var holder = el.closest && el.closest('[data-post-id],[data-comment-id],[data-id]');
                     if (!holder) return null;
@@ -1461,21 +1481,34 @@
                     if (!value || /["\\]/.test(value)) return null;
                     return { selector: '[' + attr + '="' + value + '"]', sub: holder === el ? '' : (el.classList && el.classList[0] ? '.' + el.classList[0] : '') };
                 }
+                // 被点元素里的那张图（头像、缩略图）：记下地址、圆角和裁切方式，ghost 要照着画。
+                function imageInfo(node, box) {
+                    try {
+                        var img = node && (node.tagName === 'IMG' ? node : node.querySelector && node.querySelector('img'));
+                        if (!img || !img.complete || !img.naturalWidth) return null;
+                        var src = img.currentSrc || img.src;
+                        if (!src || /^data:image\/svg/i.test(src)) return null;
+                        var holder = img.closest('.avatar, .avatar-wrap, .post-media-cell, .upc-avatar') || img;
+                        var cs = getComputedStyle(holder), radius = px(cs.borderTopLeftRadius, Math.min(box.w, box.h));
+                        if (!radius && holder !== img) radius = px(getComputedStyle(img).borderTopLeftRadius, Math.min(box.w, box.h));
+                        return { src: src, radius: radius, fit: getComputedStyle(img).objectFit || 'cover' };
+                    } catch (_) { return null; }
+                }
                 function specFor(el, x, y) {
-                    var r = el.getBoundingClientRect(), spec = { el: el, dx: 0, dy: 0, w: r.width, h: r.height, key: keyOf(el) };
-                    if (r.width <= 132 && r.height <= 132) return spec;
-                    var inner = null;
+                    var r = el.getBoundingClientRect(), spec = { el: el, dx: 0, dy: 0, w: r.width, h: r.height, key: keyOf(el), image: null };
+                    if (r.width <= 132 && r.height <= 132) { spec.image = imageInfo(el, spec); return spec; }
+                    var inner = null, innerNode = null;
                     if (x != null && document.elementsFromPoint) {
                         var stack = document.elementsFromPoint(x, y);
                         for (var i = 0; i < stack.length; i++) {
                             var n = stack[i];
                             if (n !== el && el.contains(n) && n.matches && n.matches(INNER_VISUAL)) {
                                 var ir = n.getBoundingClientRect();
-                                if (ir.width >= 12 && ir.height >= 12 && ir.width <= 260 && ir.height <= 260) { inner = ir; break; }
+                                if (ir.width >= 12 && ir.height >= 12 && ir.width <= 260 && ir.height <= 260) { inner = ir; innerNode = n; break; }
                             }
                         }
                     }
-                    if (inner) { spec.dx = inner.left - r.left; spec.dy = inner.top - r.top; spec.w = inner.width; spec.h = inner.height; return spec; }
+                    if (inner) { spec.dx = inner.left - r.left; spec.dy = inner.top - r.top; spec.w = inner.width; spec.h = inner.height; spec.image = imageInfo(innerNode, spec); return spec; }
                     var side = Math.max(40, Math.min(88, Math.min(r.width, r.height) * .9));
                     var cx = x != null ? x : r.left + r.width / 2, cy = y != null ? y : r.top + r.height / 2;
                     spec.w = spec.h = side;
@@ -1518,75 +1551,198 @@
                     var r = el.getBoundingClientRect();
                     return inView(r) ? r : null;
                 }
-                // Transform that puts the box (already at its final place) onto the anchor: same centre, uniform scale that fits inside it.
-                function transformFor(box, from) {
-                    if (!box.width || !box.height || !from) return null;
-                    var scale = Math.max(.04, Math.min(1, from.width / box.width, from.height / box.height));
-                    var dx = (from.left + from.width / 2) - (box.left + box.width / 2), dy = (from.top + from.height / 2) - (box.top + box.height / 2);
-                    return { css: 'translate3d(' + dx.toFixed(1) + 'px, ' + dy.toFixed(1) + 'px, 0) scale(' + scale.toFixed(4) + ')', dx: dx, dy: dy, scale: scale };
+                function afterPaint(fn) {
+                    var ran = false;
+                    function run() { if (ran) return; ran = true; fn(); }
+                    requestAnimationFrame(function() { requestAnimationFrame(run); });
+                    setTimeout(run, 160); // 页面在后台时 rAF 不会来，保证动画不会卡在初始姿态
                 }
-                function cancelRunning(el) { try { el.getAnimations({ subtree: true }).forEach(function(a) { if (a.__xtjOrigin) a.cancel(); }); } catch (_) {} }
-                function track(animation) { animation.__xtjOrigin = true; return animation; }
-                var OPEN_MS = 430, CLOSE_MS = 320, OPEN_EASE = 'cubic-bezier(.22,.9,.28,1)', CLOSE_EASE = 'cubic-bezier(.4,0,.2,1)';
-                // Blur behind a moving window is re-rendered every frame: switch it off while it moves, put it back after.
-                function holdBlur(box) {
-                    var a = box.style.backdropFilter, b = box.style.webkitBackdropFilter;
-                    box.style.backdropFilter = 'none'; box.style.webkitBackdropFilter = 'none';
-                    return function() { box.style.backdropFilter = a; box.style.webkitBackdropFilter = b; };
+                function solid(color) {
+                    var m = String(color || '').match(/rgba?\(([^)]+)\)/);
+                    if (!m) return null;
+                    var p = m[1].split(',').map(function(s) { return s.trim(); });
+                    if (p.length > 3 && parseFloat(p[3]) === 0) return null;
+                    return 'rgb(' + p.slice(0, 3).join(',') + ')';
                 }
-                // Opens `box` (already laid out at its final place) out of `from`. Returns the transform animation.
-                function morphIn(box, from) {
-                    var t = transformFor(box.getBoundingClientRect(), from);
-                    if (!t || !box.animate) return null;
-                    var blur = holdBlur(box);
+                var runs = typeof WeakMap === 'function' ? new WeakMap() : null;
+
+                // kind: 'open' | 'close'.  box 已经在最终位置（关闭时是当前位置）。
+                // o.rect: 起点（打开）/终点（关闭）矩形，视口坐标。o.overlay: 带背景压暗的外层（可无）。
+                // o.hero: { src, radius, fit, target } 图飞行；o.hide(): 关闭时窗口必须消失的那一刻调用。o.after(): 收尾后调用。
+                function run(kind, box, o) {
+                    if (!box || !box.animate || !o || !o.rect || !motionOk()) return null;
+                    var prior = runs && runs.get(box);
+                    if (prior) {
+                        if (kind === 'close' && prior.kind === 'open' && !prior.ended) return prior.reverse(o);
+                        prior.abort();
+                    }
+                    // The page's own transition on the window would run on top of the morph (and move the box while it is measured).
+                    var priorTransition = box.style.transition;
+                    box.style.transition = 'none';
+                    var layout = box.getBoundingClientRect();
+                    if (layout.width < 8 || layout.height < 8) { box.style.transition = priorTransition; return null; }
+                    var rect = o.rect;
+                    var sx = Math.max(.02, rect.width / layout.width), sy = Math.max(.02, rect.height / layout.height);
+                    var far = 'translate3d(' + (rect.left - layout.left).toFixed(2) + 'px,' + (rect.top - layout.top).toFixed(2) + 'px,0) scale(' + sx.toFixed(4) + ',' + sy.toFixed(4) + ')';
+                    var big = layout.width * layout.height > 90000;
+                    var D = TIMING[big ? 'big' : 'small'][kind];
+                    var saved = { transition: priorTransition, origin: box.style.transformOrigin, will: box.style.willChange, position: box.style.position, blur: box.style.getPropertyValue('backdrop-filter'), blurPriority: box.style.getPropertyPriority('backdrop-filter'), blurWebkit: box.style.getPropertyValue('-webkit-backdrop-filter'), blurWebkitPriority: box.style.getPropertyPriority('-webkit-backdrop-filter') };
+                    var anims = [], nodes = [], restores = [];
+                    var handle = { kind: kind, ended: false, box: box, anims: anims };
+                    box.style.transformOrigin = '0 0';
                     box.style.willChange = 'transform, opacity';
-                    var move = track(box.animate([{ transform: t.css }, { transform: 'none' }], { duration: OPEN_MS, easing: OPEN_EASE, fill: 'backwards' }));
-                    track(box.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 160, easing: 'ease-out', fill: 'backwards' }));
-                    move.onfinish = move.oncancel = function() { box.style.willChange = ''; blur(); };
-                    return move;
+                    // Blur behind a moving window is re-rendered every frame (and some windows force it with !important).
+                    box.style.setProperty('backdrop-filter', 'none', 'important'); box.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
+                    var boxStyle = getComputedStyle(box);
+                    // 遮罩：和窗口同色的一层，先盖住内容再淡出（打开）/ 先盖上再缩回（关闭）。
+                    var coverColor = solid(boxStyle.backgroundColor), cover = null;
+                    if (coverColor && o.cover !== false) {
+                        if (boxStyle.position === 'static') box.style.position = 'relative';
+                        cover = document.createElement('div');
+                        cover.setAttribute('aria-hidden', 'true');
+                        cover.style.cssText = 'position:absolute;left:0;top:0;right:0;bottom:0;z-index:2147483000;pointer-events:none;border-radius:inherit;background:' + coverColor;
+                        box.appendChild(cover); nodes.push(cover);
+                    }
+                    // 背景压暗：把外层的底色挪到一个单独的节点上，由它单独淡入淡出。
+                    var scrim = null;
+                    if (o.overlay && o.overlay.parentNode) {
+                        var os = getComputedStyle(o.overlay), scrimColor = os.backgroundColor;
+                        if (scrimColor && !/^rgba?\([^)]*,\s*0\)$/.test(scrimColor) && scrimColor !== 'transparent') {
+                            scrim = document.createElement('div');
+                            scrim.setAttribute('aria-hidden', 'true');
+                            var z = parseInt(os.zIndex, 10);
+                            scrim.style.cssText = 'position:' + (os.position === 'absolute' ? 'absolute' : 'fixed') + ';left:0;top:0;right:0;bottom:0;pointer-events:none;background:' + scrimColor + ';z-index:' + (isFinite(z) ? z - 1 : 0);
+                            o.overlay.parentNode.insertBefore(scrim, o.overlay);
+                            o.overlay.style.setProperty('background', 'transparent', 'important');
+                            nodes.push(scrim);
+                            restores.push(function() { o.overlay.style.removeProperty('background'); });
+                        }
+                    }
+                    // 飞行的图。
+                    var ghost = null, hiddenTarget = null, flight = false;
+                    var hero = o.hero;
+                    if (hero && hero.src) {
+                        var target = hero.target && hero.target.isConnected ? hero.target.getBoundingClientRect() : null;
+                        var s = o.heroRect || rect;
+                        ghost = document.createElement('img');
+                        ghost.alt = ''; ghost.setAttribute('aria-hidden', 'true'); ghost.decoding = 'sync';
+                        ghost.src = hero.src;
+                        var same = target && target.width > 8 && target.height > 8 && Math.abs(Math.log((s.width / s.height) / (target.width / target.height))) < .22;
+                        var gr = same ? target : s;
+                        ghost.style.cssText = 'position:fixed;left:' + gr.left + 'px;top:' + gr.top + 'px;width:' + gr.width + 'px;height:' + gr.height + 'px;margin:0;padding:0;max-width:none;max-height:none;pointer-events:none;z-index:2147483001;transform-origin:0 0;will-change:transform,opacity;object-fit:' + (hero.fit || 'cover') + ';border-radius:' + (same && hero.targetRadius != null ? hero.targetRadius : (hero.radius || 0)) + 'px';
+                        document.body.appendChild(ghost); nodes.push(ghost);
+                        if (same) {
+                            flight = true;
+                            hiddenTarget = hero.target;
+                            hiddenTarget.style.visibility = 'hidden';
+                            restores.push(function() { hiddenTarget.style.visibility = ''; });
+                            handle.ghostFar = 'translate3d(' + (s.left - target.left).toFixed(2) + 'px,' + (s.top - target.top).toFixed(2) + 'px,0) scale(' + (s.width / target.width).toFixed(4) + ',' + (s.height / target.height).toFixed(4) + ')';
+                        }
+                    }
+                    var open = kind === 'open';
+                    function add(el, frames, opts) { var a = el.animate(frames, Object.assign({ fill: 'both' }, opts)); a.__xtjOrigin = true; anims.push(a); return a; }
+                    var move = add(box, open ? [{ transform: far }, { transform: 'none' }] : [{ transform: 'none' }, { transform: far }], { duration: D, easing: EASE });
+                    add(box, open ? [{ opacity: 0 }, { opacity: 1, offset: .2 }, { opacity: 1 }] : [{ opacity: 1 }, { opacity: 1, offset: .72 }, { opacity: 0 }], { duration: D, easing: 'linear' });
+                    if (cover) add(cover, open ? [{ opacity: 1 }, { opacity: 1, offset: .14 }, { opacity: 0, offset: .62 }, { opacity: 0 }] : [{ opacity: 0 }, { opacity: 1, offset: .4 }, { opacity: 1 }], { duration: D, easing: 'linear' });
+                    if (scrim) add(scrim, open ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 1 }, { opacity: 0 }], { duration: D * (open ? .7 : .9), easing: 'ease-out' });
+                    if (ghost) {
+                        if (flight) add(ghost, open ? [{ transform: handle.ghostFar }, { transform: 'none' }] : [{ transform: 'none' }, { transform: handle.ghostFar }], { duration: D, easing: EASE });
+                        else add(ghost, open ? [{ opacity: 1 }, { opacity: 1, offset: .12 }, { opacity: 0, offset: .55 }, { opacity: 0 }] : [{ opacity: 0 }, { opacity: 0, offset: .5 }, { opacity: 1 }], { duration: D, easing: 'linear' });
+                    }
+                    // 初始姿态先停在第 0 帧，等它真的画出来之后再开始走。
+                    anims.forEach(function(a) { a.pause(); a.currentTime = 0; });
+                    var started = false;
+                    afterPaint(function() { if (handle.ended || started) return; started = true; anims.forEach(function(a) { a.play(); }); });
+
+                    var cleaned = false, endTimer = 0;
+                    function cleanup(delay) {
+                        function go() {
+                            if (cleaned) return;
+                            cleaned = true;
+                            anims.forEach(function(a) { try { a.cancel(); } catch (_) {} });
+                            nodes.forEach(function(n) { if (n.parentNode) n.parentNode.removeChild(n); });
+                            restores.forEach(function(fn) { try { fn(); } catch (_) {} });
+                            box.style.transition = saved.transition; box.style.transformOrigin = saved.origin; box.style.willChange = saved.will;
+                            box.style.position = saved.position;
+                            if (saved.blur) box.style.setProperty('backdrop-filter', saved.blur, saved.blurPriority); else box.style.removeProperty('backdrop-filter');
+                            if (saved.blurWebkit) box.style.setProperty('-webkit-backdrop-filter', saved.blurWebkit, saved.blurWebkitPriority); else box.style.removeProperty('-webkit-backdrop-filter');
+                            if (runs && runs.get(box) === handle) runs.delete(box);
+                            if (o.after) { try { o.after(); } catch (_) {} }
+                        }
+                        if (delay) setTimeout(go, delay); else go();
+                    }
+                    function finishOpen() {
+                        if (handle.ended) return;
+                        handle.ended = true;
+                        cleanup(0);
+                    }
+                    var closeDone = false;
+                    function finishClose() {
+                        if (closeDone) return;
+                        closeDone = true; handle.ended = true;
+                        // 窗口、压暗层、飞行的图同一个任务里一起消失；窗口自己的动画停在「已经消失」的最后一帧，稍后再清理，避免合成层先后不一致闪一帧。
+                        if (ghost && ghost.parentNode) ghost.parentNode.removeChild(ghost);
+                        if (scrim && scrim.parentNode) scrim.parentNode.removeChild(scrim);
+                        if (hiddenTarget) hiddenTarget.style.visibility = '';
+                        if (o.hide) { try { o.hide(); } catch (_) {} }
+                        cleanup(140);
+                    }
+                    var onEnd = open ? finishOpen : finishClose;
+                    move.onfinish = onEnd;
+                    endTimer = setTimeout(onEnd, D + 260);
+                    handle.abort = function() { clearTimeout(endTimer); handle.ended = true; closeDone = true; cleanup(0); };
+                    // 打开途中被关：沿原路退回（打开用的那些动画反着放），退回到头再按关闭收尾。
+                    handle.reverse = function(next) {
+                        if (handle.ended) return null;
+                        handle.kind = 'close-reversing';
+                        clearTimeout(endTimer);
+                        o.hide = next.hide; o.after = next.after;
+                        anims.forEach(function(a) { try { a.reverse(); } catch (_) {} });
+                        move.onfinish = function() { finishClose(); };
+                        endTimer = setTimeout(finishClose, D + 260);
+                        return handle;
+                    };
+                    if (runs) runs.set(box, handle);
+                    return handle;
                 }
-                // Closes `box` back into `from`; calls `done` once it is gone (the caller hides the window there, without a second animation).
-                function morphOut(box, from, done) {
-                    var t = transformFor(box.getBoundingClientRect(), from);
-                    if (!t || !box.animate) return false;
-                    var blur = holdBlur(box);
-                    box.style.willChange = 'transform, opacity';
-                    var move = track(box.animate([{ transform: 'none' }, { transform: t.css }], { duration: CLOSE_MS, easing: CLOSE_EASE, fill: 'forwards' }));
-                    track(box.animate([{ opacity: 1 }, { opacity: 1, offset: .55 }, { opacity: 0 }], { duration: CLOSE_MS, easing: 'linear', fill: 'forwards' }));
-                    var finished = false;
-                    function end() { if (finished) return; finished = true; done(); blur(); }
-                    move.onfinish = end;
-                    setTimeout(end, CLOSE_MS + 160);
-                    return true;
-                }
-                window.xtjOrigin = {
+
+                window.xtjMorph = {
                     motionOk: motionOk, last: function() { return lastTap.spec && Date.now() - lastTap.at < 6000 ? lastTap.spec : null; },
-                    rectOfSpec: rectOfSpec, rectOfElement: rectOfElement, transformFor: transformFor, morphIn: morphIn, morphOut: morphOut, cancel: cancelRunning,
-                    OPEN_MS: OPEN_MS, CLOSE_MS: CLOSE_MS, OPEN_EASE: OPEN_EASE, CLOSE_EASE: CLOSE_EASE
+                    rectOfSpec: rectOfSpec, rectOfElement: rectOfElement,
+                    open: function(box, o) { return run('open', box, o); },
+                    close: function(box, o) { return run('close', box, o); },
+                    abort: function(box) { var h = runs && runs.get(box); if (h) h.abort(); },
+                    running: function(box) { var h = runs && runs.get(box); return !!(h && !h.ended); }
                 };
+                window.xtjOrigin = window.xtjMorph;
+
+                function heroFor(id, spec, box) {
+                    var image = spec && spec.image, selector = HERO_TARGET[id];
+                    if (!image || !box) return null;
+                    var target = selector ? box.querySelector(selector) : null;
+                    var tr = target ? target.getBoundingClientRect() : null;
+                    return { src: image.src, fit: image.fit, radius: image.radius, target: target, targetRadius: target ? px(getComputedStyle(target).borderTopLeftRadius, Math.min(tr.width, tr.height)) : null };
+                }
 
                 // ----- modals -----
                 var baseOpen = window.openModal, baseClose = window.closeModal;
                 window.openModal = function(id) {
                     var el = document.getElementById(id), box = el && el.querySelector('.modal-box');
-                    var spec = ANIMATED[id] && motionOk() ? window.xtjOrigin.last() : null;
+                    var spec = ANIMATED[id] && motionOk() ? window.xtjMorph.last() : null;
                     var from = spec ? rectOfSpec(spec) : null;
                     var wasActive = !!(el && el.classList.contains('active'));
-                    if (el && el.__xtjClosing) { el.__xtjCloseToken = (el.__xtjCloseToken || 0) + 1; el.__xtjClosing = false; cancelRunning(el); el.style.transition = ''; el.style.opacity = ''; if (box) box.style.transition = ''; }
-                    var scrimWas = el ? el.style.transition : '';
-                    // Scrim fades in fast so the window is visible from its first frame.
-                    if (from && !wasActive && el) { el.style.transition = 'opacity 130ms ease-out'; setTimeout(function() { el.style.transition = scrimWas; }, OPEN_MS + 40); }
+                    if (box) window.xtjMorph.abort(box);
+                    if (el) el.__xtjClosing = false;
+                    var keepTransition = el ? el.style.transition : '';
+                    // The page's own fade on the window would stack on the morph; the scrim and the morph own the motion.
+                    if (from && !wasActive && el) el.style.transition = 'none';
                     var result = baseOpen.apply(this, arguments);
                     if (ANIMATED[id]) origins[id] = from ? spec : null;
-                    if (from && !wasActive && box && box.animate) {
-                        // The page's own fade/slide transitions would stack on top of this one; this window moves only by the morph.
-                        var oldBoxTransition = box.style.transition;
-                        box.style.transition = 'none';
-                        void box.offsetWidth;
-                        var move = morphIn(box, from);
-                        if (move) { var restore = function() { box.style.transition = oldBoxTransition; }; move.addEventListener('finish', restore); move.addEventListener('cancel', restore); }
-                        else box.style.transition = oldBoxTransition;
-                    }
+                    if (from && !wasActive && box && el) {
+                        void el.offsetWidth;
+                        var handle = window.xtjMorph.open(box, { rect: from, overlay: el, hero: heroFor(id, spec, box), after: function() { el.style.transition = keepTransition; } });
+                        if (!handle) el.style.transition = keepTransition;
+                    } else if (el && from) el.style.transition = keepTransition;
                     return result;
                 };
                 window.closeModal = function(id) {
@@ -1594,28 +1750,17 @@
                         var el = document.getElementById(id);
                         if (el && el.__xtjClosing) return;
                         var box = el && el.classList.contains('active') ? el.querySelector('.modal-box') : null;
-                        var to = box && box.animate ? rectOfSpec(origins[id]) : null;
+                        var to = box ? rectOfSpec(origins[id]) : null;
                         if (to) {
+                            var args = arguments, self = this, keepTransition = el.style.transition;
                             el.__xtjClosing = true;
-                            var token = el.__xtjCloseToken = (el.__xtjCloseToken || 0) + 1;
-                            var args = arguments, self = this, oldBoxTransition = box.style.transition, oldTransition = el.style.transition;
-                            box.style.transition = 'none';
-                            var scrimTimer = setTimeout(function() { if (el.__xtjCloseToken === token) { el.style.transition = 'opacity 230ms ease-in'; el.style.opacity = '0'; } }, 90);
-                            var started = morphOut(box, to, function() {
-                                clearTimeout(scrimTimer);
-                                if (el.__xtjCloseToken !== token) return;
-                                el.__xtjClosing = false;
-                                // Hide at once: letting the page's own close transition run would show the whole window again for a moment.
-                                el.style.transition = 'none'; box.style.transition = 'none';
-                                baseClose.apply(self, args);
-                                el.style.opacity = '';
-                                void el.offsetHeight;
-                                cancelRunning(el);
-                                box.style.willChange = '';
-                                requestAnimationFrame(function() { el.style.transition = oldTransition; box.style.transition = oldBoxTransition; });
+                            var handle = window.xtjMorph.close(box, {
+                                rect: to, overlay: el, hero: heroFor(id, origins[id], box),
+                                hide: function() { el.__xtjClosing = false; el.style.transition = 'none'; baseClose.apply(self, args); },
+                                after: function() { el.style.transition = keepTransition; }
                             });
-                            if (started) return;
-                            clearTimeout(scrimTimer); el.__xtjClosing = false; box.style.transition = oldBoxTransition;
+                            if (handle) return;
+                            el.__xtjClosing = false;
                         }
                     }
                     return baseClose.apply(this, arguments);

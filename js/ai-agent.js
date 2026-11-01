@@ -15254,8 +15254,7 @@ function showChatMessages() {
       var originX = Math.round(btnRect.left + btnRect.width / 2 - bar.left - left);
       if (originX < 12) originX = 12;
       if (originX > panelW - 12) originX = panelW - 12;
-      // 原点放在按钮中心：面板底边在按钮上方约 10px，按钮中心在面板底边下方 10px + 按钮半高。
-      panelShell.style.transformOrigin = originX + 'px calc(100% + ' + Math.round(10 + btnRect.height / 2) + 'px)';
+      panelShell.style.transformOrigin = originX + 'px 100%';
       panelShell.style.setProperty('--hero-ox', originX + 'px');
     }
 
@@ -15478,7 +15477,12 @@ function showChatMessages() {
       closeTimer = setTimeout(function() {
         panelShell.classList.remove('is-opening');
         closeTimer = null;
-      }, 420);
+      }, 340);
+      // 从「+」按钮长出来（共用 xtjMorph）：窗口外框从按钮的矩形连续变到最终矩形。
+      try {
+        var morphFrom = window.xtjMorph && !prefersReducedMotion() && window.xtjMorph.motionOk() ? window.xtjMorph.rectOfElement(plusBtn) : null;
+        if (morphFrom) { void panelShell.offsetWidth; window.xtjMorph.open(panelShell, { rect: morphFrom }); }
+      } catch (eMorph) {}
     }
 
     function closePanel(animate) {
@@ -15494,6 +15498,20 @@ function showChatMessages() {
       plusBtn.classList.remove('active');
       plusWrap.classList.remove('is-open');
       plusBtn.setAttribute('aria-expanded', 'false');
+      // 收回「+」按钮里：窗口缩回按钮的矩形，缩完那一刻才真正隐藏（共用 xtjMorph）。
+      if (animate !== false && !prefersReducedMotion() && window.xtjMorph && window.xtjMorph.motionOk()) {
+        var morphTo = window.xtjMorph.rectOfElement(plusBtn);
+        if (morphTo) {
+          panelShell.classList.remove('is-closing'); panelShell.classList.add('open');
+          var morphHandle = window.xtjMorph.close(panelShell, { rect: morphTo, hide: function() {
+            panelShell.classList.remove('open', 'is-closing');
+            panelClosing = false;
+            if (closeTimer) { clearTimeout(closeTimer); closeTimer = null; }
+          } });
+          if (morphHandle) { showPanelPage('primary'); return; }
+          panelShell.classList.remove('open'); panelShell.classList.add('is-closing');
+        }
+      }
       showPanelPage('primary');
       if (animate === false || prefersReducedMotion()) {
         panelShell.classList.remove('is-closing');
@@ -15510,7 +15528,7 @@ function showChatMessages() {
         panelShell.classList.remove('is-closing');
         panelClosing = false;
         closeTimer = null;
-      }, 330);
+      }, 230);
     }
 
     function closeInviteModal() {

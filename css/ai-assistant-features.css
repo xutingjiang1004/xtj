@@ -178,16 +178,16 @@
   background: #f6fcf9; color: #284b40;
   -webkit-backdrop-filter: none!important; backdrop-filter: none!important;
   box-shadow: 0 16px 48px rgba(34,75,56,.14), 0 3px 10px rgba(34,75,56,.05), inset 0 1px 0 rgba(255,255,255,.85);
-  /* 从「+」按钮长出来、收回按钮里：缩放原点由脚本放在按钮中心（只用 transform / opacity） */
-  clip-path: none; transform: scale(.42); animation: none;
-  transition: opacity 170ms ease, transform 300ms cubic-bezier(.4,0,.2,1), visibility 0s 320ms;
+  /* 展开/收回由脚本从「+」按钮出发（xtjMorph，只用 transform / opacity）；没有动画时退回一次快速淡入淡出。 */
+  clip-path: none; transform: none; animation: none;
+  transition: opacity 120ms ease, visibility 0s 120ms;
   scrollbar-width: thin;
 }
 #panelAiChat #aiPlusPanelShell.open {
-  opacity: 1; visibility: visible; pointer-events: auto; transform: translate3d(0,0,0) scale(1); clip-path: none;
-  transition: opacity 150ms ease-out, transform 380ms cubic-bezier(.22,.9,.28,1), visibility 0s;
+  opacity: 1; visibility: visible; pointer-events: auto; transform: none; clip-path: none;
+  transition: opacity 120ms ease, visibility 0s;
 }
-#panelAiChat #aiPlusPanelShell.is-closing { opacity: 0; transform: scale(.42); clip-path: none; transition: opacity 150ms ease-in 120ms, transform 300ms cubic-bezier(.4,0,.2,1), visibility 0s 300ms; }
+#panelAiChat #aiPlusPanelShell.is-closing { opacity: 0; transform: none; clip-path: none; transition: opacity 120ms ease, visibility 0s 120ms; }
 #panelAiChat #aiPlusPanelShell::before,#panelAiChat #aiPlusPanelShell::after { content: none; }
 #panelAiChat #aiPlusPanelShell .ai-plus-panel-content { padding: 14px; max-height: none; overflow: visible; }
 #panelAiChat #aiPlusPanelShell .ai-menu-heading { display: flex; align-items: center; justify-content: space-between; padding: 0 4px 12px; font-size: 15px; font-weight: 600; letter-spacing: .04em; }

@@ -89,26 +89,26 @@
          DCL 因此推迟到 4s 量级。preload 只提前「下载」，不改变执行顺序
          （defer 仍按文档顺序执行），构建脚本会同步刷新 ?v= 指纹。 -->
     <link rel="preload" as="script" href="js/vendor/supabase.min.js?v=e8c548fa1b" />
-    <link rel="preload" as="script" href="js/core.min.js?v=3e90abbbd9" />
+    <link rel="preload" as="script" href="js/core.min.js?v=fd52ad1df9" />
     <!-- 小猫 AI 模块按需加载，但实测它会被首屏图片请求挤在连接队列里几十秒，
          用户点开只看到「正在加载 AI 模块」且无法返回。这里在第一波就把它取下来，
          执行时机仍由模块加载器决定（不会提前执行）。 -->
-    <link rel="preload" as="script" href="js/ai-agent.min.js?v=eb46891029" />
+    <link rel="preload" as="script" href="js/ai-agent.min.js?v=f51d02aee7" />
     <!-- 照片墙与图片预览同样是按需模块。实测它们会被首屏图片请求挤住，
          表现为「点照片墙没反应」「点开照片几秒后黑屏」。这几个模块合计约 130KB
          （gzip 后 30KB 上下），提前取下来比让用户卡在空面板里划算。 -->
     <link rel="preload" as="script" href="js/photo-wall/data.min.js?v=9e5376a281" />
     <link rel="preload" as="script" href="js/photo-wall/render.min.js?v=5fd1382d80" />
     <link rel="preload" as="script" href="js/photo-wall/photo-wall.min.js?v=af904af583" />
-    <link rel="preload" as="script" href="js/photo-wall/preview.min.js?v=d63430b1f6" />
-    <link rel="preload" as="script" href="js/photo-wall/preview-hotfix.min.js?v=21ac36a13c" />
+    <link rel="preload" as="script" href="js/photo-wall/preview.min.js?v=c68f86d5e6" />
+    <link rel="preload" as="script" href="js/photo-wall/preview-hotfix.min.js?v=8565fca15c" />
     <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=47bcef6987">
     <meta name="xtj-module-ai-reading-style" content="css/ai-reading.min.css?v=69f38f78de">
-    <meta name="xtj-module-ai-features-style" content="css/ai-assistant-features.min.css?v=43ecbf0867">
-    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=eb46891029">
-    <meta name="xtj-module-photo-preview-style" content="css/photo-preview.min.css?v=7a46257587">
-    <meta name="xtj-module-photo-preview" content="js/photo-wall/preview.min.js?v=d63430b1f6">
-    <meta name="xtj-module-photo-preview-hotfix" content="js/photo-wall/preview-hotfix.min.js?v=21ac36a13c">
+    <meta name="xtj-module-ai-features-style" content="css/ai-assistant-features.min.css?v=959816bb90">
+    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=f51d02aee7">
+    <meta name="xtj-module-photo-preview-style" content="css/photo-preview.min.css?v=010e4c5379">
+    <meta name="xtj-module-photo-preview" content="js/photo-wall/preview.min.js?v=c68f86d5e6">
+    <meta name="xtj-module-photo-preview-hotfix" content="js/photo-wall/preview-hotfix.min.js?v=8565fca15c">
     <meta name="xtj-module-photo-upload" content="js/photo-wall/upload-ui.min.js?v=e780dfe14f">
     <meta name="xtj-module-photo-data" content="js/photo-wall/data.min.js?v=9e5376a281">
     <meta name="xtj-module-photo-render" content="js/photo-wall/render.min.js?v=5fd1382d80">
@@ -1266,7 +1266,7 @@
     <script defer src="js/core-utils.min.js?v=a376d5219e"></script>
     <script defer src="js/photo-wall/story.min.js?v=167ce053d3"></script>
     <script defer src="js/voice-transcription.min.js?v=6247e4303f"></script>
-    <script defer src="js/core.min.js?v=3e90abbbd9"></script>
+    <script defer src="js/core.min.js?v=fd52ad1df9"></script>
     <script defer src="js/login-device.min.js?v=7f402fc787"></script>
     <script defer src="js/theme-toggle.min.js?v=f67dfa81a9"></script>
     <script defer src="js/desktop-shell.min.js?v=8420dc4713"></script>

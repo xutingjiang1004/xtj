@@ -2102,18 +2102,19 @@ function isAdmin() {
             function setOpen(next) {
                 var was = open;
                 open = !!next;
-                var token = ++menuToken, engine = window.xtjOrigin;
+                var token = ++menuToken, morph = window.xtjMorph;
                 menu.setAttribute('aria-hidden', open ? 'false' : 'true');
                 trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
                 nav.classList.toggle('is-open', open);
-                if (engine) engine.cancel(menu);
-                // 菜单从按钮展开、收回按钮（只在窗口真的要显示/隐藏时动）。
-                var origin = engine && engine.motionOk() ? engine.rectOfElement(trigger) : null;
+                // 菜单从按钮长出来、收回按钮里（共用 xtjMorph）。
+                var from = morph && morph.motionOk() ? morph.rectOfElement(trigger) : null;
                 if (open) {
+                    if (morph) morph.abort(menu);
                     menu.hidden = false;
-                    if (origin && !was) engine.morphIn(menu, origin);
-                } else if (!menu.hidden && origin) {
-                    if (!engine.morphOut(menu, origin, function() { if (menuToken === token) { menu.hidden = true; engine.cancel(menu); menu.style.willChange = ''; } })) menu.hidden = true;
+                    if (from && !was) morph.open(menu, { rect: from });
+                } else if (!menu.hidden && from) {
+                    var handle = morph.close(menu, { rect: from, hide: function() { if (menuToken === token) menu.hidden = true; } });
+                    if (!handle) menu.hidden = true;
                 } else menu.hidden = true;
             }
 

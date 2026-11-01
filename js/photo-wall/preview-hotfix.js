@@ -952,22 +952,6 @@
     });
   }
 
-  // 「照片详情」卡片从被点的 ⓘ 按钮展开、关闭时缩回按钮：算出把卡片（已在最终位置）放到按钮上的 transform，交给 CSS 过渡。
-  function infoOriginTransform(content) {
-    try {
-      var engine = window.xtjOrigin;
-      if (!engine || !content || !engine.motionOk()) return '';
-      var button = document.querySelector('#photoPreviewOverlay .pp-info-btn');
-      var from = engine.rectOfElement(button);
-      if (!from) return '';
-      var keepTransform = content.style.transform, keepTransition = content.style.transition;
-      content.style.transition = 'none'; content.style.transform = 'none';
-      var box = content.getBoundingClientRect();
-      content.style.transform = keepTransform; content.style.transition = keepTransition;
-      var result = engine.transformFor(box, from);
-      return result ? result.css : '';
-    } catch (_) { return ''; }
-  }
   function closePhotoInfoInternal(silent) {
     var modal = infoModal();
     var root = overlay();
@@ -981,8 +965,22 @@
     }
     var content = modal.querySelector('.pp-info-modal-content');
     var body = infoBody();
-    var closeOrigin = !silent && content ? infoOriginTransform(content) : '';
-    if (content) { if (closeOrigin) content.style.setProperty('--pp-info-from', closeOrigin); else content.style.removeProperty('--pp-info-from'); }
+    // 「照片详情」卡片缩回被点的 ⓘ 按钮（共用 xtjMorph）：缩回结束的那一刻再隐藏，不再叠一层自带的淡出。
+    var morph = window.xtjMorph;
+    var closeTarget = !silent && content && morph && morph.motionOk() && modal.classList.contains('active') ? morph.rectOfElement(document.querySelector('#photoPreviewOverlay .pp-info-btn')) : null;
+    if (closeTarget) {
+      modal.style.pointerEvents = 'none';
+      var finishInfoClose = function () {
+        modal.classList.remove('active'); modal.classList.remove('closing');
+        modal.style.display = 'none'; modal.style.pointerEvents = '';
+        if (body) body.innerHTML = '';
+        if (state.infoReturnFocus && document.contains(state.infoReturnFocus)) state.infoReturnFocus.focus();
+        state.infoReturnFocus = null;
+      };
+      if (morph.close(content, { rect: closeTarget, hide: finishInfoClose })) return;
+      modal.style.pointerEvents = '';
+    }
+    var closeOrigin = '';
     modal.classList.remove('active');
     modal.classList.add('closing');
     modal.style.pointerEvents = 'none';
@@ -1003,7 +1001,7 @@
       if (!silent && body) body.innerHTML = '';
       if (!silent && state.infoReturnFocus && document.contains(state.infoReturnFocus)) state.infoReturnFocus.focus();
       state.infoReturnFocus = null;
-    }, closeOrigin ? 340 : 240);
+    }, 240);
   }
 
   function showPhotoInfoInternal() {
@@ -1024,9 +1022,12 @@
       modal.__xtjInfoCloseTimer = 0;
     }
     var content = modal.querySelector('.pp-info-modal-content');
+    if (window.xtjMorph && content) window.xtjMorph.abort(content);
     body.innerHTML = buildPhotoInfoHtml(photo);
     modal.classList.remove('closing');
-    modal.classList.add('pp-info-prep');
+    // 从被点的 ⓘ 按钮长出来（共用 xtjMorph）；没有动画时仍走原来的淡入。
+    var openFrom = window.xtjMorph && content && window.xtjMorph.motionOk() ? window.xtjMorph.rectOfElement(document.querySelector('#photoPreviewOverlay .pp-info-btn')) : null;
+    if (!openFrom) modal.classList.add('pp-info-prep');
     // ★ 2026-09-23 改为**全屏居中**：此前把面板锚定在 ⓘ 按钮正上方
     //   （right = innerWidth − 按钮右边距，bottom = innerHeight − 按钮顶部 + 14），
     //   而 ⓘ 按钮在工具栏里偏左，结果面板被推到屏幕左侧、还压住照片主体。
@@ -1045,11 +1046,27 @@
       modal.style.maxWidth = '100%';
     } catch (eAnchor) {}
     modal.style.display = 'flex';
-    if (content) { var openOrigin = infoOriginTransform(content); if (openOrigin) content.style.setProperty('--pp-info-from', openOrigin); else content.style.removeProperty('--pp-info-from'); }
     modal.setAttribute('aria-hidden', 'false');
     modal.style.pointerEvents = 'auto';
     state.infoOpen = true;
     if (root) root.classList.add('pp-info-open');
+    if (openFrom) {
+      modal.classList.add('active');
+      void modal.offsetWidth;
+      if (window.xtjMorph.open(content, { rect: openFrom })) {
+        var closeBtnNow = modal.querySelector('.pp-info-modal-close');
+        if (closeBtnNow) closeBtnNow.focus({ preventScroll: true }); else content.focus({ preventScroll: true });
+        if (!photo.fileSize) fetchPhotoFileSize(photo).then(function (size) {
+          if (!size) return;
+          if (!state.infoOpen || activePhoto() !== photo) return;
+          var latestBody = infoBody();
+          if (latestBody) latestBody.innerHTML = buildPhotoInfoHtml(photo);
+        });
+        return;
+      }
+      modal.classList.remove('active');
+      modal.classList.add('pp-info-prep');
+    }
     requestAnimationFrame(function () {
       requestAnimationFrame(function () {
         modal.classList.remove('pp-info-prep');

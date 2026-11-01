@@ -34,7 +34,8 @@
         for (var t = n, o = -1; o <= 1; o++) {
             if (o !== 0 && window.xtjMediaSaveData && window.xtjMediaSaveData()) continue;
             var i = e + o;
-            i >= 0 && i < t.length && t[i].imageUrl && U(t[i].imageUrl);
+            // 邻图只预取没有预览图的；有预览图的先显示预览，轮到它时再读原图，不为没看的图花流量、也不和当前这张抢带宽。
+            i >= 0 && i < t.length && t[i].imageUrl && !(t[i].thumbUrl || t[i].thumb) && (o !== 0) && U(t[i].imageUrl);
         }
     }
     function z(e) {
@@ -115,6 +116,7 @@
         if (blobOrder.length && window.__ppBlobOwner !== undefined && window.__ppBlobOwner !== who) blobOrder.slice().forEach(forgetBlob), loadedOriginals = Object.create(null), loadedOriginalOrder = [];
         window.__ppBlobOwner = who;
     });
+    var BLOB_MAX_FILE = 64 * 1024 * 1024;
     function watchOriginal(url, onProgress, key) {
         var entry = warming[url];
         if (!entry) {
@@ -122,26 +124,50 @@
             var finish;
             entry.promise = new Promise(function(resolve) { finish = function(ok) { if (warming[url] === entry) delete warming[url]; resolve(ok); }; });
             if (!url || /^(blob|data):/i.test(url) || typeof fetch !== "function") finish(!1);
-            else fetch(url, { credentials: "same-origin", signal: entry.ctl ? entry.ctl.signal : undefined }).then(function(res) {
-                if (!res.ok) return finish(!1);
-                var total = Number(res.headers.get("Content-Length")) || 0, loaded = 0, chunks = [], keep = !total || total <= 48 * 1024 * 1024;
-                var type = res.headers.get("Content-Type") || "";
-                if (!res.body || !res.body.getReader) return res.blob().then(function(blob) { if (/^image\//i.test(blob.type || type) && blob.size <= 48 * 1024 * 1024 && key) rememberBlob(key, blob); finish(!0); }, function() { finish(!1); });
-                var reader = res.body.getReader();
-                (function pump() {
-                    reader.read().then(function(r) {
-                        if (r.done) {
-                            // 只收确实是图片的响应（服务端限额页、错误页不能当图显示）。
-                            if (keep && key && /^image\//i.test(type)) rememberBlob(key, new Blob(chunks, { type: type }));
-                            return finish(!0);
-                        }
-                        loaded += r.value ? r.value.length : 0;
-                        if (keep) { if (loaded > 48 * 1024 * 1024) { keep = !1; chunks = []; } else chunks.push(r.value); }
-                        if (total) { entry.p = Math.min(.94, loaded / total); entry.subs.slice().forEach(function(cb) { cb(entry.p); }); }
-                        pump();
-                    }, function() { finish(!1); });
-                })();
-            }, function() { finish(!1); });
+            else (function() {
+                var chunks = [], loaded = 0, total = 0, type = "", etag = "", retries = 0;
+                function report() { if (total) { entry.p = Math.min(.94, loaded / total); entry.subs.slice().forEach(function(cb) { cb(entry.p); }); } }
+                function complete() {
+                    // 数据不够就当断了：接着取剩下的，不拿残缺的图当图显示。
+                    if (total && loaded < total) return retry();
+                    // 只收确实是图片的响应（服务端限额页、错误页不能当图显示）。
+                    if (key && /^image\//i.test(type) && loaded > 0) rememberBlob(key, new Blob(chunks, { type: type }));
+                    finish(!0);
+                }
+                // 网络断了：用 Range 从断开的地方接着下（带 ETag 保证是同一张图），最多 4 次；其余情况交给 <img> 自己加载并走原有的重试界面。
+                function retry() {
+                    if (entry.ctl && entry.ctl.signal.aborted) return finish(!1);
+                    if (retries++ < 4 && loaded > 0 && etag) setTimeout(attempt, 500 * retries); else finish(!1);
+                }
+                function attempt() {
+                    var resume = loaded > 0 && !!etag;
+                    fetch(url, { credentials: "same-origin", signal: entry.ctl ? entry.ctl.signal : undefined, headers: resume ? { Range: "bytes=" + loaded + "-", "If-Range": etag } : undefined }).then(function(res) {
+                        if (res.status === 206 && resume) {
+                            var range = (res.headers.get("Content-Range") || "").match(/\/(\d+)$/);
+                            if (range) total = Number(range[1]);
+                        } else if (res.ok) {
+                            if (resume) { chunks = []; loaded = 0; }
+                            total = Number(res.headers.get("Content-Length")) || 0;
+                        } else return retry();
+                        type = type || res.headers.get("Content-Type") || "";
+                        etag = res.headers.get("ETag") || etag;
+                        // 太大的原图不留在内存里：放弃这条下载，交给 <img> 直接加载（进度条走缓慢趋近）。
+                        if (total > BLOB_MAX_FILE) { try { entry.ctl && entry.ctl.abort(); } catch (err) {} return finish(!1); }
+                        if (!res.body || !res.body.getReader) return res.arrayBuffer().then(function(buffer) { chunks = [new Uint8Array(buffer)]; loaded = buffer.byteLength; complete(); }, retry);
+                        var reader = res.body.getReader();
+                        (function pump() {
+                            reader.read().then(function(r) {
+                                if (r.done) return complete();
+                                if (r.value) { chunks.push(r.value); loaded += r.value.length; }
+                                if (loaded > BLOB_MAX_FILE) { try { entry.ctl && entry.ctl.abort(); } catch (err) {} return finish(!1); }
+                                report();
+                                pump();
+                            }, retry);
+                        })();
+                    }, retry);
+                }
+                attempt();
+            })();
         }
         clearTimeout(entry.killTimer); entry.killTimer = 0;
         entry.subs.push(onProgress); entry.p && onProgress(entry.p);
@@ -271,6 +297,7 @@
         if (!image) return;
         image._ppFullPreloadCleanup && image._ppFullPreloadCleanup(!0);
         image._ppFullPreloadCleanup = null;
+        image._ppBeginOriginal = null;
         image._ppObjectUrl && (URL.revokeObjectURL(image._ppObjectUrl), image._ppObjectUrl = null);
         image._ppCleanup && image._ppCleanup(), image._ppCleanup = null, image._ppLoadGen = (image._ppLoadGen || 0) + 1,
         image._ppUrl = null, image._ppProgressiveUrl = null, image._ppListenerUrl = null, image.onload = null, image.onerror = null,
@@ -300,6 +327,10 @@
                 e.style.opacity = "0";
                 e.classList.remove("pp-placeholder");
                 return;
+            }
+            // 邻图槽只显示了预览图、原图还没开始读：它成了当前这张（id 换成 photoPreviewImage）就从这里接着读原图，带进度条。
+            if (e._ppUrl === t && e._ppBeginOriginal && e.id === 'photoPreviewImage' && !forceReload) {
+                var beginNow = e._ppBeginOriginal; e._ppBeginOriginal = null; beginNow(); return;
             }
             if (e._ppUrl === t) {
                 // 若当前展示的是该 URL 的 Blob 对象图（渐进加载中），保持不动，避免用原 URL 覆盖
@@ -363,12 +394,11 @@
                 e.removeEventListener("load", handleLoad); e.removeEventListener("error", handleError); e._ppListenerUrl = null;
                 e.style.transition = "none"; e.src = firstSource; e.style.opacity = "1";
                 var fullImage = new Image(), swapped = !1, bar = null, watch = null;
-                if (e.id === "photoPreviewImage") { bar = ppBar.start(t); watch = watchOriginal(displaySource, bar.set, t); }
                 fullImage.decoding = "async";
-                try { fullImage.fetchPriority = e.id === "photoPreviewImage" ? "high" : "low"; } catch (err) {}
                 e._ppCleanup = function() {
                     fullImage.onload = null; fullImage.onerror = null;
                     if (!swapped) { try { fullImage.src = ""; } catch (err) {} watch && watch.release(); bar && bar.cancel(); }
+                    e._ppBeginOriginal = null;
                     cleanup();
                 };
                 var swapToOriginal = function() {
@@ -388,7 +418,14 @@
                     fullImage.src = displaySource;
                     fullImage.complete && fullImage.naturalWidth > 0 && swapToOriginal();
                 };
-                if (watch) watch.promise.then(startOriginal); else startOriginal();
+                // 原图从这里才开始读。当前这张立刻读（带进度条）；邻图槽先只显示预览，等它成为当前这张再读。
+                var beginOriginal = function() {
+                    if (swapped || e._ppLoadGen !== a || e._ppUrl !== t) return;
+                    try { fullImage.fetchPriority = "high"; } catch (err) {}
+                    bar = ppBar.start(t); watch = watchOriginal(displaySource, bar.set, t);
+                    watch.promise.then(startOriginal);
+                };
+                if (e.id === "photoPreviewImage") beginOriginal(); else e._ppBeginOriginal = beginOriginal;
                 return;
             }
             e.src = forceReload && displaySource === t && window.xtjRetryOriginalImageUrl ? window.xtjRetryOriginalImageUrl(t) : displaySource;
@@ -414,6 +451,8 @@
                 i = ready;
                 o = document.getElementById('ppPrevImg'); r = document.getElementById('ppNextImg');
             }
+            // 提升上来的邻图如果还只有预览图，现在开始读它的原图（带进度条）。
+            if (i && i._ppBeginOriginal && i._ppUrl === desired) { var beginPromoted = i._ppBeginOriginal; i._ppBeginOriginal = null; beginPromoted(); }
             // Only recycle side slots after the decoded neighbor owns the center.
             if (o) { clearPreviewImageLoad(o, !0); }
             if (r) { clearPreviewImageLoad(r, !0); }

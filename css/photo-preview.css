@@ -260,26 +260,16 @@ html.xtj-photo-preview-ready #photoPreviewOverlay .pp-info-modal-content {
 }
 
 html.xtj-photo-preview-ready #photoPreviewOverlay .pp-info-modal.pp-info-prep .pp-info-modal-content {
-  transform: var(--pp-info-from, translate3d(0, 18px, 0) scale(.94));
+  transform: translate3d(0, 18px, 0) scale(.94);
   opacity: 0;
   transition: none;
 }
 
 html.xtj-photo-preview-ready #photoPreviewOverlay .pp-info-modal.closing .pp-info-modal-content {
-  transform: var(--pp-info-from, translate3d(0, 14px, 0) scale(.94));
+  transform: translate3d(0, 14px, 0) scale(.94);
   opacity: 0;
   transition: transform var(--pp-dur-base) var(--pp-ease-exit), opacity var(--pp-dur-fast) ease;
 }
-/* 从 ⓘ 按钮展开、缩回按钮时放慢到中速（只有 transform / opacity） */
-html.xtj-photo-preview-ready #photoPreviewOverlay .pp-info-modal-content[style*="--pp-info-from"] {
-  transition: transform 380ms cubic-bezier(.22, .9, .28, 1), opacity 170ms ease-out;
-  will-change: transform, opacity;
-}
-html.xtj-photo-preview-ready #photoPreviewOverlay .pp-info-modal.closing .pp-info-modal-content[style*="--pp-info-from"] {
-  transition: transform 320ms cubic-bezier(.4, 0, .2, 1), opacity 150ms ease-in 170ms;
-}
-html.xtj-photo-preview-ready #photoPreviewOverlay .pp-info-modal.pp-info-prep .pp-info-modal-content[style*="--pp-info-from"] { transition: none; }
-
 html.xtj-photo-preview-ready #photoPreviewOverlay.pp-img-error {
   background: rgba(0, 0, 0, 0.75);
 }

@@ -639,6 +639,19 @@
                 return document.documentElement.getAttribute('data-xtj-motion')==='off' ||
                     (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
             }
+            // 聊天里的菜单/面板从触发它的按钮长出来、收回按钮里（共用 xtjMorph）。
+            function chatMorphTrigger(surface) {
+                var ids = { dockChatConversationMenu: ['dockChatConversationBtn'], dockChatSocialSheet: ['dockChatSocialBtn'], chatHistoryPanel: ['chatSearchButton', 'chatMediaButton'] }[surface && surface.id] || [];
+                var tapped = window.xtjMorph && window.xtjMorph.last();
+                var found = null;
+                for (var i = 0; i < ids.length; i++) {
+                    var el = document.getElementById(ids[i]);
+                    if (!el || !el.getClientRects().length) continue;
+                    if (tapped && tapped.el && (tapped.el === el || el.contains(tapped.el))) return el;
+                    if (!found) found = el;
+                }
+                return found;
+            }
             function transitionChatSurface(surface, open, immediate, animatedElement) {
                 if (!surface) return;
                 var previous = _chatSurfaceMotions.get(surface);
@@ -648,6 +661,17 @@
                 surface.inert = !open;
                 surface.setAttribute('aria-hidden', open ? 'false' : 'true');
                 if (open) { surface.hidden=false; surface.classList.remove('hidden'); }
+                var morph = window.xtjMorph;
+                if (!immediate && morph && card && !chatReducedMotion() && morph.motionOk()) {
+                    var trigger = chatMorphTrigger(surface), from = trigger ? morph.rectOfElement(trigger) : null;
+                    if (from) {
+                        var overlay = surface === card ? null : surface;
+                        var handle = open
+                            ? (void surface.offsetWidth, morph.open(card, { rect: from, overlay: overlay }))
+                            : morph.close(card, { rect: from, overlay: overlay, hide: function() { surface.hidden=true; surface.classList.add('hidden'); } });
+                        if (handle) { _chatSurfaceMotions.set(surface, { cancel: function() { morph.abort(card); } }); return; }
+                    }
+                }
                 if (immediate || chatReducedMotion() || !card || typeof card.animate !== 'function') {
                     if (!open) { surface.hidden=true; surface.classList.add('hidden'); }
                     return;
