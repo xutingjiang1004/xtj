@@ -1134,6 +1134,8 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                             if ((now - fetchedAt) >= ttl) continue;
                             // has_avatar 必须有 url
                             if (state === 'has_avatar' && !entry.url) continue;
+                            // 旧版本把 base64 头像原图（可达几 MB）存进了这里：每次启动都要解析它，还会撑爆存储配额。丢掉，改走小图地址。
+                            if (typeof entry.url === 'string' && entry.url.indexOf('data:') === 0) continue;
                             result[keys[i]] = {
                                 state: state,
                                 url: entry.url || null,
@@ -1186,6 +1188,8 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                             (now - (entry.fetched_at || 0)) >= 30000) continue;
                         // has_avatar 必须有 url
                         if (entry.state === 'has_avatar' && !entry.url) continue;
+                        // base64 原图不入本地缓存（体积不可控，会撑爆配额让整张缓存写入失败）
+                        if (typeof entry.url === 'string' && entry.url.indexOf('data:') === 0) continue;
                         wrapped.data[keys[i]] = {
                             state: entry.state,
                             url: entry.url || null,

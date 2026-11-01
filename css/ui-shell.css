@@ -1586,6 +1586,14 @@ html.xtj-ios-viewport .dock-panel {
     border-inline: 1px solid var(--wb-border);
     background: var(--wb-canvas);
     color: var(--wb-text);
+    /* 早期「悬浮卡片」布局（≥1024px）给外壳留了 16px 内边距，面板圆角后来去掉了，
+       只剩一圈露出底层渐变的直角色块框。工作台应当铺满窗口。 */
+    padding: 0;
+  }
+
+  /* 窗口不比外壳宽时，左右各一条 1px 边线只会在屏幕边缘多出一道细线。 */
+  @media (max-width: 1536px) {
+    .app-container { border-inline: 0; }
   }
 
   [data-theme="dark"] .app-container {
@@ -1669,6 +1677,9 @@ html.xtj-ios-viewport .dock-panel {
     margin-top: 24px;
     padding: 0 !important;
     flex-direction: column;
+    /* <nav> 继承全站的 nav { flex-wrap: wrap }：键盘弹出、侧栏变矮时竖排会折成多列，溢出到内容区。 */
+    flex-wrap: nowrap;
+    flex-shrink: 0;
     gap: 7px;
     border: 0 !important;
     border-radius: 0 !important;
@@ -1961,6 +1972,7 @@ html.xtj-ios-viewport .dock-panel {
     min-height: 0 !important;
     padding: 0 !important;
     flex-direction: column !important;
+    flex-wrap: nowrap !important;
     justify-content: flex-start !important;
     border: 0 !important;
     border-radius: 0 !important;
@@ -2009,6 +2021,12 @@ html.xtj-ios-viewport .dock-panel {
     background: transparent !important; background-color: transparent !important;
     border-color: transparent !important;
   }
+  /* 键盘弹出或窗口很矮时，侧栏内容在自己里面滚动，不再画到右边的工作区上。 */
+  @media (max-height: 640px) {
+    .desktop-workbench-sidebar { overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; }
+  }
+  html.xtj-keyboard-open .desktop-workbench-sidebar { overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; }
+
   .desktop-workbench-nav.is-dragging,
   .desktop-workbench-nav.is-dragging .desktop-nav-item { cursor: grabbing; }
 }
