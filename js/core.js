@@ -9397,10 +9397,16 @@ function renderProfileActivityList(kind) {
                 return window.XtjPostMedia ? window.XtjPostMedia.getPostMediaItems(post) : (post.media_url ? [{ media_url: post.media_url, media_type: post.media_type, position: 0 }] : []);
             }
             function renderPostMediaGrid(post, options) {
-                var items = getPostMediaItems(post).filter(function(item) { return !!sanitizeUrl(item.media_url || ''); });
+                var items = getPostMediaItems(post).filter(function(item) { return !!sanitizeUrl(item.media_url || '') && !item.__poster; });
                 if (!items.length) return '';
                 var first = items[0], safeMediaUrl = sanitizeUrl(first.media_url);
-                if (first.media_type === 'video') return '<div class="media"><video src="' + escapeHtml(safeMediaUrl) + '" controls preload="none" playsinline></video></div>';
+                if (first.media_type === 'video') {
+                    // 有封面就用封面，没有也要让浏览器解出首帧，不能再是纯黑底。
+                    // 容器宽度跟随视频自身比例（竖屏就是窄条居中），不要用固定高度把它裁成横的。
+                    var poster = sanitizeUrl(post.poster_url || '');
+                    return '<div class="media media--video"><video src="' + escapeHtml(safeMediaUrl) + '" controls preload="metadata" playsinline' +
+                        (poster ? ' poster="' + escapeHtml(poster) + '"' : '') + '></video></div>';
+                }
                 if (first.media_type === 'audio') return '<div class="media"><audio src="' + escapeHtml(safeMediaUrl) + '" controls preload="metadata"></audio></div>';
                 var visible = options && options.detail ? items : items.slice(0, 9);
                 var columns = window.XtjPostMedia ? window.XtjPostMedia.gridColumns(items.length) : 1;
@@ -11292,7 +11298,9 @@ function renderProfileActivityList(kind) {
                     '</div>';
                 overlay.querySelector('.post-share-author').textContent = author;
                 var excerpt = text.length > 140 ? text.slice(0, 140) + '…' : text;
-                overlay.querySelector('.post-share-text').textContent = excerpt || '这篇帖子包含图片或音视频，点开链接查看完整内容。';
+                var isVideoPost = !!(post && String(post.media_type || '') === 'video');
+                var sharePlaceholder = isVideoPost ? '分享了一个视频，点开链接查看完整内容。' : (post && post.media_type === 'audio' ? '分享了一段音频，点开链接查看完整内容。' : '这篇帖子包含图片，点开链接查看完整内容。');
+                overlay.querySelector('.post-share-text').textContent = excerpt || sharePlaceholder;
                 overlay.querySelector('.post-share-text').classList.toggle('is-placeholder', !excerpt);
                 var linkInput = overlay.querySelector('.post-share-link');
                 linkInput.value = link;
@@ -11724,6 +11732,33 @@ function renderProfileActivityList(kind) {
                             media_type = uploaded.length > 1 ? 'album' : uploaded[0].media_type;
                             if (media_type === 'album' || media_type === 'image') attachments = uploaded;
                             else { uploadedPath = uploaded[0].storage_path; mediaUploadId = uploaded[0].upload_id; }
+                            // 视频帖把选片时截的那一帧作为图片附件一起上传，后端会把它拆成 poster_url。
+                            // 没有它，视频在信息流里是一块黑底，分享到微信也只能退回发布者头像。
+                            if (media_type === 'video' && window.XtjPostComposerMedia && typeof window.XtjPostComposerMedia.posterFile === 'function') {
+                                try {
+                                    var posterFile = window.XtjPostComposerMedia.posterFile(selectedPostMedia[0]);
+                                    if (posterFile && posterFile.size > 0 && posterFile.size <= window.XtjPostMedia.MAX_POST_FILE_BYTES) {
+                                        var posterPath = buildStorageUploadPath('posts', posterFile.name), posterUploadId = crypto.randomUUID();
+                                        var pendingPoster = { storage_path: posterPath, upload_id: posterUploadId };
+                                        uploadedMedia.push(pendingPoster);
+                                        rememberPendingPostMedia(flight.owner, posterPath, posterUploadId);
+                                        var posterPrepare = await window.xtjProtectedFetch('/api/post/media/prepare', { method: 'POST', authOwner: flight.owner, authEpoch: flight.epoch, body: JSON.stringify(pendingPoster) });
+                                        var posterPrepared = await posterPrepare.json();
+                                        assertPostPublishIdentity(flight);
+                                        if (posterPrepare.ok && posterPrepared.ok) {
+                                            var posterUpload = await sb.storage.from('uploads').upload(posterPath, posterFile, { upsert: false });
+                                            if (posterUpload.error) throw posterUpload.error;
+                                            var posterDims = await readPostImageDimensions(posterFile);
+                                            assertPostPublishIdentity(flight);
+                                            attachments = [Object.assign({}, pendingPoster, posterDims, { position: 0, media_type: 'image',
+                                                media_url: sb.storage.from('uploads').getPublicUrl(posterPath).data.publicUrl, file_size: posterFile.size })];
+                                        }
+                                    }
+                                } catch (_) {
+                                    // 封面只是锦上添花，失败不能连累视频发布；附件为空时帖子照常发。
+                                    attachments = [];
+                                }
+                            }
                             postUploadCache.set(requestKey, {
                                 media_url: media_url,
                                 media_type: media_type,

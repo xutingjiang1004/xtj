@@ -17153,3 +17153,36 @@ html.perf-lite .profile-detail-info-item {
   filter:none!important; transform:none!important; cursor:pointer;
 }
 #feed .feed-guest-gate button::before, #feed .feed-guest-gate button::after { content:none!important; }
+
+/* ===== 视频比例：始终按视频自身宽高比显示，不裁切、不满宽留空、不放大 =====
+   以前 .media video 固定 width:100% + max-height，竖屏 9:16 会被压成横向或裁掉上下，
+   只有在原生全屏播放器里才是对的。这里让容器宽度反过来跟随视频比例。 */
+.media.media--video {
+  width: -moz-fit-content;
+  width: fit-content;
+  max-width: 100%;
+  margin-left: auto;
+  margin-right: auto;
+  background: transparent;
+}
+.media.media--video video {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: min(78vh, 640px);
+  object-fit: contain;
+  border-radius: 16px;
+  background: #000;
+}
+.post-detail-media video,
+.post-detail-main-card .post-detail-media video {
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: min(78vh, 640px);
+  aspect-ratio: auto;
+  object-fit: contain;
+  margin-left: auto;
+  margin-right: auto;
+}

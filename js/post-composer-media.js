@@ -71,6 +71,42 @@
   function discard(entry) {
     entry.discarded = true;
     if (!entry.retained) URL.revokeObjectURL(entry.url);
+    if (entry.posterUrl) { try { URL.revokeObjectURL(entry.posterUrl); } catch (_) {} entry.posterUrl = ''; }
+  }
+  // 选视频时先截一帧当封面：发帖预览、信息流、微信分享卡片都靠它，
+  // 否则浏览器只给一块黑底 + 播放键，分享出去也只能退回发布者头像。
+  function capturePoster(entry, done) {
+    var video = document.createElement('video');
+    var settled = false, drawing = false;
+    var timer = setTimeout(function () { finish(null); }, 9000);
+    function finish(blob) {
+      if (settled) return; settled = true;
+      clearTimeout(timer);
+      video.removeAttribute('src'); try { video.load(); } catch (_) {}
+      done(blob || null);
+    }
+    function draw() {
+      if (drawing || settled) return;
+      var w = video.videoWidth, h = video.videoHeight;
+      if (!w || !h) return;
+      drawing = true;
+      var scale = Math.min(1, 720 / Math.max(w, h));
+      var canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(w * scale));
+      canvas.height = Math.max(1, Math.round(h * scale));
+      try { canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height); } catch (_) { return finish(null); }
+      canvas.toBlob(function (blob) { finish(blob); }, 'image/jpeg', 0.82);
+    }
+    video.muted = true; video.playsInline = true; video.preload = 'auto';
+    video.addEventListener('loadeddata', function () {
+      // 有些编码首帧就是黑的，往后挪一点点再截，画面才是真正的第一帧。
+      var target = Math.min(0.12, (video.duration || 1) / 10);
+      try { video.currentTime = target; } catch (_) { return draw(); }
+      setTimeout(draw, 1200);
+    });
+    video.addEventListener('seeked', draw);
+    video.addEventListener('error', function () { finish(null); });
+    video.src = entry.url;
   }
   function retainImage(file) {
     var entry = entries.find(function(e) { return e.file === file; });
@@ -102,7 +138,7 @@
       var isVideo = fileType.startsWith('video/'), isAudio = fileType.startsWith('audio/');
       var media = document.createElement(isVideo ? 'video' : (isAudio ? 'audio' : 'img'));
       media.src = entry.url;
-      if (isVideo) { media.muted = true; media.playsInline = true; media.preload = 'metadata'; }
+      if (isVideo) { media.muted = true; media.playsInline = true; media.preload = 'metadata'; if (entry.posterUrl) media.poster = entry.posterUrl; }
       if (isAudio) { media.controls = true; media.preload = 'metadata'; node.classList.add('is-audio'); }
       if (!isVideo && !isAudio) { media.alt = '待发布图片 ' + (index + 1); media.decoding = 'sync'; }
       var remove = document.createElement('button'); remove.type = 'button'; remove.className = 'post-media-remove'; remove.textContent = '×';
@@ -125,10 +161,27 @@
     var created = [];
     try { added.forEach(function(file) { created.push({ file: file, url: URL.createObjectURL(file), retained: 0, discarded: false }); }); }
     catch (error) { created.forEach(function(e) { URL.revokeObjectURL(e.url); }); toast('无法预览附件，请重新选择'); return false; }
-    entries = entries.concat(created); selectionVersion++; render(); return true;
+    entries = entries.concat(created); selectionVersion++; render();
+    created.forEach(function (entry) {
+      var type = window.XtjPostMedia && window.XtjPostMedia.effectiveType ? window.XtjPostMedia.effectiveType(entry.file) : String(entry.file.type || '');
+      if (!type.startsWith('video/')) return;
+      capturePoster(entry, function (blob) {
+        if (!blob || entry.discarded) return;
+        try {
+          entry.posterFile = new File([blob], 'poster-' + Date.now() + '.jpg', { type: 'image/jpeg' });
+          entry.posterUrl = URL.createObjectURL(blob);
+        } catch (_) { return; }
+        var thumb = entry.node && entry.node.querySelector('video');
+        if (thumb) { thumb.poster = entry.posterUrl; return; }
+        render();
+      });
+    });
+    return true;
   }
   window.XtjPostComposerMedia = { getFiles: function() { finishDrag(); return entries.map(function(e) { return e.file; }); }, clear: clear, append: append, reorder: reorder,
     getVersion: function() { return selectionVersion; }, retainImage: retainImage,
+    // 视频封面（第一帧）在选片时就截好，发布时作为图片附件一起上传。
+    posterFile: function(file) { var entry = entries.find(function(e) { return e.file === file; }); return entry && entry.posterFile ? entry.posterFile : null; },
     imageDimensions: function(file) {
       var entry = entries.find(function(e) { return e.file === file; });
       var img = entry && entry.node && entry.node.querySelector('img');

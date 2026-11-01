@@ -25,7 +25,24 @@ async function loadPostAttachments(db, posts) {
   if (result.error) throw Object.assign(new Error('帖子图片加载失败'), { code: 'attachments_unavailable' });
   const byPost = new Map();
   for (const item of result.data || []) { if (!byPost.has(item.post_id)) byPost.set(item.post_id, []); byPost.get(item.post_id).push(item); }
-  return posts.map(post => Object.assign({}, post, { media_items: getPostMediaItems(Object.assign({}, post, { media_items: byPost.get(post.id) || [] })) }));
+  return posts.map(post => {
+    const rows = (byPost.get(post.id) || []).slice();
+    const isVideo = String(post.media_type || '') === 'video';
+    if (!isVideo) return Object.assign({}, post, { poster_url: null, media_items: getPostMediaItems(Object.assign({}, post, { media_items: rows })) });
+    // 视频帖会把「自己截的第一帧」作为一张图片附件一起上传，用来当封面。
+    // 它不是相册里的照片，必须从媒体列表里拆出来单独标记，否则信息流会把视频帖渲染成一张静图。
+    const posterIndex = rows.findIndex(row => /^(image|photo)$/.test(String(row.media_type || '')));
+    const poster = posterIndex >= 0 ? rows.splice(posterIndex, 1)[0] : null;
+    // 视频本身不在 post_attachments 里（走 media_url），这里补回列表第 0 位，
+    // 保证分享页 /api/post/:id/media/0 仍然是可播放的视频。
+    const list = [{ media_url: post.media_url, media_type: 'video', position: 0,
+      width: post.media_width || null, height: post.media_height || null, file_size: post.file_size || null }].concat(rows);
+    if (poster) list.push(Object.assign({}, poster, { __poster: true }));
+    list.forEach((item, index) => { item.position = index; });
+    const items = getPostMediaItems(Object.assign({}, post, { media_items: list }));
+    const marked = items.find(item => item.__poster);
+    return Object.assign({}, post, { poster_url: marked ? marked.media_url : null, media_items: items });
+  });
 }
 async function createPostWithAttachments(db, actor, payload, attachments) {
   const result = await db.rpc('create_post_with_attachments', { p_actor: actor, p_payload: payload, p_attachments: attachments, p_max_images: MAX_POST_IMAGES });

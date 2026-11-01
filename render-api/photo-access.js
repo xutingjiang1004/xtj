@@ -538,11 +538,13 @@ function renderPostSharePage(row, items, origin, preview = null, options = {}) {
   // 标题与摘要里去掉裸链接本身，改用链接卡片的标题/简介，微信卡片才不会显示成一串网址。
   const plain = text.replace(POST_URL_RE, ' ').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
   const firstImage = media.find(item => /^(image|photo)$/.test(String(item.media_type || '')));
+  const isVideo = String(row.media_type || '') === 'video';
   // 标题统一「某某 分享的帖子」；某某优先取分享者，拿不到分享者才退回帖子作者。
   const title = (sharer || author) + ' 分享的帖子';
   // 描述统一「正文 · 来自 某某 的帖子，点开即可查看」；带图片的帖子正文由图片承担，不再重复文字。
   const descParts = [];
-  if (plain && !firstImage) descParts.push(plain.slice(0, 110));
+  if (isVideo) descParts.push('分享了一个视频');
+  else if (plain && !firstImage) descParts.push(plain.slice(0, 110));
   descParts.push('来自 ' + author + ' 的帖子，点开即可查看');
   const description = descParts.join(' · ');
   // 纯文字帖没有配图时用发布者头像，而不是站点默认封面——好友一眼能看出是谁发的。
