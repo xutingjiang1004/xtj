@@ -18,6 +18,11 @@
 #panelPosts #feed { gap: 0 !important; }
 #panelPosts #feed > .post-feed-item > .post-header { gap: 11px; margin-bottom: 13px; align-items: flex-start; }
 #panelPosts #feed > .post-feed-item .avatar:not(.comment-avatar) { width: 42px; height: 42px; flex: 0 0 42px; }
+/* 2026-11-01 用户反馈头像显示不完整：圆形会把头像照片的边角裁掉（人脸靠边的照片被切掉半边）。帖子里的作者头像改成和个人动态页一致的圆角方形，整张头像都看得到。 */
+#panelPosts #feed > .post-feed-item .avatar:not(.comment-avatar),
+#postDetailBody .post-detail-owner .avatar { border-radius: 11px; }
+#panelPosts #feed > .post-feed-item .avatar:not(.comment-avatar) .avatar-image,
+#postDetailBody .post-detail-owner .avatar .avatar-image { border-radius: inherit; }
 #panelPosts #feed > .post-feed-item .user-name { font-size: 15px; font-weight: 600; }
 #panelPosts #feed > .post-feed-item .post-meta-line { font-size: 12px; line-height: 1.5; color: var(--text-secondary); }
 #panelPosts #feed > .post-feed-item > .content,
@@ -278,3 +283,21 @@ button.comment-reply-context { min-height:44px;border:0;padding:4px 0;background
 /* Personal activity page: the avatar and the background image open in the viewer. */
 #userProfileModal #upcAvatar[role="button"], #userProfileModal #authorPostsCover[role="button"] { cursor: zoom-in; -webkit-tap-highlight-color: transparent; }
 #userProfileModal #authorPostsCover[role="button"]:focus-visible, #userProfileModal #upcAvatar[role="button"]:focus-visible { outline: 2px solid var(--primary, #287b55); outline-offset: 2px; }
+
+/* ===== 歌曲卡片（帖子里的网易云音乐 / QQ 音乐 / Apple Music 链接，2026-11-01 用户要求）===== */
+.xtj-music-card { display: flex; align-items: center; gap: 12px; margin: 8px 0 2px; padding: 10px 12px; border-radius: 14px; background: rgba(120, 150, 140, .1); color: inherit; text-decoration: none; -webkit-tap-highlight-color: transparent; transition: background-color .18s; }
+.xtj-music-card:active { background: rgba(120, 150, 140, .18); }
+.xtj-music-cover { flex: none; width: 52px; height: 52px; border-radius: 9px; overflow: hidden; display: grid; place-items: center; background: linear-gradient(135deg, #cfe9df, #a9d5c4); color: #3d8a70; }
+.xtj-music-cover svg { width: 26px; height: 26px; }
+.xtj-music-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.xtj-music-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.xtj-music-title { font-size: 15px; font-weight: 600; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.xtj-music-sub { font-size: 12.5px; color: #7b948b; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.xtj-music-play { flex: none; width: 36px; height: 36px; min-height: 0 !important; min-width: 0 !important; padding: 0 !important; border: 0 !important; border-radius: 50% !important; background: #fff !important; color: #1f8a68; font-size: 12px; line-height: 1; box-shadow: 0 1px 5px rgba(27, 56, 46, .16) !important; cursor: pointer; }
+.xtj-music-play.on { background: #1f8a68 !important; color: #fff; }
+.xtj-music-card.is-pending .xtj-music-title { opacity: .7; }
+[data-theme="dark"] .xtj-music-card { background: rgba(171, 218, 184, .09); }
+[data-theme="dark"] .xtj-music-card:active { background: rgba(171, 218, 184, .16); }
+[data-theme="dark"] .xtj-music-cover { background: linear-gradient(135deg, #2c4a3d, #234035); color: #9fdcbc; }
+[data-theme="dark"] .xtj-music-sub { color: #93ada3; }
+[data-theme="dark"] .xtj-music-play { background: #35453f !important; color: #bfeed9; box-shadow: none !important; }

@@ -6572,6 +6572,8 @@ function renderProfileActivityList(kind) {
                         box.style.gridTemplateRows = '1fr';
                         box.style.opacity = '1';
                         box.style.marginTop = '8px';
+                        // 回复框一展开页面会被顶着滚动（键盘也会弹出）：稍后核对一下帖子里的图片都在加载，别停在空白。
+                        setTimeout(function() { if (typeof window.xtjRecheckPostImages === 'function') window.xtjRecheckPostImages(); }, 450);
                         if (typeof box.getAnimations === 'function') {
                             Promise.all(box.getAnimations().map(function(animation) { return animation.finished.catch(function() {}); })).then(focusRevealedComment);
                         } else {
@@ -8458,11 +8460,89 @@ function renderProfileActivityList(kind) {
                 window.applyPostFilters();
             };
 
+            // ===== 帖子里的歌曲链接（网易云音乐 / QQ 音乐 / Apple Music）显示成歌曲卡片 =====
+            // App 里点「复制链接」，粘贴进发帖框，发出去后这里自动变成卡片；解析由服务端 /api/music/resolve 完成，帖子正文不变。
+            var MUSIC_HOST = /^(?:(?:y\.)?music\.163\.com|163cn\.tv|(?:music|embed\.music|itunes)\.apple\.com|(?:(?:i2?|c6?)\.)?y\.qq\.com)$/i;
+            function findMusicLink(text) {
+                var re = /https?:\/\/[^\s<>"'，。！？、）)\]】]+/gi, m;
+                while ((m = re.exec(String(text || '')))) {
+                    try { var u = new URL(m[0]); if (MUSIC_HOST.test(u.hostname) && !u.username && !u.password) return m[0]; } catch (_) {}
+                }
+                return null;
+            }
+            function musicPlatformName(url) {
+                try {
+                    var host = new URL(url).hostname.toLowerCase();
+                    return /(?:music\.163\.com|163cn\.tv)$/.test(host) ? '网易云音乐' : /apple\.com$/.test(host) ? 'Apple Music' : /qq\.com$/.test(host) ? 'QQ音乐' : '歌曲链接';
+                } catch (_) { return '歌曲链接'; }
+            }
+            function musicCardHtml(link) {
+                var safe = escapeHtml(link);
+                return '<a class="xtj-music-card is-pending" href="' + safe + '" target="_blank" rel="noopener noreferrer" data-music-url="' + safe + '" onclick="event.stopPropagation()">' +
+                    '<span class="xtj-music-cover" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V6l10-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/></svg></span>' +
+                    '<span class="xtj-music-main"><b class="xtj-music-title">歌曲链接</b><span class="xtj-music-sub">' + escapeHtml(musicPlatformName(link)) + '</span></span></a>';
+            }
             function buildPostContentHtml(content) {
+                var text = String(content || ''), link = findMusicLink(text);
                 // ★ 修复：多行帖正文换行——escapeHtml 后把 \n 替换为 <br>（与 early-feed.js 行为一致）；
                 // 仅作用于 feed 正文渲染，评论/标题等不走本函数，不受影响。
-                return escapeHtml(String(content || '')).replace(/\n/g, '<br>');
+                if (!link) return escapeHtml(text).replace(/\n/g, '<br>');
+                // 链接本身换成下面的卡片；链接前后的文字（比如 App 生成的「分享…的单曲」）保留。
+                var caption = text.replace(link, '').replace(/[ \t]+$/gm, '').replace(/\n{3,}/g, '\n\n').replace(/\s*[（(]\s*来自[^)）]*[)）]\s*$/, '').replace(/\s*[：:]\s*$/, '').trim();
+                return (caption ? escapeHtml(caption).replace(/\n/g, '<br>') : '') + musicCardHtml(link);
             }
+            var musicCards = (function() {
+                var KEY = 'xtj_music_cards_v1', TTL = 7 * 86400000, memory = Object.create(null), pending = Object.create(null), audio = null, playing = null;
+                try { var saved = JSON.parse(localStorage.getItem(KEY) || '{}'); Object.keys(saved).forEach(function(url) { if (saved[url] && Date.now() - saved[url].at < TTL) memory[url] = saved[url].card; }); } catch (_) {}
+                function persist() {
+                    try {
+                        var out = {}, keys = Object.keys(memory).filter(function(url) { return memory[url]; }).slice(-60);
+                        keys.forEach(function(url) { out[url] = { at: Date.now(), card: memory[url] }; });
+                        localStorage.setItem(KEY, JSON.stringify(out));
+                    } catch (_) {}
+                }
+                function resolve(url) {
+                    if (url in memory) return Promise.resolve(memory[url]);
+                    if (pending[url]) return pending[url];
+                    return pending[url] = fetch(API_BASE + '/api/music/resolve?url=' + encodeURIComponent(url)).then(function(res) { return res.ok ? res.json() : null; })
+                        .then(function(data) { var card = data && data.ok && data.card ? data.card : null; if (card) { memory[url] = card; persist(); } return card; })
+                        .catch(function() { return null; }).then(function(card) { delete pending[url]; return card; });
+                }
+                function fill(el, card) {
+                    if (!card || !el.isConnected) return;
+                    el.classList.remove('is-pending'); el.classList.add('has-card', 'platform-' + card.platform);
+                    if (/^https:\/\//.test(card.url || '')) el.setAttribute('href', card.url);
+                    var cover = el.querySelector('.xtj-music-cover');
+                    if (cover && /^https:\/\//.test(card.cover || '')) cover.innerHTML = '<img src="' + escapeHtml(card.cover) + '" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">';
+                    el.querySelector('.xtj-music-title').textContent = card.title || '歌曲链接';
+                    el.querySelector('.xtj-music-sub').textContent = [card.artist, card.platformName].filter(Boolean).join(' · ');
+                    if (/^https:\/\//.test(card.previewUrl || '') && !el.querySelector('.xtj-music-play')) {
+                        var play = document.createElement('button');
+                        play.type = 'button'; play.className = 'xtj-music-play'; play.setAttribute('aria-label', '试听 30 秒'); play.textContent = '▶';
+                        play.addEventListener('click', function(event) {
+                            event.preventDefault(); event.stopPropagation();
+                            if (playing === play) { audio.pause(); return; }
+                            if (!audio) audio = new Audio();
+                            if (playing) { playing.textContent = '▶'; playing.classList.remove('on'); }
+                            audio.src = card.previewUrl; playing = play; play.textContent = '❚❚'; play.classList.add('on');
+                            audio.onended = audio.onpause = function() { if (playing) { playing.textContent = '▶'; playing.classList.remove('on'); } playing = null; };
+                            audio.play().catch(function() { play.textContent = '▶'; play.classList.remove('on'); playing = null; });
+                        });
+                        el.appendChild(play);
+                    }
+                }
+                function scan(root) {
+                    (root || document).querySelectorAll('.xtj-music-card.is-pending:not([data-music-busy])').forEach(function(el) {
+                        el.setAttribute('data-music-busy', '1');
+                        var url = el.getAttribute('data-music-url');
+                        resolve(url).then(function(card) { el.removeAttribute('data-music-busy'); fill(el, card); });
+                    });
+                }
+                var timer = 0;
+                if (typeof MutationObserver === 'function') new MutationObserver(function() { clearTimeout(timer); timer = setTimeout(function() { scan(document); }, 80); }).observe(document.body, { childList: true, subtree: true });
+                return { scan: scan, resolve: resolve };
+            })();
+            window.xtjMusicCards = musicCards;
             window.buildPostContentHtml = buildPostContentHtml;
 
             function initPostScrollAnimation() {
@@ -9726,10 +9806,8 @@ function renderProfileActivityList(kind) {
                     var clearErr = document.getElementById('feedLoadMoreError');
                     if (clearErr && clearErr.parentNode) clearErr.parentNode.removeChild(clearErr);
                 } catch (_eClr) {}
-                var panel = document.getElementById("postFilterPanel");
-                if (panel) panel.style.display = "none";
-                var btn = document.getElementById("filterToggleBtn");
-                if (btn) { btn.classList.remove("active"); btn.setAttribute("aria-expanded", "false"); }
+                syncPostFilterUi();
+                closePostFilterPanel(true);
                 if(hadKeyword){clearFeedCache();return loadFeed(true);}
                 renderPostFilterUsers();
                 renderFeed({ posts: feedAllPosts, comments: feedAllComments, likes: feedAllLikes });
@@ -9738,6 +9816,15 @@ function renderProfileActivityList(kind) {
             function bindPostFilterEvents() {
                 if (window._postFilterEventsBound) return;
                 window._postFilterEventsBound = true;
+                var seg = document.getElementById('postVisibilitySeg');
+                if (seg) seg.addEventListener('click', function(event) {
+                    var button = event.target && event.target.closest ? event.target.closest('button[data-visibility]') : null;
+                    var select = document.getElementById('postVisibilityFilter');
+                    if (!button || !select || select.value === button.getAttribute('data-visibility')) return;
+                    select.value = button.getAttribute('data-visibility');
+                    syncPostFilterUi();
+                    select.dispatchEvent(new Event('change', { bubbles: true }));
+                });
                 ["postSearchInput", "postUserFilter", "postStartDate", "postEndDate", "postVisibilityFilter", "postOnlyMine"].forEach(function(id) {
                     var el = document.getElementById(id);
                     if (!el) return;
@@ -9760,33 +9847,73 @@ function renderProfileActivityList(kind) {
                 });
             }
 
+            // ===== 搜索与筛选：从搜索按钮展开的小面板（不再把整页往下顶），共用 xtjMorph 的展开/收回 =====
+            function syncPostFilterUi() {
+                var select = document.getElementById('postVisibilityFilter'), seg = document.getElementById('postVisibilitySeg');
+                if (!select || !seg) return;
+                Array.prototype.forEach.call(seg.querySelectorAll('button[data-visibility]'), function(button) {
+                    var on = button.getAttribute('data-visibility') === (select.value || 'all');
+                    button.classList.toggle('on', on); button.setAttribute('aria-pressed', on ? 'true' : 'false');
+                });
+            }
+            window.__xtjSyncPostFilterUi = syncPostFilterUi;
+            function placePostFilterPanel() {
+                var panel = document.getElementById('postFilterPanel'), btn = document.getElementById('filterToggleBtn');
+                if (!panel || !btn) return;
+                var r = btn.getBoundingClientRect(), vw = window.innerWidth, vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+                var margin = 12, wide = vw >= 700, width = wide ? Math.min(420, vw - margin * 2) : vw - margin * 2;
+                var left = wide ? Math.max(margin, Math.min(vw - width - margin, r.right - width)) : margin;
+                var top = Math.round(r.bottom + 10);
+                var dock = document.getElementById('dockBar'), dockTop = dock && dock.getClientRects().length ? dock.getBoundingClientRect().top : vh;
+                var limit = Math.min(vh, dockTop > top ? dockTop : vh) - margin;
+                panel.style.left = Math.round(left) + 'px'; panel.style.top = top + 'px'; panel.style.width = Math.round(width) + 'px';
+                panel.style.maxHeight = Math.max(220, Math.round(limit - top)) + 'px';
+            }
+            var postFilterOutside = null;
+            function closePostFilterPanel(immediate) {
+                var panel = document.getElementById("postFilterPanel"), btn = document.getElementById("filterToggleBtn");
+                if (postFilterOutside) { document.removeEventListener('pointerdown', postFilterOutside, true); document.removeEventListener('keydown', postFilterOutside, true); window.removeEventListener('resize', placePostFilterPanel); postFilterOutside = null; }
+                if (btn) { btn.classList.remove("active"); btn.setAttribute("aria-expanded", "false"); }
+                if (!panel || panel.style.display === 'none') return;
+                var morph = window.xtjMorph, from = !immediate && morph && morph.motionOk() && btn ? morph.rectOfElement(btn) : null;
+                if (from && morph.close(panel, { rect: from, hide: function() { panel.style.display = 'none'; } })) return;
+                if (morph) morph.abort(panel);
+                panel.style.display = 'none';
+            }
+            window.closePostFilterPanel = closePostFilterPanel;
             window.toggleFilterPanel = function(event) {
                 var panel = document.getElementById("postFilterPanel");
                 var btn = document.getElementById("filterToggleBtn");
                 if (!panel) return;
                 var isHidden = panel.style.display === "none" || window.getComputedStyle(panel).display === "none";
-                if (isHidden) {
-                    panel.style.display = "flex";
-                    if (btn) { btn.classList.add("active"); btn.setAttribute("aria-expanded", "true"); }
-                    // ★ 2026-09-26（审计 P2-3）：原实现每次展开都 forceRefresh=true，
-                    //   用户反复开合筛选面板就会反复打后端拉全量用户列表（并且
-                    //   renderPostFilterUsers 内还会逐用户读头像缓存）。这里改为
-                    //   仅在缓存超过 TTL（3 分钟）或从未加载时才强制刷新。
-                    var _pfAge = Date.now() - (window.__xtjPostFilterUsersLoadedAt || 0);
-                    var _pfNeedForce = !window.__xtjPostFilterUsersLoadedAt || _pfAge > 3 * 60 * 1000;
-                    loadPostFilterUsers(_pfNeedForce);
-                    renderPostFilterUsers();
-                    // Desktop posts scroll inside .wrap; panelPosts.scrollTop
-                    // does not move that viewport. Let the revealed panel find
-                    // its actual scrolling ancestors without touching the Dock.
-                    panel.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
-                    if (event && event.detail === 0) {
-                        var search = document.getElementById('postSearchInput');
-                        if (search) search.focus({ preventScroll: true });
-                    }
-                } else {
-                    panel.style.display = "none";
-                    if (btn) { btn.classList.remove("active"); btn.setAttribute("aria-expanded", "false"); }
+                if (!isHidden) { closePostFilterPanel(false); return; }
+                var morph = window.xtjMorph;
+                if (morph) morph.abort(panel);
+                panel.style.display = "flex";
+                if (btn) { btn.classList.add("active"); btn.setAttribute("aria-expanded", "true"); }
+                placePostFilterPanel();
+                syncPostFilterUi();
+                // ★ 2026-09-26（审计 P2-3）：原实现每次展开都 forceRefresh=true，
+                //   用户反复开合筛选面板就会反复打后端拉全量用户列表。这里改为
+                //   仅在缓存超过 TTL（3 分钟）或从未加载时才强制刷新。
+                var _pfAge = Date.now() - (window.__xtjPostFilterUsersLoadedAt || 0);
+                var _pfNeedForce = !window.__xtjPostFilterUsersLoadedAt || _pfAge > 3 * 60 * 1000;
+                loadPostFilterUsers(_pfNeedForce);
+                renderPostFilterUsers();
+                var from = morph && morph.motionOk() && btn ? morph.rectOfElement(btn) : null;
+                if (from) { void panel.offsetWidth; morph.open(panel, { rect: from }); }
+                // 点面板外面或按 Esc 收起；窗口尺寸变了重新对位。
+                postFilterOutside = function(e) {
+                    if (e.type === 'keydown') { if (e.key === 'Escape') { closePostFilterPanel(false); if (btn) btn.focus({ preventScroll: true }); } return; }
+                    if (panel.contains(e.target) || (btn && btn.contains(e.target))) return;
+                    closePostFilterPanel(false);
+                };
+                document.addEventListener('pointerdown', postFilterOutside, true);
+                document.addEventListener('keydown', postFilterOutside, true);
+                window.addEventListener('resize', placePostFilterPanel);
+                if (event && event.detail === 0) {
+                    var search = document.getElementById('postSearchInput');
+                    if (search) search.focus({ preventScroll: true });
                 }
             };
 

@@ -26897,6 +26897,19 @@ app.post('/api/agent/chat/new', authenticateUser, async (req, res) => {
 
 // Returns authors from posts visible to the current session. The browser must
 // not derive this list from internal authentication marker rows.
+// 帖子里的歌曲链接（网易云音乐 / QQ 音乐 / Apple Music）→ 歌曲卡片。只解析写死的几个主机，见 music-link.js。
+app.get('/api/music/resolve', rateLimit(60000, 60), async (req, res) => {
+  try {
+    var musicUrl = String(req.query && req.query.url || '').slice(0, 800);
+    var musicCard = musicUrl ? await require('./music-link').resolveMusicLink(musicUrl, fetch) : null;
+    res.set('Cache-Control', 'public, max-age=3600');
+    if (!musicCard) return res.status(404).json({ ok: false, code: 'unsupported_link' });
+    return res.json({ ok: true, card: musicCard });
+  } catch (e) {
+    return res.status(503).json({ ok: false, code: 'music_unavailable', retryable: true });
+  }
+});
+
 app.get('/api/feed/authors', optionalAuth, rateLimit(60000, 60), async (req, res) => {
   try {
     var isAdmin = req.userName === ADMIN_USERNAME;

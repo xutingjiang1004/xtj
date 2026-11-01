@@ -29,3 +29,16 @@ test('post pictures reach the model only as short-lived signed links of the serv
   assert.match(src, /createSignedUrl\(path, 120\)/); assert.match(src, /parsePostMediaUrl/); assert.match(src, /MAX_CAT_IMAGES = 3/);
   assert.match(src, /url\.origin !== origin/);
 });
+test('replying to the cat\'s own comment continues the conversation without another @', () => {
+  assert.match(block('function isValidCatTrigger(', 900), /options && options\.repliesToCat === true/);
+  const helper = block('async function commentRepliesToCat(', 900);
+  assert.match(helper, /generated_by_ai === true/); assert.match(helper, /user_name === CAT_AI_USERNAME/); assert.match(helper, /String\(res\.data\.post_id\) === String\(comment\.post_id\)/);
+  const route = block("app.post('/api/post/comment'", 6200);
+  assert.match(route, /commentRepliesToCat\(inserted\.data\)/); assert.match(route, /isValidCatTrigger\(inserted\.data, null, \{ repliesToCat: repliesToCat \}\)/);
+  assert.match(route, /req\.userName !== CAT_AI_USERNAME/, 'the cat never triggers itself');
+  const context = block('async function getCatPostContext(', 3600);
+  assert.match(context, /depth < 4/); assert.match(context, /follow_up_to_your_previous_reply/); assert.match(context, /小猫（你自己）/);
+  assert.match(block('const CAT_AI_COMMENT_PROMPT', 3000), /follow_up_to_your_previous_reply 为 true/);
+  const client = fs.readFileSync('js/core-parts/04-posts-interactions.js', 'utf8');
+  assert.match(client, /parentIsAi: item\.classList\.contains\('cat-ai-comment'\)/); assert.match(client, /reply && reply\.parentIsAi/);
+});

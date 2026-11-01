@@ -69,7 +69,7 @@
       arm(entry.target, state);
     });
     pump();
-  }, { rootMargin: '160px 0px' }) : null;
+  }, { rootMargin: '600px 0px' }) : null;
   function register(img) {
     if (tracked.has(img)) return;
     var state = { timer: 0, visible: !observer };
@@ -112,6 +112,24 @@
     });
     pump();
   });
+  // IntersectionObserver 在键盘弹出、程序化滚动（回复框把评论顶进视野）时会滞后，图片就停在空白。
+  // 滚动/窗口变化后按位置再核对一遍：在视野附近、但还被记成「不可见」的图，补上加载。
+  function nearViewport(img) {
+    var r = img.getBoundingClientRect(), height = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+    return r.width > 0 && r.height > 0 && r.bottom > -600 && r.top < height + 600;
+  }
+  function recheck() {
+    tracked.forEach(function (state, img) {
+      if (!state.visible && img.isConnected && activePanel(img) && nearViewport(img)) { state.visible = true; arm(img, state); }
+    });
+    pump();
+  }
+  var recheckTimer = 0;
+  function scheduleRecheck() { clearTimeout(recheckTimer); recheckTimer = setTimeout(recheck, 120); }
+  window.addEventListener('scroll', scheduleRecheck, { passive: true, capture: true });
+  window.addEventListener('resize', scheduleRecheck, { passive: true });
+  if (window.visualViewport) { window.visualViewport.addEventListener('resize', scheduleRecheck, { passive: true }); window.visualViewport.addEventListener('scroll', scheduleRecheck, { passive: true }); }
+  window.xtjRecheckPostImages = scheduleRecheck;
   scan(document.body);
   pump();
   // Opacity-only navigation does not generate IntersectionObserver changes.

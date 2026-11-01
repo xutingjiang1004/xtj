@@ -14,6 +14,10 @@ const NEW = process.argv[3] || 'http://127.0.0.1:4173';
 const SELFTEST = process.env.XTJ_GUARD_SELFTEST === '1';
 const inject = () => document.addEventListener('DOMContentLoaded', () => { const st = document.createElement('style'); st.textContent = '#panelPosts *{letter-spacing:.4px}'; document.head.appendChild(st); });
 const SKIP = new Set(['transition-property', 'transition-duration', 'transition-delay', 'transition-timing-function']);
+// Changes the user asked for explicitly. Each entry says what is allowed to differ and why; anything else still fails.
+//   panel : the search/filter panel is not compared at all (redesigned on 2026-11-01 at the user's request, hidden by default)
+//   avatar: border radii of the post author avatar (circle -> rounded square, 2026-11-01: the circle cut off the edge of the photo)
+const AUTHORIZED_AVATAR_PROPS = /^border-(top|bottom)-(left|right)-radius$/;
 
 async function dump(origin, theme, viewport, mobile) {
   const s = await open({ origin, theme, viewport, mobile, dsf: 1, fixedTime: true, settleMs: 5000, init: SELFTEST && origin === NEW ? inject : undefined });
@@ -27,7 +31,9 @@ async function dump(origin, theme, viewport, mobile) {
         for (let i = 0; i < c.length; i++) style[c[i]] = c.getPropertyValue(c[i]);
         const r = el.getBoundingClientRect();
         style.__rect = [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)].join(',');
-        rows.push({ key, sel: el.tagName.toLowerCase() + (el.id ? '#' + el.id : '') + (typeof el.className === 'string' && el.className ? '.' + el.className.trim().split(/\s+/).slice(0, 2).join('.') : ''), style });
+        const feedAvatar = !!el.closest('.post-feed-item') && !!el.closest('.avatar:not(.comment-avatar)') && !el.closest('.comment-item');
+        rows.push({ key, feedAvatar, skipStyle: el.id === 'postFilterPanel', sel: el.tagName.toLowerCase() + (el.id ? '#' + el.id : '') + (typeof el.className === 'string' && el.className ? '.' + el.className.trim().split(/\s+/).slice(0, 2).join('.') : ''), style });
+        if (el.id === 'postFilterPanel') return;
         Array.from(el.children).forEach((k, i) => walk(k, key + '/' + i));
       };
       walk(root, 'root');
@@ -49,9 +55,11 @@ async function dump(origin, theme, viewport, mobile) {
       const eb = byKey.get(ea.key);
       if (!eb) { (bySel[ea.sel] = bySel[ea.sel] || []).push('element missing on the new tree'); changed += 1; continue; }
       elements += 1;
+      if (ea.skipStyle || eb.skipStyle) continue;
       let differs = false;
       for (const k of Object.keys(ea.style)) {
         if (SKIP.has(k) || ea.style[k] === eb.style[k]) continue;
+        if (ea.feedAvatar && AUTHORIZED_AVATAR_PROPS.test(k)) continue;
         differs = true;
         (bySel[ea.sel] = bySel[ea.sel] || []).push(`${k}: ${String(ea.style[k]).slice(0, 40)} -> ${String(eb.style[k]).slice(0, 40)}`);
       }
