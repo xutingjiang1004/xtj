@@ -28,10 +28,22 @@ function validMediaPath(value) {
 }
 
 function installOssSign(app, { authenticateUser, rateLimit, banError } = {}) {
+  // 启动自检：只报「有没有」，绝不输出密钥。排查直传失败时先看这四行。
+  try {
+    const c = ossMedia.config();
+    console.log('[OSS-CONFIG] 直传', ossMedia.enabled() ? '已启用' : '未启用（上传回退 Supabase）');
+    console.log('[OSS-CONFIG] OSS_BUCKET:', c.bucket || '未设置');
+    console.log('[OSS-CONFIG] OSS_ENDPOINT:', c.endpoint || '未设置');
+    console.log('[OSS-CONFIG] OSS_ACCESS_KEY_ID:', c.keyId ? '已设置(' + c.keyId.slice(0, 6) + '…)' : '未设置');
+    console.log('[OSS-CONFIG] OSS_ACCESS_KEY_SECRET:', c.keySecret ? '已设置' : '未设置');
+  } catch (_) { console.warn('[OSS-CONFIG] 自检失败'); }
   app.post('/api/oss/sign', authenticateUser, rateLimit(60000, 120), async (req, res) => {
     // 没配置 OSS 时明确告诉前端「这条链路不可用」，前端据此回退 Supabase，
     // 而不是把一次发帖卡在这里。
-    if (!ossMedia.enabled()) return res.status(503).json({ ok: false, code: 'oss_disabled' });
+    if (!ossMedia.enabled()) {
+      console.warn('[OSS] 拒绝签名：环境变量不完整，前端将回退 Supabase');
+      return res.status(503).json({ ok: false, code: 'oss_disabled' });
+    }
     const ban = typeof banError === 'function' ? banError(req) : null;
     if (ban) return res.status(ban.status || 403).json({ ok: false, error: ban.message });
     const path = req.body && req.body.path;
