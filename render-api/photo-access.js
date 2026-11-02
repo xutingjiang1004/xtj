@@ -158,9 +158,13 @@ async function migratePhotoStorage(supabase) {
 // Media is revalidated on every use because access can change. Avatars are the exception: they are
 // public by definition and every upload gets a new unique path, so a cached copy can never be stale.
 // 免费版 Supabase 每月只有 5GB 出站。no-cache 会让每次刷新都回源校验，
-// 视频/大图反复打开时把额度烧光。改为「私有缓存 1 小时」：字节只留在用户自己的浏览器，
-// 不进 CDN、不跨账号共享；过期后仍强制回源重新鉴权。
-const PRIVATE_MEDIA_CACHE = 'private, max-age=3600, must-revalidate';
+// 视频/大图反复打开时把额度烧光。
+// ★ 2026-11-02：原来改成的「私有缓存 1 小时」仍然太短——同一张图每小时就会被完整重新
+//   下载一次，是旧图出站流量的大头。存量媒体还没迁到 OSS，这部分流量全部记在 Supabase 账上。
+//   现在改为「私有缓存 7 天」：字节只留在用户自己的浏览器（private 不进 CDN、不跨账号共享），
+//   文件名唯一且内容永不覆盖，7 天内不会拿到过期副本；7 天后过期仍强制回源重新鉴权。
+//   新媒体走阿里云 OSS，上传时就是 public, max-age=31536000, immutable，不受此值影响。
+const PRIVATE_MEDIA_CACHE = 'private, max-age=604800, must-revalidate';
 async function streamOriginal(req, res, { supabase, bucket, path, fetchImpl = fetch, allowDownload = false, previews, cacheControl = PRIVATE_MEDIA_CACHE }) {
   mediaTraffic.identify(bucket, path, req.params && req.params.id);
   if (req.query && req.query.preview !== undefined) {
