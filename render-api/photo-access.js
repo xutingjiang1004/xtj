@@ -3,7 +3,7 @@ const crypto = require('node:crypto');
 const { Readable, Transform } = require('node:stream');
 const { mediaTraffic } = require('./media-traffic');
 const { pipeline } = require('node:stream/promises');
-const { parsePostMediaUrl } = require('./post-media');
+const { parsePostMediaUrl, isOssMediaUrl } = require('./post-media');
 const { loadPostAttachments } = require('./post-attachments');
 const { avatarImageUrl } = require('./avatar-image');
 const PHOTO_BUCKET = 'photo-wall';
@@ -303,6 +303,13 @@ function createPhotoAccess({ app, supabase, supabaseUrl, secret, authenticateUse
       if (!row || row.is_deleted === true || !['','text','image','video','audio','photo','album',null].includes(row.media_type) || !normalPostAllowed(row) || (row.visibility && row.visibility !== 'public' && row.user_name !== req.userName && req.userName !== adminName)) return missing(res);
       const posts = await readAttachments(row);
       const item = (posts[0].media_items || [])[Number(req.params.position)];
+      // ★ 2026-11-02：直传 OSS 的媒体不再经过本服务转发，鉴权通过后 302 过去，
+      //   字节从 OSS 直接进入浏览器——Render 和 Supabase 的出口都不再计费。
+      //   权限判定一律在本服务完成，OSS 那边只是存储。
+      if (item && isOssMediaUrl(item.media_url)) {
+        res.set('Cache-Control', 'public, max-age=600');
+        return res.redirect(302, item.media_url);
+      }
       const path = item && parsePostMediaUrl(item.media_url, supabaseUrl);
       if (!path) return missing(res);
       await streamOriginal(req,res,{supabase,bucket:'uploads',path,fetchImpl,previews});

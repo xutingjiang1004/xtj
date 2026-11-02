@@ -21,7 +21,7 @@ const { checkedResult, checkedData, checkedRpc, patchReport, reportNotification,
 const { createAdminAuditTrail } = require('./admin-audit-trail');
 const { createPhotoRecord, inspectPhotoOriginal, validatePhotoCreatePayload } = require('./photo-create');
 const { validatePostAttachments, loadPostAttachments, createPostWithAttachments } = require('./post-attachments');
-const { installPostMedia, createPostWithMedia, parsePostMediaUrl, isLocalUploadUrl, retireAccountPostMediaUploads, deleteQueuedAccountPostMediaUploads } = require('./post-media');
+const { installPostMedia, createPostWithMedia, parsePostMediaUrl, isOssMediaUrl, isLocalUploadUrl, retireAccountPostMediaUploads, deleteQueuedAccountPostMediaUploads } = require('./post-media');
 const { PHOTO_BUCKET, PHOTO_COOKIE, POST_MEDIA_COOKIE, setPhotoSession, photoMediaUrl, photoPayload, safePhotoPath, createPhotoAccess } = require('./photo-access');
 const {
   claimDmMediaUpload,
@@ -13825,6 +13825,9 @@ function normalizeFallbackIpLocation(value) {
 
 
 installPostMedia(app, { supabase, authenticateUser, rateLimit, userBanError }).start();
+// ★ 2026-11-02：帖子媒体改为浏览器直传阿里云 OSS（签名由服务端下发）。
+//   未配置 OSS 环境变量时接口返回 oss_disabled，前端自动回退 Supabase 老链路。
+require('./oss-sign').installOssSign(app, { authenticateUser, rateLimit, banError: userBanError });
 app.post('/api/post/create', authenticateUser, rateLimit(60000, 20), async (req, res) => {
   try {
     // ★ 封禁强制：服务端写端点必须校验限制状态，防止绕过前端本地禁点
@@ -14322,7 +14325,9 @@ app.post('/api/post/delete', authenticateUser, rateLimit(60000, 20), async (req,
       isAdmin: isAdmin,
       expectPhoto: false,
       actorKey: actorKey,
-      storagePaths: parsePostMediaUrl(post.media_url, SUPABASE_URL) ? [parsePostMediaUrl(post.media_url, SUPABASE_URL)] : []
+      // ★ 2026-11-02：直传 OSS 的媒体不在 Supabase 存储里，不能塞进 storagePaths，
+      //   否则删除会去打一个不存在的对象。OSS 侧的孤儿文件留待后续清理任务处理。
+      storagePaths: (function () { var p = parsePostMediaUrl(post.media_url, SUPABASE_URL); return p && !isOssMediaUrl(post.media_url) ? [p] : []; })()
     });
     if (hardDelete.error) return res.status(500).json({ error: sanitizeError(hardDelete.error), code: 'delete_failed' });
     var result = hardDelete.result || {};

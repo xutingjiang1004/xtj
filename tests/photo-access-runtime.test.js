@@ -58,7 +58,7 @@ test('wall bytes deny anonymous/forged requests and preserve authenticated origi
   const f=fixture();await request(f.app).get('/api/photo/'+A+'/media').expect(401);assert.equal(f.storageCalls.length,0);
   await request(f.app).get('/api/photo/'+A+'/media?user_name=owner').set('Authorization','Bearer forged').expect(401);
   const response=await request(f.app).get('/api/photo/'+A+'/media').set('Authorization','Bearer other').expect(200);
-  assert.deepEqual(body(response),png);assert.equal(response.headers['cache-control'],'private, no-cache, must-revalidate');assert.equal(f.objects.has('uploads/photos/0.png'),false);assert.deepEqual(f.objects.get(PHOTO_BUCKET+'/photos/0.png'),png);
+  assert.deepEqual(body(response),png);assert.equal(response.headers['cache-control'],'private, max-age=3600, must-revalidate');assert.equal(f.objects.has('uploads/photos/0.png'),false);assert.deepEqual(f.objects.get(PHOTO_BUCKET+'/photos/0.png'),png);
   const head=await request(f.app).head('/api/photo/'+A+'/media').set('Authorization','Bearer other').expect(200);assert.equal(head.headers['content-length'],String(png.length));
   const range=await request(f.app).get('/api/photo/'+A+'/media').set('Authorization','Bearer other').set('Range','bytes=0-3').expect(206);assert.deepEqual(body(range),png.subarray(0,4));
   await request(f.app).get('/api/photo/'+A+'/media').set('Authorization','Bearer other').set('Range','bytes=0-3,8-10').expect(416);
@@ -165,7 +165,7 @@ test('conditional originals reuse unchanged bytes only after fresh authorization
   const first=await request(f.app).get(path).expect(200),etag=first.headers.etag;
   assert.ok(etag);assert.deepEqual(body(first),png);
   const cached=await request(f.app).get(path).set('If-None-Match',etag).expect(304);
-  assert.equal(cached.text,'');assert.equal(cached.headers.etag,etag);assert.equal(cached.headers['cache-control'],'private, no-cache, must-revalidate');
+  assert.equal(cached.text,'');assert.equal(cached.headers.etag,etag);assert.equal(cached.headers['cache-control'],'private, max-age=3600, must-revalidate');
   await request(f.app).head(path).set('If-Modified-Since',first.headers['last-modified']).expect(304);
   f.objects.set('uploads/posts/one.png',Buffer.concat([png,Buffer.from('changed')]));
   const changed=await request(f.app).get(path).set('If-None-Match',etag).expect(200);assert.notEqual(changed.headers.etag,etag);

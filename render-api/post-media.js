@@ -1,10 +1,40 @@
 'use strict';
 const { MAX_POST_IMAGES } = require('../js/post-media');
 const { removeStorageWithQueue, enqueueStorageCleanupJob } = require('./storage-cleanup');
+const ossMedia = require('./oss-media');
 const PATH = /^posts\/[a-zA-Z0-9_\u4e00-\u9fff.-]{1,200}$/;
+const POSTER_PATH = /^posters\/[a-zA-Z0-9_\u4e00-\u9fff.-]{1,200}$/;
 const ID = /^[a-zA-Z0-9_-]{8,128}$/;
 function validPath(value) { return typeof value === 'string' && PATH.test(value) && !value.includes('..'); }
+// ★ 2026-11-02：帖子媒体可能已经直传阿里云 OSS，地址不再来自 Supabase。
+//   这里把识别逻辑集中在一个地方，其余模块（附件校验、删除、分享页）继续
+//   复用 parsePostMediaUrl，不必各自判断域名。
+function ossOrigin() {
+  const c = ossMedia.config();
+  if (!c.bucket || !c.endpoint) return '';
+  return 'https://' + c.bucket + '.' + c.endpoint;
+}
+function isOssMediaUrl(value) {
+  const origin = ossOrigin();
+  if (!origin) return false;
+  try {
+    const url = new URL(value);
+    return url.origin === origin && (PATH.test(decodeURIComponent(url.pathname.slice(1))) || POSTER_PATH.test(decodeURIComponent(url.pathname.slice(1))));
+  } catch (_) { return false; }
+}
+function parseOssMediaUrl(value) {
+  if (!isOssMediaUrl(value)) return null;
+  try {
+    const path = decodeURIComponent(new URL(value).pathname.slice(1));
+    if (!PATH.test(path) && !POSTER_PATH.test(path)) return null;
+    return path.includes('..') ? null : path;
+  } catch (_) { return null; }
+}
 function parsePostMediaUrl(value, origin) {
+  // OSS 直传的地址：带随机段、公共读，路径格式与 Supabase 时代完全一致，
+  // 所以下游拿到 storage_path 就能照旧比对。
+  const ossPath = parseOssMediaUrl(value);
+  if (ossPath) return ossPath;
   let url, expected;
   try { url = new URL(value); expected = new URL(origin); } catch (_) { return null; }
   if (url.origin !== expected.origin || url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) return null;
@@ -126,4 +156,4 @@ async function createPostWithMedia(supabase, actor, path, uploadId, payload) {
   if (!data || !data.ok || !data.post) return { error: { code: data && data.code || 'media_ownership', message: '媒体登记已失效，请重新选择附件' } };
   return { data: data.post, error: null, duplicate: data.duplicate === true };
 }
-module.exports = { installPostMedia, createPostWithMedia, parsePostMediaUrl, isLocalUploadUrl, validPath, sweepPostMediaUploads, retireAccountPostMediaUploads, deleteQueuedAccountPostMediaUploads };
+module.exports = { installPostMedia, createPostWithMedia, parsePostMediaUrl, parseOssMediaUrl, isOssMediaUrl, ossOrigin, isLocalUploadUrl, validPath, sweepPostMediaUploads, retireAccountPostMediaUploads, deleteQueuedAccountPostMediaUploads };

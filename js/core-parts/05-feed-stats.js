@@ -297,6 +297,37 @@
                 return String(scope || "misc") + "/" + userPart + Date.now() + "_" + Math.random().toString(36).slice(2, 8) + "_" + sanitizeStorageFileName(fileName);
             }
 
+            // ★ 2026-11-02：帖子附件优先「浏览器直传阿里云 OSS」。
+            //   动机是额度：媒体经 Render 代理再从 Supabase 取，会把 Supabase 出站
+            //   （5GB/月）和 Render 出站（5GB/月）同时烧穿。直传之后字节只走 OSS，
+            //   而且上传时就带 immutable 缓存，同一个用户同一张图只下载一次。
+            //
+            //   降级：接口没配 OSS、签名失败、PUT 失败，一律返回 { ok:false } 让调用方
+            //   回退 Supabase 老链路——发帖绝不能因为存储切换而失败。
+            async function uploadPostObjectToOss(path, file, contentType, identity) {
+                var type = String(contentType || (file && file.type) || '').toLowerCase();
+                // 后端 oss-sign 只接受 image/ video/ audio/ 三种前缀，其余直接走老链路，
+                // 省掉一次必然失败的往返。
+                if (!/^(image|video|audio)\//.test(type)) return { ok: false, reason: 'type' };
+                try {
+                    var signRes = await window.xtjProtectedFetch('/api/oss/sign', {
+                        method: 'POST',
+                        body: JSON.stringify({ path: path, content_type: type }),
+                        authOwner: identity && identity.owner,
+                        authEpoch: identity && identity.epoch
+                    });
+                    if (!signRes.ok) return { ok: false, reason: 'sign_' + signRes.status };
+                    var signed = await signRes.json();
+                    if (!signed || !signed.ok || !signed.url) return { ok: false, reason: 'sign_rejected' };
+                    var putRes = await fetch(signed.url, { method: 'PUT', headers: signed.headers || { 'Content-Type': type }, body: file });
+                    if (!putRes.ok) return { ok: false, reason: 'put_' + putRes.status };
+                    // 公网地址去掉签名查询串：签名 15 分钟后失效，落库的必须是稳定地址。
+                    return { ok: true, url: String(signed.url).split('?')[0] };
+                } catch (_e) {
+                    return { ok: false, reason: 'network' };
+                }
+            }
+
             // ★ 2026-09-25 新增：私聊媒体上传路径（走后端 /api/dm/upload 时使用）。
             //   与 buildStorageUploadPath 的区别：**不含用户名**，改为 <uidHash>_ 前缀。
             //   原因：后端 validateDmUploadOwnership 要求 chat/<uidHash>_ 严格前缀匹配

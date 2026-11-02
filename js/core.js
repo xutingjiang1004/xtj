@@ -11749,13 +11749,20 @@ function renderProfileActivityList(kind) {
                                 if (!prepareResponse.ok || !prepared.ok || prepared.storage_path !== path) throw new Error(prepared.error || '上传准备失败');
                                 // 文件名唯一、内容不可覆盖：顺手给存储侧打一年缓存，
                                 // 以后任何直连场景都不会 1 小时失效、反复重下。
-                                var uploadRes = flight.progress ? await flight.progress.upload(sb, path, selectedFile, position) : await sb.storage.from('uploads').upload(path, selectedFile, { upsert: false, cacheControl: '31536000' });
+                                // ★ 2026-11-02：优先 OSS 直传（不吃 Supabase / Render 出站），
+                                //   签名不可用或 PUT 失败时静默回退 Supabase，发帖不受影响。
+                                var selectedType = window.XtjPostMedia && window.XtjPostMedia.effectiveType ? window.XtjPostMedia.effectiveType(selectedFile) : String(selectedFile.type || '');
+                                var viaOss = await uploadPostObjectToOss(path, selectedFile, selectedType, { owner: flight.owner, epoch: flight.epoch });
+                                assertPostPublishIdentity(flight);
+                                var uploadRes;
+                                if (viaOss.ok) uploadRes = { error: null };
+                                else uploadRes = flight.progress ? await flight.progress.upload(sb, path, selectedFile, position) : await sb.storage.from('uploads').upload(path, selectedFile, { upsert: false, cacheControl: '31536000' });
                                 assertPostPublishIdentity(flight);
                                 if (uploadRes.error) throw uploadRes.error;
                                 var dimensions = selectedFile.type.startsWith('image/') ? await readPostImageDimensions(selectedFile) : {};
                                 assertPostPublishIdentity(flight);
-                                return Object.assign({}, pending, dimensions, { position: position, media_type: selectedFile.type.split('/')[0],
-                                    media_url: sb.storage.from('uploads').getPublicUrl(path).data.publicUrl, file_size: selectedFile.size });
+                                return Object.assign({}, pending, dimensions, { position: position, media_type: String(selectedType || '').split('/')[0],
+                                    media_url: viaOss.ok ? viaOss.url : sb.storage.from('uploads').getPublicUrl(path).data.publicUrl, file_size: selectedFile.size });
                             }, 3);
                             media_url = uploaded[0].media_url;
                             media_type = uploaded.length > 1 ? 'album' : uploaded[0].media_type;
@@ -11771,11 +11778,18 @@ function renderProfileActivityList(kind) {
                                 if (posterFile && posterFile.size > 0 && posterFile.size <= window.XtjPostMedia.MAX_POST_FILE_BYTES) {
                                     // 封面单独放 posters/：这个前缀按公开缩略图处理，不用回表匹配帖子。
                                     var posterPath = buildStorageUploadPath('posters', posterFile.name);
-                                    var posterUpload = await sb.storage.from('uploads').upload(posterPath, posterFile, { upsert: false, cacheControl: '31536000' })
-                                        .catch(function () { return { error: true }; });
+                                    // ★ 2026-11-02：封面同样优先直传 OSS，失败再回退 Supabase。
+                                    var posterViaOss = await uploadPostObjectToOss(posterPath, posterFile, posterFile.type || 'image/jpeg', { owner: flight.owner, epoch: flight.epoch });
                                     assertPostPublishIdentity(flight);
-                                    // 封面传失败就当作没有封面，帖子照常发，不让它连累视频。
-                                    if (!posterUpload.error) posterUrl = sb.storage.from('uploads').getPublicUrl(posterPath).data.publicUrl;
+                                    if (posterViaOss.ok) {
+                                        posterUrl = posterViaOss.url;
+                                    } else {
+                                        var posterUpload = await sb.storage.from('uploads').upload(posterPath, posterFile, { upsert: false, cacheControl: '31536000' })
+                                            .catch(function () { return { error: true }; });
+                                        assertPostPublishIdentity(flight);
+                                        // 封面传失败就当作没有封面，帖子照常发，不让它连累视频。
+                                        if (!posterUpload.error) posterUrl = sb.storage.from('uploads').getPublicUrl(posterPath).data.publicUrl;
+                                    }
                                 }
                             }
                             postUploadCache.set(requestKey, {
@@ -12847,6 +12861,37 @@ function renderProfileActivityList(kind) {
                     if (u) userPart = u.replace(/[^a-zA-Z0-9_\u4e00-\u9fff]/g, '_').slice(0, 32) + '_';
                 } catch (_e) {}
                 return String(scope || "misc") + "/" + userPart + Date.now() + "_" + Math.random().toString(36).slice(2, 8) + "_" + sanitizeStorageFileName(fileName);
+            }
+
+            // ★ 2026-11-02：帖子附件优先「浏览器直传阿里云 OSS」。
+            //   动机是额度：媒体经 Render 代理再从 Supabase 取，会把 Supabase 出站
+            //   （5GB/月）和 Render 出站（5GB/月）同时烧穿。直传之后字节只走 OSS，
+            //   而且上传时就带 immutable 缓存，同一个用户同一张图只下载一次。
+            //
+            //   降级：接口没配 OSS、签名失败、PUT 失败，一律返回 { ok:false } 让调用方
+            //   回退 Supabase 老链路——发帖绝不能因为存储切换而失败。
+            async function uploadPostObjectToOss(path, file, contentType, identity) {
+                var type = String(contentType || (file && file.type) || '').toLowerCase();
+                // 后端 oss-sign 只接受 image/ video/ audio/ 三种前缀，其余直接走老链路，
+                // 省掉一次必然失败的往返。
+                if (!/^(image|video|audio)\//.test(type)) return { ok: false, reason: 'type' };
+                try {
+                    var signRes = await window.xtjProtectedFetch('/api/oss/sign', {
+                        method: 'POST',
+                        body: JSON.stringify({ path: path, content_type: type }),
+                        authOwner: identity && identity.owner,
+                        authEpoch: identity && identity.epoch
+                    });
+                    if (!signRes.ok) return { ok: false, reason: 'sign_' + signRes.status };
+                    var signed = await signRes.json();
+                    if (!signed || !signed.ok || !signed.url) return { ok: false, reason: 'sign_rejected' };
+                    var putRes = await fetch(signed.url, { method: 'PUT', headers: signed.headers || { 'Content-Type': type }, body: file });
+                    if (!putRes.ok) return { ok: false, reason: 'put_' + putRes.status };
+                    // 公网地址去掉签名查询串：签名 15 分钟后失效，落库的必须是稳定地址。
+                    return { ok: true, url: String(signed.url).split('?')[0] };
+                } catch (_e) {
+                    return { ok: false, reason: 'network' };
+                }
             }
 
             // ★ 2026-09-25 新增：私聊媒体上传路径（走后端 /api/dm/upload 时使用）。

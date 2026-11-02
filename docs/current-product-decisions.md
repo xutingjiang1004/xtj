@@ -2,6 +2,18 @@
 
 本文件记录用户本轮明确确认的方向。维护时先核对本文件和 CHANGELOG.md，历史实现不能用作恢复已退役功能的依据。
 
+## 2026-11-02 帖子媒体改走阿里云 OSS（用户明确要求）
+
+- 决定：**继续用 `xtj.onrender.com`，不买域名、不做 ICP 备案、不把站点迁回境内服务器**。用户明确说「反正我也习惯了 xtjonrender.com，现在就需要解决存储照片视频额度的问题」。因此不要再劝备案或迁站，除非用户重新提出。
+- 起因：Supabase 免费额度 Egress 已用 4.563/5GB（周期 10/26–11/26），剩约 437MB；11/1 单日 Storage 出站 692MB。同时媒体全部经 Render 的 `/api/uploads/media` 代理转发，Render 免费版也有 5GB/月出站，等于同一份字节被两个额度各记一次。
+- 存储选阿里云 OSS：华东1（杭州）、标准存储、**本地冗余**（同城冗余单价高 25% 且用不上试用包）、公共读、版本控制关闭。Bucket 为 `xtj-media-2026`，公网域名 `xtj-media-2026.oss-cn-hangzhou.aliyuncs.com`。OSS 默认域名不需要备案；哪天要绑自有域名才需要。
+- 链路：浏览器 `POST /api/oss/sign` 拿到 15 分钟有效的 PUT 签名 → 直传 OSS；落库的 `media_url` 是 OSS 公网地址（去掉签名查询串）；`/api/post/:id/media/:position` 在原有权限判定之后 302 到该地址。字节既不经过 Render 也不经过 Supabase。
+- 缓存：上传时就写 `public, max-age=31536000, immutable`（文件名唯一、内容不可覆盖，所以可以永久缓存）。这是本次省流量的主要手段——同一个用户同一张图只下载一次。已用真实 PUT/GET/DELETE 往返验证过头会落成对象元数据。
+- **私聊桶 `dm-private` / `dm-flash` 永远不迁**：那是私有内容，落进公共读桶等于公开。这两个桶继续走 Supabase 私有代理。
+- 降级：缺 `OSS_BUCKET` / `OSS_ENDPOINT` / `OSS_ACCESS_KEY_ID` / `OSS_ACCESS_KEY_SECRET` 任一项时 `/api/oss/sign` 返回 `oss_disabled`，前端静默回退 Supabase 老链路。发帖不能因为存储切换而失败。
+- **存量媒体这轮不迁**：迁移脚本要从 Supabase 下载再上传 OSS，那笔下载本身就算 Supabase 出站，会当场吃掉剩下的 437MB。等下个计费周期（11/26 之后）额度重置再迁。
+- 已知遗留：①删除帖子不会删 OSS 对象，会积累孤儿文件；②`post-critique.js` / `cat-post-images.js` 仍按 Supabase 路径取图，对 OSS 媒体取不到（小猫看不了新帖的图）；③帖子媒体不再有 w=240/1080 预览档，直接给原图（靠 immutable 缓存抵消）。
+
 ## 2026-11-01 共享元素转场、搜索面板、头像形状、歌曲卡片、小猫接话（用户明确要求）
 
 - 打开/关闭窗口要像苹果的 zoom transition：从被点的元素出发，关闭时回到那里，位置对齐、连贯，不要一张缩小的页面在飞，不要闪。实现见 `window.xtjMorph`；初始姿态先画出来再开始计时，关闭结束同一任务里直接隐藏。

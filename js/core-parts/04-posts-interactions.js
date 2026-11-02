@@ -6113,13 +6113,20 @@
                                 if (!prepareResponse.ok || !prepared.ok || prepared.storage_path !== path) throw new Error(prepared.error || '上传准备失败');
                                 // 文件名唯一、内容不可覆盖：顺手给存储侧打一年缓存，
                                 // 以后任何直连场景都不会 1 小时失效、反复重下。
-                                var uploadRes = flight.progress ? await flight.progress.upload(sb, path, selectedFile, position) : await sb.storage.from('uploads').upload(path, selectedFile, { upsert: false, cacheControl: '31536000' });
+                                // ★ 2026-11-02：优先 OSS 直传（不吃 Supabase / Render 出站），
+                                //   签名不可用或 PUT 失败时静默回退 Supabase，发帖不受影响。
+                                var selectedType = window.XtjPostMedia && window.XtjPostMedia.effectiveType ? window.XtjPostMedia.effectiveType(selectedFile) : String(selectedFile.type || '');
+                                var viaOss = await uploadPostObjectToOss(path, selectedFile, selectedType, { owner: flight.owner, epoch: flight.epoch });
+                                assertPostPublishIdentity(flight);
+                                var uploadRes;
+                                if (viaOss.ok) uploadRes = { error: null };
+                                else uploadRes = flight.progress ? await flight.progress.upload(sb, path, selectedFile, position) : await sb.storage.from('uploads').upload(path, selectedFile, { upsert: false, cacheControl: '31536000' });
                                 assertPostPublishIdentity(flight);
                                 if (uploadRes.error) throw uploadRes.error;
                                 var dimensions = selectedFile.type.startsWith('image/') ? await readPostImageDimensions(selectedFile) : {};
                                 assertPostPublishIdentity(flight);
-                                return Object.assign({}, pending, dimensions, { position: position, media_type: selectedFile.type.split('/')[0],
-                                    media_url: sb.storage.from('uploads').getPublicUrl(path).data.publicUrl, file_size: selectedFile.size });
+                                return Object.assign({}, pending, dimensions, { position: position, media_type: String(selectedType || '').split('/')[0],
+                                    media_url: viaOss.ok ? viaOss.url : sb.storage.from('uploads').getPublicUrl(path).data.publicUrl, file_size: selectedFile.size });
                             }, 3);
                             media_url = uploaded[0].media_url;
                             media_type = uploaded.length > 1 ? 'album' : uploaded[0].media_type;
@@ -6135,11 +6142,18 @@
                                 if (posterFile && posterFile.size > 0 && posterFile.size <= window.XtjPostMedia.MAX_POST_FILE_BYTES) {
                                     // 封面单独放 posters/：这个前缀按公开缩略图处理，不用回表匹配帖子。
                                     var posterPath = buildStorageUploadPath('posters', posterFile.name);
-                                    var posterUpload = await sb.storage.from('uploads').upload(posterPath, posterFile, { upsert: false, cacheControl: '31536000' })
-                                        .catch(function () { return { error: true }; });
+                                    // ★ 2026-11-02：封面同样优先直传 OSS，失败再回退 Supabase。
+                                    var posterViaOss = await uploadPostObjectToOss(posterPath, posterFile, posterFile.type || 'image/jpeg', { owner: flight.owner, epoch: flight.epoch });
                                     assertPostPublishIdentity(flight);
-                                    // 封面传失败就当作没有封面，帖子照常发，不让它连累视频。
-                                    if (!posterUpload.error) posterUrl = sb.storage.from('uploads').getPublicUrl(posterPath).data.publicUrl;
+                                    if (posterViaOss.ok) {
+                                        posterUrl = posterViaOss.url;
+                                    } else {
+                                        var posterUpload = await sb.storage.from('uploads').upload(posterPath, posterFile, { upsert: false, cacheControl: '31536000' })
+                                            .catch(function () { return { error: true }; });
+                                        assertPostPublishIdentity(flight);
+                                        // 封面传失败就当作没有封面，帖子照常发，不让它连累视频。
+                                        if (!posterUpload.error) posterUrl = sb.storage.from('uploads').getPublicUrl(posterPath).data.publicUrl;
+                                    }
                                 }
                             }
                             postUploadCache.set(requestKey, {
