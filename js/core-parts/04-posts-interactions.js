@@ -1645,7 +1645,11 @@
                         function add(el, frames, opts) { var a = el.animate(frames, Object.assign({ fill: 'both' }, opts)); a.__xtjOrigin = true; anims.push(a); return a; }
                         var move = add(box, open ? [{ transform: far }, { transform: 'none' }] : [{ transform: 'none' }, { transform: far }], { duration: D, easing: EASE });
                         // With a flying picture the window's white body must not show around the small picture: it appears once the picture has grown, and is gone before the picture lands.
-                        add(box, (flight || (rect && rect.width <= 132 && rect.height <= 132)) ? (open ? [{ opacity: 0 }, { opacity: 0, offset: .22 }, { opacity: 1, offset: .6 }, { opacity: 1 }] : [{ opacity: 1 }, { opacity: 1, offset: .12 }, { opacity: 0, offset: .5 }, { opacity: 0 }]) : (open ? [{ opacity: 0 }, { opacity: 1, offset: .2 }, { opacity: 1 }] : [{ opacity: 1 }, { opacity: 1, offset: .72 }, { opacity: 0 }]), { duration: D, easing: 'linear' });
+                        // ★ 2026-11-02：关闭时去掉了「前 12% 保持全不透明」那段保持帧。
+                        //   原来关闭最开始约 38ms 里，整张白卡片还是满尺寸、完全不透明地画着，
+                        //   iOS 上看起来就是「卡片那一小块白闪一下」。现在白底从第 0 帧就开始退，
+                        //   只留飞行的头像图单独飞回去。
+                        add(box, (flight || (rect && rect.width <= 132 && rect.height <= 132)) ? (open ? [{ opacity: 0 }, { opacity: 0, offset: .22 }, { opacity: 1, offset: .6 }, { opacity: 1 }] : [{ opacity: 1 }, { opacity: 0, offset: .34 }, { opacity: 0 }]) : (open ? [{ opacity: 0 }, { opacity: 1, offset: .2 }, { opacity: 1 }] : [{ opacity: 1 }, { opacity: 1, offset: .72 }, { opacity: 0 }]), { duration: D, easing: 'linear' });
                         if (cover) add(cover, open ? [{ opacity: 1 }, { opacity: 1, offset: .14 }, { opacity: 0, offset: .62 }, { opacity: 0 }] : [{ opacity: 0 }, { opacity: 1, offset: .4 }, { opacity: 1 }], { duration: D, easing: 'linear' });
                         if (scrim) add(scrim, open ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 1 }, { opacity: 0 }], { duration: D * (open ? .7 : .9), easing: 'ease-out' });
                         if (ghost) {
