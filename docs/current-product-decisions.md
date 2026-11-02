@@ -13,7 +13,8 @@
 - 降级：缺 `OSS_BUCKET` / `OSS_ENDPOINT` / `OSS_ACCESS_KEY_ID` / `OSS_ACCESS_KEY_SECRET` 任一项时 `/api/oss/sign` 返回 `oss_disabled`，前端静默回退 Supabase 老链路。发帖不能因为存储切换而失败。
 - **存量媒体这轮不迁**：迁移脚本要从 Supabase 下载再上传 OSS，那笔下载本身就算 Supabase 出站，会当场吃掉剩下的 437MB。等下个计费周期（11/26 之后）额度重置再迁。
 - **链路的四个必备条件**（缺一个都表现为「上传成功但没落到 OSS」或「发布结果未确认」）：① OSS 桶跨域规则放行 `PUT` 且允许 Headers 为 `*`；② 页面 CSP 的 `connect-src` 放行 OSS 域名（`render-api/security-headers.js`）；③ Render 上四个 `OSS_*` 环境变量齐全且 Secret 无复制错误；④ 数据库函数 `create_post_with_attachments` 放行 OSS 地址（迁移 `supabase/migrations/20261102000000_oss_media_attachments.sql`，2026-11-02 已执行）。
-- 已知遗留：①删除帖子不会删 OSS 对象，会积累孤儿文件；②`post-critique.js` / `cat-post-images.js` 仍按 Supabase 路径取图，对 OSS 媒体取不到（小猫看不了新帖的图）；③帖子媒体不再有 w=240/1080 预览档，直接给原图（靠 immutable 缓存抵消）；④视频封面（`poster_url`）在 iPhone 上截首帧失败，帖子会没有封面。
+- **缩略图（2026-11-02 晚）**：直传 OSS 后信息流一开始直接加载原图（实测单张 1.1MB），9 张图首屏约 10MB。改为选片时本地压 480px JPEG、随原图上传到 `posts/thumb_*`，地址写进帖子 metadata 的 `thumbs` 数组（与 position 对齐）。信息流列表用它，点开查看器仍用原图；旧帖没有 thumbs 时回退到服务端 `?preview=1` 预览档。**不需要数据库迁移**（metadata 是帖子 content 里的 JSON）。
+- 已知遗留：①删除帖子不会删 OSS 对象，会积累孤儿文件（缩略图同理）；②`post-critique.js` / `cat-post-images.js` 仍按 Supabase 路径取图，对 OSS 媒体取不到（小猫看不了新帖的图）；③存量旧图仍走 Supabase 代理，缓存已从 1 小时延长到 7 天，整体迁移等 11/26 新计费周期。
 
 ## 2026-11-01 共享元素转场、搜索面板、头像形状、歌曲卡片、小猫接话（用户明确要求）
 

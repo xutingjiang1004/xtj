@@ -11323,7 +11323,9 @@ function renderProfileActivityList(kind) {
                     for (var i = 0; i < items.length; i++) {
                         if (!/^(image|photo)$/.test(String(items[i].media_type || ''))) continue;
                         var thumb = overlay.querySelector('.post-share-thumb');
-                        thumb.src = '/api/post/' + encodeURIComponent(id) + '/media/' + i + '?preview=1';
+                        // 用列表缩略图即可：OSS 帖的 preview_url 是 480px 缩略图，
+                        // 旧帖的 preview_url 本来就是 ?preview=1 的服务端预览档。
+                        thumb.src = items[i].preview_url || ('/api/post/' + encodeURIComponent(id) + '/media/' + i + '?preview=1');
                         thumb.hidden = false;
                         thumb.addEventListener('error', function() { this.hidden = true; });
                         break;
@@ -11721,7 +11723,7 @@ function renderProfileActivityList(kind) {
                 btn.dataset.originalText = btn.textContent;btn._composeMarkup=btn.innerHTML;
                 btn.innerHTML = '<span>发布中</span>';
                 if (window.XtjPostPublishProgress) flight.progress = window.XtjPostPublishProgress.begin(btn, selectedPostMedia, function() { return postPublishIdentityCurrent(flight); });
-                var uploadedPath = '', mediaUploadId = '', uploadedMedia = [], posterUrl = '';
+                var uploadedPath = '', mediaUploadId = '', uploadedMedia = [], posterUrl = '', thumbUrls = [];
                 try {
                     var media_url = "";
                     var media_type = "";
@@ -11735,6 +11737,7 @@ function renderProfileActivityList(kind) {
                             mediaUploadId = cachedUpload.mediaUploadId;
                             uploadedMedia = cachedUpload.uploadedMedia.slice();
                             posterUrl = cachedUpload.posterUrl || '';
+                            thumbUrls = (cachedUpload.thumbs || []).slice();
                             reusedUpload = true;
                         } else {
                             var uploaded = await window.XtjPostMedia.mapUploads(selectedPostMedia, async function(selectedFile, position) {
@@ -11761,8 +11764,27 @@ function renderProfileActivityList(kind) {
                                 if (uploadRes.error) throw uploadRes.error;
                                 var dimensions = selectedFile.type.startsWith('image/') ? await readPostImageDimensions(selectedFile) : {};
                                 assertPostPublishIdentity(flight);
+                                // ★ 2026-11-02：缩略图另存一份。信息流一格只有 100–200 CSS px，
+                                //   却要拉 1MB 以上的原图，手机首屏和存储出站流量都被它吃光。
+                                //   原图照旧上传（点开看原图），缩略图走 posts/thumb_ 前缀单独存一份，
+                                //   地址写进帖子 metadata 的 thumbs 数组（按 position 对齐）。
+                                var thumbUrl = '';
+                                var thumbFile = window.XtjPostComposerMedia && typeof window.XtjPostComposerMedia.thumbFile === 'function' ? window.XtjPostComposerMedia.thumbFile(selectedFile) : null;
+                                if (thumbFile) {
+                                    var thumbPath = 'posts/thumb_' + crypto.randomUUID().replace(/-/g, '') + '.jpg';
+                                    var thumbViaOss = await uploadPostObjectToOss(thumbPath, thumbFile, 'image/jpeg', { owner: flight.owner, epoch: flight.epoch });
+                                    if (thumbViaOss.ok) thumbUrl = thumbViaOss.url;
+                                    else {
+                                        var thumbUpload = await sb.storage.from('uploads').upload(thumbPath, thumbFile, { upsert: false, cacheControl: '31536000' })
+                                            .catch(function () { return { error: true }; });
+                                        assertPostPublishIdentity(flight);
+                                        // uploads 桶是私有的，缩略图地址要走同源代理，不能直接给存储直链。
+                                        if (!thumbUpload.error) thumbUrl = (window.API_BASE || '').replace(/\/$/, '') + '/api/uploads/media?path=' + encodeURIComponent(thumbPath);
+                                    }
+                                }
+                                thumbUrls[position] = thumbUrl || null;
                                 return Object.assign({}, pending, dimensions, { position: position, media_type: String(selectedType || '').split('/')[0],
-                                    media_url: viaOss.ok ? viaOss.url : sb.storage.from('uploads').getPublicUrl(path).data.publicUrl, file_size: selectedFile.size });
+                                    media_url: viaOss.ok ? viaOss.url : sb.storage.from('uploads').getPublicUrl(path).data.publicUrl, thumb_url: thumbUrl, file_size: selectedFile.size });
                             }, 3);
                             media_url = uploaded[0].media_url;
                             media_type = uploaded.length > 1 ? 'album' : uploaded[0].media_type;
@@ -11799,14 +11821,15 @@ function renderProfileActivityList(kind) {
                                 uploadedPath: uploadedPath,
                                 mediaUploadId: mediaUploadId,
                                 uploadedMedia: uploadedMedia.slice(),
-                                posterUrl: posterUrl || ''
+                                posterUrl: posterUrl || '',
+                                thumbs: thumbUrls.slice()
                             });
                         }
                     } else if (file) {
                         throw new Error('附件模块未加载，请刷新后重试');
                     }
                     var plainText = content.slice(0, 2000);
-                    var metadata = collectPostMetadata ? collectPostMetadata(visibility, { location: publishLocation, poster_url: posterUrl || '' }) : { visibility: visibility || "public" };
+                    var metadata = collectPostMetadata ? collectPostMetadata(visibility, { location: publishLocation, poster_url: posterUrl || '', thumbs: thumbUrls }) : { visibility: visibility || "public" };
                     var contentPayload = buildPostContentPayload(plainText, metadata);
                     var payload = {
                         user_name: flight.owner,

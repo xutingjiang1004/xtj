@@ -14,6 +14,8 @@
   3. **Render 的四个环境变量**：`OSS_BUCKET` / `OSS_ENDPOINT` / `OSS_ACCESS_KEY_ID` / `OSS_ACCESS_KEY_SECRET`。Secret 复制时错一两个字符会得到 OSS 的 `SignatureDoesNotMatch`（403）。
   4. **数据库函数要放行**：`create_post_with_attachments` 原本要求附件真实存在于 Supabase 存储（`storage.objects`），OSS 的文件查不到就返回 `media_not_uploaded`，接口转 503，前端显示「发布结果未确认，请重试」。已加迁移 `supabase/migrations/20261102000000_oss_media_attachments.sql`，只放宽这一条存在性校验，其余校验原样保留。
 - **诊断手段**：`render-api/oss-sign.js` 增加启动自检日志 `[OSS-CONFIG]`，只打印变量「已设置/未设置」不打印密钥；跨域是否生效用一条 `OPTIONS` 预检即可判定（返回 `Access-Control-Allow-Origin` 即通）。
+- **图片缩略图（2026-11-02 晚）**：媒体直传 OSS 之后，信息流里 `<img>` 直接拿到的是原图（1.1MB/张），9 张图首屏就是 10MB。现在选片时在手机本地压一张 **480px JPEG（质量 0.72）**，随原图一起上传到 `posts/thumb_*`，地址按 position 写进帖子 metadata 的 `thumbs` 数组；`getPostMediaItems` 用它作为 `preview_url`（信息流列表），`media_url` 仍是原图（点开查看器）。旧帖没有 `thumbs` 就回退到服务端 `?preview=1` 预览档，行为不变。缩略图不进 `post_media_uploads` 登记表，也不参与附件校验。
+- **视频封面（2026-11-02 晚）**：iPhone 上截首帧失败会让 `poster_url` 为空，帖子没有封面。根因是原来只等 `loadedmetadata` 里的 `play()`，重试窗口只有 8×250ms（2 秒），iOS 解码慢或 `play()` 被拒就放弃。现在加 `canplay` 监听兜底、`play()` 失败也继续抓帧、重试放宽到 50×400ms，总超时 12 秒 → 25 秒。
 - **修掉上一轮遗留的 4 个过期断言**：`98a3a4ac` 把私有媒体缓存头从 `private, no-cache` 改成 `private, max-age=3600` 但没同步测试，`upload-access-runtime` / `photo-access-runtime` / `media-previews` 一直红着。现已同步，媒体相关 70 个用例全绿。
 - 未改动：Dock、帖子页版面。
 
