@@ -7287,7 +7287,11 @@ function renderProfileActivityList(kind) {
                         //   只留飞行的头像图单独飞回去。
                         add(box, (flight || (rect && rect.width <= 132 && rect.height <= 132)) ? (open ? [{ opacity: 0 }, { opacity: 0, offset: .22 }, { opacity: 1, offset: .6 }, { opacity: 1 }] : [{ opacity: 1 }, { opacity: 0, offset: .34 }, { opacity: 0 }]) : (open ? [{ opacity: 0 }, { opacity: 1, offset: .2 }, { opacity: 1 }] : [{ opacity: 1 }, { opacity: 1, offset: .72 }, { opacity: 0 }]), { duration: D, easing: 'linear' });
                         if (cover) add(cover, open ? [{ opacity: 1 }, { opacity: 1, offset: .14 }, { opacity: 0, offset: .62 }, { opacity: 0 }] : [{ opacity: 0 }, { opacity: 1, offset: .4 }, { opacity: 1 }], { duration: D, easing: 'linear' });
-                        if (scrim) add(scrim, open ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 1 }, { opacity: 0 }], { duration: D * (open ? .7 : .9), easing: 'ease-out' });
+                        // ★ 2026-11-02：关闭时遮罩原来也用 ease-out（开头最快），结果整页在
+                        //   卡片还没缩下去时就已经变亮，看起来就是「白闪一下」。
+                        //   关闭改成 ease-in（先按住、后面才散），并且跑满整个时长，
+                        //   让页面保持暗着，等卡片收干净再亮起来。
+                        if (scrim) add(scrim, open ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 1 }, { opacity: 0 }], { duration: D * (open ? .7 : 1), easing: open ? 'ease-out' : 'ease-in' });
                         if (ghost) {
                             if (flight) add(ghost, open ? [{ transform: handle.ghostFar }, { transform: 'none' }] : [{ transform: 'none' }, { transform: handle.ghostFar }], { duration: D, easing: EASE });
                             else add(ghost, open ? [{ opacity: 1 }, { opacity: 1, offset: .12 }, { opacity: 0, offset: .55 }, { opacity: 0 }] : [{ opacity: 0 }, { opacity: 0, offset: .5 }, { opacity: 1 }], { duration: D, easing: 'linear' });
