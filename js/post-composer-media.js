@@ -92,12 +92,13 @@
       // readyState < 2 时 drawImage 画出来是一张纯黑图，iOS 上尤其常见。宁可多等一会儿。
       if (!w || !h || video.readyState < 2) { retry(); return; }
       drawing = true;
-      var scale = Math.min(1, 720 / Math.max(w, h));
+      // 720 档在 3x 屏上被放大到 1380 物理像素，封面看着发虚；提到 1080 才够。
+      var scale = Math.min(1, 1080 / Math.max(w, h));
       var canvas = document.createElement('canvas');
       canvas.width = Math.max(1, Math.round(w * scale));
       canvas.height = Math.max(1, Math.round(h * scale));
       try { canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height); } catch (_) { return finish(null); }
-      canvas.toBlob(function (blob) { finish(blob); }, 'image/jpeg', 0.82);
+      canvas.toBlob(function (blob) { finish(blob); }, 'image/jpeg', 0.85);
     }
     function retry() {
       if (settled || drawing) return;

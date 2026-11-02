@@ -5767,8 +5767,24 @@
                 if (!player) return;
                 wrap.classList.add('is-expanded');
                 player.controls = true;
+                try { if (player.ended) player.currentTime = 0; } catch (_) {}
                 try { player.play(); } catch (_) {}
             });
+            // ★ 2026-11-02：播放结束必须收回画中画状态。
+            //   以前 is-expanded 加上去就再没人移除，播过一次的视频永久满宽：
+            //   竖屏视频占满整屏、最后一帧被放大所以看着糊，而且停在原生控件的
+            //   「重播」按钮上再点，iOS 会出现有声无画的黑屏。现在结束后回到
+            //   封面态（controls 关掉、currentTime 归零），下次播放从头开始。
+            document.addEventListener('ended', function(e) {
+                var player = e.target;
+                if (!player || player.tagName !== 'VIDEO') return;
+                var wrap = player.closest && player.closest('.media--video.is-feed');
+                if (!wrap) return;
+                wrap.classList.remove('is-expanded');
+                try { player.controls = false; } catch (_) {}
+                try { player.pause(); } catch (_) {}
+                try { player.currentTime = 0; } catch (_) {}
+            }, true);
             // The detail dialog stops bubbling at its glass box. Delegate
             // inside its body too, without dispatching an action twice.
             var postDetailActionRoot = document.getElementById('postDetailBody');
