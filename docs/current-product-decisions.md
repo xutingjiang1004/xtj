@@ -12,7 +12,8 @@
 - **私聊桶 `dm-private` / `dm-flash` 永远不迁**：那是私有内容，落进公共读桶等于公开。这两个桶继续走 Supabase 私有代理。
 - 降级：缺 `OSS_BUCKET` / `OSS_ENDPOINT` / `OSS_ACCESS_KEY_ID` / `OSS_ACCESS_KEY_SECRET` 任一项时 `/api/oss/sign` 返回 `oss_disabled`，前端静默回退 Supabase 老链路。发帖不能因为存储切换而失败。
 - **存量媒体这轮不迁**：迁移脚本要从 Supabase 下载再上传 OSS，那笔下载本身就算 Supabase 出站，会当场吃掉剩下的 437MB。等下个计费周期（11/26 之后）额度重置再迁。
-- 已知遗留：①删除帖子不会删 OSS 对象，会积累孤儿文件；②`post-critique.js` / `cat-post-images.js` 仍按 Supabase 路径取图，对 OSS 媒体取不到（小猫看不了新帖的图）；③帖子媒体不再有 w=240/1080 预览档，直接给原图（靠 immutable 缓存抵消）。
+- **链路的四个必备条件**（缺一个都表现为「上传成功但没落到 OSS」或「发布结果未确认」）：① OSS 桶跨域规则放行 `PUT` 且允许 Headers 为 `*`；② 页面 CSP 的 `connect-src` 放行 OSS 域名（`render-api/security-headers.js`）；③ Render 上四个 `OSS_*` 环境变量齐全且 Secret 无复制错误；④ 数据库函数 `create_post_with_attachments` 放行 OSS 地址（迁移 `supabase/migrations/20261102000000_oss_media_attachments.sql`，2026-11-02 已执行）。
+- 已知遗留：①删除帖子不会删 OSS 对象，会积累孤儿文件；②`post-critique.js` / `cat-post-images.js` 仍按 Supabase 路径取图，对 OSS 媒体取不到（小猫看不了新帖的图）；③帖子媒体不再有 w=240/1080 预览档，直接给原图（靠 immutable 缓存抵消）；④视频封面（`poster_url`）在 iPhone 上截首帧失败，帖子会没有封面。
 
 ## 2026-11-01 共享元素转场、搜索面板、头像形状、歌曲卡片、小猫接话（用户明确要求）
 

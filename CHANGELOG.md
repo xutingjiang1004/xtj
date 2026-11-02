@@ -8,6 +8,12 @@
 - **降级**：OSS 四个环境变量不全时接口返回 `oss_disabled`，前端静默回退 Supabase 老链路，发帖不会因此失败。
 - **边界**：私聊桶 `dm-private` / `dm-flash` 不迁，继续走 Supabase 私有代理（私有内容不能进公共读桶）。存量媒体本轮不迁——迁移本身要从 Supabase 下载，会烧掉剩余额度，等下个计费周期再说。
 - **配套**：`post-media.js` 的 `parsePostMediaUrl` 同时识别 OSS 地址（公私两套路径格式一致）；删帖时的 `storagePaths` 排除 OSS 媒体，避免去打不存在的 Supabase 对象。
+- **打通这条链路需要四处同时具备，缺一不可**（都是实测踩出来的）：
+  1. OSS 桶的**跨域规则**要放行 `PUT` 且「允许 Headers = `*`」；只放行 GET/HEAD 会让浏览器预检 403。
+  2. 页面 **CSP 的 `connect-src` 必须放行 OSS 域名**（`render-api/security-headers.js`）；不放行则请求在离开浏览器前就被拦，前端只会静默回退，表现为「怎么配都没用」。
+  3. **Render 的四个环境变量**：`OSS_BUCKET` / `OSS_ENDPOINT` / `OSS_ACCESS_KEY_ID` / `OSS_ACCESS_KEY_SECRET`。Secret 复制时错一两个字符会得到 OSS 的 `SignatureDoesNotMatch`（403）。
+  4. **数据库函数要放行**：`create_post_with_attachments` 原本要求附件真实存在于 Supabase 存储（`storage.objects`），OSS 的文件查不到就返回 `media_not_uploaded`，接口转 503，前端显示「发布结果未确认，请重试」。已加迁移 `supabase/migrations/20261102000000_oss_media_attachments.sql`，只放宽这一条存在性校验，其余校验原样保留。
+- **诊断手段**：`render-api/oss-sign.js` 增加启动自检日志 `[OSS-CONFIG]`，只打印变量「已设置/未设置」不打印密钥；跨域是否生效用一条 `OPTIONS` 预检即可判定（返回 `Access-Control-Allow-Origin` 即通）。
 - **修掉上一轮遗留的 4 个过期断言**：`98a3a4ac` 把私有媒体缓存头从 `private, no-cache` 改成 `private, max-age=3600` 但没同步测试，`upload-access-runtime` / `photo-access-runtime` / `media-previews` 一直红着。现已同步，媒体相关 70 个用例全绿。
 - 未改动：Dock、帖子页版面。
 
