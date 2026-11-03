@@ -7286,7 +7286,10 @@ function renderProfileActivityList(kind) {
                         //   iOS 上看起来就是「卡片那一小块白闪一下」。现在白底从第 0 帧就开始退，
                         //   只留飞行的头像图单独飞回去。
                         add(box, (flight || (rect && rect.width <= 132 && rect.height <= 132)) ? (open ? [{ opacity: 0 }, { opacity: 0, offset: .22 }, { opacity: 1, offset: .6 }, { opacity: 1 }] : [{ opacity: 1 }, { opacity: 0, offset: .34 }, { opacity: 0 }]) : (open ? [{ opacity: 0 }, { opacity: 1, offset: .2 }, { opacity: 1 }] : [{ opacity: 1 }, { opacity: 1, offset: .72 }, { opacity: 0 }]), { duration: D, easing: 'linear' });
-                        if (cover) add(cover, open ? [{ opacity: 1 }, { opacity: 1, offset: .14 }, { opacity: 0, offset: .62 }, { opacity: 0 }] : [{ opacity: 0 }, { opacity: 1, offset: .4 }, { opacity: 1 }], { duration: D, easing: 'linear' });
+                        // 关闭时不能再把白色遮盖层从透明「淡入」：那会在动画中段重新画出
+                        // 一张不透明白卡片（iOS 上就是用户看到的白闪）。关闭一开始内容就被
+                        // 同色层盖稳，之后只让整张卡收缩、淡出；遮盖层自身不再增亮。
+                        if (cover) add(cover, open ? [{ opacity: 1 }, { opacity: 1, offset: .14 }, { opacity: 0, offset: .62 }, { opacity: 0 }] : [{ opacity: 1 }, { opacity: 1 }], { duration: D, easing: 'linear' });
                         // ★ 2026-11-02：关闭时遮罩原来也用 ease-out（开头最快），结果整页在
                         //   卡片还没缩下去时就已经变亮，看起来就是「白闪一下」。
                         //   关闭改成 ease-in（先按住、后面才散），并且跑满整个时长，
