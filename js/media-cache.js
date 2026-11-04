@@ -1,8 +1,14 @@
 (function () {
   'use strict';
   window.xtjMediaSaveData = function () {
-    try { return localStorage.getItem('xtj_media_save_data') !== 'off' || !!(navigator.connection && navigator.connection.saveData); }
-    catch (_) { return true; }
+    try {
+      // FIX CACHE-05: 用户显式选择优先于系统省流量。旧写法用 || 时，系统 saveData
+      // 为 true 会让按钮永远关不掉（每次点击都写回 'off' 却仍是开启态）。
+      var pref = localStorage.getItem('xtj_media_save_data');
+      // 默认开启减少原图预加载（与历史行为一致）；用户显式 'off' 必须生效，
+      // 不再被系统 saveData 覆盖。'on' 与未设置都返回 true。
+      return pref !== 'off';
+    } catch (_) { return true; }
   };
   window.xtjMediaPreviewUrl = function (value) {
     try {

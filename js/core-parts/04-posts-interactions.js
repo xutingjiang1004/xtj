@@ -3911,7 +3911,9 @@
             }
             function buildPostCommentsHtml(post, pComms, options) {
                 if (!pComms.length) return '';
-                var limit = options && options.detail ? 60 : 60; // 列表也一次画满，不再截断成 3 条
+                // FIX POSTB-04: 详情弹窗自动翻页会不断追加 rows，固定 60 条让后续评论永远
+                // 不显示、跨页定位也找不到节点。detail 按已加载评论全量渲染，列表仍保持 60 条上限。
+                var limit = options && options.detail ? Math.max(60, pComms.length) : 60; // 列表也一次画满，不再截断成 3 条
                       var _byId = {}; var _seen = Object.create(null); var _count = 0;
                       pComms.forEach(function(c) { _byId[String(c.id)] = c; });
                       var _childrenOf = {};
@@ -3959,15 +3961,19 @@
             // 「帖子详情」才能看到。这里按需把这些评论拉回卡片内部再重绘一次。
             var _commentExpandInflight = Object.create(null);
             var _commentExpandAttempted = Object.create(null);
+            // FIX POSTB-02: 每轮都从 cursor=null 重拉前 6 页，>300 条时按 id 去重后永远
+            // 没有新增、按钮反复出现。游标按帖子持久化，下次点击从上次结束处续拉。
+            var _commentExpandCursors = Object.create(null);
+            var _commentExpandDone = Object.create(null);
             window.__xtjExpandPostComments = function(postId, btn) {
                 var key = String(postId || '');
                 if (!key) return Promise.resolve(false);
                 if (_commentExpandInflight[key]) return _commentExpandInflight[key];
-                if (_commentExpandAttempted[key] && !btn) return Promise.resolve(false);
+                if (_commentExpandDone[key] || (_commentExpandAttempted[key] && !btn)) return Promise.resolve(false);
                 _commentExpandAttempted[key] = true;
                 if (btn) { btn.disabled = true; btn.textContent = '正在加载评论…'; }
                 var task = (async function() {
-                    var rows = [], cursor = null, guard = 0;
+                    var rows = [], cursor = _commentExpandCursors[key] || null, guard = 0;
                     try {
                         do {
                             var path = '/api/post/detail/' + encodeURIComponent(key) + '/relations/comments?limit=50' + (cursor ? '&cursor=' + encodeURIComponent(cursor) : '');
@@ -3982,6 +3988,8 @@
                     } catch (eExpand) {
                         console.warn('[comments] expand failed', eExpand);
                     }
+                    _commentExpandCursors[key] = cursor || null;
+                    if (!cursor) _commentExpandDone[key] = true;
                     if (!rows.length) {
                         if (btn) { btn.disabled = false; btn.textContent = '展开评论失败，点开帖子详情'; }
                         return false;
@@ -4542,6 +4550,8 @@
                     });
                     localStorage.setItem(CACHE_KEY, JSON.stringify({
                         version: 8,
+                        // FIX POSTB-05: 快照带上归属账号，失败回退时才能拒绝上一账号的私密帖。
+                        owner: String(window.currentUser || ''),
                         data: {
                             posts: cachePosts,
                             comments: cacheComments,
@@ -6146,10 +6156,14 @@
                                 // ★ 2026-11-02：优先 OSS 直传（不吃 Supabase / Render 出站），
                                 //   签名不可用或 PUT 失败时静默回退 Supabase，发帖不受影响。
                                 var selectedType = window.XtjPostMedia && window.XtjPostMedia.effectiveType ? window.XtjPostMedia.effectiveType(selectedFile) : String(selectedFile.type || '');
-                                var viaOss = await uploadPostObjectToOss(path, selectedFile, selectedType, { owner: flight.owner, epoch: flight.epoch });
+                                var viaOss = await uploadPostObjectToOss(path, selectedFile, selectedType, { owner: flight.owner, epoch: flight.epoch, progress: flight.progress });
                                 assertPostPublishIdentity(flight);
                                 var uploadRes;
-                                if (viaOss.ok) uploadRes = { error: null };
+                                if (viaOss.ok) {
+                                    uploadRes = { error: null };
+                                    // FIX MEDIA-02: 直传完成后把该文件计入已上传字节。
+                                    if (flight.progress && typeof flight.progress.uploaded === 'function') flight.progress.uploaded(position, selectedFile);
+                                }
                                 else uploadRes = flight.progress ? await flight.progress.upload(sb, path, selectedFile, position) : await sb.storage.from('uploads').upload(path, selectedFile, { upsert: false, cacheControl: '31536000' });
                                 assertPostPublishIdentity(flight);
                                 if (uploadRes.error) throw uploadRes.error;
@@ -6163,7 +6177,7 @@
                                 var thumbFile = window.XtjPostComposerMedia && typeof window.XtjPostComposerMedia.thumbFile === 'function' ? window.XtjPostComposerMedia.thumbFile(selectedFile) : null;
                                 if (thumbFile) {
                                     var thumbPath = 'posts/thumb_' + crypto.randomUUID().replace(/-/g, '') + '.jpg';
-                                    var thumbViaOss = await uploadPostObjectToOss(thumbPath, thumbFile, 'image/jpeg', { owner: flight.owner, epoch: flight.epoch });
+                                    var thumbViaOss = await uploadPostObjectToOss(thumbPath, thumbFile, 'image/jpeg', { owner: flight.owner, epoch: flight.epoch, progress: flight.progress });
                                     if (thumbViaOss.ok) thumbUrl = thumbViaOss.url;
                                     else {
                                         var thumbUpload = await sb.storage.from('uploads').upload(thumbPath, thumbFile, { upsert: false, cacheControl: '31536000' })
@@ -6192,7 +6206,7 @@
                                     // 封面单独放 posters/：这个前缀按公开缩略图处理，不用回表匹配帖子。
                                     var posterPath = buildStorageUploadPath('posters', posterFile.name);
                                     // ★ 2026-11-02：封面同样优先直传 OSS，失败再回退 Supabase。
-                                    var posterViaOss = await uploadPostObjectToOss(posterPath, posterFile, posterFile.type || 'image/jpeg', { owner: flight.owner, epoch: flight.epoch });
+                                    var posterViaOss = await uploadPostObjectToOss(posterPath, posterFile, posterFile.type || 'image/jpeg', { owner: flight.owner, epoch: flight.epoch, progress: flight.progress });
                                     assertPostPublishIdentity(flight);
                                     if (posterViaOss.ok) {
                                         posterUrl = posterViaOss.url;
@@ -6483,7 +6497,12 @@
                         var fallbackRaw = !cacheFallbackShown && window.safeStorage.get(CACHE_KEY);
                         if (fallbackRaw) {
                             var fallbackParsed = JSON.parse(fallbackRaw);
-                            if (fallbackParsed && fallbackParsed.data && hydrateFeedStateFromSnapshot(fallbackParsed)) {
+                            // FIX POSTB-05: 失败回退原先不校验时效与归属，可能把上一账号含
+                            // 私密帖的旧快照注入 feedAllPosts。与快路径统一 5 分钟 TTL + owner 校验。
+                            var fallbackAge = Date.now() - Number(fallbackParsed && fallbackParsed.timestamp || 0);
+                            var fallbackFresh = Number.isFinite(fallbackAge) && fallbackAge >= 0 && fallbackAge < CACHE_DURATION;
+                            var fallbackOwnerOk = !fallbackParsed || !fallbackParsed.owner || String(fallbackParsed.owner) === String(window.currentUser || '');
+                            if (fallbackFresh && fallbackOwnerOk && fallbackParsed && fallbackParsed.data && hydrateFeedStateFromSnapshot(fallbackParsed)) {
                                 await renderFeedFromMemoryState();
                                 setupFeedInfiniteScroll();
                                 cacheFallbackShown = true;

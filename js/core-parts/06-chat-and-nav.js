@@ -95,11 +95,29 @@
                 }
                 var shouldAnimateTab = options.animate === true;
                 if (tab !== currentDockTab) {
+                    // FIX NAVA-02: 通知横幅等路径先 switchDockTab('chat') 再 openChat，
+                    // openChat 里的 currentDockTab === 'posts' 判断已失效。离开 posts 时统一快照滚动位置。
+                    if (currentDockTab === 'posts' && restorePostsScroll === null) {
+                        var postsScrollPanel = document.getElementById('panelPosts');
+                        if (postsScrollPanel) restorePostsScroll = postsScrollPanel.scrollTop;
+                    }
                     try { var imv = document.getElementById('imgViewer'); if (imv && imv.classList.contains('active')) closeImageViewer(); } catch(e) {}
                     try { var am = document.getElementById('announcementModal'); if (am && am.classList.contains('active')) closeAnnouncementModal(); } catch(e) {}
-                    try { var sm = document.getElementById('statModal'); if (sm && sm.classList.contains('active')) sm.classList.remove('active'); } catch(e) {}
-                    try { var cm = document.getElementById('commentModal'); if (cm && cm.classList.contains('active')) closeModal('commentModal'); } catch(e) {}
-                    document.body.style.overflow = '';
+                    try { var sm = document.getElementById('statModal'); if (sm && sm.classList.contains('active') && typeof closeModal === 'function') closeModal('statModal'); } catch(e) {}
+                    // FIX NAVA-01: body 级弹窗（帖子详情、个人资料、举报、登录等）不受
+                    // .dock-panel inert 影响。切 tab 时必须统一走 closeModal 清理状态，
+                    // 否则会整屏盖在新 tab 上，并残留 activePostId / 在途详情请求。
+                    try {
+                        var openOverlays = document.querySelectorAll('.modal-overlay.active, .report-modal-overlay.active, .announcement-modal-overlay.active');
+                        Array.prototype.forEach.call(openOverlays, function (el) {
+                            if (!el || !el.id || el.id === 'statModal' || el.id === 'announcementModal') return;
+                            try { if (typeof closeModal === 'function') closeModal(el.id); else el.classList.remove('active'); }
+                            catch (e2) { el.classList.remove('active'); }
+                        });
+                    } catch (e3) {}
+                    // FIX NAVA-01/AUTH-08: 滚动锁交给统一函数按当前弹窗重算，不再硬清。
+                    try { if (typeof syncHeaderModalBodyLock === 'function') syncHeaderModalBodyLock(); else document.body.style.overflow = ''; }
+                    catch (e4) { document.body.style.overflow = ''; }
                 }
                 if (shouldAnimateTab) {
                     var btn = document.querySelector('.dock-tab[data-tab="' + tab + '"]');

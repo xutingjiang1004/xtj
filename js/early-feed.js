@@ -312,18 +312,41 @@
     state.stale = true;
     finishOk(cached);
   }
+  // FIX CACHE-02: 真实数据到达时若用户正在输入/已滚动/页面隐藏，原实现直接 return
+  // 且没有任何补偿，首屏会永久停在旧缓存。改为条件满足后补刷新（最多重试 40 次）。
+  var coreRefreshNeeded = false, coreRefreshTimer = 0, coreRefreshScheduled = false, coreRefreshAttempts = 0;
+  function scheduleCoreRefreshRetry() {
+    if (coreRefreshScheduled || coreRefreshAttempts >= 40) return;
+    coreRefreshScheduled = true;
+    clearTimeout(coreRefreshTimer);
+    coreRefreshTimer = setTimeout(function () {
+      coreRefreshScheduled = false;
+      coreRefreshAttempts++;
+      if (coreRefreshNeeded) refreshCoreFeed();
+    }, 1200);
+  }
   function refreshCoreFeed() {
     // Never yank the page while the visitor is typing or reading further down.
+    coreRefreshNeeded = true;
     var active = document.activeElement;
-    if (pageHidden || (active && /^(TEXTAREA|INPUT)$/.test(active.tagName)) || (window.scrollY || 0) > 160) return;
-    try { if (typeof window.loadFeed === 'function' && window.__xtjCoreFeedReady) window.loadFeed(true); } catch (_) {}
+    if (pageHidden || (active && /^(TEXTAREA|INPUT)$/.test(active.tagName)) || (window.scrollY || 0) > 160) {
+      scheduleCoreRefreshRetry();
+      return;
+    }
+    clearTimeout(coreRefreshTimer); coreRefreshScheduled = false;
+    var refreshed = false;
+    try { if (typeof window.loadFeed === 'function' && window.__xtjCoreFeedReady) { window.loadFeed(true); refreshed = true; } } catch (_) {}
+    if (refreshed) { coreRefreshNeeded = false; coreRefreshAttempts = 0; }
+    else scheduleCoreRefreshRetry();
   }
 
   function requestFeed(attempt) {
     try {
       var url = (window.location && window.location.origin ? window.location.origin : '') + '/api/feed?page=0&limit=' + FEED_LIMIT;
       var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
-      var patient = servedStale || !!readFeedCache();
+      // FIX CACHE-04: 无缓存的新设备首访也要给免费实例冷启动（20–40s）留够时间，
+      // 否则 12s 一到就整页报错，自动重试与 45s patient 窗口完全用不上。
+      var patient = servedStale || !!readFeedCache() || attempt === 0;
       var timer = setTimeout(function () {
         try {
           if (ctrl) ctrl.abort();

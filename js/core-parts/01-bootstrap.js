@@ -553,9 +553,15 @@ const ADMIN_NAME = "xxz";
                     // ★ 审计修复：logout 请求复用 xtjFetch 超时封装（8s），
                     // 避免 VPN/半开连接下 fetch 永不 settle（与 doLogout 的 8s 超时对齐）。
                     var logoutFetch = (typeof window.xtjFetch === 'function') ? window.xtjFetch : fetch;
-                    logoutFetch(API_BASE + '/api/user/logout', {
+                    // FIX BOOT-01: 身份不匹配分支的 logout 必须登记到 __xtjLogoutPending，
+                    // 否则用户立刻重试登录时，旧 logout 晚到会按当前 cookie 撤销新会话的 refresh。
+                    var pendingLogout = Promise.resolve(logoutFetch(API_BASE + '/api/user/logout', {
                         method: 'POST', credentials: 'include', headers: logoutHeaders
-                    }, 8000).catch(function(){});
+                    }, 8000)).catch(function(){});
+                    window.__xtjLogoutPending = pendingLogout;
+                    pendingLogout.then(function() {
+                        if (window.__xtjLogoutPending === pendingLogout) window.__xtjLogoutPending = null;
+                    });
                 } catch(e) {}
 
                 // ★ 广播退出事件到其他标签页（仅当非远程同步触发时）

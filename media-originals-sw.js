@@ -50,7 +50,16 @@ async function originalResponse(event, key) {
   // On the first worker visit, retain the browser's existing HTTP-cache bytes
   // while forcing a current server validation; installation must not cause a
   // one-time redownload of originals already stored by the browser.
-  const response = await fetch(new Request(event.request, { mode: 'same-origin', headers, cache: saved ? 'no-store' : 'no-cache', redirect: 'error' }));
+  let response;
+  try {
+    response = await fetch(new Request(event.request, { mode: 'same-origin', headers, cache: saved ? 'no-store' : 'no-cache', redirect: 'error' }));
+  } catch (_) {
+    // FIX CACHE-03: OSS 直传帖的 /api/post/:id/media/:n 在鉴权后 302 到 OSS。
+    // redirect:'error' 会让这类图片整体失败；把请求交回浏览器按原样跟随重定向，
+    // 同时不把重定向响应当成可缓存的鉴权结果。
+    if (generation !== originalGeneration) return new Response('', { status: 401 });
+    return fetch(event.request);
+  }
   if (generation !== originalGeneration) return new Response('', { status: 401 });
   if (response.headers.get('X-XTJ-Service-Status') === 'egress_quota_exceeded') {
     event.waitUntil(self.clients.matchAll({ type: 'window' }).then(clients => clients.forEach(client => client.postMessage({ type: 'XTJ_SERVICE_RESTRICTED' }))));
@@ -92,6 +101,8 @@ const SIGNED_MAX_BYTES = 160 * 1024 * 1024;
 const SIGNED_MAX_FILE_BYTES = 24 * 1024 * 1024;
 const SIGNED_MAX_AGE = 30 * 86400000;
 let signedWrites = Promise.resolve(), signedCorsBroken = false;
+// FIX CACHE-06: 退出登录清理必须让在途的签名图写入作废，否则缓存会被重新创建。
+let signedGeneration = 0;
 function signedKey(request) {
   if (request.method !== 'GET' || request.destination !== 'image' || request.headers.has('range')) return null;
   let url;
@@ -114,6 +125,7 @@ async function trimSigned(cache) {
   }
 }
 async function signedResponse(event, key) {
+  const generation = signedGeneration;
   try {
     const cache = await caches.open(SIGNED_CACHE), saved = await cache.match(key);
     if (saved && Date.now() - Number(saved.headers.get('X-XTJ-Cached-At')) <= SIGNED_MAX_AGE) return saved;
@@ -129,6 +141,7 @@ async function signedResponse(event, key) {
     headers.set('X-XTJ-Cached-At', String(Date.now())); headers.set('X-XTJ-Cached-Bytes', String(bytes));
     const copy = new Response(response.clone().body, { status: 200, headers });
     event.waitUntil((signedWrites = signedWrites.catch(() => {}).then(async () => {
+      if (generation !== signedGeneration) return;
       const cache = await caches.open(SIGNED_CACHE); await cache.put(key, copy); await trimSigned(cache);
     })).catch(() => {}));
   }
@@ -145,8 +158,12 @@ self.addEventListener('message', event => {
   if (!source?.url || new URL(source.url).origin !== self.location.origin) return;
   if (event.data?.type === 'XTJ_CLEAR_ORIGINAL_MEDIA') {
     originalGeneration++;
+    signedGeneration++;
     if (originalSeedController) originalSeedController.abort();
-    event.waitUntil(originalWrite(() => caches.delete(ORIGINAL_CACHE)).catch(() => {}).then(() => caches.delete(SIGNED_CACHE)).catch(() => {}).then(() => event.ports?.[0]?.postMessage({ ok: true })));
+    // FIX CACHE-06: 删除排到所有在途写入之后，避免 clear 先删、随后 put 把上一账号的私有图重新写回。
+    event.waitUntil(originalWrite(() => caches.delete(ORIGINAL_CACHE)).catch(() => {})
+      .then(() => (signedWrites = signedWrites.catch(() => {}).then(() => caches.delete(SIGNED_CACHE))).catch(() => {}))
+      .then(() => event.ports?.[0]?.postMessage({ ok: true })));
   }
   if (event.data?.type === 'XTJ_SEED_ORIGINAL_MEDIA') {
     const generation = originalGeneration;

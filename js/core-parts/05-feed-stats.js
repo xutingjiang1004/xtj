@@ -309,6 +309,10 @@
                 // 后端 oss-sign 只接受 image/ video/ audio/ 三种前缀，其余直接走老链路，
                 // 省掉一次必然失败的往返。
                 if (!/^(image|video|audio)\//.test(type)) return { ok: false, reason: 'type' };
+                // FIX MEDIA-03: OSS 的 fetch(PUT) 原先既无超时也不受发布取消控制，
+                // 弱网挂起时整个发帖流程永久停住、发布按钮不恢复。这里给 PUT 绑上
+                // AbortController（5 分钟兜底）并登记到进度组件，cancel() 可中止它。
+                var putTimer = 0, releaseWatch = function () {};
                 try {
                     var signRes = await window.xtjProtectedFetch('/api/oss/sign', {
                         method: 'POST',
@@ -319,12 +323,21 @@
                     if (!signRes.ok) return { ok: false, reason: 'sign_' + signRes.status };
                     var signed = await signRes.json();
                     if (!signed || !signed.ok || !signed.url) return { ok: false, reason: 'sign_rejected' };
-                    var putRes = await fetch(signed.url, { method: 'PUT', headers: signed.headers || { 'Content-Type': type }, body: file });
+                    var putController = typeof AbortController !== 'undefined' ? new AbortController() : null;
+                    if (putController) {
+                        var uploadProgress = identity && identity.progress;
+                        if (uploadProgress && typeof uploadProgress.watch === 'function') releaseWatch = uploadProgress.watch(putController) || releaseWatch;
+                        putTimer = setTimeout(function () { try { putController.abort(); } catch (_e2) {} }, 5 * 60 * 1000);
+                    }
+                    var putRes = await fetch(signed.url, { method: 'PUT', headers: signed.headers || { 'Content-Type': type }, body: file, signal: putController ? putController.signal : undefined });
                     if (!putRes.ok) return { ok: false, reason: 'put_' + putRes.status };
                     // 公网地址去掉签名查询串：签名 15 分钟后失效，落库的必须是稳定地址。
                     return { ok: true, url: String(signed.url).split('?')[0] };
                 } catch (_e) {
                     return { ok: false, reason: 'network' };
+                } finally {
+                    if (putTimer) clearTimeout(putTimer);
+                    releaseWatch();
                 }
             }
 
@@ -582,10 +595,16 @@
                     //   反之亦然。这里统一命名、互相注销，保证任一路径结束后两个监听都不残留。
                     var onLoad = null;
                     var onError = null;
+                    // FIX STAT-01: 守卫改用闭包任务令牌。旧实现在赋 src 前就删掉
+                    // data-remote-src，导致 load/error/重试三处守卫恒为「不匹配」——
+                    // 成功不释放 blob、失败一次都不重试。属性改在本任务结束时移除。
+                    var swapToken = true;
                     var cleanupListeners = function() {
                         if (onLoad) { try { img.removeEventListener('load', onLoad); } catch (eL) {} onLoad = null; }
                         if (onError) { try { img.removeEventListener('error', onError); } catch (eE) {} onError = null; }
+                        swapToken = false;
                         try { img.removeAttribute('data-swapping'); } catch (eS) {}
+                        try { img.removeAttribute('data-remote-src'); } catch (eR) {}
                     };
                     var finishSwap = function() {
                         cleanupListeners();
@@ -622,13 +641,13 @@
                     };
                     var retryLeft = 2;
                     var scheduleRetry = function() {
-                        if (!img.parentNode || img.getAttribute('data-remote-src') !== remote) { cleanupListeners(); return; }
+                        if (!img.parentNode || !swapToken) { cleanupListeners(); return; }
                         if (retryLeft <= 0) { cleanupListeners(); return; }
                         retryLeft -= 1;
                         var delay = retryLeft === 1 ? 600 : 1800;
                         setTimeout(function() {
                             if (!img.parentNode) { cleanupListeners(); return; }
-                            if (img.getAttribute('data-remote-src') !== remote) { cleanupListeners(); return; }
+                            if (!swapToken) { cleanupListeners(); return; }
                             // error 之后 <img> 是空的 → 先把本地图重新铺成背景，避免露出空白
                             applyLocalBackdrop();
                             // 复用目标元素本身重新加载（命中缓存/失败重试都只算这一路）
@@ -637,7 +656,7 @@
                     };
                     applyLocalBackdrop();
                     onLoad = function() {
-                        if (!img.parentNode || img.getAttribute('data-remote-src') !== remote) { cleanupListeners(); return; }
+                        if (!img.parentNode || !swapToken) { cleanupListeners(); return; }
                         // ★ 2026-09-26（`object-fit` 改为 cover 后的必要条件）：只有远端图的
                         //   真实比例与占位比例**一致**时才允许换源。比例一旦不一致，cover 会把
                         //   远端图按占位盒子裁切（老消息没有 w/h，兜的是 4:3，会被裁掉一大块）。
@@ -667,7 +686,7 @@
                     img.addEventListener('load', onLoad);
                     img.addEventListener('error', onError);
                     // ★ 预加载到目标元素本身：只请求远端一次（onload 后浏览器已缓存）
-                    img.removeAttribute('data-remote-src');
+                    // data-remote-src 保留到本任务结束（见 cleanupListeners），守卫才有效。
                     try { img.src = remote; } catch (eSet) { cleanupListeners(); }
                 });
             }
@@ -1400,9 +1419,13 @@
                 //   未读数是安全敏感数据，必须走后端（service_role）。这里改为复用
                 //   /api/dm/list，并用 aggregateDmUnread 保证与会话列表口径完全一致。
                 if (Date.now() - _dmUnreadFetchedAt < 5000) return;
+                var badgeOwner = window.currentUser, badgeEpoch = (typeof _authStateEpoch === 'number' ? _authStateEpoch : 0);
                 try {
                     // 走共享单飞请求：与会话列表复用同一份结果，不再并发两次
                     var result = await fetchDmListShared(180);
+                    // FIX STAT-03: 3 秒共享缓存可能命中上一账号的 JSON；切号后必须丢弃，
+                    // 否则旧账号的未读数、免打扰名单与会话快照会写进新账号。
+                    if (badgeOwner !== window.currentUser || badgeEpoch !== (typeof _authStateEpoch === 'number' ? _authStateEpoch : 0)) return;
                     if (!result || !result.ok) return;
                     _dmUnreadFetchedAt = Date.now();
                     setUnreadBadgeCount(Array.isArray(result.conversations)
@@ -1424,12 +1447,16 @@
 
             async function checkReportReplies() {
                 if (!window.currentUser) return;
+                // FIX STAT-02: 30 秒轮询在途时切号，迟到响应不得把上一账号的未读数
+                // 写到新账号（或已登出界面）的红点上。
+                var replyOwner = window.currentUser, replyEpoch = (typeof _authStateEpoch === 'number' ? _authStateEpoch : 0);
+                function sameReplyAccount() { return replyOwner === window.currentUser && replyEpoch === (typeof _authStateEpoch === 'number' ? _authStateEpoch : 0); }
                 try {
                     // 兼容新旧API：优先用后端通知API，降级到本地检测
                     var unread = 0;
                     if (typeof window.xtjProtectedFetch !== 'function') return;
                     var notifRes = await window.xtjProtectedFetch('/api/report/notifications', { background: true });
-                    if (!notifRes.ok) return;
+                    if (!sameReplyAccount() || !notifRes.ok) return;
                     var notifData = await notifRes.json().catch(function() { return {}; });
                     unread = Number(notifData.unread) || 0;
                         // 降级：本地检测旧版 admin_response（兼容旧逻辑）

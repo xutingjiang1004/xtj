@@ -559,9 +559,15 @@ const ADMIN_NAME = "xxz";
                     // ★ 审计修复：logout 请求复用 xtjFetch 超时封装（8s），
                     // 避免 VPN/半开连接下 fetch 永不 settle（与 doLogout 的 8s 超时对齐）。
                     var logoutFetch = (typeof window.xtjFetch === 'function') ? window.xtjFetch : fetch;
-                    logoutFetch(API_BASE + '/api/user/logout', {
+                    // FIX BOOT-01: 身份不匹配分支的 logout 必须登记到 __xtjLogoutPending，
+                    // 否则用户立刻重试登录时，旧 logout 晚到会按当前 cookie 撤销新会话的 refresh。
+                    var pendingLogout = Promise.resolve(logoutFetch(API_BASE + '/api/user/logout', {
                         method: 'POST', credentials: 'include', headers: logoutHeaders
-                    }, 8000).catch(function(){});
+                    }, 8000)).catch(function(){});
+                    window.__xtjLogoutPending = pendingLogout;
+                    pendingLogout.then(function() {
+                        if (window.__xtjLogoutPending === pendingLogout) window.__xtjLogoutPending = null;
+                    });
                 } catch(e) {}
 
                 // ★ 广播退出事件到其他标签页（仅当非远程同步触发时）
@@ -4011,6 +4017,11 @@ function isAdmin() {
                 window.__xtjLogoutPending = logoutRequest;
                 closeModal('profileDetailModal');
                 closeModal('profileActivityModal');
+                // FIX PROF-02: 登出时还要关掉从帖子页点开的资料卡/举报记录/删除确认等弹窗，
+                // 否则旧账号界面盖在页面上，并让 07 的焦点表面把背景判为 inert。
+                ['userProfileModal', 'reportHistoryModal', 'reportModal', 'postDetailModal', 'delModal', 'statModal'].forEach(function (modalId) {
+                    try { if (typeof closeModal === 'function') closeModal(modalId); } catch (eModal) {}
+                });
 
                 try {
                     if (typeof window.__xtjAbortAiRequests === 'function') window.__xtjAbortAiRequests();
@@ -4108,7 +4119,9 @@ function isAdmin() {
                     if (regNick) regNick.value = '';
                     if (regPw) regPw.value = '';
                 } catch (e) {}
-                document.body.style.overflow = '';
+                // FIX PROF-02: 滚动锁按当前弹窗状态重算，不再无条件写死，避免与 07 打架。
+                try { if (typeof syncHeaderModalBodyLock === 'function') syncHeaderModalBodyLock(); else document.body.style.overflow = ''; }
+                catch (eBodyLock) { document.body.style.overflow = ''; }
 
                 try { if (typeof window.__xtjBroadcastLogout === 'function') window.__xtjBroadcastLogout('manual'); } catch(e) {}
                 try { if (typeof window.queueBehavior === 'function') window.queueBehavior('logout', '用户退出登录'); } catch(e) {}
@@ -4478,6 +4491,10 @@ function renderProfileActivityList(kind) {
             };
 
             async function loadMyReportRecords() {
+                // FIX PROF-01: 查询期间退出/切号时，迟到响应不得把上一账号的举报记录
+                //（含管理员回复）写进当前弹窗。
+                var recordsOwner = currentUser, recordsEpoch = _authStateEpoch;
+                function sameAccount() { return recordsOwner === currentUser && recordsEpoch === _authStateEpoch; }
                 if (!window.currentUser) {
                     var list = document.getElementById('reportHistoryList') || document.getElementById('reportRecordsList');
                     if (list) list.innerHTML = '<div class="report-records-empty">请先登录</div>';
@@ -4496,6 +4513,7 @@ function renderProfileActivityList(kind) {
                         .eq('media_type', REPORT_MARKER)
                         .order('created_at', { ascending: false })
                         .limit(160);
+                    if (!sameAccount()) return;
                     if (res && res.error) throw res.error;
                     var records = (res.data || []).map(function(p) {
                         var c = {};
@@ -4553,7 +4571,7 @@ function renderProfileActivityList(kind) {
                     }).join('');
                 } catch(e) {
                     console.error('[XTJ] loadMyReportRecords error:', e);
-                    list.innerHTML = '<div class="report-records-empty">加载失败，请重试</div>';
+                    if (sameAccount()) list.innerHTML = '<div class="report-records-empty">加载失败，请重试</div>';
                 }
             }
 
@@ -9547,7 +9565,9 @@ function renderProfileActivityList(kind) {
             }
             function buildPostCommentsHtml(post, pComms, options) {
                 if (!pComms.length) return '';
-                var limit = options && options.detail ? 60 : 60; // 列表也一次画满，不再截断成 3 条
+                // FIX POSTB-04: 详情弹窗自动翻页会不断追加 rows，固定 60 条让后续评论永远
+                // 不显示、跨页定位也找不到节点。detail 按已加载评论全量渲染，列表仍保持 60 条上限。
+                var limit = options && options.detail ? Math.max(60, pComms.length) : 60; // 列表也一次画满，不再截断成 3 条
                       var _byId = {}; var _seen = Object.create(null); var _count = 0;
                       pComms.forEach(function(c) { _byId[String(c.id)] = c; });
                       var _childrenOf = {};
@@ -9595,15 +9615,19 @@ function renderProfileActivityList(kind) {
             // 「帖子详情」才能看到。这里按需把这些评论拉回卡片内部再重绘一次。
             var _commentExpandInflight = Object.create(null);
             var _commentExpandAttempted = Object.create(null);
+            // FIX POSTB-02: 每轮都从 cursor=null 重拉前 6 页，>300 条时按 id 去重后永远
+            // 没有新增、按钮反复出现。游标按帖子持久化，下次点击从上次结束处续拉。
+            var _commentExpandCursors = Object.create(null);
+            var _commentExpandDone = Object.create(null);
             window.__xtjExpandPostComments = function(postId, btn) {
                 var key = String(postId || '');
                 if (!key) return Promise.resolve(false);
                 if (_commentExpandInflight[key]) return _commentExpandInflight[key];
-                if (_commentExpandAttempted[key] && !btn) return Promise.resolve(false);
+                if (_commentExpandDone[key] || (_commentExpandAttempted[key] && !btn)) return Promise.resolve(false);
                 _commentExpandAttempted[key] = true;
                 if (btn) { btn.disabled = true; btn.textContent = '正在加载评论…'; }
                 var task = (async function() {
-                    var rows = [], cursor = null, guard = 0;
+                    var rows = [], cursor = _commentExpandCursors[key] || null, guard = 0;
                     try {
                         do {
                             var path = '/api/post/detail/' + encodeURIComponent(key) + '/relations/comments?limit=50' + (cursor ? '&cursor=' + encodeURIComponent(cursor) : '');
@@ -9618,6 +9642,8 @@ function renderProfileActivityList(kind) {
                     } catch (eExpand) {
                         console.warn('[comments] expand failed', eExpand);
                     }
+                    _commentExpandCursors[key] = cursor || null;
+                    if (!cursor) _commentExpandDone[key] = true;
                     if (!rows.length) {
                         if (btn) { btn.disabled = false; btn.textContent = '展开评论失败，点开帖子详情'; }
                         return false;
@@ -10178,6 +10204,8 @@ function renderProfileActivityList(kind) {
                     });
                     localStorage.setItem(CACHE_KEY, JSON.stringify({
                         version: 8,
+                        // FIX POSTB-05: 快照带上归属账号，失败回退时才能拒绝上一账号的私密帖。
+                        owner: String(window.currentUser || ''),
                         data: {
                             posts: cachePosts,
                             comments: cacheComments,
@@ -11782,10 +11810,14 @@ function renderProfileActivityList(kind) {
                                 // ★ 2026-11-02：优先 OSS 直传（不吃 Supabase / Render 出站），
                                 //   签名不可用或 PUT 失败时静默回退 Supabase，发帖不受影响。
                                 var selectedType = window.XtjPostMedia && window.XtjPostMedia.effectiveType ? window.XtjPostMedia.effectiveType(selectedFile) : String(selectedFile.type || '');
-                                var viaOss = await uploadPostObjectToOss(path, selectedFile, selectedType, { owner: flight.owner, epoch: flight.epoch });
+                                var viaOss = await uploadPostObjectToOss(path, selectedFile, selectedType, { owner: flight.owner, epoch: flight.epoch, progress: flight.progress });
                                 assertPostPublishIdentity(flight);
                                 var uploadRes;
-                                if (viaOss.ok) uploadRes = { error: null };
+                                if (viaOss.ok) {
+                                    uploadRes = { error: null };
+                                    // FIX MEDIA-02: 直传完成后把该文件计入已上传字节。
+                                    if (flight.progress && typeof flight.progress.uploaded === 'function') flight.progress.uploaded(position, selectedFile);
+                                }
                                 else uploadRes = flight.progress ? await flight.progress.upload(sb, path, selectedFile, position) : await sb.storage.from('uploads').upload(path, selectedFile, { upsert: false, cacheControl: '31536000' });
                                 assertPostPublishIdentity(flight);
                                 if (uploadRes.error) throw uploadRes.error;
@@ -11799,7 +11831,7 @@ function renderProfileActivityList(kind) {
                                 var thumbFile = window.XtjPostComposerMedia && typeof window.XtjPostComposerMedia.thumbFile === 'function' ? window.XtjPostComposerMedia.thumbFile(selectedFile) : null;
                                 if (thumbFile) {
                                     var thumbPath = 'posts/thumb_' + crypto.randomUUID().replace(/-/g, '') + '.jpg';
-                                    var thumbViaOss = await uploadPostObjectToOss(thumbPath, thumbFile, 'image/jpeg', { owner: flight.owner, epoch: flight.epoch });
+                                    var thumbViaOss = await uploadPostObjectToOss(thumbPath, thumbFile, 'image/jpeg', { owner: flight.owner, epoch: flight.epoch, progress: flight.progress });
                                     if (thumbViaOss.ok) thumbUrl = thumbViaOss.url;
                                     else {
                                         var thumbUpload = await sb.storage.from('uploads').upload(thumbPath, thumbFile, { upsert: false, cacheControl: '31536000' })
@@ -11828,7 +11860,7 @@ function renderProfileActivityList(kind) {
                                     // 封面单独放 posters/：这个前缀按公开缩略图处理，不用回表匹配帖子。
                                     var posterPath = buildStorageUploadPath('posters', posterFile.name);
                                     // ★ 2026-11-02：封面同样优先直传 OSS，失败再回退 Supabase。
-                                    var posterViaOss = await uploadPostObjectToOss(posterPath, posterFile, posterFile.type || 'image/jpeg', { owner: flight.owner, epoch: flight.epoch });
+                                    var posterViaOss = await uploadPostObjectToOss(posterPath, posterFile, posterFile.type || 'image/jpeg', { owner: flight.owner, epoch: flight.epoch, progress: flight.progress });
                                     assertPostPublishIdentity(flight);
                                     if (posterViaOss.ok) {
                                         posterUrl = posterViaOss.url;
@@ -12119,7 +12151,12 @@ function renderProfileActivityList(kind) {
                         var fallbackRaw = !cacheFallbackShown && window.safeStorage.get(CACHE_KEY);
                         if (fallbackRaw) {
                             var fallbackParsed = JSON.parse(fallbackRaw);
-                            if (fallbackParsed && fallbackParsed.data && hydrateFeedStateFromSnapshot(fallbackParsed)) {
+                            // FIX POSTB-05: 失败回退原先不校验时效与归属，可能把上一账号含
+                            // 私密帖的旧快照注入 feedAllPosts。与快路径统一 5 分钟 TTL + owner 校验。
+                            var fallbackAge = Date.now() - Number(fallbackParsed && fallbackParsed.timestamp || 0);
+                            var fallbackFresh = Number.isFinite(fallbackAge) && fallbackAge >= 0 && fallbackAge < CACHE_DURATION;
+                            var fallbackOwnerOk = !fallbackParsed || !fallbackParsed.owner || String(fallbackParsed.owner) === String(window.currentUser || '');
+                            if (fallbackFresh && fallbackOwnerOk && fallbackParsed && fallbackParsed.data && hydrateFeedStateFromSnapshot(fallbackParsed)) {
                                 await renderFeedFromMemoryState();
                                 setupFeedInfiniteScroll();
                                 cacheFallbackShown = true;
@@ -12925,6 +12962,10 @@ function renderProfileActivityList(kind) {
                 // 后端 oss-sign 只接受 image/ video/ audio/ 三种前缀，其余直接走老链路，
                 // 省掉一次必然失败的往返。
                 if (!/^(image|video|audio)\//.test(type)) return { ok: false, reason: 'type' };
+                // FIX MEDIA-03: OSS 的 fetch(PUT) 原先既无超时也不受发布取消控制，
+                // 弱网挂起时整个发帖流程永久停住、发布按钮不恢复。这里给 PUT 绑上
+                // AbortController（5 分钟兜底）并登记到进度组件，cancel() 可中止它。
+                var putTimer = 0, releaseWatch = function () {};
                 try {
                     var signRes = await window.xtjProtectedFetch('/api/oss/sign', {
                         method: 'POST',
@@ -12935,12 +12976,21 @@ function renderProfileActivityList(kind) {
                     if (!signRes.ok) return { ok: false, reason: 'sign_' + signRes.status };
                     var signed = await signRes.json();
                     if (!signed || !signed.ok || !signed.url) return { ok: false, reason: 'sign_rejected' };
-                    var putRes = await fetch(signed.url, { method: 'PUT', headers: signed.headers || { 'Content-Type': type }, body: file });
+                    var putController = typeof AbortController !== 'undefined' ? new AbortController() : null;
+                    if (putController) {
+                        var uploadProgress = identity && identity.progress;
+                        if (uploadProgress && typeof uploadProgress.watch === 'function') releaseWatch = uploadProgress.watch(putController) || releaseWatch;
+                        putTimer = setTimeout(function () { try { putController.abort(); } catch (_e2) {} }, 5 * 60 * 1000);
+                    }
+                    var putRes = await fetch(signed.url, { method: 'PUT', headers: signed.headers || { 'Content-Type': type }, body: file, signal: putController ? putController.signal : undefined });
                     if (!putRes.ok) return { ok: false, reason: 'put_' + putRes.status };
                     // 公网地址去掉签名查询串：签名 15 分钟后失效，落库的必须是稳定地址。
                     return { ok: true, url: String(signed.url).split('?')[0] };
                 } catch (_e) {
                     return { ok: false, reason: 'network' };
+                } finally {
+                    if (putTimer) clearTimeout(putTimer);
+                    releaseWatch();
                 }
             }
 
@@ -13198,10 +13248,16 @@ function renderProfileActivityList(kind) {
                     //   反之亦然。这里统一命名、互相注销，保证任一路径结束后两个监听都不残留。
                     var onLoad = null;
                     var onError = null;
+                    // FIX STAT-01: 守卫改用闭包任务令牌。旧实现在赋 src 前就删掉
+                    // data-remote-src，导致 load/error/重试三处守卫恒为「不匹配」——
+                    // 成功不释放 blob、失败一次都不重试。属性改在本任务结束时移除。
+                    var swapToken = true;
                     var cleanupListeners = function() {
                         if (onLoad) { try { img.removeEventListener('load', onLoad); } catch (eL) {} onLoad = null; }
                         if (onError) { try { img.removeEventListener('error', onError); } catch (eE) {} onError = null; }
+                        swapToken = false;
                         try { img.removeAttribute('data-swapping'); } catch (eS) {}
+                        try { img.removeAttribute('data-remote-src'); } catch (eR) {}
                     };
                     var finishSwap = function() {
                         cleanupListeners();
@@ -13238,13 +13294,13 @@ function renderProfileActivityList(kind) {
                     };
                     var retryLeft = 2;
                     var scheduleRetry = function() {
-                        if (!img.parentNode || img.getAttribute('data-remote-src') !== remote) { cleanupListeners(); return; }
+                        if (!img.parentNode || !swapToken) { cleanupListeners(); return; }
                         if (retryLeft <= 0) { cleanupListeners(); return; }
                         retryLeft -= 1;
                         var delay = retryLeft === 1 ? 600 : 1800;
                         setTimeout(function() {
                             if (!img.parentNode) { cleanupListeners(); return; }
-                            if (img.getAttribute('data-remote-src') !== remote) { cleanupListeners(); return; }
+                            if (!swapToken) { cleanupListeners(); return; }
                             // error 之后 <img> 是空的 → 先把本地图重新铺成背景，避免露出空白
                             applyLocalBackdrop();
                             // 复用目标元素本身重新加载（命中缓存/失败重试都只算这一路）
@@ -13253,7 +13309,7 @@ function renderProfileActivityList(kind) {
                     };
                     applyLocalBackdrop();
                     onLoad = function() {
-                        if (!img.parentNode || img.getAttribute('data-remote-src') !== remote) { cleanupListeners(); return; }
+                        if (!img.parentNode || !swapToken) { cleanupListeners(); return; }
                         // ★ 2026-09-26（`object-fit` 改为 cover 后的必要条件）：只有远端图的
                         //   真实比例与占位比例**一致**时才允许换源。比例一旦不一致，cover 会把
                         //   远端图按占位盒子裁切（老消息没有 w/h，兜的是 4:3，会被裁掉一大块）。
@@ -13283,7 +13339,7 @@ function renderProfileActivityList(kind) {
                     img.addEventListener('load', onLoad);
                     img.addEventListener('error', onError);
                     // ★ 预加载到目标元素本身：只请求远端一次（onload 后浏览器已缓存）
-                    img.removeAttribute('data-remote-src');
+                    // data-remote-src 保留到本任务结束（见 cleanupListeners），守卫才有效。
                     try { img.src = remote; } catch (eSet) { cleanupListeners(); }
                 });
             }
@@ -14016,9 +14072,13 @@ function renderProfileActivityList(kind) {
                 //   未读数是安全敏感数据，必须走后端（service_role）。这里改为复用
                 //   /api/dm/list，并用 aggregateDmUnread 保证与会话列表口径完全一致。
                 if (Date.now() - _dmUnreadFetchedAt < 5000) return;
+                var badgeOwner = window.currentUser, badgeEpoch = (typeof _authStateEpoch === 'number' ? _authStateEpoch : 0);
                 try {
                     // 走共享单飞请求：与会话列表复用同一份结果，不再并发两次
                     var result = await fetchDmListShared(180);
+                    // FIX STAT-03: 3 秒共享缓存可能命中上一账号的 JSON；切号后必须丢弃，
+                    // 否则旧账号的未读数、免打扰名单与会话快照会写进新账号。
+                    if (badgeOwner !== window.currentUser || badgeEpoch !== (typeof _authStateEpoch === 'number' ? _authStateEpoch : 0)) return;
                     if (!result || !result.ok) return;
                     _dmUnreadFetchedAt = Date.now();
                     setUnreadBadgeCount(Array.isArray(result.conversations)
@@ -14040,12 +14100,16 @@ function renderProfileActivityList(kind) {
 
             async function checkReportReplies() {
                 if (!window.currentUser) return;
+                // FIX STAT-02: 30 秒轮询在途时切号，迟到响应不得把上一账号的未读数
+                // 写到新账号（或已登出界面）的红点上。
+                var replyOwner = window.currentUser, replyEpoch = (typeof _authStateEpoch === 'number' ? _authStateEpoch : 0);
+                function sameReplyAccount() { return replyOwner === window.currentUser && replyEpoch === (typeof _authStateEpoch === 'number' ? _authStateEpoch : 0); }
                 try {
                     // 兼容新旧API：优先用后端通知API，降级到本地检测
                     var unread = 0;
                     if (typeof window.xtjProtectedFetch !== 'function') return;
                     var notifRes = await window.xtjProtectedFetch('/api/report/notifications', { background: true });
-                    if (!notifRes.ok) return;
+                    if (!sameReplyAccount() || !notifRes.ok) return;
                     var notifData = await notifRes.json().catch(function() { return {}; });
                     unread = Number(notifData.unread) || 0;
                         // 降级：本地检测旧版 admin_response（兼容旧逻辑）
@@ -14348,11 +14412,29 @@ function renderProfileActivityList(kind) {
                 }
                 var shouldAnimateTab = options.animate === true;
                 if (tab !== currentDockTab) {
+                    // FIX NAVA-02: 通知横幅等路径先 switchDockTab('chat') 再 openChat，
+                    // openChat 里的 currentDockTab === 'posts' 判断已失效。离开 posts 时统一快照滚动位置。
+                    if (currentDockTab === 'posts' && restorePostsScroll === null) {
+                        var postsScrollPanel = document.getElementById('panelPosts');
+                        if (postsScrollPanel) restorePostsScroll = postsScrollPanel.scrollTop;
+                    }
                     try { var imv = document.getElementById('imgViewer'); if (imv && imv.classList.contains('active')) closeImageViewer(); } catch(e) {}
                     try { var am = document.getElementById('announcementModal'); if (am && am.classList.contains('active')) closeAnnouncementModal(); } catch(e) {}
-                    try { var sm = document.getElementById('statModal'); if (sm && sm.classList.contains('active')) sm.classList.remove('active'); } catch(e) {}
-                    try { var cm = document.getElementById('commentModal'); if (cm && cm.classList.contains('active')) closeModal('commentModal'); } catch(e) {}
-                    document.body.style.overflow = '';
+                    try { var sm = document.getElementById('statModal'); if (sm && sm.classList.contains('active') && typeof closeModal === 'function') closeModal('statModal'); } catch(e) {}
+                    // FIX NAVA-01: body 级弹窗（帖子详情、个人资料、举报、登录等）不受
+                    // .dock-panel inert 影响。切 tab 时必须统一走 closeModal 清理状态，
+                    // 否则会整屏盖在新 tab 上，并残留 activePostId / 在途详情请求。
+                    try {
+                        var openOverlays = document.querySelectorAll('.modal-overlay.active, .report-modal-overlay.active, .announcement-modal-overlay.active');
+                        Array.prototype.forEach.call(openOverlays, function (el) {
+                            if (!el || !el.id || el.id === 'statModal' || el.id === 'announcementModal') return;
+                            try { if (typeof closeModal === 'function') closeModal(el.id); else el.classList.remove('active'); }
+                            catch (e2) { el.classList.remove('active'); }
+                        });
+                    } catch (e3) {}
+                    // FIX NAVA-01/AUTH-08: 滚动锁交给统一函数按当前弹窗重算，不再硬清。
+                    try { if (typeof syncHeaderModalBodyLock === 'function') syncHeaderModalBodyLock(); else document.body.style.overflow = ''; }
+                    catch (e4) { document.body.style.overflow = ''; }
                 }
                 if (shouldAnimateTab) {
                     var btn = document.querySelector('.dock-tab[data-tab="' + tab + '"]');

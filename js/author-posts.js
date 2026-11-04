@@ -221,6 +221,11 @@
   function cacheKey(s) { return String(s.owner || '') + '|' + s.author; }
   function readCache(s) {
     var key = cacheKey(s), hit = memoryCache[key];
+    if (hit) {
+      // FIX CACHE-01: 退出/切号会清掉 localStorage 里的个人动态缓存，内存副本必须
+      // 跟着失效，否则同一 SPA 会话内重新登录会回显上一账号内容并绕过访问限制。
+      try { if (!localStorage.getItem(CACHE_PREFIX + key)) { delete memoryCache[key]; hit = null; } } catch (_) {}
+    }
     if (!hit) {
       try { var raw = localStorage.getItem(CACHE_PREFIX + key); hit = raw ? JSON.parse(raw) : null; } catch (_) { hit = null; }
       if (hit) memoryCache[key] = hit;
