@@ -1331,7 +1331,11 @@
             //   启动时两者在同一帧先后触发，等于并发打两次同一个重接口。
             //   这里做单飞 + 3 秒短缓存；缓存的是**解析后的 JSON**（Response body 只能消费一次，
             //   直接共享 Response 会让第二个调用方拿到 "body already used"）。
-            var _dmListShared = { at: 0, json: null, inflight: null, owner: '', epoch: 0, retryAt: 0, failures: 0 };
+            var _dmListShared = { at: 0, json: null, inflight: null, owner: '', epoch: 0, retryAt: 0, failures: 0, lastFailure: null };
+            // FIX CHAT-02: 会话列表失败时把"到底为什么失败"留存下来，供 UI 提示与排查。
+            //   以前所有失败都被压成 null，界面只能显示一句笼统的"消息加载失败"，
+            //   服务端 503 / 限流 429 / 断言失败在用户看来完全一样。
+            window.__xtjDmListFailure = function() { return _dmListShared.lastFailure || null; };
             window.__xtjInvalidateDmListShared = function() {
                 _dmListShared.epoch++;
                 _dmListShared.at = 0;
@@ -1383,10 +1387,19 @@
                     for (var attempt=0; attempt<2; attempt++) {
                         if (_dmListShared.epoch!==epoch || window.currentUser!==owner || (window._authStateEpoch || 0)!==identityEpoch) return null;
                         try {
-                            var response=await window.xtjProtectedFetch('/api/dm/list?limit='+encodeURIComponent(String(limit||180)), {background:options.background !== false,timeoutMs:12000,authOwner:owner,authEpoch:identityEpoch});
-                            if (response && response.ok) return await response.json();
+                            var response=await window.xtjProtectedFetch('/api/dm/list?limit='+encodeURIComponent(String(limit||180)), {background:options.background !== false,timeoutMs:15000,authOwner:owner,authEpoch:identityEpoch});
+                            if (response && response.ok) { _dmListShared.lastFailure = null; return await response.json(); }
+                            var failureCode = '';
+                            try { var failureJson = await response.clone().json(); failureCode = String((failureJson && (failureJson.code || failureJson.error)) || ''); } catch (_readFailure) {}
+                            _dmListShared.lastFailure = { status: response ? response.status : 0, code: failureCode, at: Date.now(), limit: limit };
+                            // 服务端 5xx/429 才值得再试一次；401/403 由鉴权链路处理，立刻结束。
                             if (!response || (response.status!==429 && response.status<500)) return null;
-                        } catch (_) {}
+                            // FIX CHAT-03: 若 5xx 是"重查询超时/负载"，用更小的窗口再试一次，
+                            //   把一次必然失败的等待换成一次更轻的请求（180→60 条）。
+                            if (attempt === 0 && Number(limit) > 60) { limit = 60; continue; }
+                        } catch (err) {
+                            _dmListShared.lastFailure = { status: 0, code: (err && err.code) || (err && err.name) || 'network', at: Date.now(), limit: limit };
+                        }
                         if (attempt===0) await new Promise(function(resolve){setTimeout(resolve,800);});
                     }
                     return null;

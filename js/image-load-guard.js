@@ -137,7 +137,13 @@
   }
   function recheck() {
     tracked.forEach(function (state, img) {
-      if (!state.visible && img.isConnected && activePanel(img) && nearViewport(img)) { state.visible = true; arm(img, state); }
+      // 只有「还没开始加载、正等队列」的图才需要补可见性。已加载完成的图会一直留在
+      // tracked 里，长列表滚动时每 120ms 为它们逐个 getBoundingClientRect 是纯浪费，
+      // 而且会强制同步布局 —— 这正是滚动掉帧的主要来源之一。
+      if (state.visible || done(img)) return;
+      if (!img.isConnected) return;
+      if (!img.getAttribute('data-post-src') || img.getAttribute('src')) return;
+      if (activePanel(img) && nearViewport(img)) { state.visible = true; arm(img, state); }
     });
     pump();
   }

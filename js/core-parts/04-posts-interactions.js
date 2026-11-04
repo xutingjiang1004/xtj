@@ -2416,6 +2416,15 @@
             let feedNextCursor = null;
             let feedLoadedPages = [];
             let feedPageFetchPending = false;
+            // FIX FEED-STALL-02: feedPageFetchPending 是"有没有分页请求在途"的全局锁。
+            //   旧实现在 finally 里用 `requestId === feedLoadRequestId` 判断是否解锁 ——
+            //   一旦请求被更新的 loadFeed 顶掉，旧请求的 finally 就不再解锁，而新请求
+            //   可能已经结束，于是锁永久为 true：loadMoreFeedPosts 第一行直接 return，
+            //   无限滚动彻底失效（用户侧就是"滑到底部再也没有反应/只剩没有更多"）。
+            //   改为令牌所有权：只有最后持有锁的那次请求负责解锁。
+            //   计数器放在 window 上并就地自增：这段代码会被测试按片段单独执行，
+            //   闭包变量/辅助函数都不在片段里，不能依赖。
+            //   （用法：lock = window.__xtjFeedFetchLockSeq = (Number(window.__xtjFeedFetchLockSeq)||0)+1）
             // ★ 修复：加载更多失败后置位，哨兵不再自动触发（防无限重复请求），
             // 需用户点击错误提示"重试"才清除并重新加载
             let feedLoadMoreFailed = false;
@@ -2426,6 +2435,10 @@
                 feedInteractionMutationVersion++;
                 feedPageFetchPending = false;
                 feedLoadMoreFailed = false;
+                // 账号切换/重置时取消"哨兵仍在视口就自动续拉"的补拉定时器，
+                // 否则它可能在清空后的新账号列表上提前触发一次空跑。
+                try { clearTimeout(_feedAutoContinueTimer); } catch (_autoTimerClear) {}
+                _feedAutoContinueTimer = 0;
                 feedPage = 1;
                 feedEndReached = false;
                 feedGuestLimited = false;
@@ -4563,7 +4576,10 @@
                             nextOffset: firstPage && firstPage.nextOffset > 0 ? firstPage.nextOffset : cachePosts.length,
                             nextCursor: firstPage && firstPage.nextCursor ? firstPage.nextCursor : getFeedResumeCursor(cachePosts),
                             cursorScope: 'first-page',
-                            endReached: !!feedEndReached && cachePosts.length === (feedAllPosts || []).length,
+                            // FIX FEED-END-01: 只有"整页"的快照才可信地携带终态。发帖后内存里
+                            // 可能只剩 1–2 条，此时若把 endReached=true 写进缓存，下次加载就会
+                            // 直接显示"没有更多帖子"并跳过所有翻页（缓存会把旧标志再喂回来）。
+                            endReached: !!feedEndReached && cachePosts.length === (feedAllPosts || []).length && cachePosts.length >= FEED_PAGE_SIZE,
                             pageSize: FEED_PAGE_SIZE
                         },
                         timestamp: Date.now()
@@ -4635,7 +4651,13 @@
                         nextCursor: data.cursorScope !== 'first-page' ? getFeedResumeCursor(posts) : data.nextCursor && typeof data.nextCursor.created_at === 'string' && data.nextCursor.id
                             ? { created_at: data.nextCursor.created_at, id: String(data.nextCursor.id) }
                             : null,
-                        endReached: typeof data.endReached === "boolean" ? data.endReached : (posts.length < FEED_PAGE_SIZE),
+                        // FIX FEED-END-01: 不足一页的旧快照不能证明"到底"。此前直接沿用
+                        // 缓存里的 endReached=true，会让一份只有 1–2 条帖子的受损快照
+                        // 永久把信息流钉在"没有更多帖子"。小快照一律先当作"未到底"，
+                        // 由下一次真实请求给出结论。
+                        endReached: posts.length >= FEED_PAGE_SIZE
+                            ? (typeof data.endReached === "boolean" ? data.endReached : posts.length < FEED_PAGE_SIZE)
+                            : false,
                         pageSize: data.pageSize || FEED_PAGE_SIZE
                     }
                 };
@@ -5113,6 +5135,18 @@
                 }
                 feedNextCursor = chunk.nextCursor || null;
                 if (chunk.endReached) feedEndReached = true;
+                // FIX FEED-END-01: endReached 之前只会被置 true、从不回落。一旦缓存/上一次
+                //   加载把它写成 true（例如发布后快照里只有 1 条帖子），后续即使 page0 明确
+                //   返回"还有下一页"，标志仍然是 true → 无限滚动在第一条/"没有更多帖子"处
+                //   永久停住。非终态页（有游标或 nextOffset 有前进）必须能把它清回 false。
+                else if (chunk.nextCursor || Number(chunk.nextOffset) > Number(chunk.offset || 0)) {
+                    feedEndReached = false;
+                    // 之前误判出来的"没有更多帖子"要一起撤掉，否则提示会留在列表底部。
+                    try {
+                        var staleNoMoreNotice = document.getElementById('feedNoMore');
+                        if (staleNoMoreNotice && staleNoMoreNotice.parentNode) staleNoMoreNotice.parentNode.removeChild(staleNoMoreNotice);
+                    } catch (_noMoreCleanup) {}
+                }
                 incomingPosts.forEach(syncPostInfoCache);
                 markFeedStateChanged();
             }
@@ -6332,7 +6366,12 @@
                 //   成功刷新/失败回退）都重置旧式 feedPage 计数器。此前刷新后
                 //   feedPage 残留旧值，加载更多按旧页码计算导致误判 feedEndReached，
                 //   无限滚动永久失效（"没有更多帖子"）直至刷新页面。
-                feedPage = 1;
+                //   FIX FEED-JUMP-01：但不能再无条件打回 1 —— feedPage 现在只是
+                //   renderFeed 的"渲染窗口"（getFeedRenderedSliceStart 才是切片起点）。
+                //   用户已经滚到第 40 条时强制刷新，若这里把它改回 1，整段列表会被
+                //   截成 20 条、高度骤降，浏览器随即把滚动位置夹到新的底部/顶部 ——
+                //   表现为"突然跳回最上面，图片还全部重新加载"。
+                if (!(feedPage >= 1)) feedPage = 1;
                 // 重置"加载更多失败"标志，避免 feed 重绘后哨兵永久不再触发
                 feedLoadMoreFailed = false;
                 try {
@@ -6396,6 +6435,7 @@
                     }
                 }
                 try {
+                    var feedFetchLock = window.__xtjFeedFetchLockSeq = (Number(window.__xtjFeedFetchLockSeq) || 0) + 1;
                     feedPageFetchPending = true;
                     var chunk = await fetchFeedPageChunk(0, requestId, true);
                     var pendingLikes = Object.keys(likeOperations).map(function(key) {
@@ -6533,7 +6573,8 @@
                         };
                     }
                 } finally {
-                    if (requestId === feedLoadRequestId) feedPageFetchPending = false;
+                    // 只有最后一次拿到锁的请求负责解锁；被顶掉的旧请求不会再把锁留死。
+                    if (feedFetchLock === window.__xtjFeedFetchLockSeq) feedPageFetchPending = false;
                 }
             };
             window.loadFeed = loadFeed;
@@ -6620,6 +6661,7 @@
                 feed.insertBefore(noMore, sentinel || null);
             }
 
+            var _feedAutoContinueTimer = 0;
             loadMoreFeedPosts = async function() {
                 if (feedPageFetchPending || feedLoadMoreFailed) return;
                 var feed = document.getElementById("feed");
@@ -6631,8 +6673,18 @@
                 if (feedEndReached) {
                     var terminalPosts = getFilteredPosts(feedAllPosts, feedAllComments);
                     if (getFeedRenderedSliceStart() >= terminalPosts.length) {
-                        ensureFeedNoMoreNotice();
-                        return;
+                        // FIX FEED-END-01: 终态标志可能来自旧缓存/旧快照。服务端总量明显大于
+                        //   内存条数、且还有游标时，说明"到底"是假象 —— 先解除终态再拉下一页，
+                        //   不能直接把"没有更多帖子"钉死在列表底部。
+                        var knownTotal = Number(window._xtjTotalPostCount);
+                        if (Number.isFinite(knownTotal) && knownTotal > (feedAllPosts || []).length && feedNextCursor) {
+                            feedEndReached = false;
+                            var staleNoMore = document.getElementById('feedNoMore');
+                            if (staleNoMore) staleNoMore.remove();
+                        } else {
+                            ensureFeedNoMoreNotice();
+                            return;
+                        }
                     }
                 }
                 var requestId = feedLoadRequestId;
@@ -6658,8 +6710,10 @@
                 var endIdx = startIdx + FEED_PAGE_SIZE;
                 var filteredPosts = getFilteredPosts(feedAllPosts, feedAllComments);
                 var fetchFailed = false;
+                var loadMoreFetchLock = 0;
                 if (filteredPosts.length < endIdx && !feedEndReached) {
                     try {
+                        loadMoreFetchLock = window.__xtjFeedFetchLockSeq = (Number(window.__xtjFeedFetchLockSeq) || 0) + 1;
                         feedPageFetchPending = true;
                         // ★ 修复：ensureFeedCoverageForVisibleSlice 内部以 feedNextOffset（服务端游标）拉取，
                         // 不再依赖 feedPage 推算 offset，避免并发发帖/删除导致 offset 漂移时帖子重复或永久跳过。
@@ -6670,7 +6724,8 @@
                         fetchFailed = true;
                         console.error('[feed] loadMore ensure coverage failed:', e);
                     } finally {
-                        if (requestId === feedLoadRequestId) feedPageFetchPending = false;
+                        // 令牌所有权解锁：被 loadFeed 顶掉时不再把锁留成永久 true。
+                        if (loadMoreFetchLock && loadMoreFetchLock === window.__xtjFeedFetchLockSeq) feedPageFetchPending = false;
                     }
                     filteredPosts = getFilteredPosts(feedAllPosts, feedAllComments);
                 }
@@ -6723,12 +6778,48 @@
                     // this second check the terminal notice never renders.
                     if (feedEndReached && endIdx >= filteredPosts.length) ensureFeedNoMoreNotice();
                 }
-                if (getFeedRenderedSliceStart() >= filteredPosts.length && !feedEndReached) {
-                    // A permanently visible sentinel emits no second intersection event.
-                    // Keep a keyboard-accessible continuation after the bounded filter scan.
-                    showFeedSearchContinueControl();
+                // A permanently visible sentinel emits no second intersection event.
+                // Keep a keyboard-accessible continuation after the bounded filter scan.
+                var renderedAfterAppend = getFeedRenderedSliceStart();
+                var appendedThisRound = startIdx < filteredPosts.length;
+                if (!feedEndReached && (appendedThisRound || renderedAfterAppend < filteredPosts.length)) {
+                    if (hasActiveFeedFilters()) showFeedSearchContinueControl();
+                    // FIX FEED-STALL-01: 没有筛选时这里以前什么都不做。可一旦本次只追加了
+                    //   少量帖子、哨兵仍停在视口里（列表还没铺满一屏），IntersectionObserver
+                    //   不会再触发第二次 → 无限滚动就此停住，用户只看到"加载不动"。
+                    //   只要这一轮确实追加了帖子（或内存里还有没画出来的帖子）、且哨兵仍
+                    //   贴着视口，就主动再走一轮；某一轮追加不到任何新内容时不再排下一次。
+                    else if (!_feedAutoContinueTimer) {
+                        var sentinelNode = document.getElementById('feedSentinel');
+                        var sentinelNear = false;
+                        try {
+                            var sentinelRect = sentinelNode && sentinelNode.getBoundingClientRect();
+                            sentinelNear = !!sentinelRect && sentinelRect.top < (window.innerHeight || 0) + 240;
+                        } catch (_sentinelProbe) {}
+                        if (sentinelNear) {
+                            _feedAutoContinueTimer = setTimeout(function() {
+                                _feedAutoContinueTimer = 0;
+                                if (feedEndReached || feedPageFetchPending || feedLoadMoreFailed) return;
+                                loadMoreFeedPosts();
+                            }, 80);
+                        }
+                    }
                 }
                 if (startIdx < filteredPosts.length) feedPage++;
+            };
+            // Read-only diagnostic hook: 便于在真机/线上快速确认"到底为什么不再翻页"。
+            window.__xtjFeedDebugState = function() {
+                return {
+                    posts: (feedAllPosts || []).length,
+                    rendered: getFeedRenderedSliceStart(),
+                    endReached: feedEndReached,
+                    nextOffset: feedNextOffset,
+                    hasCursor: !!feedNextCursor,
+                    page: feedPage,
+                    pending: feedPageFetchPending,
+                    failed: feedLoadMoreFailed,
+                    total: Number(window._xtjTotalPostCount)
+                };
             };
 
             appendMorePosts = function(posts, comments, likes) {
@@ -6893,6 +6984,24 @@
             renderFeedWithAvatars = function(visiblePosts, comments, likes) {
                 var feed = document.getElementById("feed");
                 if (!feed) return;
+                // FIX FEED-JUMP-02: 全量重建（innerHTML）期间 feed 子树会被整段替换，
+                //   滚动位置只能靠"锚点帖子的相对位移"还原。只写回数字 scrollTop 不够：
+                //   列表变短时浏览器会先把位置夹到新高度，之后再赋值也回不到原处；
+                //   表现就是"往下翻着突然跳回最上面，图片还全部重新加载"。
+                var scrollSurface = null, anchorId = '', anchorOffset = 0;
+                try {
+                    scrollSurface = (typeof getActualScrollSurface === 'function') ? getActualScrollSurface(feed) : window;
+                    var surfaceTop = scrollSurface === window ? 0 : scrollSurface.getBoundingClientRect().top;
+                    var cards = feed.querySelectorAll('.post');
+                    for (var cardIndex = 0; cardIndex < cards.length; cardIndex++) {
+                        var cardRect = cards[cardIndex].getBoundingClientRect();
+                        if (cardRect.bottom > surfaceTop + 1) {
+                            anchorId = String(cards[cardIndex].getAttribute('data-post-id') || '');
+                            anchorOffset = cardRect.top - surfaceTop;
+                            break;
+                        }
+                    }
+                } catch (_scrollProbeError) { scrollSurface = null; }
                 var refreshNotice = feed.querySelector('#feedStaleNotice');
                 var focusedInput = document.activeElement;
                 var selectionStart = focusedInput && focusedInput.selectionStart;
@@ -6935,6 +7044,25 @@
                 //   从中间开始追加 → 帖子重复。
                 resetFeedDomTrimmed();
                 initPostScrollAnimation();
+                // 以"同一条帖子在视口里的位置"为锚还原滚动；锚点不在新列表里（筛选/切号）
+                // 就保持浏览器默认，不要硬拉回旧位置。
+                try {
+                    if (scrollSurface && anchorId) {
+                        var anchorSelector = typeof safePostSelector === 'function' ? safePostSelector(anchorId) : '';
+                        var anchorCard = anchorSelector ? feed.querySelector(anchorSelector) : null;
+                        if (anchorCard) {
+                            var restoreTop = function() {
+                                var surfaceNow = scrollSurface === window ? 0 : scrollSurface.getBoundingClientRect().top;
+                                var delta = anchorCard.getBoundingClientRect().top - surfaceNow - anchorOffset;
+                                if (Math.abs(delta) < 1) return;
+                                if (scrollSurface === window) window.scrollTo(0, Math.max(0, (window.scrollY || 0) + delta));
+                                else scrollSurface.scrollTop = Math.max(0, scrollSurface.scrollTop + delta);
+                            };
+                            restoreTop();
+                            if (typeof requestAnimationFrame === 'function') requestAnimationFrame(restoreTop);
+                        }
+                    }
+                } catch (_scrollRestoreError) {}
             };
 
             renderFeed = async function(payload) {

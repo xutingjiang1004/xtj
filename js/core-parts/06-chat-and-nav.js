@@ -1160,7 +1160,7 @@
                     if (window.currentUser !== 'xxz') avatarUsers.push('xxz');
                     hydrateDockChatAvatars(avatarUsers, function(changed) {
                         if (changed) patchDockChatConversationAvatars(el);
-                    });
+                    }).catch(function() {});
                     // A full 180-row window might hide older contacts. Paint the first
                     // result now, then extend the list without blocking its first paint.
                     if (!authoritative && rawRows.length >= 180) {
@@ -1187,6 +1187,11 @@
                     // 此前无条件追加 retry 且 dockChatListCacheTime=0 会立刻触发下次重试，
                     // 可能反复请求。重试按钮只在无列表（首屏加载失败）时显示。
                     if (!hadRenderedList) {
+                        // FIX CHAT-02: 把失败原因（HTTP 状态 / 错误码）写进日志与按钮文案。
+                        //   以前这里静默吞掉真实原因，只剩一句"消息加载失败"，连是不是
+                        //   服务端 503 都看不出来，重试也只能盲试。
+                        var listFailure = typeof window.__xtjDmListFailure === 'function' ? window.__xtjDmListFailure() : null;
+                        console.warn('[chat-list] load failed:', e && e.message, listFailure);
                         el.innerHTML = '';
                         var previousRetry = el.querySelector('.chat-load-retry');
                         if (previousRetry) previousRetry.remove();
@@ -1195,7 +1200,8 @@
                         retry.className = 'chat-load-retry';
             // ★ 修复：全库无 .chat-load-retry 样式规则，按钮此前以浏览器默认外观呈现
             retry.style.cssText = 'display:inline-block;margin:12px auto;padding:8px 18px;background:var(--primary,#4c9aff);color:#fff;border:none;border-radius:18px;cursor:pointer;font-size:13px;';
-                        retry.textContent = '消息加载失败，点击重试';
+                        retry.textContent = '消息加载失败' + (listFailure && listFailure.status ? '（' + listFailure.status + '）' : '') + '，点击重试';
+                        if (listFailure && listFailure.code) retry.title = String(listFailure.code);
                         retry.addEventListener('click', function() {
                             retry.remove();
                             window.dockChatListCacheTime = 0;
