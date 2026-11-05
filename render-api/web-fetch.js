@@ -156,7 +156,12 @@ async function assertSafeWebUrl(rawUrl, lookupImpl) {
 }
 
 function requestPinnedHttps(parsed, addresses, maxBytes, timeoutMs, headers, externalSignal) {
-  return new Promise(function(resolve, reject) {
+  return new Promise(function(resolveRaw, rejectRaw) {
+    // 总时限（与 requestPinnedStream 对齐）：request.setTimeout 只是 socket 空闲超时，
+    // 慢速滴灌的站点每隔几十秒发一个字节就能让连接一直占到读满 maxBytes。
+    var deadline = null;
+    function resolve(value) { clearTimeout(deadline); resolveRaw(value); }
+    function reject(error) { clearTimeout(deadline); rejectRaw(error); }
     var chunks = [];
     var total = 0;
     var settled = false;
@@ -250,6 +255,14 @@ function requestPinnedHttps(parsed, addresses, maxBytes, timeoutMs, headers, ext
     request.setTimeout(timeoutMs, function() {
       request.destroy(new Error('网页请求超时'));
     });
+    deadline = setTimeout(function() {
+      if (settled) return;
+      settled = true;
+      cleanupExternalAbort();
+      try { request.destroy(new Error('网页请求超时')); } catch (_) {}
+      rejectRaw(new Error('网页请求超时'));
+    }, timeoutMs);
+    if (deadline.unref) deadline.unref();
     request.on('error', function(err) {
       if (!settled) {
         settled = true;
