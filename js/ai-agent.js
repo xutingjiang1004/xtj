@@ -13464,7 +13464,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       try { clearInterval(_idleCheckTimer); } catch (e) {}
       cancelAnswerPromote();
       // Normal done/EOF path: release the reader/body instead of waiting for GC.
-      try { if (reader && typeof reader.cancel === 'function') reader.cancel(); } catch (eReaderDone) {}
+      try { if (reader && typeof reader.cancel === 'function') cancelAiStreamReader(reader); } catch (eReaderDone) {}
 
       // H-25: 45s 无数据超时 — 清理节点、复位状态并提示，避免永久"处理中"
       if (timedOut) {
