@@ -1553,6 +1553,13 @@
                                 var a = t.split("/"), r = a[a.length - 1].split("?")[0];
                                 r && r.length > 0 && (i = r);
                             }
+                            // 照片墙图片地址形如 /api/photo/<id>/media，末段没有扩展名：
+                            // 直接当文件名会保存成无扩展名的 "media"，系统打不开。
+                            // 没有扩展名时改用 photo_时间戳，并按真实类型补扩展名。
+                            if (!/\.[A-Za-z0-9]{2,5}$/.test(i)) {
+                                var _ext = { "image/jpeg": ".jpg", "image/jpg": ".jpg", "image/png": ".png", "image/webp": ".webp", "image/gif": ".gif", "image/avif": ".avif", "image/heic": ".heic", "image/heif": ".heif", "image/bmp": ".bmp", "image/tiff": ".tiff" }[String(e && e.type || "").toLowerCase()] || ".jpg";
+                                i = "photo_" + Date.now() + _ext;
+                            }
                             n.download = i, document.body.appendChild(n), n.click(), setTimeout(function() {
                                 try {
                                     document.body.removeChild(n), window.URL.revokeObjectURL(o);

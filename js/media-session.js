@@ -68,10 +68,12 @@
     authCheck.then(function (resp) {
       if (!resp || (resp.status !== 401 && resp.status !== 403)) {
         if (failed) failed();
-        return false;
+        // null = 已经报过失败；后面的 then 不能再按 !ready 报第二次。
+        return null;
       }
       return window.xtjEnsureMediaSession(url.href, { force: true });
     }).then(function (ready) {
+      if (ready === null) return;
       if (!current(owner, generation) || !img.isConnected || img.getAttribute('src') !== source) return;
       if (!ready) { if (failed) failed(); return; }
       url.searchParams.set('xtj_retry', Date.now().toString(36));
