@@ -8,6 +8,7 @@ const assistantOutput = require('./ai-assistant-output');
 const { aiConversationActorPattern, parseAiHistoryCursor, queryAiHistoryPage } = require('./ai-history');
 const { createComment, readRelationPage, readFeedEngagement } = require('./post-interactions');
 const { readPostViewers } = require('./post-viewers');
+const { readPostOssPaths, deleteOssObjects } = require('./oss-cleanup');
 const { readPhotoWallPage } = require('./photo-wall-page');
 const { createAdaptivePoller } = require('./adaptive-poller');
 const { createMediaPreviews } = require('./media-previews');
@@ -37,7 +38,7 @@ const {
   refundDmMediaQuota,
   acquireDmMediaSlot
 } = require('./dm-media');
-const { enqueueStorageCleanupJob, removeStorageWithQueue, isNotFoundError } = require('./storage-cleanup');
+const { enqueueStorageCleanupJob, removeStorageWithQueue, isNotFoundError, sweepAbandonedPhotoUploads } = require('./storage-cleanup');
 const { applySecurityHeaders } = require('./security-headers');
 // ★ 2026-09-26：provider-registry 模块已删除（无任何运行时/前端消费），见文末说明。
 const {
@@ -13483,6 +13484,7 @@ async function hardDeleteContent(params) {
 }
 
 var _storageCleanupRunning = false;
+var _abandonedPhotoSweepAt = 0;
 var STORAGE_CLEANUP_CLAIM_TIMEOUT_MS = 60 * 1000;
 var STORAGE_CLEANUP_LEASE_MS = 60 * 1000;
 var STORAGE_CLEANUP_REMOVE_TIMEOUT_MS = 30 * 1000;
@@ -13513,6 +13515,14 @@ async function processStorageCleanupJobs() {
   try {
     var orphanSweep = await supabase.rpc('enqueue_managed_image_orphans');
     if (!orphanSweep || orphanSweep.error) console.warn('[storage-cleanup] managed image sweep unavailable');
+    // 放弃的照片上传（只有文件、没有照片记录）每小时最多扫一次，每次最多 100 条。
+    if (Date.now() - _abandonedPhotoSweepAt > 60 * 60 * 1000) {
+      _abandonedPhotoSweepAt = Date.now();
+      try {
+        var abandoned = await sweepAbandonedPhotoUploads(supabase);
+        if (abandoned && abandoned.swept) console.log('[storage-cleanup] 放弃的照片上传已清理 ' + abandoned.swept + ' 个');
+      } catch (abandonedError) { console.warn('[storage-cleanup] abandoned photo sweep failed:', abandonedError && abandonedError.message || abandonedError); }
+    }
     var pending = await supabase.from('storage_cleanup_jobs')
       .select('id, bucket, paths, attempts, status, updated_at, claim_token, lease_until')
       .in('status', ['pending', 'processing'])
@@ -14313,7 +14323,7 @@ app.post('/api/post/delete', authenticateUser, rateLimit(60000, 20), async (req,
   try {
     var postId = normalizePostId(req.body && req.body.post_id);
     if (!postId) return res.status(400).json({ error: '帖子参数无效', code: 'invalid_post_id' });
-    var lookup = await supabase.from('posts').select('user_name, actor_key, media_type, media_url').eq('id', postId).maybeSingle();
+    var lookup = await supabase.from('posts').select('user_name, actor_key, media_type, media_url, content').eq('id', postId).maybeSingle();
     if (lookup.error) return res.status(500).json({ error: sanitizeError(lookup.error), code: 'delete_lookup_failed' });
     var post = lookup.data;
     if (!post) return res.json({ ok: true, deleted: false, already_deleted: true, post_id: postId });
@@ -14326,6 +14336,8 @@ app.post('/api/post/delete', authenticateUser, rateLimit(60000, 20), async (req,
     }
     if (!isAdmin && post.user_name !== req.userName) return res.status(403).json({ error: '无权删除' });
     var actorKey = post.actor_key || 'post_' + postId + '_' + Date.now();
+    // 附件行会随帖子一起删，所以删之前先把这条帖子在 OSS 上的对象路径读出来。
+    var ossPathsToClean = await readPostOssPaths(supabase, post, postId);
     var hardDelete = await hardDeleteContent({
       postId: postId,
       actorUser: req.userName,
@@ -14342,6 +14354,8 @@ app.post('/api/post/delete', authenticateUser, rateLimit(60000, 20), async (req,
       var status = result.code === 'forbidden' ? 403 : result.code === 'not_found' ? 404 : 500;
       return res.status(status).json({ error: result.error || '删除未生效', code: result.code || 'delete_not_applied' });
     }
+    // 删帖已确认：清掉它在 OSS 上的原图、缩略图、封面。尽力而为，失败不影响删帖结果。
+    if (result.deleted === true && ossPathsToClean.length) deleteOssObjects(ossPathsToClean).catch(function() {});
     return res.json({ ok: true, deleted: result.deleted === true, already_deleted: result.already_deleted === true, post_id: postId });
   } catch (e) { console.error('[API] post delete:', e.message); return res.status(500).json({ error: '删除失败' }); }
 });
@@ -17490,6 +17504,7 @@ app.post('/admin/report/:id/delete-post', verifyToken, securityRateLimit(60000, 
       if (fetchPostErr) return sendAdminDbFailure(res,fetchPostErr);
       if (post) {
         const expectPhoto = targetType === 'photo' || post.media_type === '__photo_wall__';
+        const ossPathsToClean = expectPhoto ? [] : await readPostOssPaths(supabase, post, normalizedTargetId);
         const deletion = await hardDeleteContent({
           postId: normalizedTargetId,
           actorUser: ADMIN_USERNAME,
@@ -17503,6 +17518,7 @@ app.post('/admin/report/:id/delete-post', verifyToken, securityRateLimit(60000, 
           return res.status(500).json({ error: deletion.result && deletion.result.error || '删除未生效', code: deletion.result && deletion.result.code || 'delete_not_applied' });
         }
         if (expectPhoto) await processStorageCleanupJobs();
+        if (ossPathsToClean.length && deletion.result.deleted === true) deleteOssObjects(ossPathsToClean).catch(function() {});
       }
     }
     // 标记举报已处理

@@ -189,7 +189,30 @@ async function claimManagedImageCleanupPaths(supabase, paths) {
   return paths.filter(path => !managed.includes(path) || result.data.paths.includes(path));
 }
 
+// 上传了照片文件、却一直没走到创建照片记录（关页面、设备丢了待确认记录）时，photo_upload_registry 里会留一行
+// pending，photo-wall 桶里留一个没有任何照片引用的文件。浏览器端的待确认记录 7 天就过期（photo-wall/upload-ui.js），
+// 这里留一倍余量：超过 14 天仍是 pending 的登记行，交给 removeStorageWithQueue 清理。
+// 安全性不依赖这里的判断：removeStorageWithQueue 会先走 claim_photo_cleanup_paths，凡是仍被照片记录引用的路径
+// 会被标成 attached 并跳过，所以不会删到正在使用的文件；删除失败的路径进持久队列重试。
+const ABANDONED_PHOTO_UPLOAD_MS = 14 * 24 * 60 * 60 * 1000;
+async function sweepAbandonedPhotoUploads(supabase, options) {
+  options = options || {};
+  const now = Number.isFinite(options.now) ? options.now : Date.now();
+  const cutoff = new Date(now - (options.olderThanMs || ABANDONED_PHOTO_UPLOAD_MS)).toISOString();
+  const limit = Math.min(200, Math.max(1, options.limit || 100));
+  const result = await supabase.from('photo_upload_registry').select('storage_path')
+    .eq('status', 'pending').neq('user_name', '__cleanup__').lt('created_at', cutoff)
+    .order('created_at', { ascending: true }).limit(limit);
+  if (!result || result.error) return { ok: false, swept: 0, error: result && result.error || new Error('photo_registry_unavailable') };
+  const paths = (result.data || []).map(row => row && row.storage_path).filter(path => typeof path === 'string' && /^photos\//.test(path));
+  if (!paths.length) return { ok: true, swept: 0 };
+  const removal = await removeStorageWithQueue(supabase, { bucket: 'photo-wall', paths: paths, photoId: 'abandoned-upload-sweep' });
+  return { ok: removal.ok !== false, swept: paths.length, removal: removal };
+}
+
 module.exports = {
+  sweepAbandonedPhotoUploads,
+  ABANDONED_PHOTO_UPLOAD_MS,
   normalizePaths,
   normalizePhotoId,
   isNotFoundError,
