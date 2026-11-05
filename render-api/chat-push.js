@@ -25,6 +25,8 @@ function createChatPush({express,supabase,authenticateUser,rateLimit,secret,tran
   async function result(q){const r=await q;if(r.error)throw r.error;return r.data;}
   router.use(authenticateUser);
   if(rateLimit)router.use(rateLimit(60000,25));
+  // Express 5 leaves req.body undefined for requests without a JSON body.
+  router.use((req,_res,next)=>{if(!req.body||typeof req.body!=='object')req.body={};next();});
   router.get('/config',(_req,res)=>res.json({ok:true,public_key:vapid.publicKey}));
   router.post('/subscribe',async(req,res)=>{
     const subscription=validateSubscription(req.body.subscription);
