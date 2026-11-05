@@ -19,3 +19,26 @@ test('已登录但令牌刷新暂时失败时，照片墙仍按访客身份加�
     assert.deepEqual(s.errors, []);
   } finally { await s.close(); }
 });
+
+test('离线提示条：打开页面时就已离线要显示；从后台/缓存恢复时已联网要撤掉', { timeout: 90000 }, async () => {
+  // 提示条以前只在 offline 事件里创建、online 事件里移除：页面加载时已经离线没有事件，用户看不到任何提示；
+  // 离线后切走（bfcache / 后台冻结）、联网后回来，online 事件错过了，「网络已断开」一直挂在屏幕上。
+  const s = await h.open({
+    viewport: { width: 390, height: 844 }, settleMs: 1200,
+    init: () => { window.__xtjOnLine = false; Object.defineProperty(Navigator.prototype, 'onLine', { configurable: true, get() { return window.__xtjOnLine; } }); },
+  });
+  try {
+    const p = s.page;
+    assert.equal(await p.locator('#xtjOfflineBar').count(), 1, '加载时已离线，提示条应显示');
+    await p.evaluate(() => { window.__xtjOnLine = true; window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })); });
+    await p.waitForTimeout(200);
+    assert.equal(await p.locator('#xtjOfflineBar').count(), 0, '恢复显示时已联网，提示条应撤掉');
+    await p.evaluate(() => { window.__xtjOnLine = false; document.dispatchEvent(new Event('visibilitychange')); });
+    await p.waitForTimeout(200);
+    assert.equal(await p.locator('#xtjOfflineBar').count(), 1, '回到前台时已离线，提示条应出现');
+    await p.evaluate(() => { window.__xtjOnLine = true; window.dispatchEvent(new Event('online')); });
+    await p.waitForTimeout(200);
+    assert.equal(await p.locator('#xtjOfflineBar').count(), 0, 'online 事件仍然撤掉提示条');
+    assert.deepEqual(s.errors, []);
+  } finally { await s.close(); }
+});
