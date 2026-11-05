@@ -311,7 +311,9 @@ function createPhotoAccess({ app, supabase, supabaseUrl, secret, authenticateUse
       //   字节从 OSS 直接进入浏览器——Render 和 Supabase 的出口都不再计费。
       //   权限判定一律在本服务完成，OSS 那边只是存储。
       if (item && isOssMediaUrl(item.media_url)) {
-        res.set('Cache-Control', 'public, max-age=600');
+        // 非公开帖子的跳转是「作者/管理员可见」的鉴权结果，只能留在本人浏览器，
+        // 不能标 public 让共享缓存把它发给其他访客。
+        res.set('Cache-Control', (!row.visibility || row.visibility === 'public' ? 'public' : 'private') + ', max-age=600');
         return res.redirect(302, item.media_url);
       }
       const path = item && parsePostMediaUrl(item.media_url, supabaseUrl);
