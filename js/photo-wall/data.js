@@ -376,7 +376,8 @@
         if (externalSignal.aborted) throw createPhotoAbortError();
         externalSignal.addEventListener('abort', onAbort);
       }
-      var headers = window.getUserAuthHeaders ? await window.getUserAuthHeaders() : {};
+      // getUserAuthHeaders() 在令牌暂时取不到时返回 null；null 作为 fetch 的 headers 会直接抛 TypeError，公开照片也加载不出来。
+      var headers = (window.getUserAuthHeaders ? await window.getUserAuthHeaders() : null) || {};
       if (!isCurrentRequest()) throw createPhotoAbortError();
       var resp = await fetch(apiUrl('/api/photos/public?page=' + page + '&limit=' + limit + '&sort=' + encodeURIComponent(sortKey) + (cursor ? '&cursor=' + encodeURIComponent(JSON.stringify(cursor)) : '')), { credentials: 'include', headers:headers, signal: controller.signal });
       // P5: 如果 generation 已变化（被新请求替代），丢弃结果
