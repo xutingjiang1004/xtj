@@ -1585,6 +1585,20 @@
                     return 'rgb(' + p.slice(0, 3).join(',') + ')';
                 }
                 var runs = typeof WeakMap === 'function' ? new WeakMap() : null;
+                // 转场正在播放时，别的代码里重活（整块列表重绘、重新量布局）会和动画抢主线程，掉帧。
+                // defer(cb)：正在播放就等它收尾、画完那一帧之后再跑，返回 true；没在播放返回 false（由调用方自己继续）。
+                var playing = 0, deferred = [], flushTimer = 0;
+                function motionStarted(handle) { if (handle.__counted) return; handle.__counted = true; playing++; }
+                function flushDeferred() {
+                    clearTimeout(flushTimer); flushTimer = 0;
+                    var list = deferred.splice(0);
+                    list.forEach(function(fn) { try { fn(); } catch (_) {} });
+                }
+                function motionEnded(handle) {
+                    if (!handle.__counted || handle.__released) return;
+                    handle.__released = true; playing = Math.max(0, playing - 1);
+                    if (!playing && deferred.length) requestAnimationFrame(function() { setTimeout(function() { if (!playing) flushDeferred(); }, 0); });
+                }
 
                 // kind: 'open' | 'close'.  box 已经在最终位置（关闭时是当前位置）。
                 // o.rect: 起点（打开）/终点（关闭）矩形，视口坐标。o.overlay: 带背景压暗的外层（可无）。
@@ -1698,7 +1712,7 @@
                         // 初始姿态先停在第 0 帧，等它真的画出来之后再开始走。
                         anims.forEach(function(a) { a.pause(); a.currentTime = 0; });
                         var started = false;
-                        afterPaint(function() { if (handle.ended || started) return; started = true; anims.forEach(function(a) { a.play(); }); });
+                        afterPaint(function() { if (handle.ended || started) return; started = true; motionStarted(handle); anims.forEach(function(a) { a.play(); }); });
                     } catch (buildError) { cleanup(0); return null; }
 
                     var cleaned = false, endTimer = 0;
@@ -1722,6 +1736,7 @@
                         if (handle.ended) return;
                         handle.ended = true;
                         cleanup(0);
+                        motionEnded(handle);
                     }
                     var closeDone = false;
                     function finishClose() {
@@ -1732,13 +1747,24 @@
                         if (scrim && scrim.parentNode) scrim.parentNode.removeChild(scrim);
                         if (hiddenTarget) hiddenTarget.style.visibility = '';
                         if (hiddenOrigin) hiddenOrigin.style.visibility = originVisibility;
+                        // 落地这一帧只做「飞行图消失、头像出现、窗口隐藏」；焦点/inert 这类会让整页重算样式的收尾等这一帧画完再做。
+                        window.__xtjMorphLanding = true;
+                        var landed = false;
+                        function afterLanding() {
+                            if (landed) return; landed = true;
+                            window.__xtjMorphLanding = false;
+                            if (window.__xtjSyncFocusSurfaces) { try { window.__xtjSyncFocusSurfaces(); } catch (_) {} }
+                        }
+                        requestAnimationFrame(function() { setTimeout(afterLanding, 0); });
+                        setTimeout(afterLanding, 300);
                         if (o.hide) { try { o.hide(); } catch (_) {} }
                         cleanup(140);
+                        motionEnded(handle);
                     }
                     var onEnd = open ? finishOpen : finishClose;
                     move.onfinish = onEnd;
                     endTimer = setTimeout(onEnd, D + 260);
-                    handle.abort = function() { clearTimeout(endTimer); handle.ended = true; closeDone = true; cleanup(0); };
+                    handle.abort = function() { clearTimeout(endTimer); handle.ended = true; closeDone = true; cleanup(0); motionEnded(handle); };
                     // 打开途中被关：沿原路退回（打开用的那些动画反着放），退回到头再按关闭收尾。
                     handle.reverse = function(next) {
                         if (handle.ended) return null;
@@ -1760,6 +1786,12 @@
                     open: function(box, o) { return run('open', box, o); },
                     close: function(box, o) { return run('close', box, o); },
                     abort: function(box) { var h = runs && runs.get(box); if (h) h.abort(); },
+                    defer: function(cb) {
+                        if (!playing) return false;
+                        deferred.push(cb);
+                        if (!flushTimer) flushTimer = setTimeout(function() { flushTimer = 0; flushDeferred(); }, 1500);
+                        return true;
+                    },
                     // 这个窗口的打开/关闭是不是由转场接管了（core-animations 的 GSAP 淡入淡出据此让路）。
                     claims: function(id, phase) {
                         var el = document.getElementById(id);
@@ -1801,12 +1833,19 @@
                     var keepTransition = el ? el.style.transition : '';
                     // The page's own fade on the window would stack on the morph; the scrim and the morph own the motion.
                     if (from && !wasActive && el) el.style.transition = 'none';
+                    // The page-wide inert/focus pass (tens of ms of style work) waits until the window has landed.
+                    var holdsFocus = !!(from && !wasActive && box && el);
+                    if (holdsFocus) { window.__xtjMorphLanding = true; setTimeout(function() { if (window.__xtjMorphLanding && holdsFocus) { window.__xtjMorphLanding = false; if (window.__xtjSyncFocusSurfaces) { try { window.__xtjSyncFocusSurfaces(); } catch (_) {} } } }, 1500); }
                     var result = baseOpen.apply(this, arguments);
                     if (ANIMATED[id]) origins[id] = from ? spec : null;
                     if (from && !wasActive && box && el) {
                         void el.offsetWidth;
-                        var handle = window.xtjMorph.open(box, { rect: from, overlay: el, hero: heroFor(id, spec, box), after: function() { el.style.transition = keepTransition; } });
-                        if (!handle) el.style.transition = keepTransition;
+                        var releaseFocusHold = function() {
+                            if (!holdsFocus) return; holdsFocus = false;
+                            requestAnimationFrame(function() { setTimeout(function() { window.__xtjMorphLanding = false; if (window.__xtjSyncFocusSurfaces) { try { window.__xtjSyncFocusSurfaces(); } catch (_) {} } }, 0); });
+                        };
+                        var handle = window.xtjMorph.open(box, { rect: from, overlay: el, hero: heroFor(id, spec, box), after: function() { el.style.transition = keepTransition; releaseFocusHold(); } });
+                        if (!handle) { el.style.transition = keepTransition; releaseFocusHold(); }
                     } else if (el && from) el.style.transition = keepTransition;
                     return result;
                 };

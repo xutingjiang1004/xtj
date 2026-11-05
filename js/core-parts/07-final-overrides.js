@@ -14,15 +14,26 @@
                 if (root.id === 'ppInfoModal') return root.getAttribute('aria-hidden') === 'false' && root.style.display !== 'none';
                 return !root.hidden && root.style.display !== 'none' && (root.classList.contains('active') || root.classList.contains('show'));
             }
+            var CONTROL_SELECTOR = 'button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+            function usable(node) {
+                return !node.disabled && node.tabIndex >= 0 && !node.closest('[inert], [hidden], [aria-hidden="true"]') && node.getClientRects().length && getComputedStyle(node).visibility !== 'hidden';
+            }
             function controls(root) {
-                return Array.from(root.querySelectorAll('button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])')).filter(function(node) {
-                    return !node.disabled && node.tabIndex >= 0 && !node.closest('[inert], [hidden], [aria-hidden="true"]') && node.getClientRects().length && getComputedStyle(node).visibility !== 'hidden';
-                });
+                return Array.from(root.querySelectorAll(CONTROL_SELECTOR)).filter(usable);
+            }
+            // Opening only needs the first one; checking every control of a window with hundreds of buttons forces a layout for each.
+            function firstControl(root) {
+                var nodes = root.querySelectorAll(CONTROL_SELECTOR);
+                for (var i = 0; i < nodes.length; i++) if (usable(nodes[i])) return nodes[i];
+                return null;
             }
             function focusFirst(root) {
-                var first = controls(root)[0];
+                var first = firstControl(root);
                 if (!first) { root.tabIndex = -1; first = root; }
                 first.focus({ preventScroll: true });
+            }
+            function mayBeSurface(node) {
+                return node.nodeType === 1 && (node.matches(selector) || !!node.querySelector(selector));
             }
             function register() {
                 document.querySelectorAll(selector).forEach(function(root) {
@@ -31,25 +42,45 @@
                     new MutationObserver(sync).observe(root, { attributes: true, attributeFilter: root.id === 'ppInfoModal' ? ['class','hidden','aria-hidden'] : ['class','hidden'] });
                 });
             }
+            function applyBackground(next) {
+                background.forEach(function(wasInert, node) {
+                    if (next.has(node)) return;
+                    // Surfaces and dock panels get their state from the loops in sync(); putting back the value recorded earlier
+                    // would make an open window inert again when it was the background of another one.
+                    if (surfaces.has(node) || (node.classList && node.classList.contains('dock-panel'))) return;
+                    if (node.inert !== wasInert) node.inert = wasInert;
+                });
+                // An open surface that is only background now (a window under another window) must be inert again even though
+                // the surface loop has just made it interactive.
+                next.forEach(function(wasInert, node) { if (!node.inert) node.inert = true; });
+                background = next;
+            }
             function sync() {
                 if (syncing) return; syncing = true;
                 try {
-                    background.forEach(function(wasInert,node) { node.inert = wasInert; }); background.clear();
+                    // 窗口正在做转场（打开中，或刚落地的这一帧）：整页 inert 和移动焦点会让整页重算样式（几十毫秒），
+                    // 先只更新窗口自己的状态，其余等转场落地、那一帧画完之后再做（见 04 里的 __xtjMorphLanding）。
+                    var heavy = !window.__xtjMorphLanding;
+                    // Every inert flip invalidates the style of the whole subtree (the whole page for the body's children), so
+                    // only the nodes whose state really changes are touched; this used to flip all of them off and on again.
+                    var nextBackground = new Map();
                     var research = document.body.classList.contains('xtj-research-open'), ai = document.body.classList.contains('xtj-ai-page-open');
-                    document.querySelectorAll('.dock-panel').forEach(function(panel) {
+                    if (heavy) document.querySelectorAll('.dock-panel').forEach(function(panel) {
                         var open = panel.classList.contains('active') && !panel.classList.contains('hidden') && (panel.id === 'panelDeepThink' || !research && !ai);
-                        panel.inert = !open; panel.setAttribute('aria-hidden', String(!open));
+                        if (panel.inert !== !open) panel.inert = !open;
+                        if (panel.getAttribute('aria-hidden') !== String(!open)) panel.setAttribute('aria-hidden', String(!open));
                     });
                     var oldTop = top, active = [];
                     surfaces.forEach(function(state,root) {
                         if (!root.isConnected) { surfaces.delete(root); return; }
                         var open = visible(root);
                         if (open && !state.open) { state.order = ++sequence; state.origin = document.activeElement; }
-                        state.open = open; root.inert = !open;
+                        state.open = open; if (root.inert !== !open) root.inert = !open;
                         if (root.getAttribute('aria-hidden') !== String(!open)) root.setAttribute('aria-hidden', String(!open));
                         if (open) active.push({ root: root, state: state });
                     });
                     active.sort(function(a,b) { return a.state.order - b.state.order; });
+                    if (!heavy) return;
                     top = active.length ? active[active.length - 1].root : null;
                     if (top) {
                         var branch = top;
@@ -58,17 +89,20 @@
                             Array.from(parent.children).forEach(function(sibling) {
                                 if (sibling === branch) return;
                                 if (sibling.matches('.toast,[role="status"],[role="alert"]')) return;
-                                if (!background.has(sibling)) background.set(sibling, sibling.inert);
-                                sibling.inert = true;
+                                if (!nextBackground.has(sibling)) nextBackground.set(sibling, background.has(sibling) ? background.get(sibling) : sibling.inert);
                             });
                             branch = parent;
                         }
+                        applyBackground(nextBackground);
                         if (oldTop !== top && !top.contains(document.activeElement)) {
                             var nestedOrigin = oldTop && surfaces.get(oldTop) && surfaces.get(oldTop).origin;
                             if (nestedOrigin && nestedOrigin.isConnected && top.contains(nestedOrigin) && !nestedOrigin.closest('[inert]')) nestedOrigin.focus({ preventScroll: true });
                             else focusFirst(top);
                         }
-                    } else if (oldTop && oldTop.contains(document.activeElement)) {
+                    } else {
+                        applyBackground(nextBackground);
+                    }
+                    if (!top && oldTop && oldTop.contains(document.activeElement)) {
                         var origin = surfaces.get(oldTop) && surfaces.get(oldTop).origin;
                         if (origin && origin.isConnected && !origin.closest('[inert]')) origin.focus({ preventScroll: true });
                     }
@@ -77,7 +111,13 @@
             register();
             document.querySelectorAll('.dock-panel').forEach(function(panel) { new MutationObserver(sync).observe(panel,{ attributes: true, attributeFilter: ['class'] }); });
             new MutationObserver(sync).observe(document.body,{ attributes: true, attributeFilter: ['class'] });
-            new MutationObserver(function() { register(); sync(); }).observe(document.body,{ childList: true });
+            new MutationObserver(function(records) {
+                var relevant = records.some(function(record) {
+                    return Array.prototype.some.call(record.addedNodes, mayBeSurface) || Array.prototype.some.call(record.removedNodes, mayBeSurface);
+                });
+                if (!relevant) return;
+                register(); sync();
+            }).observe(document.body,{ childList: true });
             window.__xtjSyncFocusSurfaces = sync;
             window.__xtjGetFocusSurface = function() { return top; };
             document.addEventListener('keydown',function(event) {
@@ -91,7 +131,7 @@
                     if (!nodes.length) focusFirst(top); else (event.shiftKey ? last : first).focus({ preventScroll: true });
                 }
             },true);
-            document.addEventListener('focusin',function(event) { if (top && !top.contains(event.target) && !syncing) focusFirst(top); });
+            document.addEventListener('focusin',function(event) { if (top && !top.contains(event.target) && !syncing && !window.__xtjMorphLanding) focusFirst(top); });
             sync();
         })();
 

@@ -603,18 +603,33 @@
       // 防重入：回调里会对 body 子节点加 class，若直接改会触发自身 mutation
       // → 无限循环占死主线程（线上首页曾因此彻底卡死，F12 都按不出来）。
       // 处理期间先 disconnect，杜绝回调重入，处理完再恢复观察。
+      var PHOTO_ITEM = '.photo-item, .pw-item, .photo-wall-item', PHOTO_AREA = '#photoWallContainer, #photoGrid, #photoWall, .photo-wall-grid, #photoWallGrid, .pw-grid, ' + PHOTO_ITEM;
+      function touchesPhotoWall(record) {
+        var target = record.target;
+        if (target.nodeType === 1 && target.closest && target.closest(PHOTO_AREA)) return true;
+        return Array.prototype.some.call(record.addedNodes, function (node) {
+          return node.nodeType === 1 && (node.matches(PHOTO_ITEM) || !!node.querySelector(PHOTO_ITEM) || (node.matches && node.matches(PHOTO_AREA)));
+        });
+      }
+      var polishTimer = 0;
       var moBody = new MutationObserver(function (records) {
         // Dragging changes the theme control every frame. It cannot change the
         // photo wall, so avoid rescanning every photo during this gesture.
         if (records.length && records.every(function (record) {
           return record.target.nodeType === 1 && record.target.closest('#themeToggle, .actions');
         })) return;
-        try {
-          moBody.disconnect();
-          polishPhotoWall();
-        } finally {
-          moBody.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style'] });
-        }
+        // The callback used to rescan the whole document on every class/style/child change anywhere (a window moving
+        // writes its style each frame): only changes that touch the photo wall matter, and they are coalesced.
+        if (!records.some(touchesPhotoWall) || polishTimer) return;
+        polishTimer = setTimeout(function () {
+          polishTimer = 0;
+          try {
+            moBody.disconnect();
+            polishPhotoWall();
+          } finally {
+            moBody.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style'] });
+          }
+        }, 60);
       });
       moBody.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style'] });
     } catch (eObs) {}
