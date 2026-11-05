@@ -28,6 +28,9 @@
 #panelPosts #feed > .post-feed-item > .post-header { gap: 11px; margin-bottom: 13px; align-items: flex-start; }
 #panelPosts #feed > .post-feed-item .avatar:not(.comment-avatar) { width: 42px; height: 42px; flex: 0 0 42px; }
 /* 2026-11-01 用户反馈头像显示不完整：圆形会把头像照片的边角裁掉（人脸靠边的照片被切掉半边）。帖子里的作者头像改成和个人动态页一致的圆角方形，整张头像都看得到。 */
+/* 2026-11-05 头像右边和下面缺一条：头像外面包着 role=button 的 .avatar-wrap（40×40），通用按钮规则给它加了 overflow:hidden，
+   而信息流里的头像是 42×42，被外壳裁掉右、下各 2px（约 5%，下面和右边缺口、右下角圆角被削平）。外壳不需要裁切（头像自己有圆角和裁切），改回可见。 */
+.avatar-wrap { overflow: visible; }
 #panelPosts #feed > .post-feed-item .avatar:not(.comment-avatar),
 #postDetailBody .post-detail-owner .avatar { border-radius: 11px; }
 #panelPosts #feed > .post-feed-item .avatar:not(.comment-avatar) .avatar-image,
