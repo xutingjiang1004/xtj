@@ -13,7 +13,7 @@ async function routeRelations(f, post, { views, likes, viewsTotal, likesTotal })
   await f.page.route('**/api/post/detail/' + post.id + '/relations/likes**', route => route.fulfill({ json: { ok: true, data: likes, has_more: false, next_cursor: null, total: likesTotal } }));
 }
 
-test('clicking 浏览 or 点赞 opens one full-screen panel: viewers on the left, likers on the right, each with avatar and name', { timeout: 60000 }, async () => {
+test('clicking 浏览 or 点赞 opens one bottom half-screen panel: viewers on the left, likers on the right, each with avatar and name', { timeout: 60000 }, async () => {
   const f = await postBrowserFixture({ counts: [1] });
   try {
     const post = f.posts[0];
@@ -32,7 +32,9 @@ test('clicking 浏览 or 点赞 opens one full-screen panel: viewers on the left
     assert.deepEqual(await modal.locator('#postStatsLikesList .post-stats-name').allTextContents(), ['fan00', 'fan01']);
     assert.equal(await modal.locator('.post-stats-row .avatar').count(), 5, 'every user shows an avatar (or initial)');
     const box = await modal.locator('.post-stats-panel').boundingBox(), viewport = f.page.viewportSize();
-    assert.ok(box.width >= viewport.width - 1 && box.height >= viewport.height - 1, 'the panel fills the interface');
+    assert.ok(box.width >= viewport.width - 1, 'the panel spans the width of the site');
+    assert.ok(Math.abs(box.height - viewport.height / 2) <= 2, 'the panel takes half of the site height');
+    assert.ok(Math.abs(box.y + box.height - viewport.height) <= 1, 'the panel sits at the bottom, so the top half is left uncovered');
     const left = await modal.locator('#postStatsViewsHead').boundingBox(), right = await modal.locator('#postStatsLikesHead').boundingBox();
     assert.ok(left.x < right.x, 'viewers are on the left, likers on the right');
     await modal.locator('.post-stats-close').click();
