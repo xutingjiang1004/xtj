@@ -34,7 +34,7 @@ async function fixture() {
   await page.addScriptTag({ content: fs.readFileSync('js/ai-core/stream-renderer.js', 'utf8') });
   await page.evaluate(() => { window.XtjAiCore.Errors = {}; });
   await page.addScriptTag({ content: transport });
-  await page.evaluate(({ stream, tools }) => {
+  await page.evaluate(({ stream, rail, tools }) => {
     window.S = { paused: false, activeRenderers: [] };
     window.AI_DEBUG = false;
     window.prefersReducedMotion = () => false;
@@ -47,9 +47,10 @@ async function fixture() {
     };
     window.toolActivityDoneLabel = () => '已使用工具';
     window.moveToolAreaBelowBubble = () => {};
-    window.eval(stream + '\n' + tools);
+    window.eval(stream + '\n' + rail + '\n' + tools);
   }, {
     stream: section('  function takeSmoothTextChunk(', '  function bindVisualViewport('),
+    rail: section('  function setTextOnce(', '  // Site dialogs instead of') + section('  function inProcessRail(', '  function toolLabel('),
     tools: section('  function ensureToolActivity(', '  function settleOrganizingStep(')
   });
   return { browser, page };

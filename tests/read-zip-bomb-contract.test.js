@@ -93,6 +93,35 @@ test('P1-11: a zip bomb entry is rejected before decompression', async () => {
   assert.equal(out.content, undefined, 'rejected entry must not be decompressed into the response');
 });
 
+test('P1-11: an entry whose declared size is forged is never fully decompressed', async () => {
+  // 声明的 uncompressedSize 由压缩包自己填写：这里把 96MB 的实际内容伪造成声明 100 字节，
+  // 绕过「按声明大小拦截」。修复前 JSZip 会先整条解压到内存，最后才报 size mismatch。
+  const realBytes = 96 * 1024 * 1024;
+  const zip = new JSZip();
+  zip.file('bomb.txt', Buffer.alloc(realBytes, 65));
+  const buf = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+  for (let i = 0; i < buf.length - 28; i++) {
+    if (buf.readUInt32LE(i) === 0x04034b50 && buf.readUInt32LE(i + 22) === realBytes) buf.writeUInt32LE(100, i + 22);
+    if (buf.readUInt32LE(i) === 0x02014b50 && buf.readUInt32LE(i + 24) === realBytes) buf.writeUInt32LE(100, i + 24);
+  }
+  assert.ok(buf.length < 1024 * 1024, 'fixture must stay a small download: ' + buf.length);
+  global.gc && global.gc();
+  const before = process.memoryUsage().arrayBuffers + process.memoryUsage().heapUsed;
+  let peak = before;
+  const timer = setInterval(() => {
+    const now = process.memoryUsage();
+    peak = Math.max(peak, now.arrayBuffers + now.heapUsed);
+  }, 2);
+  let out;
+  try { out = await callReadZip({ url: 'https://example.com/a.zip', entry: 'bomb.txt' }, buf); }
+  finally { clearInterval(timer); }
+  assert.equal(out.error, undefined, 'forged entry must still return a bounded prefix: ' + out.error);
+  assert.match(out.content, /AAAA/);
+  assert.match(out.content, /内容过长已截断/);
+  assert.ok(out.content.length < 13000, 'only a bounded prefix is returned');
+  assert.ok(peak - before < 48 * 1024 * 1024, 'decompression must stop early, peak growth MB: ' + Math.round((peak - before) / 1048576));
+});
+
 test('P1-11: an entry-count explosion is rejected', async () => {
   // 10001 个空文件 —— 中央目录足够小，但条目数超过 10000 上限。
   const files = {};
