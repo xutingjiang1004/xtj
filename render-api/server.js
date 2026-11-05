@@ -28206,6 +28206,21 @@ app.get('/admin/ai-agent/conversation', verifyToken, securityRateLimit(60000, 60
   }
 });
 
+// 批量删除过期 AI 消息：PostgREST 的 DELETE 带 limit 必须同时给 order，
+// 原写法 delete().select().limit(n) 没有 order，会被拒绝，清理删不掉任何行。
+// 与 cleanupExpiredRateLimitRows 一致：先按时间取 id，再按 id 删除。返回本批删除条数，失败抛错。
+async function deleteAiMessageBatch(cutoff, batchSize) {
+  var picked = await supabase.from('posts').select('id')
+    .eq('media_type', AI_AGENT_MESSAGE_MARKER).lt('created_at', cutoff)
+    .order('created_at', { ascending: true }).order('id', { ascending: true }).limit(batchSize);
+  if (picked.error) throw picked.error;
+  var ids = (picked.data || []).map(function(r) { return r.id; });
+  if (!ids.length) return 0;
+  var removed = await supabase.from('posts').delete().select('id').in('id', ids);
+  if (removed.error) throw removed.error;
+  return removed.data ? removed.data.length : 0;
+}
+
 // POST /admin/ai-agent/cleanup — 清理过期的 AI 聊天记录
 // older_than_days: 默认 30 天
 app.post('/admin/ai-agent/cleanup', verifyToken, securityRateLimit(600000, 5), async (req, res) => {
@@ -28234,14 +28249,9 @@ app.post('/admin/ai-agent/cleanup', verifyToken, securityRateLimit(600000, 5), a
     var deleted = 0;
     var batchSize = 500;
     while (deleted < count) {
-      var { data: delData, error: delErr } = await supabase.from('posts')
-        .delete()
-        .select('id')
-        .eq('media_type', AI_AGENT_MESSAGE_MARKER)
-        .lt('created_at', cutoff)
-        .limit(batchSize);
-      if (delErr) return res.status(500).json({ error: '删除失败: ' + sanitizeError(delErr), deleted: deleted, total: count });
-      var batchDeleted = (delData && delData.length) ? delData.length : 0;
+      var batchDeleted;
+      try { batchDeleted = await deleteAiMessageBatch(cutoff, batchSize); }
+      catch (delErr) { return res.status(500).json({ error: '删除失败: ' + sanitizeError(delErr), deleted: deleted, total: count }); }
       if (batchDeleted <= 0) break; // 无更多可删，防止死循环
       deleted += batchDeleted;
       await new Promise(function(r) { setTimeout(r, 200); });
@@ -28313,9 +28323,9 @@ async function autoCleanupAiMessages() {
 
     var deleted = 0;
     while (deleted < count) {
-      var { data: delData, error: delErr } = await supabase.from('posts').delete().select('id').eq('media_type', AI_AGENT_MESSAGE_MARKER).lt('created_at', cutoff).limit(500);
-      if (delErr) { console.error('[AUTO-CLEANUP] delete error:', delErr && delErr.message); break; }
-      var batchDeleted = (delData && delData.length) ? delData.length : 0;
+      var batchDeleted;
+      try { batchDeleted = await deleteAiMessageBatch(cutoff, 500); }
+      catch (delErr) { console.error('[AUTO-CLEANUP] delete error:', delErr && delErr.message); break; }
       if (batchDeleted <= 0) break; // 无更多可删，防止死循环
       deleted += batchDeleted;
       await new Promise(function(r) { setTimeout(r, 300); });
