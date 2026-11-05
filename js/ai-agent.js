@@ -17039,6 +17039,8 @@ function showChatMessages() {
     if(aiFeatureRequestClient)aiFeatureRequestClient.clear();
     modelCapabilityCache.clear();
     serverModelCatalog = []; serverModelIdentity = null;
+    // 60 秒同步缓存属于上一个账号：不清掉的话，换账号后 openAiChat 会跳过同步，托管模型目录与新账号的模型、研究模型偏好都要等一分钟。
+    S._customModelsSyncedAt = 0;
     if (S.selectedModel === CUSTOM_MODEL_PREFIX + OPENROUTER_MODEL_UID) {
       S.selectedModel = DEFAULT_AI_MODEL;
       try { localStorage.setItem('xtj_ai_model',DEFAULT_AI_MODEL); } catch (_) {}
