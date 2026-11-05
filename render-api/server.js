@@ -5210,9 +5210,10 @@ async function aiSiteSearch(source, query, userName, limit, isAdmin, searchPlan)
       return aiSiteResult('dm', m.id, '与 ' + peer + ' 的聊天', aiSiteSnippet(m.content, q), m.created_at, { type: 'dm', user: peer, message_id: m.id }, q, score);
     });
   } else if (source === 'ai_history') {
-    var aiRes = await supabase.from('posts').select('id,content,media_url,created_at').eq('user_name', userName).eq('media_type', AI_AGENT_MESSAGE_MARKER).ilike('content', pattern).order('created_at', { ascending: false }).limit(take);
+    var aiRes = await supabase.from('posts').select('id,content,media_url,created_at').eq('user_name', userName).eq('media_type', AI_AGENT_MESSAGE_MARKER).ilike('content', pattern).order('created_at', { ascending: false }).limit(take * 3);
     if (aiRes.error) { console.error('[aiSiteSearch] ai_history query error:', aiRes.error); return { results: [], error: { code: 'ai_history_query_failed', message: '小猫历史搜索暂时不可用' } }; }
-    rows = (aiRes.data || []).map(function(m) {
+    // 用户删除的对话只是软删除（meta.deleted），不能再被检索出来；多取一些再过滤，免得被它们挤掉有效结果。
+    rows = (aiRes.data || []).filter(function(m) { return !(parseMsgMeta(m) || {}).deleted; }).slice(0, take).map(function(m) {
       var meta = parseMsgMeta(m);
       var text = aiSiteText(m.content, 10000);
       var score = aiSiteMatchScore(text, q);
