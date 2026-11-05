@@ -28454,7 +28454,15 @@ const ADMIN_DM_NOTIFY_USER = process.env.ADMIN_DM_NOTIFY_USER || '';
 var dmUnreadNotifyTimer = null;
 var dmUnreadNotifiedIds = new Set(); // 已通知的消息ID，防止重复发送
 
+// 每 60 秒触发一次；SMTP 慢于一个周期时，上一轮还没写入「已提醒」标记，
+// 下一轮会把同一批私信再发一封，所以同一时刻只允许一轮在跑。
+var dmUnreadNotifyBusy = false;
 async function checkUnreadDmForAdmin() {
+  if (dmUnreadNotifyBusy) return;
+  dmUnreadNotifyBusy = true;
+  try { await checkUnreadDmForAdminOnce(); } finally { dmUnreadNotifyBusy = false; }
+}
+async function checkUnreadDmForAdminOnce() {
   try {
     // ★ 修复：原写法 `!mailTransporter && !getMailTransporter()` 引用了 mail-transport
     //   的模块私有变量 mailTransporter（未导出）→ ReferenceError 被外层 catch 吞掉
@@ -28470,6 +28478,11 @@ async function checkUnreadDmForAdmin() {
       .eq('media_type', DM_MARKER)
       .eq('media_url', ADMIN_DM_NOTIFY_USER)
       .lt('created_at', cutoff)
+      // 已读（read_at 为时间串）与已提醒的私信必须在库里就排除：这里按时间正序只取 50 条，
+      // 如果让它们占满窗口，管理员已读私信累计超过 50 条后，新的未读私信永远查不到、提醒静默失效。
+      // 用户文本在 JSON 里引号会被转义成 \"，不会误命中这两个模式。
+      .not('content', 'like', '%"read_at":"%')
+      .not('content', 'like', '%"dm_notified_at":%')
       .order('created_at', { ascending: true })
       .limit(50);
     if (error || !data || !data.length) return;
