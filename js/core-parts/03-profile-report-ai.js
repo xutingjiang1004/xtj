@@ -1000,33 +1000,12 @@ function renderProfileActivityList(kind) {
                 var list = document.getElementById('reportHistoryList') || document.getElementById('reportRecordsList');
                 if (!list) return;
                 try {
-                    if (!window.sb) {
-                        list.innerHTML = '<div class="report-records-empty">数据库连接未初始化</div>';
-                        return;
-                    }
-                    var res = await sb.from('posts')
-                        .select('id, content, created_at')
-                        .eq('user_name', window.currentUser)
-                        .eq('media_type', REPORT_MARKER)
-                        .order('created_at', { ascending: false })
-                        .limit(160);
+                    // 匿名密钥读不到 __report__ 行（RLS 只放行公开帖子类型），必须走服务端按登录身份查询。
+                    var reportsResponse = await window.xtjProtectedFetch('/api/my-reports', { authOwner: recordsOwner, authEpoch: recordsEpoch });
+                    var reportsBody = await reportsResponse.json().catch(function() { return {}; });
                     if (!sameAccount()) return;
-                    if (res && res.error) throw res.error;
-                    var records = (res.data || []).map(function(p) {
-                        var c = {};
-                        try { c = JSON.parse(p.content || '{}'); } catch(e) {}
-                        return {
-                            id: p.id,
-                            created_at: p.created_at,
-                            target_type: c.target_type || 'post',
-                            target_id: c.target_id || '',
-                            target_user: c.target_user || '',
-                            report_reason: c.report_reason || '',
-                            status: c.status || 'pending',
-                            admin_response: c.admin_response || null,
-                            reviewed_at: c.reviewed_at || null
-                        };
-                    });
+                    if (!reportsResponse.ok || !reportsBody || !Array.isArray(reportsBody.data)) throw new Error((reportsBody && reportsBody.error) || '举报记录加载失败');
+                    var records = reportsBody.data;
                     if (!records.length) {
                         list.innerHTML = '<div class="report-records-empty">你还没有举报记录。</div>';
                         return;

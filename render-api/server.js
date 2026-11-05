@@ -17654,7 +17654,7 @@ app.get('/api/my-reports', rateLimit(60000, 20), authenticateUser, async (req, r
     .eq('media_type', REPORT_MARKER)
     .eq('user_name', userName)
     .order('created_at', { ascending: false })
-    .limit(50);
+    .limit(160);
   if (error) return res.status(400).json({ error: sanitizeError(error) });
   const reports = (data || []).map(function(p) {
     var c = {};
