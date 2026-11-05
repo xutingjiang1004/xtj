@@ -198,8 +198,9 @@ test('feed load-more failure shows a retry entry and pauses the sentinel loop', 
   assert.match(loadMore, /feedLoadMoreFailed = false;[\s\S]*?loadMoreFeedPosts\(\)/);
   // 入口处与哨兵回调都检查失败标记
   assert.match(core, /feedPageFetchPending \|\| feedLoadMoreFailed\) return;/);
-  assert.match(core, /entry\.isIntersecting && !feedLoadMoreFailed &&/);
-  assert.match(core, /!feedEndReached \|\| getFeedRenderedSliceStart\(\) < getFilteredPosts/);
+  assert.match(core, /entry\.isIntersecting && !feedLoadMoreFailed\)/);
+  // 终态短路：到底且当前过滤结果已全部渲染时才停止（2026-11-05 起写法为 if (feedEndReached) { … >= terminalPosts.length }）
+  assert.match(core, /if \(feedEndReached\) \{\s*var terminalPosts = getFilteredPosts\([^)]*\);\s*if \(getFeedRenderedSliceStart\(\) >= terminalPosts\.length\)/);
 });
 
 test('like button uses the same SVG on initial render and subsequent toggles', () => {
