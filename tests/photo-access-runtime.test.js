@@ -58,7 +58,7 @@ test('wall bytes deny anonymous/forged requests and preserve authenticated origi
   const f=fixture();await request(f.app).get('/api/photo/'+A+'/media').expect(401);assert.equal(f.storageCalls.length,0);
   await request(f.app).get('/api/photo/'+A+'/media?user_name=owner').set('Authorization','Bearer forged').expect(401);
   const response=await request(f.app).get('/api/photo/'+A+'/media').set('Authorization','Bearer other').expect(200);
-  assert.deepEqual(body(response),png);assert.equal(response.headers['cache-control'],'private, no-cache, must-revalidate');assert.equal(f.objects.has('uploads/photos/0.png'),false);assert.deepEqual(f.objects.get(PHOTO_BUCKET+'/photos/0.png'),png);
+  assert.deepEqual(body(response),png);assert.equal(response.headers['cache-control'],'private, max-age=604800, must-revalidate');assert.equal(f.objects.has('uploads/photos/0.png'),false);assert.deepEqual(f.objects.get(PHOTO_BUCKET+'/photos/0.png'),png);
   const head=await request(f.app).head('/api/photo/'+A+'/media').set('Authorization','Bearer other').expect(200);assert.equal(head.headers['content-length'],String(png.length));
   const range=await request(f.app).get('/api/photo/'+A+'/media').set('Authorization','Bearer other').set('Range','bytes=0-3').expect(206);assert.deepEqual(body(range),png.subarray(0,4));
   await request(f.app).get('/api/photo/'+A+'/media').set('Authorization','Bearer other').set('Range','bytes=0-3,8-10').expect(416);
@@ -165,7 +165,7 @@ test('conditional originals reuse unchanged bytes only after fresh authorization
   const first=await request(f.app).get(path).expect(200),etag=first.headers.etag;
   assert.ok(etag);assert.deepEqual(body(first),png);
   const cached=await request(f.app).get(path).set('If-None-Match',etag).expect(304);
-  assert.equal(cached.text,'');assert.equal(cached.headers.etag,etag);assert.equal(cached.headers['cache-control'],'private, no-cache, must-revalidate');
+  assert.equal(cached.text,'');assert.equal(cached.headers.etag,etag);assert.equal(cached.headers['cache-control'],'private, max-age=604800, must-revalidate');
   await request(f.app).head(path).set('If-Modified-Since',first.headers['last-modified']).expect(304);
   f.objects.set('uploads/posts/one.png',Buffer.concat([png,Buffer.from('changed')]));
   const changed=await request(f.app).get(path).set('If-None-Match',etag).expect(200);assert.notEqual(changed.headers.etag,etag);
@@ -217,4 +217,87 @@ test('a stalled attachment read cannot keep an old public permission alive for l
     const second=await Promise.race([request(f.app).get(path+'1').then(response=>response),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('later request reused a completed permission read')),1000);})]);
     assert.equal(second.status,404);assert.deepEqual(f.reads,['posts','post_attachments','posts']);
   }finally{clearTimeout(timer);release();await first;}
+});
+
+test('post share page renders public text posts for guests with WeChat preview metadata',async()=>{
+  const f=fixture();
+  f.publicPost.media_type='text';
+  f.publicPost.content='你好，这是一篇公开的文字帖子\n第二行';
+  const page=await request(f.app).get('/share/posts/'+f.publicPost.id).expect(200);
+  assert.match(page.text,/公开的文字帖子/);assert.match(page.text,/第二行/);
+  assert.match(page.text,/XTJ · 帖子分享/);
+  assert.match(page.text,/property="og:title"/);assert.match(page.text,/property="og:description"/);
+  assert.match(page.text,/name="description"/);
+  // 分享页要给微信好友一个回站入口（蓝色链接不算，必须是主按钮样式）。
+  assert.match(page.text,/class="cta"[^>]*>打开 XTJ 看更多</);
+  assert.match(page.text,/\.cta\{display:block/);
+  assert.ok(!page.text.includes(A),'分享页不能泄露照片墙资源 ID');
+  f.publicPost.content=JSON.stringify({__type:'__xtj_post_v2__',text:'包装后的正文'});
+  const wrapped=await request(f.app).get('/share/posts/'+f.publicPost.id).expect(200);
+  assert.match(wrapped.text,/包装后的正文/);assert.ok(!wrapped.text.includes('__xtj_post_v2__'),'不能回显帖子 JSON 包装');
+  f.publicPost.visibility='private';await request(f.app).get('/share/posts/'+f.publicPost.id).expect(404);
+  f.publicPost.visibility='public';f.publicPost.is_deleted=true;await request(f.app).get('/share/posts/'+f.publicPost.id).expect(404);
+  f.publicPost.is_deleted=false;f.publicPost.media_type='__dm__';await request(f.app).get('/share/posts/'+f.publicPost.id).expect(404);
+});
+
+test('post share page keeps zoomable image markup and renders video and audio players safely',async()=>{
+  const f=fixture();
+  const page=await request(f.app).get('/share/posts/'+f.publicPost.id).expect(200);
+  assert.match(page.text,/公开帖子/);
+  assert.equal((page.text.match(/data-original="/g)||[]).length,2,'相册两张图都应保留原图地址');
+  assert.match(page.text,/class="retry" hidden/);
+  const { renderPostSharePage } = require('../render-api/photo-access');
+  const row={id:f.publicPost.id,user_name:'<b>作者</b>',content:'正文 <script>alert(1)</script>',created_at:'2026-11-01T00:00:00Z',media_type:'album'};
+  const items=[{media_type:'video',share_media_url:'/api/post/x/media/0'},{media_type:'audio',share_media_url:'/api/post/x/media/1'},{media_type:'image',share_media_url:'/api/post/x/media/2'}];
+  const html=renderPostSharePage(row,items,'https://xtj.example');
+  assert.match(html,/<video controls/);assert.match(html,/<audio controls/);
+  assert.ok(!html.includes('正文 <script>alert(1)</script>'),'正文必须转义');
+  assert.ok(!html.includes('<b>作者</b>'),'作者名必须转义');
+  // 微信抓 1-4MB 原图会放弃，封面必须是可抓取的 JPEG 预览
+  assert.match(html,/property="og:image" content="https:\/\/xtj\.example\/api\/post\/x\/media\/2\?preview=1&amp;format=jpeg"/);
+});
+
+test('post share page turns a bare link into a card and falls back to the site cover',async()=>{
+  const { renderPostSharePage, publicLink } = require('../render-api/photo-access');
+  const row={id:'x',user_name:'xxz',content:'https://music.apple.com/us/album/promise/1866523223?i=1866523227',created_at:'2026-11-01T00:00:00Z',media_type:''};
+  const preview={kind:'music',host:'Apple Music',url:'https://music.apple.com/promise',title:'Promise',desc:'Wonstein',image:'https://is1.example/cover.jpg',audio:'https://audio.example/a.m4a'};
+  const html=renderPostSharePage(row,[],'https://xtj.example',preview);
+  assert.match(html,/class="lcard music"/);
+  assert.match(html,/<audio class="lc-audio" controls preload="none" src="https:\/\/audio\.example\/a\.m4a">/);
+  // 标题统一「某某 分享的帖子」，歌名退到落地页卡片里。
+  assert.match(html,/property="og:title" content="xxz 分享的帖子"/);
+  assert.match(html,/property="og:description" content="来自 xxz 的帖子，点开即可查看"/);
+  assert.match(html,/property="og:image" content="https:\/\/is1\.example\/cover\.jpg"/);
+  assert.ok(!html.includes('https://music.apple.com/us/album/promise'),'裸链接不应再原样出现在正文里');
+
+  const plain=renderPostSharePage({...row,content:'今天天气不错'},[],'https://xtj.example');
+  assert.match(plain,/property="og:image" content="https:\/\/xtj\.example\/img\/share-cover-v2\.jpg"/);
+  // 纯文字帖：描述先放正文，再跟「来自某某的帖子」，发布人一眼可见。
+  assert.match(plain,/property="og:description" content="今天天气不错 · 来自 xxz 的帖子，点开即可查看"/);
+
+  // 有发布者头像时用头像，不再落到站点默认封面，也不该声明 1200 方图尺寸。
+  const withAvatar=renderPostSharePage({...row,content:'今天天气不错'},[],'https://xtj.example',null,{avatarUrl:'https://xtj.example/api/avatar/image/xxz?v=abc&size=large&format=jpg'});
+  assert.match(withAvatar,/property="og:image" content="https:\/\/xtj\.example\/api\/avatar\/image\/xxz\?v=abc&amp;size=large&amp;format=jpg"/);
+  assert.ok(!withAvatar.includes('og:image:width'),'头像封面不应声明默认封面尺寸');
+
+  // 转发场景：标题写转发者，描述里的「来自」仍是原作者，两者不能混。
+  const forwarded=renderPostSharePage({...row,user_name:'🧢',content:'你要干啥？'},[],'https://xtj.example',null,{sharer:'xxz'});
+  assert.match(forwarded,/property="og:title" content="xxz 分享的帖子"/);
+  assert.match(forwarded,/property="og:description" content="你要干啥？ · 来自 🧢 的帖子，点开即可查看"/);
+
+  // 带图片的帖子：描述只写来源，不重复正文。
+  const withImage=renderPostSharePage({...row,content:'这是一段很长的正文'},[{media_type:'image',share_media_url:'/api/post/x/media/0'}],'https://xtj.example');
+  assert.match(withImage,/property="og:description" content="来自 xxz 的帖子，点开即可查看"/);
+  // 默认封面是 1:1，声明尺寸后微信不再二次裁切
+  assert.match(plain,/property="og:image:width" content="1200"/);
+  assert.match(plain,/property="og:image:height" content="1200"/);
+  assert.match(plain,/rel="apple-touch-icon" sizes="180x180" href="https:\/\/xtj\.example\/img\/icon-180\.png"/);
+  // 真实图片封面不该被标成 1200 方图
+  assert.ok(!html.includes('og:image:width'),'帖子自带图片时不应声明默认封面尺寸');
+
+  assert.equal(publicLink('http://127.0.0.1/x'),null);
+  assert.equal(publicLink('http://192.168.1.4/x'),null);
+  assert.equal(publicLink('http://localhost:3000/x'),null);
+  assert.equal(publicLink('http://169.254.169.254/latest'),null);
+  assert.ok(publicLink('https://music.apple.com/x'));
 });

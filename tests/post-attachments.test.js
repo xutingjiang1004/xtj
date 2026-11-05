@@ -75,11 +75,11 @@ test('upload failure stops scheduling and drains in-flight uploads before cleanu
   assert.equal(active,0);assert.equal(peak,3);assert.deepEqual(started,[0,1,2]);assert.deepEqual(new Set(settled),new Set(started));
   const result=await media.mapUploads([0,1,2,3,4],async n=>{await new Promise(r=>setTimeout(r,5-n));return n;},3);assert.deepEqual(result,[0,1,2,3,4]);
 });
-test('Feed has at most 3 preview comments while Detail retains replies, AI comments and orphan/deep/cyclic content', () => {
+test('Feed renders every loaded comment (no 3-item truncation) while Detail retains replies, AI comments and orphan/deep/cyclic content', () => {
   const comments=Array.from({length:10},(_,n)=>({id:String(n),content:'comment-'+n,user_name:n===2?'cat_ai':'bob',generated_by_ai:n===2,parent_comment_id:n?String(n-1):null}));
   const ctx=renderer(),post={id:'post',user_name:'alice',content:'x',created_at:'2026-10-03'};
   const feed=ctx.renderPostCard(post,{post:comments},{},{}), full=ctx.statPostDetailMarkup(post,[],comments);
-  assert.equal((feed.match(/data-comment-id=/g)||[]).length,3);assert.match(feed,/查看全部 10 条评论/);
+  assert.equal((feed.match(/data-comment-id=/g)||[]).length,10);assert.doesNotMatch(feed,/查看全部 10 条评论/);
   assert.equal((full.match(/data-comment-id=/g)||[]).length,10);assert.match(full,/cat-ai-comment/);assert.match(full,/comment-replies/);
   assert.equal((ctx.buildPostCommentsHtml(post,[{...comments[0],parent_comment_id:'1'},{...comments[1],parent_comment_id:'0'}],{detail:true}).match(/data-comment-id=/g)||[]).length,2);
 });

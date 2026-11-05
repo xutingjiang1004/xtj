@@ -5,7 +5,7 @@
   window.XtjPostPublishProgress = {
     begin: function (button, files, isCurrent) {
       var loaded = files.map(function () { return 0; }), total = files.reduce(function (sum, file) { return sum + file.size; }, 0);
-      var requests = new Set(), percent = 0, stopped = false;
+      var requests = new Set(), controllers = new Set(), percent = 0, stopped = false;
       var host = document.createElement('span'); host.className = 'post-publish-progress';
       var copy = document.createElement('span'); copy.className = 'post-publish-progress-copy';
       var label = document.createElement('span'); label.className = 'post-publish-progress-label';
@@ -66,13 +66,34 @@
               global: { fetch: function (input, options) { return transport(index, input, options); } }
             });
           }
-          var result = await uploader.storage.from('uploads').upload(path, file, { upsert: false });
+          // 文件名唯一、内容永不覆盖，直接给一年缓存：以后哪怕某条链路又直连存储，
+          // 也不会 1 小时就失效、反复重新下载视频。
+          var result = await uploader.storage.from('uploads').upload(path, file, { upsert: false, cacheControl: '31536000' });
           if (!result.error) { loaded[index] = file.size; update(total ? loaded.reduce(function (sum, value) { return sum + value; }, 0) / total * 90 : 0, '上传中'); }
           return result;
         },
+        // FIX MEDIA-02: OSS 直传用 fetch(PUT)，XHR 的 onprogress 通道收不到字节。
+        // PUT 成功后由调用方按文件标记完成，进度条不再全程停在 0%。
+        uploaded: function (index, file) {
+          if (stopped || !isCurrent() || !files[index]) return;
+          loaded[index] = Math.max(loaded[index], Number(file && file.size) || files[index].size || 0);
+          update(total ? loaded.reduce(function (sum, value) { return sum + value; }, 0) / total * 90 : 0, '上传中');
+        },
         saving: function () { update(total ? 95 : 0, '发布中'); },
         confirmed: function () { update(100, '已发布'); },
-        cancel: function () { stopped = true; Array.from(requests).forEach(function (xhr) { xhr.abort(); }); requests.clear(); }
+        // FIX MEDIA-03: OSS 直传走 fetch(PUT)，不是 Supabase 的 XHR 通道。让调用方
+        // 登记 AbortController，cancel() 才能中止挂起的 PUT；返回注销函数避免集合增长。
+        watch: function (controller) {
+          if (!controller || !controller.signal) return function () {};
+          if (stopped || !isCurrent()) { try { controller.abort(); } catch (_) {} return function () {}; }
+          controllers.add(controller);
+          return function () { controllers.delete(controller); };
+        },
+        cancel: function () {
+          stopped = true;
+          Array.from(requests).forEach(function (xhr) { try { xhr.abort(); } catch (_) {} }); requests.clear();
+          Array.from(controllers).forEach(function (controller) { try { controller.abort(); } catch (_) {} }); controllers.clear();
+        }
       };
     }
   };

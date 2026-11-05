@@ -14,22 +14,38 @@
       return (window.API_BASE || '').replace(/\/$/, '') + '/api/post/' + encodeURIComponent(post.id) + '/media/' + position;
     } catch (_) { return value; }
   }
+  // ★ 2026-11-02：上传时另存了一份 480px 缩略图，地址按 position 存在帖子的 meta.thumbs 里。
+  // 信息流列表用缩略图，点开查看器仍用原图；旧帖没有缩略图就回退到原来的做法。
+  function storedThumb(post, position) {
+    try {
+      var meta = post && post._contentMeta;
+      var list = meta && Array.isArray(meta.thumbs) ? meta.thumbs : null;
+      if (!list) return '';
+      var value = list[position];
+      return typeof value === 'string' && value ? value : '';
+    } catch (_) { return ''; }
+  }
   function getPostMediaItems(post) {
     post = post || {};
     var list = Array.isArray(post.media_items) ? post.media_items : post.attachments;
     if (Array.isArray(list) && list.length) {
       return list.filter(function(item) { return item && typeof item.media_url === 'string' && item.media_url; })
-        .map(function(item, index) { return Object.assign({}, item, { width: item.width || (!item.id && (post.media_width || post.width || (post._contentMeta && post._contentMeta.w))) || null,
+        .map(function(item, index) {
+          var position = Number.isInteger(item.position) ? item.position : index;
+          var display = mediaUrl(post, item.media_url, position);
+          var thumb = storedThumb(post, position);
+          return Object.assign({}, item, { width: item.width || (!item.id && (post.media_width || post.width || (post._contentMeta && post._contentMeta.w))) || null,
           height: item.height || (!item.id && (post.media_height || post.height || (post._contentMeta && post._contentMeta.h))) || null,
-          media_url: mediaUrl(post, item.media_url, Number.isInteger(item.position) ? item.position : index),
-          preview_url: typeof window !== 'undefined' && window.xtjMediaPreviewUrl ? window.xtjMediaPreviewUrl(mediaUrl(post, item.media_url, Number.isInteger(item.position) ? item.position : index)) : mediaUrl(post, item.media_url, Number.isInteger(item.position) ? item.position : index),
-          position: Number.isInteger(item.position) ? item.position : index }); })
+          media_url: display,
+          preview_url: thumb || (typeof window !== 'undefined' && window.xtjMediaPreviewUrl ? window.xtjMediaPreviewUrl(display) : display),
+          position: position }); })
         .sort(function(a, b) { return a.position - b.position; });
     }
     if (!post.media_url) return [];
     var meta = post._contentMeta || {};
     var original = mediaUrl(post, post.media_url, 0);
-    return [{ media_url: original, preview_url: typeof window !== 'undefined' && window.xtjMediaPreviewUrl ? window.xtjMediaPreviewUrl(original) : original, media_type: /^(video|audio)$/.test(post.media_type) ? post.media_type : 'image', position: 0,
+    var thumb = storedThumb(post, 0);
+    return [{ media_url: original, preview_url: thumb || (typeof window !== 'undefined' && window.xtjMediaPreviewUrl ? window.xtjMediaPreviewUrl(original) : original), media_type: /^(video|audio)$/.test(post.media_type) ? post.media_type : 'image', position: 0,
       width: post.media_width || post.width || meta.w || null, height: post.media_height || post.height || meta.h || null,
       file_size: meta.fileSize || null }];
   }

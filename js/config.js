@@ -33,4 +33,18 @@
             return window.XTJ_CONFIG.API_BASE + '/api/uploads/media?path=' + encodeURIComponent(decodeURIComponent(url.pathname.slice(prefix.length)));
         } catch (_) { return value; }
     };
+    // 视频封面是上传时截下的首帧，原图动辄几 MB。
+    // 走同源接口的 1080 预览档，微信和弱网都能立刻出图。
+    window.xtjPostPosterUrl = function(value) {
+        try {
+            if (!value) return '';
+            var src = window.xtjUploadDisplayUrl(value);
+            var url = new URL(src, window.location.href);
+            if (url.origin === window.location.origin && url.pathname === '/api/uploads/media' && url.searchParams.get('path')) {
+                url.searchParams.set('preview', '1');
+                return url.href;
+            }
+            return window.xtjMediaPreviewUrl ? window.xtjMediaPreviewUrl(src) : src;
+        } catch (_) { return value || ''; }
+    };
 })();

@@ -2,7 +2,7 @@
 const fs=require('node:fs'),http=require('node:http'),path=require('node:path');
 const {chromium,webkit}=require('playwright');
 const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aVxkAAAAASUVORK5CYII=','base64');
-async function postBrowserFixture({viewport={width:390,height:844},theme='light',engine='chromium',counts=[2,3,4,9,15,18],holdImages=false,ios=false,user='alice',publicPosts=false,feedUnavailable=false,legacyCoverCache=false,realUploads=false,dmMessages=[],holdFeed=false,breakProfileInit=false,waitForPost=true,enforceFeedPrivacy=false}={}){
+async function postBrowserFixture({viewport={width:390,height:844},theme='light',engine='chromium',counts=[2,3,4,9,15,18],holdImages=false,ios=false,user='alice',publicPosts=false,feedUnavailable=false,legacyCoverCache=false,realUploads=false,dmMessages=[],holdFeed=false,breakProfileInit=false,waitForPost=true,enforceFeedPrivacy=false,guestLimited=false}={}){
  let releaseStorageResponses;const storageWait=new Promise(resolve=>releaseStorageResponses=resolve),storageRequests=[];
  let releaseFeed;const feedWait=new Promise(resolve=>releaseFeed=resolve);
  const root=path.resolve('.'),mime={'.html':'text/html','.js':'application/javascript','.css':'text/css','.svg':'image/svg+xml','.mjs':'application/javascript'};
@@ -40,7 +40,7 @@ async function postBrowserFixture({viewport={width:390,height:844},theme='light'
   if(url.pathname==='/api/config/public')data={supabase_url:origin+'/test-supabase',supabase_anon_key:'sb_publishable_test_only_never_production'};
   if(url.pathname==='/api/user/refresh')data={token:'test-only-token',user_name:user};
   if(url.pathname==='/api/dm/list')data={ok:true,data:dmMessages,muted_peers:[]};
-  if(url.pathname==='/api/feed'){const visible=enforceFeedPrivacy&&!route.request().headers().authorization?posts.filter(p=>p.visibility==='public'):posts;data={ok:true,posts:visible,comments,likes,next_offset:visible.length,next_cursor:null,endReached:true,total_post_count:visible.length};if(feedUnavailable){status=503;data={ok:false,retryable:true};}}
+  if(url.pathname==='/api/feed'){const visibleAll=enforceFeedPrivacy&&!route.request().headers().authorization?posts.filter(p=>p.visibility==='public'):posts;const visible=guestLimited?visibleAll.slice(0,10):visibleAll;data={ok:true,posts:visible,comments,likes,next_offset:visible.length,next_cursor:null,endReached:true,guest_limited:guestLimited,login_required:guestLimited,total_post_count:visible.length};if(feedUnavailable){status=503;data={ok:false,retryable:true};}}
   if(url.pathname==='/api/post/media/batch'){if(failMediaBatch){status=503;data={ok:false,retryable:true};}else data={ok:true,posts:posts.filter(p=>body.post_ids.includes(p.id)&&(p.visibility==='public'||p.user_name===user)).map(p=>({id:p.id,media_items:p.media_items}))};}
   if(url.pathname==='/api/avatar/batch')data={ok:true,avatars:{}};
   if(url.pathname==='/api/post/like'){const liked=body.liked;const i=likes.findIndex(l=>l.post_id===body.post_id&&l.user_name==='alice');if(liked&&i<0)likes.push({id:'like-'+body.post_id,post_id:body.post_id,user_name:'alice'});if(!liked&&i>=0)likes.splice(i,1);data={ok:true,liked,like_count:likes.filter(l=>l.post_id===body.post_id).length};}

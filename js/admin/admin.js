@@ -4055,7 +4055,7 @@
         function paint(body,refresh){
             var retained=new Set((body.items||[]).map(function(row){return row.id;}));seen.forEach(function(previous,id){if(!retained.has(id)){previous.line.remove();seen.delete(id);}});
             (body.items||[]).forEach(function(row){var previous=seen.get(row.id);var line=document.createElement('div');line.style.cssText='padding:8px 0;border-bottom:1px solid rgba(148,163,184,.12);font-size:12px;';
-                var lat=Number(row.latitude),lng=Number(row.longitude),link=document.createElement('a');link.target='_blank';link.rel='noopener noreferrer';link.href='https://www.openstreetmap.org/?mlat='+encodeURIComponent(lat)+'&mlon='+encodeURIComponent(lng)+'#map=16/'+encodeURIComponent(lat)+'/'+encodeURIComponent(lng);link.textContent=String(row.latitude)+', '+String(row.longitude);line.appendChild(link);
+                var lat=Number(row.latitude),lng=Number(row.longitude),link=document.createElement('a');link.target='_blank';link.rel='noopener noreferrer';link.href='https://uri.amap.com/marker?position='+encodeURIComponent(lng+','+lat)+'&name='+encodeURIComponent('用户定位')+'&coordinate=wgs84&callnative=1&src=xtj';link.textContent=String(row.latitude)+', '+String(row.longitude);line.appendChild(link);
                 var detail=document.createElement('span');detail.textContent=' · '+(row.accuracy_m==null?'精度未提供':'精度 '+Math.round(row.accuracy_m)+' 米')+' · '+formatTime(row.captured_at)+' · '+(row.capture_reason==='post_location'?'发布帖子定位':row.capture_reason==='legacy_retained'?'保留历史':row.capture_reason||'主动定位')+' · '+(row.resolved_address|| (row.resolution_status==='failed'?'地址解析失败':'地址解析中'));line.appendChild(detail);
                 if(row.resolution_status!=='resolved'){var retry=document.createElement('button');retry.type='button';retry.textContent='重新解析';retry.style.cssText='min-height:44px;padding:0 8px;border:0;background:none;color:var(--primary)';retry.onclick=function(){window.adminReResolveLocation(userName,'',row.id);};line.appendChild(retry);}
                 var latest=document.getElementById('adminGpsLatestStatus');if(latest&&latest.dataset.locationId===row.id){latest.textContent=row.resolved_address||(row.resolution_status==='failed'?'解析失败':'解析中');}
@@ -4242,7 +4242,9 @@
             var resolvedAt = latestLoc.resolved_at || null;
             var pageLoadId = latestLoc.page_load_id || '';
             var captureReason = latestLoc.capture_reason || '';
-            var mapUrl = 'https://www.openstreetmap.org/?mlat=' + encodeURIComponent(latitude) + '&mlon=' + encodeURIComponent(longitude) + '#map=16/' + encodeURIComponent(latitude) + '/' + encodeURIComponent(longitude);
+            // 国内直连 openstreetmap.org 基本打不开（地图瓦片被墙/极慢），
+            // 改用高德 URI：手机可直接唤起高德 App，桌面打开网页版；coordinate=wgs84 让它自行纠偏。
+            var mapUrl = 'https://uri.amap.com/marker?position=' + encodeURIComponent(longitude + ',' + latitude) + '&name=' + encodeURIComponent('用户定位') + '&coordinate=wgs84&callnative=1&src=xtj';
 
             html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;font-size:12px;">';
             html += '<div><span style="color:var(--text-muted);">纬度</span><br>' + escapeHtml(String(latestLoc.latitude)) + '</div>';
@@ -5236,7 +5238,7 @@
                 '<label style="display:flex;align-items:center;gap:4px;font-weight:400;cursor:pointer;"><input type="checkbox" id="guestAiEnabled"' + (cfg.allow_guest_ai === true ? ' checked' : '') + ' style="width:16px;height:16px;accent-color:var(--primary,#2E9465);" /> 访客用户可使用AI</label>',
                 '</div>',
                 '<div style="font-size:11px;color:#888;margin:4px 0 0 0;line-height:1.5;padding:6px 8px;background:rgba(46,148,101,0.06);border-radius:4px;">',
-                '开启后，未登录访客可直接使用小猫 AI 普通聊天，聊天记录不保存，刷新即清；历史、深入研究、自定义模型等依赖账号的功能仍需登录。关闭后访客必须登录才能使用。',
+                '当前版本已在服务端关闭访客 AI：即使勾选此项，也必须在服务器环境变量设置 XTJ_ALLOW_GUEST_AI=1 并重新部署才会生效。未开启时，访客可以打开小猫 AI 页面，但发送消息会提示「请先登录」。',
                 '</div>',
                 '</div>',
 

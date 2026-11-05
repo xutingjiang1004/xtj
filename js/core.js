@@ -559,9 +559,15 @@ const ADMIN_NAME = "xxz";
                     // ★ 审计修复：logout 请求复用 xtjFetch 超时封装（8s），
                     // 避免 VPN/半开连接下 fetch 永不 settle（与 doLogout 的 8s 超时对齐）。
                     var logoutFetch = (typeof window.xtjFetch === 'function') ? window.xtjFetch : fetch;
-                    logoutFetch(API_BASE + '/api/user/logout', {
+                    // FIX BOOT-01: 身份不匹配分支的 logout 必须登记到 __xtjLogoutPending，
+                    // 否则用户立刻重试登录时，旧 logout 晚到会按当前 cookie 撤销新会话的 refresh。
+                    var pendingLogout = Promise.resolve(logoutFetch(API_BASE + '/api/user/logout', {
                         method: 'POST', credentials: 'include', headers: logoutHeaders
-                    }, 8000).catch(function(){});
+                    }, 8000)).catch(function(){});
+                    window.__xtjLogoutPending = pendingLogout;
+                    pendingLogout.then(function() {
+                        if (window.__xtjLogoutPending === pendingLogout) window.__xtjLogoutPending = null;
+                    });
                 } catch(e) {}
 
                 // ★ 广播退出事件到其他标签页（仅当非远程同步触发时）
@@ -1825,6 +1831,7 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
             fileSize: null,
             originalSize: null,
             mimeType: "",
+            poster_url: "",
         };
         let postSearchState = {
             keyword: "",
@@ -2501,6 +2508,9 @@ function isAdmin() {
                 location_city: post && post.location_city ? post.location_city : metaLocationCity,
                 location_district: post && post.location_district ? post.location_district : metaLocationDistrict,
                 location_level: post && post.location_level ? post.location_level : metaLocationLevel,
+                // 视频封面：后端能从帖子内容里解析出来就优先用它，解析不到再退回内容元数据。
+                // 封面单独存放而不是当附件，是因为带附件的帖子会被写成图片帖，视频会丢。
+                poster_url: (post && post.poster_url) || meta.poster_url || "",
                 media_items: window.XtjPostMedia ? window.XtjPostMedia.getPostMediaItems(Object.assign({}, post, { _contentMeta: meta })) : (post && post.media_items),
                 _contentMeta: meta
             });
@@ -3384,8 +3394,11 @@ function isAdmin() {
                 const pw = document.getElementById("regPwInp").value;
                 const email = document.getElementById("regEmailInp").value.trim();
                 if (!name) { showToast("请输入昵称"); return; }
-                if (name.length < 2 || name.length > 20) { showToast("昵称长度2-20个字符"); return; }
-                if (!/^[\u4e00-\u9fa5a-zA-Z0-9_]+$/.test(name)) { showToast("昵称仅支持中英文、数字和下划线"); return; }
+                // 按码点计数：一个 Emoji 在 UTF-16 里占两个码元，用 length 会把 10 个表情算成 20。
+                var nickChars = Array.from(name).length;
+                if (nickChars < 2 || nickChars > 20) { showToast("昵称长度2-20个字符"); return; }
+                // 中文 / 字母 / 数字 / 下划线 / Emoji（含代理对、变体选择符、ZWJ 组合与符号类表情）
+                if (!/^(?:[\u4e00-\u9fa5A-Za-z0-9_]|[\uD800-\uDBFF][\uDC00-\uDFFF]|[\u2600-\u27BF\u2B00-\u2BFF\u2190-\u21FF\u00A9\u00AE\u2122\uFE0F\u200D\u20E3])+$/.test(name)) { showToast("昵称仅支持中英文、数字、下划线和 Emoji"); return; }
                 if (!pw) { showToast("请输入密码", "error"); if (_regPwInp) _regPwInp.focus(); return; }
                 if (pw.length < 6) { showToast("密码至少6位", "error"); if (_regPwInp) _regPwInp.focus(); return; }
                 if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showToast("邮箱格式不正确"); return; }
@@ -4004,6 +4017,11 @@ function isAdmin() {
                 window.__xtjLogoutPending = logoutRequest;
                 closeModal('profileDetailModal');
                 closeModal('profileActivityModal');
+                // FIX PROF-02: 登出时还要关掉从帖子页点开的资料卡/举报记录/删除确认等弹窗，
+                // 否则旧账号界面盖在页面上，并让 07 的焦点表面把背景判为 inert。
+                ['userProfileModal', 'reportHistoryModal', 'reportModal', 'postDetailModal', 'delModal', 'statModal'].forEach(function (modalId) {
+                    try { if (typeof closeModal === 'function') closeModal(modalId); } catch (eModal) {}
+                });
 
                 try {
                     if (typeof window.__xtjAbortAiRequests === 'function') window.__xtjAbortAiRequests();
@@ -4101,7 +4119,9 @@ function isAdmin() {
                     if (regNick) regNick.value = '';
                     if (regPw) regPw.value = '';
                 } catch (e) {}
-                document.body.style.overflow = '';
+                // FIX PROF-02: 滚动锁按当前弹窗状态重算，不再无条件写死，避免与 07 打架。
+                try { if (typeof syncHeaderModalBodyLock === 'function') syncHeaderModalBodyLock(); else document.body.style.overflow = ''; }
+                catch (eBodyLock) { document.body.style.overflow = ''; }
 
                 try { if (typeof window.__xtjBroadcastLogout === 'function') window.__xtjBroadcastLogout('manual'); } catch(e) {}
                 try { if (typeof window.queueBehavior === 'function') window.queueBehavior('logout', '用户退出登录'); } catch(e) {}
@@ -4471,6 +4491,10 @@ function renderProfileActivityList(kind) {
             };
 
             async function loadMyReportRecords() {
+                // FIX PROF-01: 查询期间退出/切号时，迟到响应不得把上一账号的举报记录
+                //（含管理员回复）写进当前弹窗。
+                var recordsOwner = currentUser, recordsEpoch = _authStateEpoch;
+                function sameAccount() { return recordsOwner === currentUser && recordsEpoch === _authStateEpoch; }
                 if (!window.currentUser) {
                     var list = document.getElementById('reportHistoryList') || document.getElementById('reportRecordsList');
                     if (list) list.innerHTML = '<div class="report-records-empty">请先登录</div>';
@@ -4489,6 +4513,7 @@ function renderProfileActivityList(kind) {
                         .eq('media_type', REPORT_MARKER)
                         .order('created_at', { ascending: false })
                         .limit(160);
+                    if (!sameAccount()) return;
                     if (res && res.error) throw res.error;
                     var records = (res.data || []).map(function(p) {
                         var c = {};
@@ -4546,7 +4571,7 @@ function renderProfileActivityList(kind) {
                     }).join('');
                 } catch(e) {
                     console.error('[XTJ] loadMyReportRecords error:', e);
-                    list.innerHTML = '<div class="report-records-empty">加载失败，请重试</div>';
+                    if (sameAccount()) list.innerHTML = '<div class="report-records-empty">加载失败，请重试</div>';
                 }
             }
 
@@ -5054,7 +5079,7 @@ function renderProfileActivityList(kind) {
                 window.__catAiPollStatus[commentIdStr] = { postId: String(postId) };
 
                 // 显示临时状态
-                showCatAiStatus(commentIdStr, '小猫正在组织毒液……');
+                showCatAiStatus(commentIdStr, '小猫正在回复中…');
 
                 function poll() {
                     if ((window._catAiCancelled || 0) !== myGlobalEpoch ||
@@ -5199,7 +5224,7 @@ function renderProfileActivityList(kind) {
                                 if (data.message && data.message.includes('同步')) {
                                     showCatAiStatus(commentIdStr, '回复已生成，正在同步……');
                                 } else {
-                                    showCatAiStatus(commentIdStr, '小猫正在组织毒液……');
+                                    showCatAiStatus(commentIdStr, '小猫正在回复中…');
                                 }
                                 window.__catAiPollTimers[commentIdStr] = setTimeout(poll, baseInterval);
                             } else {
@@ -6261,11 +6286,11 @@ function renderProfileActivityList(kind) {
                     var atPos = -1;
                     for (var i = start - 1; i >= 0; i--) {
                         if (text[i] === '@' || text[i] === '＠') {
-                            // 检查 @ 是否在开头、空格后或换行后
-                            if (i === 0 || text[i - 1] === ' ' || text[i - 1] === '\n' || text[i - 1] === '\r') {
-                                atPos = i;
-                                break;
-                            }
+                            // ★ 2026-11-02：@ 不再要求出现在开头/空格后。
+                            //   中文输入没有空格，句尾接 "@小猫" 是常态，旧判断会整段失配，
+                            //   导致只有开头 @ 才能唤起候选框。误判由下面的前缀匹配兜底。
+                            atPos = i;
+                            break;
                         }
                     }
                     if (atPos >= 0) {
@@ -6285,10 +6310,9 @@ function renderProfileActivityList(kind) {
                     var atPos = -1;
                     for (var i = start - 1; i >= 0; i--) {
                         if (text[i] === '@' || text[i] === '＠') {
-                            if (i === 0 || text[i - 1] === ' ' || text[i - 1] === '\n' || text[i - 1] === '\r') {
-                                atPos = i;
-                                break;
-                            }
+                            // 任意位置都能唤起候选（中文语句里 @ 前后通常没有空格）
+                            atPos = i;
+                            break;
                         }
                     }
                     if (atPos < 0) { closeMentionDropdown(); return; }
@@ -7302,9 +7326,20 @@ function renderProfileActivityList(kind) {
                         function add(el, frames, opts) { var a = el.animate(frames, Object.assign({ fill: 'both' }, opts)); a.__xtjOrigin = true; anims.push(a); return a; }
                         var move = add(box, open ? [{ transform: far }, { transform: 'none' }] : [{ transform: 'none' }, { transform: far }], { duration: D, easing: EASE });
                         // With a flying picture the window's white body must not show around the small picture: it appears once the picture has grown, and is gone before the picture lands.
-                        add(box, (flight || (rect && rect.width <= 132 && rect.height <= 132)) ? (open ? [{ opacity: 0 }, { opacity: 0, offset: .22 }, { opacity: 1, offset: .6 }, { opacity: 1 }] : [{ opacity: 1 }, { opacity: 1, offset: .12 }, { opacity: 0, offset: .5 }, { opacity: 0 }]) : (open ? [{ opacity: 0 }, { opacity: 1, offset: .2 }, { opacity: 1 }] : [{ opacity: 1 }, { opacity: 1, offset: .72 }, { opacity: 0 }]), { duration: D, easing: 'linear' });
-                        if (cover) add(cover, open ? [{ opacity: 1 }, { opacity: 1, offset: .14 }, { opacity: 0, offset: .62 }, { opacity: 0 }] : [{ opacity: 0 }, { opacity: 1, offset: .4 }, { opacity: 1 }], { duration: D, easing: 'linear' });
-                        if (scrim) add(scrim, open ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 1 }, { opacity: 0 }], { duration: D * (open ? .7 : .9), easing: 'ease-out' });
+                        // ★ 2026-11-02：关闭时去掉了「前 12% 保持全不透明」那段保持帧。
+                        //   原来关闭最开始约 38ms 里，整张白卡片还是满尺寸、完全不透明地画着，
+                        //   iOS 上看起来就是「卡片那一小块白闪一下」。现在白底从第 0 帧就开始退，
+                        //   只留飞行的头像图单独飞回去。
+                        add(box, (flight || (rect && rect.width <= 132 && rect.height <= 132)) ? (open ? [{ opacity: 0 }, { opacity: 0, offset: .22 }, { opacity: 1, offset: .6 }, { opacity: 1 }] : [{ opacity: 1 }, { opacity: 0, offset: .34 }, { opacity: 0 }]) : (open ? [{ opacity: 0 }, { opacity: 1, offset: .2 }, { opacity: 1 }] : [{ opacity: 1 }, { opacity: 1, offset: .72 }, { opacity: 0 }]), { duration: D, easing: 'linear' });
+                        // 关闭时不能再把白色遮盖层从透明「淡入」：那会在动画中段重新画出
+                        // 一张不透明白卡片（iOS 上就是用户看到的白闪）。关闭一开始内容就被
+                        // 同色层盖稳，之后只让整张卡收缩、淡出；遮盖层自身不再增亮。
+                        if (cover) add(cover, open ? [{ opacity: 1 }, { opacity: 1, offset: .14 }, { opacity: 0, offset: .62 }, { opacity: 0 }] : [{ opacity: 1 }, { opacity: 1 }], { duration: D, easing: 'linear' });
+                        // ★ 2026-11-02：关闭时遮罩原来也用 ease-out（开头最快），结果整页在
+                        //   卡片还没缩下去时就已经变亮，看起来就是「白闪一下」。
+                        //   关闭改成 ease-in（先按住、后面才散），并且跑满整个时长，
+                        //   让页面保持暗着，等卡片收干净再亮起来。
+                        if (scrim) add(scrim, open ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 1 }, { opacity: 0 }], { duration: D * (open ? .7 : 1), easing: open ? 'ease-out' : 'ease-in' });
                         if (ghost) {
                             if (flight) {
                                 add(ghost, open ? [{ transform: handle.ghostFar }, { transform: 'none' }] : [{ transform: 'none' }, { transform: handle.ghostFar }], { duration: D, easing: EASE });
@@ -8067,6 +8102,8 @@ function renderProfileActivityList(kind) {
             let feedPage = 1;
             const FEED_PAGE_SIZE = 20;
             let feedEndReached = false;
+            // 未登录访客只能看到最新 10 条；末尾提示改成「登录查看更早的帖子」。
+            let feedGuestLimited = false;
             let feedAllPosts = [];
             let feedAllComments = [];
             let feedAllLikes = [];
@@ -8081,6 +8118,15 @@ function renderProfileActivityList(kind) {
             let feedNextCursor = null;
             let feedLoadedPages = [];
             let feedPageFetchPending = false;
+            // FIX FEED-STALL-02: feedPageFetchPending 是"有没有分页请求在途"的全局锁。
+            //   旧实现在 finally 里用 `requestId === feedLoadRequestId` 判断是否解锁 ——
+            //   一旦请求被更新的 loadFeed 顶掉，旧请求的 finally 就不再解锁，而新请求
+            //   可能已经结束，于是锁永久为 true：loadMoreFeedPosts 第一行直接 return，
+            //   无限滚动彻底失效（用户侧就是"滑到底部再也没有反应/只剩没有更多"）。
+            //   改为令牌所有权：只有最后持有锁的那次请求负责解锁。
+            //   计数器放在 window 上并就地自增：这段代码会被测试按片段单独执行，
+            //   闭包变量/辅助函数都不在片段里，不能依赖。
+            //   （用法：lock = window.__xtjFeedFetchLockSeq = (Number(window.__xtjFeedFetchLockSeq)||0)+1）
             // ★ 修复：加载更多失败后置位，哨兵不再自动触发（防无限重复请求），
             // 需用户点击错误提示"重试"才清除并重新加载
             let feedLoadMoreFailed = false;
@@ -8091,8 +8137,13 @@ function renderProfileActivityList(kind) {
                 feedInteractionMutationVersion++;
                 feedPageFetchPending = false;
                 feedLoadMoreFailed = false;
+                // 账号切换/重置时取消"哨兵仍在视口就自动续拉"的补拉定时器，
+                // 否则它可能在清空后的新账号列表上提前触发一次空跑。
+                try { clearTimeout(_feedAutoContinueTimer); } catch (_autoTimerClear) {}
+                _feedAutoContinueTimer = 0;
                 feedPage = 1;
                 feedEndReached = false;
+                feedGuestLimited = false;
                 feedNextOffset = 0;
                 feedNextCursor = null;
                 feedLoadedPages = [];
@@ -9198,6 +9249,7 @@ function renderProfileActivityList(kind) {
                 var svgTranslate = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/></svg>';
                 var svgAi = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3l1.9 5.8 1.9-5.8a2 2 0 0 1 1.3-1.3l5.8-1.9-5.8-1.9a2 2 0 0 1-1.3-1.3z"/></svg>';
                 var svgReport = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" x2="4" y1="22" y2="15"/></svg>';
+                var svgShare = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" x2="15.42" y1="13.51" y2="17.49"/><line x1="15.41" x2="8.59" y1="6.51" y2="10.49"/></svg>';
                 var post = feedAllPosts.find(function(p) { return String(p.id) === String(postId); });
                 if (!post && window.currentPost && String(window.currentPost.id) === String(postId)) post = window.currentPost;
                 var postText = post ? String(post.content || '') : '';
@@ -9206,7 +9258,8 @@ function renderProfileActivityList(kind) {
                 var hasImages = post && window.XtjPostMedia && window.XtjPostMedia.getPostMediaItems(post).some(function (item) { return /^(image|photo)$/.test(item.media_type); });
                 var btnTranslate = hasText ? '<button type="button" role="menuitem" data-post-tool="translate" data-post-id="' + escapeHtml(postId) + '">' + svgTranslate + '<span>翻译帖子</span></button>' : '';
                 var btnAi = hasText || hasImages ? '<button type="button" role="menuitem" data-post-tool="ask-ai" data-post-id="' + escapeHtml(postId) + '">' + svgAi + '<span>锐评 AI</span></button>' : '';
-                menu.innerHTML = btnTranslate + btnAi +
+                var btnShare = '<button type="button" role="menuitem" data-post-tool="share" data-post-id="' + escapeHtml(postId) + '">' + svgShare + '<span>分享帖子</span></button>';
+                menu.innerHTML = btnShare + btnTranslate + btnAi +
                                  '<button type="button" role="menuitem" data-post-tool="report" data-post-id="' + escapeHtml(postId) + '">' + svgReport + '<span>举报帖子</span></button>';
                 document.body.appendChild(menu);
                 activatePostToolsMenu({ menu: menu, trigger: trigger, animation: null }, true);
@@ -9438,10 +9491,24 @@ function renderProfileActivityList(kind) {
                 return window.XtjPostMedia ? window.XtjPostMedia.getPostMediaItems(post) : (post.media_url ? [{ media_url: post.media_url, media_type: post.media_type, position: 0 }] : []);
             }
             function renderPostMediaGrid(post, options) {
-                var items = getPostMediaItems(post).filter(function(item) { return !!sanitizeUrl(item.media_url || ''); });
+                var items = getPostMediaItems(post).filter(function(item) { return !!sanitizeUrl(item.media_url || '') && !item.__poster; });
                 if (!items.length) return '';
                 var first = items[0], safeMediaUrl = sanitizeUrl(first.media_url);
-                if (first.media_type === 'video') return '<div class="media"><video src="' + escapeHtml(safeMediaUrl) + '" controls preload="none" playsinline></video></div>';
+                if (first.media_type === 'video') {
+                    // 有封面就用封面，没有也要让浏览器解出首帧，不能再是纯黑底。
+                    // 信息流里默认缩成画中画大小（约半宽居中），点封面才展开播放，
+                    // 否则一条竖屏视频会把整屏占满，下面的帖子根本刷不到。
+                    var isDetail = !!(options && options.detail);
+                    var poster = sanitizeUrl(post.poster_url || '');
+                    var posterSrc = window.xtjPostPosterUrl ? window.xtjPostPosterUrl(poster) : poster;
+                    var streamUrl = window.xtjUploadDisplayUrl ? window.xtjUploadDisplayUrl(safeMediaUrl) : safeMediaUrl;
+                    return '<div class="media media--video' + (isDetail ? '' : ' is-feed') + '">' +
+                        '<video src="' + escapeHtml(streamUrl) + '"' + (isDetail ? ' controls' : '') +
+                        ' preload="' + (posterSrc ? 'none' : 'metadata') + '" playsinline' +
+                        (posterSrc ? ' poster="' + escapeHtml(posterSrc) + '"' : '') + ' data-xtj-video="1"></video>' +
+                        (isDetail ? '' : '<button type="button" class="video-cover" aria-label="播放视频"><span class="video-cover-icon"></span></button>') +
+                        '</div>';
+                }
                 if (first.media_type === 'audio') return '<div class="media"><audio src="' + escapeHtml(safeMediaUrl) + '" controls preload="metadata"></audio></div>';
                 var visible = options && options.detail ? items : items.slice(0, 9);
                 var columns = window.XtjPostMedia ? window.XtjPostMedia.gridColumns(items.length) : 1;
@@ -9559,7 +9626,9 @@ function renderProfileActivityList(kind) {
             }
             function buildPostCommentsHtml(post, pComms, options) {
                 if (!pComms.length) return '';
-                var limit = options && options.detail ? 30 : 3;
+                // FIX POSTB-04: 详情弹窗自动翻页会不断追加 rows，固定 60 条让后续评论永远
+                // 不显示、跨页定位也找不到节点。detail 按已加载评论全量渲染，列表仍保持 60 条上限。
+                var limit = options && options.detail ? Math.max(60, pComms.length) : 60; // 列表也一次画满，不再截断成 3 条
                       var _byId = {}; var _seen = Object.create(null); var _count = 0;
                       pComms.forEach(function(c) { _byId[String(c.id)] = c; });
                       var _childrenOf = {};
@@ -9597,10 +9666,102 @@ function renderProfileActivityList(kind) {
                 // Orphan/cyclic/deep historical replies stay readable without unbounded recursion.
                 pComms.forEach(function(c) { if (!_seen[String(c.id)] && _count < limit) html += _renderCommentNode(c, 0); });
                 var totalComments = Number.isFinite(post.comment_count) ? post.comment_count : pComms.length;
-                if (!(options && options.detail) && totalComments > _count) html += '<button type="button" class="post-all-comments" onclick="showFeedPostComments(\'' + safeJsStr(String(post.id)) + '\')">查看全部 ' + totalComments + ' 条评论</button>';
+                if (!(options && options.detail) && totalComments > _count) html += '<button type="button" class="post-all-comments" data-post-id="' + escapeHtml(String(post.id)) + '" onclick="__xtjExpandPostComments(\'' + safeJsStr(String(post.id)) + '\', this)">展开其余 ' + (totalComments - _count) + ' 条评论</button>';
                 return '<div class="comments">' + html + '</div>';
             }
             window.buildPostCommentsHtml = buildPostCommentsHtml;
+
+            // ===== 评论全展开：卡片内直接补齐该帖所有评论，不再跳详情 =====
+            // 列表接口只带每帖前 3 条评论（RPC 侧固定上限），剩余评论过去只能点进
+            // 「帖子详情」才能看到。这里按需把这些评论拉回卡片内部再重绘一次。
+            var _commentExpandInflight = Object.create(null);
+            var _commentExpandAttempted = Object.create(null);
+            // FIX POSTB-02: 每轮都从 cursor=null 重拉前 6 页，>300 条时按 id 去重后永远
+            // 没有新增、按钮反复出现。游标按帖子持久化，下次点击从上次结束处续拉。
+            var _commentExpandCursors = Object.create(null);
+            var _commentExpandDone = Object.create(null);
+            window.__xtjExpandPostComments = function(postId, btn) {
+                var key = String(postId || '');
+                if (!key) return Promise.resolve(false);
+                if (_commentExpandInflight[key]) return _commentExpandInflight[key];
+                if (_commentExpandDone[key] || (_commentExpandAttempted[key] && !btn)) return Promise.resolve(false);
+                _commentExpandAttempted[key] = true;
+                if (btn) { btn.disabled = true; btn.textContent = '正在加载评论…'; }
+                var task = (async function() {
+                    var rows = [], cursor = _commentExpandCursors[key] || null, guard = 0;
+                    try {
+                        do {
+                            var path = '/api/post/detail/' + encodeURIComponent(key) + '/relations/comments?limit=50' + (cursor ? '&cursor=' + encodeURIComponent(cursor) : '');
+                            var res = typeof window.xtjOptionalAuthFetch === 'function'
+                                ? await window.xtjOptionalAuthFetch(path, { timeoutMs: 15000 })
+                                : await fetch((window.API_BASE || '') + path, { credentials: 'include', headers: { Accept: 'application/json' } });
+                            var body = await res.json();
+                            if (!body || !body.ok) break;
+                            rows = rows.concat(Array.isArray(body.data) ? body.data : []);
+                            cursor = body.has_more && body.next_cursor ? body.next_cursor : null;
+                        } while (cursor && ++guard < 6);
+                    } catch (eExpand) {
+                        console.warn('[comments] expand failed', eExpand);
+                    }
+                    _commentExpandCursors[key] = cursor || null;
+                    if (!cursor) _commentExpandDone[key] = true;
+                    if (!rows.length) {
+                        if (btn) { btn.disabled = false; btn.textContent = '展开评论失败，点开帖子详情'; }
+                        return false;
+                    }
+                    feedAllComments = mergeFeedRecords(feedAllComments || [], rows, function(c) { return String(c.id); }, false);
+                    if (typeof window.__xtjSchedulePostCardPatch === 'function') window.__xtjSchedulePostCardPatch(key);
+                    return true;
+                })();
+                _commentExpandInflight[key] = task;
+                var clear = function() { setTimeout(function() { delete _commentExpandInflight[key]; }, 300); };
+                task.then(clear, clear);
+                return task;
+            };
+
+            // 按钮滚进视口就自动补齐 → 视觉上评论始终是全展开的，不需要用户点任何东西。
+            var _commentAutoObserver = null;
+            var _commentAutoTimer = null;
+            function autoExpandVisibleComments() {
+                if (typeof IntersectionObserver !== 'function') return;
+                var feed = document.getElementById('feed');
+                if (!feed) return;
+                if (!_commentAutoObserver) {
+                    _commentAutoObserver = new IntersectionObserver(function(entries) {
+                        entries.forEach(function(entry) {
+                            if (!entry.isIntersecting) return;
+                            var btn = entry.target;
+                            _commentAutoObserver.unobserve(btn);
+                            if (!btn.isConnected) return;
+                            var pid = btn.getAttribute('data-post-id');
+                            if (pid) window.__xtjExpandPostComments(pid, btn);
+                        });
+                    }, { rootMargin: '240px 0px' });
+                }
+                Array.prototype.forEach.call(feed.querySelectorAll('.post-all-comments[data-post-id]:not([data-auto-expand])'), function(btn) {
+                    btn.setAttribute('data-auto-expand', '1');
+                    _commentAutoObserver.observe(btn);
+                });
+            }
+            function scheduleAutoExpandComments() {
+                if (_commentAutoTimer) return;
+                _commentAutoTimer = setTimeout(function() {
+                    _commentAutoTimer = null;
+                    autoExpandVisibleComments();
+                }, 350);
+            }
+            window.__xtjAutoExpandComments = scheduleAutoExpandComments;
+            if (typeof MutationObserver === 'function') {
+                try {
+                    var _commentFeedObserver = new MutationObserver(scheduleAutoExpandComments);
+                    var _observeCommentFeed = function() {
+                        var feed = document.getElementById('feed');
+                        if (feed) _commentFeedObserver.observe(feed, { childList: true, subtree: true });
+                    };
+                    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _observeCommentFeed, { once: true });
+                    else _observeCommentFeed();
+                } catch (eObserve) { console.warn('[comments] observer init failed', eObserve); }
+            }
 
             function renderPostCard(post, commentMap, likeMap, likeUserMap) {
                 var normalized = normalizePostForRender(post);
@@ -10104,6 +10265,8 @@ function renderProfileActivityList(kind) {
                     });
                     localStorage.setItem(CACHE_KEY, JSON.stringify({
                         version: 8,
+                        // FIX POSTB-05: 快照带上归属账号，失败回退时才能拒绝上一账号的私密帖。
+                        owner: String(window.currentUser || ''),
                         data: {
                             posts: cachePosts,
                             comments: cacheComments,
@@ -10115,7 +10278,10 @@ function renderProfileActivityList(kind) {
                             nextOffset: firstPage && firstPage.nextOffset > 0 ? firstPage.nextOffset : cachePosts.length,
                             nextCursor: firstPage && firstPage.nextCursor ? firstPage.nextCursor : getFeedResumeCursor(cachePosts),
                             cursorScope: 'first-page',
-                            endReached: !!feedEndReached && cachePosts.length === (feedAllPosts || []).length,
+                            // FIX FEED-END-01: 只有"整页"的快照才可信地携带终态。发帖后内存里
+                            // 可能只剩 1–2 条，此时若把 endReached=true 写进缓存，下次加载就会
+                            // 直接显示"没有更多帖子"并跳过所有翻页（缓存会把旧标志再喂回来）。
+                            endReached: !!feedEndReached && cachePosts.length === (feedAllPosts || []).length && cachePosts.length >= FEED_PAGE_SIZE,
                             pageSize: FEED_PAGE_SIZE
                         },
                         timestamp: Date.now()
@@ -10187,7 +10353,13 @@ function renderProfileActivityList(kind) {
                         nextCursor: data.cursorScope !== 'first-page' ? getFeedResumeCursor(posts) : data.nextCursor && typeof data.nextCursor.created_at === 'string' && data.nextCursor.id
                             ? { created_at: data.nextCursor.created_at, id: String(data.nextCursor.id) }
                             : null,
-                        endReached: typeof data.endReached === "boolean" ? data.endReached : (posts.length < FEED_PAGE_SIZE),
+                        // FIX FEED-END-01: 不足一页的旧快照不能证明"到底"。此前直接沿用
+                        // 缓存里的 endReached=true，会让一份只有 1–2 条帖子的受损快照
+                        // 永久把信息流钉在"没有更多帖子"。小快照一律先当作"未到底"，
+                        // 由下一次真实请求给出结论。
+                        endReached: posts.length >= FEED_PAGE_SIZE
+                            ? (typeof data.endReached === "boolean" ? data.endReached : posts.length < FEED_PAGE_SIZE)
+                            : false,
                         pageSize: data.pageSize || FEED_PAGE_SIZE
                     }
                 };
@@ -10363,6 +10535,7 @@ function renderProfileActivityList(kind) {
                         comments = early.comments || [];
                         likes = early.likes || [];
                         endReached = early.endReached || false;
+                        feedGuestLimited = !!early.guest_limited;
                         if (typeof early.total_post_count === 'number') window._xtjTotalPostCount = early.total_post_count;
                         serverNextOffset = early.next_offset != null ? Number(early.next_offset) : null;
                         serverNextCursor = early.next_cursor || null;
@@ -10377,6 +10550,7 @@ function renderProfileActivityList(kind) {
                                 comments = early2.comments || [];
                                 likes = early2.likes || [];
                                 endReached = early2.endReached || false;
+                                feedGuestLimited = !!early2.guest_limited;
                                 if (typeof early2.total_post_count === 'number') window._xtjTotalPostCount = early2.total_post_count;
                                 serverNextOffset = early2.next_offset != null ? Number(early2.next_offset) : null;
                                 serverNextCursor = early2.next_cursor || null;
@@ -10419,6 +10593,7 @@ function renderProfileActivityList(kind) {
                             comments = apiData.comments || [];
                             likes = apiData.likes || [];
                             endReached = apiData.endReached || false;
+                            feedGuestLimited = !!apiData.guest_limited;
                             if (typeof apiData.total_post_count === 'number') window._xtjTotalPostCount = apiData.total_post_count;
                             // 使用服务器返回的 next_offset，不自行计算、不再叠加 posts.length
                             serverNextOffset = apiData.next_offset != null ? Number(apiData.next_offset) : null;
@@ -10662,6 +10837,18 @@ function renderProfileActivityList(kind) {
                 }
                 feedNextCursor = chunk.nextCursor || null;
                 if (chunk.endReached) feedEndReached = true;
+                // FIX FEED-END-01: endReached 之前只会被置 true、从不回落。一旦缓存/上一次
+                //   加载把它写成 true（例如发布后快照里只有 1 条帖子），后续即使 page0 明确
+                //   返回"还有下一页"，标志仍然是 true → 无限滚动在第一条/"没有更多帖子"处
+                //   永久停住。非终态页（有游标或 nextOffset 有前进）必须能把它清回 false。
+                else if (chunk.nextCursor || Number(chunk.nextOffset) > Number(chunk.offset || 0)) {
+                    feedEndReached = false;
+                    // 之前误判出来的"没有更多帖子"要一起撤掉，否则提示会留在列表底部。
+                    try {
+                        var staleNoMoreNotice = document.getElementById('feedNoMore');
+                        if (staleNoMoreNotice && staleNoMoreNotice.parentNode) staleNoMoreNotice.parentNode.removeChild(staleNoMoreNotice);
+                    } catch (_noMoreCleanup) {}
+                }
                 incomingPosts.forEach(syncPostInfoCache);
                 markFeedStateChanged();
             }
@@ -11134,6 +11321,155 @@ function renderProfileActivityList(kind) {
                     if (!handled && btn) { btn.disabled = false; btn.textContent = nextVisibility === "private" ? "🌐 设为公开" : "🔒 设为私密"; }
                 }
             };
+            // ============== 帖子分享（生成公开链接，微信好友点开即可查看） ==============
+            var postShareOverlay = null;
+            var postShareReturnFocus = null;
+            function getPostShareSource(postId) {
+                var post = (feedAllPosts || []).find(function(p) { return String(p && p.id) === String(postId); });
+                if (!post && window.currentPost && String(window.currentPost.id) === String(postId)) post = window.currentPost;
+                if (!post && window.__xtjPostDetailSnapshot && String(window.__xtjPostDetailSnapshot.id) === String(postId)) post = window.__xtjPostDetailSnapshot;
+                return post || null;
+            }
+            function postSharePlainText(post) {
+                var text = post ? String(post.content || '') : '';
+                try { var payload = JSON.parse(text); if (payload && payload.__type === '__xtj_post_v2__') text = String(payload.text || ''); } catch (_) {}
+                return text.trim();
+            }
+            function onPostShareKeydown(e) {
+                if (e.key === 'Escape') { e.preventDefault(); closePostShare(); }
+            }
+            function closePostShare() {
+                if (!postShareOverlay) return;
+                var overlay = postShareOverlay;
+                postShareOverlay = null;
+                document.removeEventListener('keydown', onPostShareKeydown, true);
+                overlay.remove();
+                if (postShareReturnFocus && postShareReturnFocus.isConnected) { try { postShareReturnFocus.focus(); } catch (_) {} }
+                postShareReturnFocus = null;
+            }
+            function copyPostShareLink(link, button) {
+                if (!button || button.disabled) return;
+                button.disabled = true;
+                var done = function(copied) {
+                    button.disabled = false;
+                    if (copied) {
+                        button.textContent = '已复制';
+                        button.classList.add('is-copied');
+                        showToast('链接已复制，去微信粘贴给好友吧');
+                        setTimeout(function() {
+                            if (!button.isConnected) return;
+                            button.textContent = '复制链接';
+                            button.classList.remove('is-copied');
+                        }, 2200);
+                    } else {
+                        var input = postShareOverlay && postShareOverlay.querySelector('.post-share-link');
+                        if (input) { input.focus(); input.select(); }
+                        showToast('请长按链接手动复制');
+                    }
+                };
+                var fallback = function() {
+                    var input = document.createElement('textarea');
+                    input.value = link;
+                    input.setAttribute('readonly', '');
+                    input.style.cssText = 'position:fixed;top:0;left:-9999px;opacity:0';
+                    document.body.appendChild(input);
+                    input.select();
+                    input.setSelectionRange(0, input.value.length);
+                    var copied = false;
+                    try { copied = document.execCommand('copy'); } catch (_) {}
+                    input.remove();
+                    done(copied);
+                };
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(link).then(function() { done(true); }, fallback);
+                } else fallback();
+            }
+            window.closePostShare = closePostShare;
+            window.openPostShare = function(postId) {
+                var id = String(postId || '');
+                if (!id) return;
+                var post = getPostShareSource(id);
+                if (post && post.visibility === 'private') { showToast('私密帖子仅自己可见，不能分享'); return; }
+                closePostShare();
+                postShareReturnFocus = document.activeElement;
+                var shareTarget = new URL('/share/posts/' + encodeURIComponent(id), window.location.origin);
+                // 卡片标题显示「谁分享的帖子」，所以把分享者一起带进链接；
+                // 服务端读 from，微信抓取时就能拿到正确的人名。
+                try {
+                    var sharer = String(currentUser || (window.readUserName && window.readUserName()) || '').trim();
+                    if (sharer) shareTarget.searchParams.set('from', sharer);
+                } catch (_) {}
+                var link = shareTarget.href;
+                var text = postSharePlainText(post);
+                var author = post && post.user_name ? String(post.user_name) : 'XTJ 用户';
+                var overlay = document.createElement('div');
+                // 用 ID 承载样式：本文件后段的「全局玻璃按钮重置」选择器特异性较高，
+                // 纯类名会被它覆盖（关闭按钮被压回文档流、主按钮失去绿色渐变）。
+                overlay.id = 'postShareOverlay';
+                overlay.className = 'post-share-overlay';
+                overlay.innerHTML =
+                    '<div class="post-share-dialog" role="dialog" aria-modal="true" aria-labelledby="postShareTitle">' +
+                        '<button type="button" class="post-share-close" aria-label="关闭分享">×</button>' +
+                        '<h3 id="postShareTitle">分享帖子</h3>' +
+                        '<p class="post-share-sub">发给微信好友，对方点开链接就能看</p>' +
+                        '<div class="post-share-card">' +
+                            '<div class="post-share-card-main">' +
+                                '<p class="post-share-author"></p>' +
+                                '<p class="post-share-text"></p>' +
+                            '</div>' +
+                            '<img class="post-share-thumb" alt="帖子图片" hidden>' +
+                        '</div>' +
+                        '<label class="post-share-link-label" for="postShareLinkInput">帖子链接</label>' +
+                        '<div class="post-share-link-row">' +
+                            '<input id="postShareLinkInput" class="post-share-link" type="text" readonly>' +
+                        '</div>' +
+                        '<div class="post-share-actions">' +
+                            '<button type="button" class="post-share-copy">复制链接</button>' +
+                            '<button type="button" class="post-share-native" hidden>发送给朋友</button>' +
+                        '</div>' +
+                        '<p class="post-share-hint">复制后粘贴到微信聊天，好友点开即可查看这篇帖子，无需登录。</p>' +
+                    '</div>';
+                overlay.querySelector('.post-share-author').textContent = author;
+                var excerpt = text.length > 140 ? text.slice(0, 140) + '…' : text;
+                var isVideoPost = !!(post && String(post.media_type || '') === 'video');
+                var sharePlaceholder = isVideoPost ? '分享了一个视频，点开链接查看完整内容。' : (post && post.media_type === 'audio' ? '分享了一段音频，点开链接查看完整内容。' : '这篇帖子包含图片，点开链接查看完整内容。');
+                overlay.querySelector('.post-share-text').textContent = excerpt || sharePlaceholder;
+                overlay.querySelector('.post-share-text').classList.toggle('is-placeholder', !excerpt);
+                var linkInput = overlay.querySelector('.post-share-link');
+                linkInput.value = link;
+                linkInput.addEventListener('focus', function() { linkInput.select(); });
+                // 缩略图走与分享页相同的公开媒体地址，私密帖子已在上方拦截。
+                if (post && window.XtjPostMedia && typeof window.XtjPostMedia.getPostMediaItems === 'function') {
+                    var items = window.XtjPostMedia.getPostMediaItems(post) || [];
+                    for (var i = 0; i < items.length; i++) {
+                        if (!/^(image|photo)$/.test(String(items[i].media_type || ''))) continue;
+                        var thumb = overlay.querySelector('.post-share-thumb');
+                        // 用列表缩略图即可：OSS 帖的 preview_url 是 480px 缩略图，
+                        // 旧帖的 preview_url 本来就是 ?preview=1 的服务端预览档。
+                        thumb.src = items[i].preview_url || ('/api/post/' + encodeURIComponent(id) + '/media/' + i + '?preview=1');
+                        thumb.hidden = false;
+                        thumb.addEventListener('error', function() { this.hidden = true; });
+                        break;
+                    }
+                }
+                overlay.querySelector('.post-share-copy').addEventListener('click', function() {
+                    copyPostShareLink(link, overlay.querySelector('.post-share-copy'));
+                });
+                var nativeButton = overlay.querySelector('.post-share-native');
+                if (typeof navigator.share === 'function') {
+                    nativeButton.hidden = false;
+                    nativeButton.addEventListener('click', function() {
+                        navigator.share({ title: 'XTJ · ' + author + ' 的帖子', text: excerpt || author + ' 在 XTJ 分享的帖子', url: link }).catch(function() {});
+                    });
+                }
+                overlay.querySelector('.post-share-close').addEventListener('click', closePostShare);
+                overlay.addEventListener('click', function(e) { if (e.target === overlay) closePostShare(); });
+                document.addEventListener('keydown', onPostShareKeydown, true);
+                document.body.appendChild(overlay);
+                postShareOverlay = overlay;
+                var copyButton = overlay.querySelector('.post-share-copy');
+                if (copyButton && typeof copyButton.focus === 'function') { try { copyButton.focus(); } catch (_) {} }
+            };
             // ============== Global click delegation ==============
             function handlePostActionClick(e) {
                 var postToolTrigger = e.target.closest('.post-tools-trigger');
@@ -11145,9 +11481,15 @@ function renderProfileActivityList(kind) {
                 var postToolAction = e.target.closest('[data-post-tool]');
                 if (postToolAction) {
                     e.preventDefault();
-                    if (!window.currentUser) { showToast('请先登录'); return; }
                     var postTool = postToolAction.getAttribute('data-post-tool');
                     var postToolPostId = postToolAction.getAttribute('data-post-id');
+                    // 分享的是公开帖子链接，游客也能转发给好友，不要求先登录。
+                    if (postTool === 'share') {
+                        closePostToolsMenu();
+                        if (typeof window.openPostShare === 'function') window.openPostShare(postToolPostId);
+                        return;
+                    }
+                    if (!window.currentUser) { showToast('请先登录'); return; }
                     closePostToolsMenu();
                     if (postTool === 'translate' && typeof window.requestPostTranslation === 'function') {
                         window.requestPostTranslation(postToolPostId);
@@ -11170,6 +11512,36 @@ function renderProfileActivityList(kind) {
                 }
             }
             document.addEventListener('click', handlePostActionClick);
+            // 信息流里的视频是画中画大小的封面，点一下才展开成正常尺寸并开始播放。
+            // 收起状态下 video 没有 controls，避免原生控件条压在小封面上。
+            document.addEventListener('click', function(e) {
+                var cover = e.target.closest && e.target.closest('.media--video.is-feed .video-cover');
+                if (!cover) return;
+                e.preventDefault();
+                e.stopPropagation();
+                var wrap = cover.closest('.media--video');
+                var player = wrap && wrap.querySelector('video');
+                if (!player) return;
+                wrap.classList.add('is-expanded');
+                player.controls = true;
+                try { if (player.ended) player.currentTime = 0; } catch (_) {}
+                try { player.play(); } catch (_) {}
+            });
+            // ★ 2026-11-02：播放结束必须收回画中画状态。
+            //   以前 is-expanded 加上去就再没人移除，播过一次的视频永久满宽：
+            //   竖屏视频占满整屏、最后一帧被放大所以看着糊，而且停在原生控件的
+            //   「重播」按钮上再点，iOS 会出现有声无画的黑屏。现在结束后回到
+            //   封面态（controls 关掉、currentTime 归零），下次播放从头开始。
+            document.addEventListener('ended', function(e) {
+                var player = e.target;
+                if (!player || player.tagName !== 'VIDEO') return;
+                var wrap = player.closest && player.closest('.media--video.is-feed');
+                if (!wrap) return;
+                wrap.classList.remove('is-expanded');
+                try { player.controls = false; } catch (_) {}
+                try { player.pause(); } catch (_) {}
+                try { player.currentTime = 0; } catch (_) {}
+            }, true);
             // The detail dialog stops bubbling at its glass box. Delegate
             // inside its body too, without dispatching an action twice.
             var postDetailActionRoot = document.getElementById('postDetailBody');
@@ -11280,8 +11652,9 @@ function renderProfileActivityList(kind) {
                 var optionsEl = document.getElementById('postLocationOptions');
                 if (!panel || !optionsEl) return;
                 optionsEl.innerHTML = '';
-                var options = geoData.options || [];
+                var options = (geoData.options || []).slice(0, 10);
                 if (options.length === 0) {
+                    if (geoData.address) options.push({ level: 'address', name: geoData.address, province: geoData.province, city: geoData.city, district: geoData.district });
                     if (geoData.province && geoData.city) {
                         options.push({ level: 'city', name: geoData.province + geoData.city, province: geoData.province, city: geoData.city });
                     }
@@ -11487,7 +11860,7 @@ function renderProfileActivityList(kind) {
                 btn.dataset.originalText = btn.textContent;btn._composeMarkup=btn.innerHTML;
                 btn.innerHTML = '<span>发布中</span>';
                 if (window.XtjPostPublishProgress) flight.progress = window.XtjPostPublishProgress.begin(btn, selectedPostMedia, function() { return postPublishIdentityCurrent(flight); });
-                var uploadedPath = '', mediaUploadId = '', uploadedMedia = [];
+                var uploadedPath = '', mediaUploadId = '', uploadedMedia = [], posterUrl = '', thumbUrls = [];
                 try {
                     var media_url = "";
                     var media_type = "";
@@ -11500,6 +11873,8 @@ function renderProfileActivityList(kind) {
                             uploadedPath = cachedUpload.uploadedPath;
                             mediaUploadId = cachedUpload.mediaUploadId;
                             uploadedMedia = cachedUpload.uploadedMedia.slice();
+                            posterUrl = cachedUpload.posterUrl || '';
+                            thumbUrls = (cachedUpload.thumbs || []).slice();
                             reusedUpload = true;
                         } else {
                             var uploaded = await window.XtjPostMedia.mapUploads(selectedPostMedia, async function(selectedFile, position) {
@@ -11512,32 +11887,90 @@ function renderProfileActivityList(kind) {
                                 var prepared = await prepareResponse.json();
                                 assertPostPublishIdentity(flight);
                                 if (!prepareResponse.ok || !prepared.ok || prepared.storage_path !== path) throw new Error(prepared.error || '上传准备失败');
-                                var uploadRes = flight.progress ? await flight.progress.upload(sb, path, selectedFile, position) : await sb.storage.from('uploads').upload(path, selectedFile, { upsert: false });
+                                // 文件名唯一、内容不可覆盖：顺手给存储侧打一年缓存，
+                                // 以后任何直连场景都不会 1 小时失效、反复重下。
+                                // ★ 2026-11-02：优先 OSS 直传（不吃 Supabase / Render 出站），
+                                //   签名不可用或 PUT 失败时静默回退 Supabase，发帖不受影响。
+                                var selectedType = window.XtjPostMedia && window.XtjPostMedia.effectiveType ? window.XtjPostMedia.effectiveType(selectedFile) : String(selectedFile.type || '');
+                                var viaOss = await uploadPostObjectToOss(path, selectedFile, selectedType, { owner: flight.owner, epoch: flight.epoch, progress: flight.progress });
+                                assertPostPublishIdentity(flight);
+                                var uploadRes;
+                                if (viaOss.ok) {
+                                    uploadRes = { error: null };
+                                    // FIX MEDIA-02: 直传完成后把该文件计入已上传字节。
+                                    if (flight.progress && typeof flight.progress.uploaded === 'function') flight.progress.uploaded(position, selectedFile);
+                                }
+                                else uploadRes = flight.progress ? await flight.progress.upload(sb, path, selectedFile, position) : await sb.storage.from('uploads').upload(path, selectedFile, { upsert: false, cacheControl: '31536000' });
                                 assertPostPublishIdentity(flight);
                                 if (uploadRes.error) throw uploadRes.error;
                                 var dimensions = selectedFile.type.startsWith('image/') ? await readPostImageDimensions(selectedFile) : {};
                                 assertPostPublishIdentity(flight);
-                                return Object.assign({}, pending, dimensions, { position: position, media_type: selectedFile.type.split('/')[0],
-                                    media_url: sb.storage.from('uploads').getPublicUrl(path).data.publicUrl, file_size: selectedFile.size });
+                                // ★ 2026-11-02：缩略图另存一份。信息流一格只有 100–200 CSS px，
+                                //   却要拉 1MB 以上的原图，手机首屏和存储出站流量都被它吃光。
+                                //   原图照旧上传（点开看原图），缩略图走 posts/thumb_ 前缀单独存一份，
+                                //   地址写进帖子 metadata 的 thumbs 数组（按 position 对齐）。
+                                var thumbUrl = '';
+                                var thumbFile = window.XtjPostComposerMedia && typeof window.XtjPostComposerMedia.thumbFile === 'function' ? window.XtjPostComposerMedia.thumbFile(selectedFile) : null;
+                                if (thumbFile) {
+                                    var thumbPath = 'posts/thumb_' + crypto.randomUUID().replace(/-/g, '') + '.jpg';
+                                    var thumbViaOss = await uploadPostObjectToOss(thumbPath, thumbFile, 'image/jpeg', { owner: flight.owner, epoch: flight.epoch, progress: flight.progress });
+                                    if (thumbViaOss.ok) thumbUrl = thumbViaOss.url;
+                                    else {
+                                        var thumbUpload = await sb.storage.from('uploads').upload(thumbPath, thumbFile, { upsert: false, cacheControl: '31536000' })
+                                            .catch(function () { return { error: true }; });
+                                        assertPostPublishIdentity(flight);
+                                        // uploads 桶是私有的，缩略图地址要走同源代理，不能直接给存储直链。
+                                        if (!thumbUpload.error) thumbUrl = (window.API_BASE || '').replace(/\/$/, '') + '/api/uploads/media?path=' + encodeURIComponent(thumbPath);
+                                    }
+                                }
+                                thumbUrls[position] = thumbUrl || null;
+                                return Object.assign({}, pending, dimensions, { position: position, media_type: String(selectedType || '').split('/')[0],
+                                    media_url: viaOss.ok ? viaOss.url : sb.storage.from('uploads').getPublicUrl(path).data.publicUrl, thumb_url: thumbUrl, file_size: selectedFile.size });
                             }, 3);
                             media_url = uploaded[0].media_url;
                             media_type = uploaded.length > 1 ? 'album' : uploaded[0].media_type;
                             if (media_type === 'album' || media_type === 'image') attachments = uploaded;
                             else { uploadedPath = uploaded[0].storage_path; mediaUploadId = uploaded[0].upload_id; }
+                            // 视频封面：单独上传成一张图片，但**绝对不能**放进 attachments。
+                            // 发布接口和数据库函数 create_post_with_attachments 都把「带附件的帖子」
+                            // 强制写成 image/album，视频帖一挂附件就变成图片帖，视频直接丢失。
+                            // 所以封面走帖子内容里的元数据（poster_url），帖子本体仍是纯视频。
+                            if (media_type === 'video' && window.XtjPostComposerMedia && typeof window.XtjPostComposerMedia.posterFile === 'function') {
+                                var posterFile = null;
+                                try { posterFile = window.XtjPostComposerMedia.posterFile(selectedPostMedia[0]); } catch (_) { posterFile = null; }
+                                if (posterFile && posterFile.size > 0 && posterFile.size <= window.XtjPostMedia.MAX_POST_FILE_BYTES) {
+                                    // 封面单独放 posters/：这个前缀按公开缩略图处理，不用回表匹配帖子。
+                                    var posterPath = buildStorageUploadPath('posters', posterFile.name);
+                                    // ★ 2026-11-02：封面同样优先直传 OSS，失败再回退 Supabase。
+                                    var posterViaOss = await uploadPostObjectToOss(posterPath, posterFile, posterFile.type || 'image/jpeg', { owner: flight.owner, epoch: flight.epoch, progress: flight.progress });
+                                    assertPostPublishIdentity(flight);
+                                    if (posterViaOss.ok) {
+                                        posterUrl = posterViaOss.url;
+                                    } else {
+                                        var posterUpload = await sb.storage.from('uploads').upload(posterPath, posterFile, { upsert: false, cacheControl: '31536000' })
+                                            .catch(function () { return { error: true }; });
+                                        assertPostPublishIdentity(flight);
+                                        // 封面传失败就当作没有封面，帖子照常发，不让它连累视频。
+                                        if (!posterUpload.error) posterUrl = sb.storage.from('uploads').getPublicUrl(posterPath).data.publicUrl;
+                                    }
+                                }
+                            }
                             postUploadCache.set(requestKey, {
                                 media_url: media_url,
                                 media_type: media_type,
                                 attachments: attachments.slice(),
                                 uploadedPath: uploadedPath,
                                 mediaUploadId: mediaUploadId,
-                                uploadedMedia: uploadedMedia.slice()
+                                uploadedMedia: uploadedMedia.slice(),
+                                posterUrl: posterUrl || '',
+                                thumbs: thumbUrls.slice()
                             });
                         }
                     } else if (file) {
                         throw new Error('附件模块未加载，请刷新后重试');
                     }
                     var plainText = content.slice(0, 2000);
-                    var metadata = collectPostMetadata ? collectPostMetadata(visibility, { location: publishLocation }) : { visibility: visibility || "public" };
+                    var metadata = collectPostMetadata ? collectPostMetadata(visibility, { location: publishLocation, poster_url: posterUrl || '', thumbs: thumbUrls }) : { visibility: visibility || "public" };
                     var contentPayload = buildPostContentPayload(plainText, metadata);
                     var payload = {
                         user_name: flight.owner,
@@ -11635,7 +12068,12 @@ function renderProfileActivityList(kind) {
                 //   成功刷新/失败回退）都重置旧式 feedPage 计数器。此前刷新后
                 //   feedPage 残留旧值，加载更多按旧页码计算导致误判 feedEndReached，
                 //   无限滚动永久失效（"没有更多帖子"）直至刷新页面。
-                feedPage = 1;
+                //   FIX FEED-JUMP-01：但不能再无条件打回 1 —— feedPage 现在只是
+                //   renderFeed 的"渲染窗口"（getFeedRenderedSliceStart 才是切片起点）。
+                //   用户已经滚到第 40 条时强制刷新，若这里把它改回 1，整段列表会被
+                //   截成 20 条、高度骤降，浏览器随即把滚动位置夹到新的底部/顶部 ——
+                //   表现为"突然跳回最上面，图片还全部重新加载"。
+                if (!(feedPage >= 1)) feedPage = 1;
                 // 重置"加载更多失败"标志，避免 feed 重绘后哨兵永久不再触发
                 feedLoadMoreFailed = false;
                 try {
@@ -11699,6 +12137,7 @@ function renderProfileActivityList(kind) {
                     }
                 }
                 try {
+                    var feedFetchLock = window.__xtjFeedFetchLockSeq = (Number(window.__xtjFeedFetchLockSeq) || 0) + 1;
                     feedPageFetchPending = true;
                     var chunk = await fetchFeedPageChunk(0, requestId, true);
                     var pendingLikes = Object.keys(likeOperations).map(function(key) {
@@ -11800,7 +12239,12 @@ function renderProfileActivityList(kind) {
                         var fallbackRaw = !cacheFallbackShown && window.safeStorage.get(CACHE_KEY);
                         if (fallbackRaw) {
                             var fallbackParsed = JSON.parse(fallbackRaw);
-                            if (fallbackParsed && fallbackParsed.data && hydrateFeedStateFromSnapshot(fallbackParsed)) {
+                            // FIX POSTB-05: 失败回退原先不校验时效与归属，可能把上一账号含
+                            // 私密帖的旧快照注入 feedAllPosts。与快路径统一 5 分钟 TTL + owner 校验。
+                            var fallbackAge = Date.now() - Number(fallbackParsed && fallbackParsed.timestamp || 0);
+                            var fallbackFresh = Number.isFinite(fallbackAge) && fallbackAge >= 0 && fallbackAge < CACHE_DURATION;
+                            var fallbackOwnerOk = !fallbackParsed || !fallbackParsed.owner || String(fallbackParsed.owner) === String(window.currentUser || '');
+                            if (fallbackFresh && fallbackOwnerOk && fallbackParsed && fallbackParsed.data && hydrateFeedStateFromSnapshot(fallbackParsed)) {
                                 await renderFeedFromMemoryState();
                                 setupFeedInfiniteScroll();
                                 cacheFallbackShown = true;
@@ -11831,7 +12275,8 @@ function renderProfileActivityList(kind) {
                         };
                     }
                 } finally {
-                    if (requestId === feedLoadRequestId) feedPageFetchPending = false;
+                    // 只有最后一次拿到锁的请求负责解锁；被顶掉的旧请求不会再把锁留死。
+                    if (feedFetchLock === window.__xtjFeedFetchLockSeq) feedPageFetchPending = false;
                 }
             };
             window.loadFeed = loadFeed;
@@ -11897,14 +12342,28 @@ function renderProfileActivityList(kind) {
                 if (!feed || document.getElementById("feedNoMore")) return;
                 var noMore = document.createElement("div");
                 noMore.id = "feedNoMore";
-                noMore.className = "loading";
-                noMore.textContent = "没有更多帖子";
-                noMore.style.padding = "30px";
-                noMore.style.textAlign = "center";
+                if (feedGuestLimited) {
+                    // 访客只看得到最新 10 条，到底了就给一个登录入口，而不是「没有更多帖子」。
+                    noMore.className = "loading feed-guest-gate";
+                    var tip = document.createElement("span");
+                    tip.textContent = "登录后可查看更早的帖子";
+                    var login = document.createElement("button");
+                    login.type = "button"; login.textContent = "登录";
+                    login.addEventListener("click", function () {
+                        if (typeof window.openAuthModal === "function") window.openAuthModal("login");
+                    });
+                    noMore.append(tip, login);
+                } else {
+                    noMore.className = "loading";
+                    noMore.textContent = "没有更多帖子";
+                    noMore.style.padding = "30px";
+                    noMore.style.textAlign = "center";
+                }
                 var sentinel = document.getElementById("feedSentinel");
                 feed.insertBefore(noMore, sentinel || null);
             }
 
+            var _feedAutoContinueTimer = 0;
             loadMoreFeedPosts = async function() {
                 if (feedPageFetchPending || feedLoadMoreFailed) return;
                 var feed = document.getElementById("feed");
@@ -11916,8 +12375,18 @@ function renderProfileActivityList(kind) {
                 if (feedEndReached) {
                     var terminalPosts = getFilteredPosts(feedAllPosts, feedAllComments);
                     if (getFeedRenderedSliceStart() >= terminalPosts.length) {
-                        ensureFeedNoMoreNotice();
-                        return;
+                        // FIX FEED-END-01: 终态标志可能来自旧缓存/旧快照。服务端总量明显大于
+                        //   内存条数、且还有游标时，说明"到底"是假象 —— 先解除终态再拉下一页，
+                        //   不能直接把"没有更多帖子"钉死在列表底部。
+                        var knownTotal = Number(window._xtjTotalPostCount);
+                        if (Number.isFinite(knownTotal) && knownTotal > (feedAllPosts || []).length && feedNextCursor) {
+                            feedEndReached = false;
+                            var staleNoMore = document.getElementById('feedNoMore');
+                            if (staleNoMore) staleNoMore.remove();
+                        } else {
+                            ensureFeedNoMoreNotice();
+                            return;
+                        }
                     }
                 }
                 var requestId = feedLoadRequestId;
@@ -11943,8 +12412,10 @@ function renderProfileActivityList(kind) {
                 var endIdx = startIdx + FEED_PAGE_SIZE;
                 var filteredPosts = getFilteredPosts(feedAllPosts, feedAllComments);
                 var fetchFailed = false;
+                var loadMoreFetchLock = 0;
                 if (filteredPosts.length < endIdx && !feedEndReached) {
                     try {
+                        loadMoreFetchLock = window.__xtjFeedFetchLockSeq = (Number(window.__xtjFeedFetchLockSeq) || 0) + 1;
                         feedPageFetchPending = true;
                         // ★ 修复：ensureFeedCoverageForVisibleSlice 内部以 feedNextOffset（服务端游标）拉取，
                         // 不再依赖 feedPage 推算 offset，避免并发发帖/删除导致 offset 漂移时帖子重复或永久跳过。
@@ -11955,7 +12426,8 @@ function renderProfileActivityList(kind) {
                         fetchFailed = true;
                         console.error('[feed] loadMore ensure coverage failed:', e);
                     } finally {
-                        if (requestId === feedLoadRequestId) feedPageFetchPending = false;
+                        // 令牌所有权解锁：被 loadFeed 顶掉时不再把锁留成永久 true。
+                        if (loadMoreFetchLock && loadMoreFetchLock === window.__xtjFeedFetchLockSeq) feedPageFetchPending = false;
                     }
                     filteredPosts = getFilteredPosts(feedAllPosts, feedAllComments);
                 }
@@ -12008,12 +12480,48 @@ function renderProfileActivityList(kind) {
                     // this second check the terminal notice never renders.
                     if (feedEndReached && endIdx >= filteredPosts.length) ensureFeedNoMoreNotice();
                 }
-                if (getFeedRenderedSliceStart() >= filteredPosts.length && !feedEndReached) {
-                    // A permanently visible sentinel emits no second intersection event.
-                    // Keep a keyboard-accessible continuation after the bounded filter scan.
-                    showFeedSearchContinueControl();
+                // A permanently visible sentinel emits no second intersection event.
+                // Keep a keyboard-accessible continuation after the bounded filter scan.
+                var renderedAfterAppend = getFeedRenderedSliceStart();
+                var appendedThisRound = startIdx < filteredPosts.length;
+                if (!feedEndReached && (appendedThisRound || renderedAfterAppend < filteredPosts.length)) {
+                    if (hasActiveFeedFilters()) showFeedSearchContinueControl();
+                    // FIX FEED-STALL-01: 没有筛选时这里以前什么都不做。可一旦本次只追加了
+                    //   少量帖子、哨兵仍停在视口里（列表还没铺满一屏），IntersectionObserver
+                    //   不会再触发第二次 → 无限滚动就此停住，用户只看到"加载不动"。
+                    //   只要这一轮确实追加了帖子（或内存里还有没画出来的帖子）、且哨兵仍
+                    //   贴着视口，就主动再走一轮；某一轮追加不到任何新内容时不再排下一次。
+                    else if (!_feedAutoContinueTimer) {
+                        var sentinelNode = document.getElementById('feedSentinel');
+                        var sentinelNear = false;
+                        try {
+                            var sentinelRect = sentinelNode && sentinelNode.getBoundingClientRect();
+                            sentinelNear = !!sentinelRect && sentinelRect.top < (window.innerHeight || 0) + 240;
+                        } catch (_sentinelProbe) {}
+                        if (sentinelNear) {
+                            _feedAutoContinueTimer = setTimeout(function() {
+                                _feedAutoContinueTimer = 0;
+                                if (feedEndReached || feedPageFetchPending || feedLoadMoreFailed) return;
+                                loadMoreFeedPosts();
+                            }, 80);
+                        }
+                    }
                 }
                 if (startIdx < filteredPosts.length) feedPage++;
+            };
+            // Read-only diagnostic hook: 便于在真机/线上快速确认"到底为什么不再翻页"。
+            window.__xtjFeedDebugState = function() {
+                return {
+                    posts: (feedAllPosts || []).length,
+                    rendered: getFeedRenderedSliceStart(),
+                    endReached: feedEndReached,
+                    nextOffset: feedNextOffset,
+                    hasCursor: !!feedNextCursor,
+                    page: feedPage,
+                    pending: feedPageFetchPending,
+                    failed: feedLoadMoreFailed,
+                    total: Number(window._xtjTotalPostCount)
+                };
             };
 
             appendMorePosts = function(posts, comments, likes) {
@@ -12178,6 +12686,24 @@ function renderProfileActivityList(kind) {
             renderFeedWithAvatars = function(visiblePosts, comments, likes) {
                 var feed = document.getElementById("feed");
                 if (!feed) return;
+                // FIX FEED-JUMP-02: 全量重建（innerHTML）期间 feed 子树会被整段替换，
+                //   滚动位置只能靠"锚点帖子的相对位移"还原。只写回数字 scrollTop 不够：
+                //   列表变短时浏览器会先把位置夹到新高度，之后再赋值也回不到原处；
+                //   表现就是"往下翻着突然跳回最上面，图片还全部重新加载"。
+                var scrollSurface = null, anchorId = '', anchorOffset = 0;
+                try {
+                    scrollSurface = (typeof getActualScrollSurface === 'function') ? getActualScrollSurface(feed) : window;
+                    var surfaceTop = scrollSurface === window ? 0 : scrollSurface.getBoundingClientRect().top;
+                    var cards = feed.querySelectorAll('.post');
+                    for (var cardIndex = 0; cardIndex < cards.length; cardIndex++) {
+                        var cardRect = cards[cardIndex].getBoundingClientRect();
+                        if (cardRect.bottom > surfaceTop + 1) {
+                            anchorId = String(cards[cardIndex].getAttribute('data-post-id') || '');
+                            anchorOffset = cardRect.top - surfaceTop;
+                            break;
+                        }
+                    }
+                } catch (_scrollProbeError) { scrollSurface = null; }
                 var refreshNotice = feed.querySelector('#feedStaleNotice');
                 var focusedInput = document.activeElement;
                 var selectionStart = focusedInput && focusedInput.selectionStart;
@@ -12220,6 +12746,25 @@ function renderProfileActivityList(kind) {
                 //   从中间开始追加 → 帖子重复。
                 resetFeedDomTrimmed();
                 initPostScrollAnimation();
+                // 以"同一条帖子在视口里的位置"为锚还原滚动；锚点不在新列表里（筛选/切号）
+                // 就保持浏览器默认，不要硬拉回旧位置。
+                try {
+                    if (scrollSurface && anchorId) {
+                        var anchorSelector = typeof safePostSelector === 'function' ? safePostSelector(anchorId) : '';
+                        var anchorCard = anchorSelector ? feed.querySelector(anchorSelector) : null;
+                        if (anchorCard) {
+                            var restoreTop = function() {
+                                var surfaceNow = scrollSurface === window ? 0 : scrollSurface.getBoundingClientRect().top;
+                                var delta = anchorCard.getBoundingClientRect().top - surfaceNow - anchorOffset;
+                                if (Math.abs(delta) < 1) return;
+                                if (scrollSurface === window) window.scrollTo(0, Math.max(0, (window.scrollY || 0) + delta));
+                                else scrollSurface.scrollTop = Math.max(0, scrollSurface.scrollTop + delta);
+                            };
+                            restoreTop();
+                            if (typeof requestAnimationFrame === 'function') requestAnimationFrame(restoreTop);
+                        }
+                    }
+                } catch (_scrollRestoreError) {}
             };
 
             renderFeed = async function(payload) {
@@ -12264,6 +12809,9 @@ function renderProfileActivityList(kind) {
                 refreshPendingFeedIpPosts(currentPages);
                 renderFilterSummary(filteredPosts.length);
                 if (typeof setupFeedInfiniteScroll === 'function') setupFeedInfiniteScroll();
+                // 未登录访客只拿到最新 10 条，这一屏就是全部：直接把登录入口补在列表末尾，
+                // 不必等哨兵进入视口（有些机型滚到底也不会再触发一次 IntersectionObserver）。
+                if (feedGuestLimited) ensureFeedNoMoreNotice();
 
                 loadAvatarsForUsers(Array.from(allUsers)).then(function() { applyLoadedAvatarsToFeed(); });
                 setTimeout(function() { prefetchStatData(); }, 1000);
@@ -12578,6 +13126,50 @@ function renderProfileActivityList(kind) {
                 return String(scope || "misc") + "/" + userPart + Date.now() + "_" + Math.random().toString(36).slice(2, 8) + "_" + sanitizeStorageFileName(fileName);
             }
 
+            // ★ 2026-11-02：帖子附件优先「浏览器直传阿里云 OSS」。
+            //   动机是额度：媒体经 Render 代理再从 Supabase 取，会把 Supabase 出站
+            //   （5GB/月）和 Render 出站（5GB/月）同时烧穿。直传之后字节只走 OSS，
+            //   而且上传时就带 immutable 缓存，同一个用户同一张图只下载一次。
+            //
+            //   降级：接口没配 OSS、签名失败、PUT 失败，一律返回 { ok:false } 让调用方
+            //   回退 Supabase 老链路——发帖绝不能因为存储切换而失败。
+            async function uploadPostObjectToOss(path, file, contentType, identity) {
+                var type = String(contentType || (file && file.type) || '').toLowerCase();
+                // 后端 oss-sign 只接受 image/ video/ audio/ 三种前缀，其余直接走老链路，
+                // 省掉一次必然失败的往返。
+                if (!/^(image|video|audio)\//.test(type)) return { ok: false, reason: 'type' };
+                // FIX MEDIA-03: OSS 的 fetch(PUT) 原先既无超时也不受发布取消控制，
+                // 弱网挂起时整个发帖流程永久停住、发布按钮不恢复。这里给 PUT 绑上
+                // AbortController（5 分钟兜底）并登记到进度组件，cancel() 可中止它。
+                var putTimer = 0, releaseWatch = function () {};
+                try {
+                    var signRes = await window.xtjProtectedFetch('/api/oss/sign', {
+                        method: 'POST',
+                        body: JSON.stringify({ path: path, content_type: type }),
+                        authOwner: identity && identity.owner,
+                        authEpoch: identity && identity.epoch
+                    });
+                    if (!signRes.ok) return { ok: false, reason: 'sign_' + signRes.status };
+                    var signed = await signRes.json();
+                    if (!signed || !signed.ok || !signed.url) return { ok: false, reason: 'sign_rejected' };
+                    var putController = typeof AbortController !== 'undefined' ? new AbortController() : null;
+                    if (putController) {
+                        var uploadProgress = identity && identity.progress;
+                        if (uploadProgress && typeof uploadProgress.watch === 'function') releaseWatch = uploadProgress.watch(putController) || releaseWatch;
+                        putTimer = setTimeout(function () { try { putController.abort(); } catch (_e2) {} }, 5 * 60 * 1000);
+                    }
+                    var putRes = await fetch(signed.url, { method: 'PUT', headers: signed.headers || { 'Content-Type': type }, body: file, signal: putController ? putController.signal : undefined });
+                    if (!putRes.ok) return { ok: false, reason: 'put_' + putRes.status };
+                    // 公网地址去掉签名查询串：签名 15 分钟后失效，落库的必须是稳定地址。
+                    return { ok: true, url: String(signed.url).split('?')[0] };
+                } catch (_e) {
+                    return { ok: false, reason: 'network' };
+                } finally {
+                    if (putTimer) clearTimeout(putTimer);
+                    releaseWatch();
+                }
+            }
+
             // ★ 2026-09-25 新增：私聊媒体上传路径（走后端 /api/dm/upload 时使用）。
             //   与 buildStorageUploadPath 的区别：**不含用户名**，改为 <uidHash>_ 前缀。
             //   原因：后端 validateDmUploadOwnership 要求 chat/<uidHash>_ 严格前缀匹配
@@ -12832,10 +13424,16 @@ function renderProfileActivityList(kind) {
                     //   反之亦然。这里统一命名、互相注销，保证任一路径结束后两个监听都不残留。
                     var onLoad = null;
                     var onError = null;
+                    // FIX STAT-01: 守卫改用闭包任务令牌。旧实现在赋 src 前就删掉
+                    // data-remote-src，导致 load/error/重试三处守卫恒为「不匹配」——
+                    // 成功不释放 blob、失败一次都不重试。属性改在本任务结束时移除。
+                    var swapToken = true;
                     var cleanupListeners = function() {
                         if (onLoad) { try { img.removeEventListener('load', onLoad); } catch (eL) {} onLoad = null; }
                         if (onError) { try { img.removeEventListener('error', onError); } catch (eE) {} onError = null; }
+                        swapToken = false;
                         try { img.removeAttribute('data-swapping'); } catch (eS) {}
+                        try { img.removeAttribute('data-remote-src'); } catch (eR) {}
                     };
                     var finishSwap = function() {
                         cleanupListeners();
@@ -12872,13 +13470,13 @@ function renderProfileActivityList(kind) {
                     };
                     var retryLeft = 2;
                     var scheduleRetry = function() {
-                        if (!img.parentNode || img.getAttribute('data-remote-src') !== remote) { cleanupListeners(); return; }
+                        if (!img.parentNode || !swapToken) { cleanupListeners(); return; }
                         if (retryLeft <= 0) { cleanupListeners(); return; }
                         retryLeft -= 1;
                         var delay = retryLeft === 1 ? 600 : 1800;
                         setTimeout(function() {
                             if (!img.parentNode) { cleanupListeners(); return; }
-                            if (img.getAttribute('data-remote-src') !== remote) { cleanupListeners(); return; }
+                            if (!swapToken) { cleanupListeners(); return; }
                             // error 之后 <img> 是空的 → 先把本地图重新铺成背景，避免露出空白
                             applyLocalBackdrop();
                             // 复用目标元素本身重新加载（命中缓存/失败重试都只算这一路）
@@ -12887,7 +13485,7 @@ function renderProfileActivityList(kind) {
                     };
                     applyLocalBackdrop();
                     onLoad = function() {
-                        if (!img.parentNode || img.getAttribute('data-remote-src') !== remote) { cleanupListeners(); return; }
+                        if (!img.parentNode || !swapToken) { cleanupListeners(); return; }
                         // ★ 2026-09-26（`object-fit` 改为 cover 后的必要条件）：只有远端图的
                         //   真实比例与占位比例**一致**时才允许换源。比例一旦不一致，cover 会把
                         //   远端图按占位盒子裁切（老消息没有 w/h，兜的是 4:3，会被裁掉一大块）。
@@ -12917,7 +13515,7 @@ function renderProfileActivityList(kind) {
                     img.addEventListener('load', onLoad);
                     img.addEventListener('error', onError);
                     // ★ 预加载到目标元素本身：只请求远端一次（onload 后浏览器已缓存）
-                    img.removeAttribute('data-remote-src');
+                    // data-remote-src 保留到本任务结束（见 cleanupListeners），守卫才有效。
                     try { img.src = remote; } catch (eSet) { cleanupListeners(); }
                 });
             }
@@ -13562,7 +14160,11 @@ function renderProfileActivityList(kind) {
             //   启动时两者在同一帧先后触发，等于并发打两次同一个重接口。
             //   这里做单飞 + 3 秒短缓存；缓存的是**解析后的 JSON**（Response body 只能消费一次，
             //   直接共享 Response 会让第二个调用方拿到 "body already used"）。
-            var _dmListShared = { at: 0, json: null, inflight: null, owner: '', epoch: 0, retryAt: 0, failures: 0 };
+            var _dmListShared = { at: 0, json: null, inflight: null, owner: '', epoch: 0, retryAt: 0, failures: 0, lastFailure: null };
+            // FIX CHAT-02: 会话列表失败时把"到底为什么失败"留存下来，供 UI 提示与排查。
+            //   以前所有失败都被压成 null，界面只能显示一句笼统的"消息加载失败"，
+            //   服务端 503 / 限流 429 / 断言失败在用户看来完全一样。
+            window.__xtjDmListFailure = function() { return _dmListShared.lastFailure || null; };
             window.__xtjInvalidateDmListShared = function() {
                 _dmListShared.epoch++;
                 _dmListShared.at = 0;
@@ -13614,10 +14216,19 @@ function renderProfileActivityList(kind) {
                     for (var attempt=0; attempt<2; attempt++) {
                         if (_dmListShared.epoch!==epoch || window.currentUser!==owner || (window._authStateEpoch || 0)!==identityEpoch) return null;
                         try {
-                            var response=await window.xtjProtectedFetch('/api/dm/list?limit='+encodeURIComponent(String(limit||180)), {background:options.background !== false,timeoutMs:12000,authOwner:owner,authEpoch:identityEpoch});
-                            if (response && response.ok) return await response.json();
+                            var response=await window.xtjProtectedFetch('/api/dm/list?limit='+encodeURIComponent(String(limit||180)), {background:options.background !== false,timeoutMs:15000,authOwner:owner,authEpoch:identityEpoch});
+                            if (response && response.ok) { _dmListShared.lastFailure = null; return await response.json(); }
+                            var failureCode = '';
+                            try { var failureJson = await response.clone().json(); failureCode = String((failureJson && (failureJson.code || failureJson.error)) || ''); } catch (_readFailure) {}
+                            _dmListShared.lastFailure = { status: response ? response.status : 0, code: failureCode, at: Date.now(), limit: limit };
+                            // 服务端 5xx/429 才值得再试一次；401/403 由鉴权链路处理，立刻结束。
                             if (!response || (response.status!==429 && response.status<500)) return null;
-                        } catch (_) {}
+                            // FIX CHAT-03: 若 5xx 是"重查询超时/负载"，用更小的窗口再试一次，
+                            //   把一次必然失败的等待换成一次更轻的请求（180→60 条）。
+                            if (attempt === 0 && Number(limit) > 60) { limit = 60; continue; }
+                        } catch (err) {
+                            _dmListShared.lastFailure = { status: 0, code: (err && err.code) || (err && err.name) || 'network', at: Date.now(), limit: limit };
+                        }
                         if (attempt===0) await new Promise(function(resolve){setTimeout(resolve,800);});
                     }
                     return null;
@@ -13650,9 +14261,13 @@ function renderProfileActivityList(kind) {
                 //   未读数是安全敏感数据，必须走后端（service_role）。这里改为复用
                 //   /api/dm/list，并用 aggregateDmUnread 保证与会话列表口径完全一致。
                 if (Date.now() - _dmUnreadFetchedAt < 5000) return;
+                var badgeOwner = window.currentUser, badgeEpoch = (typeof _authStateEpoch === 'number' ? _authStateEpoch : 0);
                 try {
                     // 走共享单飞请求：与会话列表复用同一份结果，不再并发两次
                     var result = await fetchDmListShared(180);
+                    // FIX STAT-03: 3 秒共享缓存可能命中上一账号的 JSON；切号后必须丢弃，
+                    // 否则旧账号的未读数、免打扰名单与会话快照会写进新账号。
+                    if (badgeOwner !== window.currentUser || badgeEpoch !== (typeof _authStateEpoch === 'number' ? _authStateEpoch : 0)) return;
                     if (!result || !result.ok) return;
                     _dmUnreadFetchedAt = Date.now();
                     setUnreadBadgeCount(Array.isArray(result.conversations)
@@ -13674,12 +14289,16 @@ function renderProfileActivityList(kind) {
 
             async function checkReportReplies() {
                 if (!window.currentUser) return;
+                // FIX STAT-02: 30 秒轮询在途时切号，迟到响应不得把上一账号的未读数
+                // 写到新账号（或已登出界面）的红点上。
+                var replyOwner = window.currentUser, replyEpoch = (typeof _authStateEpoch === 'number' ? _authStateEpoch : 0);
+                function sameReplyAccount() { return replyOwner === window.currentUser && replyEpoch === (typeof _authStateEpoch === 'number' ? _authStateEpoch : 0); }
                 try {
                     // 兼容新旧API：优先用后端通知API，降级到本地检测
                     var unread = 0;
                     if (typeof window.xtjProtectedFetch !== 'function') return;
                     var notifRes = await window.xtjProtectedFetch('/api/report/notifications', { background: true });
-                    if (!notifRes.ok) return;
+                    if (!sameReplyAccount() || !notifRes.ok) return;
                     var notifData = await notifRes.json().catch(function() { return {}; });
                     unread = Number(notifData.unread) || 0;
                         // 降级：本地检测旧版 admin_response（兼容旧逻辑）
@@ -13982,11 +14601,29 @@ function renderProfileActivityList(kind) {
                 }
                 var shouldAnimateTab = options.animate === true;
                 if (tab !== currentDockTab) {
+                    // FIX NAVA-02: 通知横幅等路径先 switchDockTab('chat') 再 openChat，
+                    // openChat 里的 currentDockTab === 'posts' 判断已失效。离开 posts 时统一快照滚动位置。
+                    if (currentDockTab === 'posts' && restorePostsScroll === null) {
+                        var postsScrollPanel = document.getElementById('panelPosts');
+                        if (postsScrollPanel) restorePostsScroll = postsScrollPanel.scrollTop;
+                    }
                     try { var imv = document.getElementById('imgViewer'); if (imv && imv.classList.contains('active')) closeImageViewer(); } catch(e) {}
                     try { var am = document.getElementById('announcementModal'); if (am && am.classList.contains('active')) closeAnnouncementModal(); } catch(e) {}
-                    try { var sm = document.getElementById('statModal'); if (sm && sm.classList.contains('active')) sm.classList.remove('active'); } catch(e) {}
-                    try { var cm = document.getElementById('commentModal'); if (cm && cm.classList.contains('active')) closeModal('commentModal'); } catch(e) {}
-                    document.body.style.overflow = '';
+                    try { var sm = document.getElementById('statModal'); if (sm && sm.classList.contains('active') && typeof closeModal === 'function') closeModal('statModal'); } catch(e) {}
+                    // FIX NAVA-01: body 级弹窗（帖子详情、个人资料、举报、登录等）不受
+                    // .dock-panel inert 影响。切 tab 时必须统一走 closeModal 清理状态，
+                    // 否则会整屏盖在新 tab 上，并残留 activePostId / 在途详情请求。
+                    try {
+                        var openOverlays = document.querySelectorAll('.modal-overlay.active, .report-modal-overlay.active, .announcement-modal-overlay.active');
+                        Array.prototype.forEach.call(openOverlays, function (el) {
+                            if (!el || !el.id || el.id === 'statModal' || el.id === 'announcementModal') return;
+                            try { if (typeof closeModal === 'function') closeModal(el.id); else el.classList.remove('active'); }
+                            catch (e2) { el.classList.remove('active'); }
+                        });
+                    } catch (e3) {}
+                    // FIX NAVA-01/AUTH-08: 滚动锁交给统一函数按当前弹窗重算，不再硬清。
+                    try { if (typeof syncHeaderModalBodyLock === 'function') syncHeaderModalBodyLock(); else document.body.style.overflow = ''; }
+                    catch (e4) { document.body.style.overflow = ''; }
                 }
                 if (shouldAnimateTab) {
                     var btn = document.querySelector('.dock-tab[data-tab="' + tab + '"]');
@@ -15029,7 +15666,7 @@ function renderProfileActivityList(kind) {
                     if (window.currentUser !== 'xxz') avatarUsers.push('xxz');
                     hydrateDockChatAvatars(avatarUsers, function(changed) {
                         if (changed) patchDockChatConversationAvatars(el);
-                    });
+                    }).catch(function() {});
                     // A full 180-row window might hide older contacts. Paint the first
                     // result now, then extend the list without blocking its first paint.
                     if (!authoritative && rawRows.length >= 180) {
@@ -15056,6 +15693,11 @@ function renderProfileActivityList(kind) {
                     // 此前无条件追加 retry 且 dockChatListCacheTime=0 会立刻触发下次重试，
                     // 可能反复请求。重试按钮只在无列表（首屏加载失败）时显示。
                     if (!hadRenderedList) {
+                        // FIX CHAT-02: 把失败原因（HTTP 状态 / 错误码）写进日志与按钮文案。
+                        //   以前这里静默吞掉真实原因，只剩一句"消息加载失败"，连是不是
+                        //   服务端 503 都看不出来，重试也只能盲试。
+                        var listFailure = typeof window.__xtjDmListFailure === 'function' ? window.__xtjDmListFailure() : null;
+                        console.warn('[chat-list] load failed:', e && e.message, listFailure);
                         el.innerHTML = '';
                         var previousRetry = el.querySelector('.chat-load-retry');
                         if (previousRetry) previousRetry.remove();
@@ -15064,7 +15706,8 @@ function renderProfileActivityList(kind) {
                         retry.className = 'chat-load-retry';
             // ★ 修复：全库无 .chat-load-retry 样式规则，按钮此前以浏览器默认外观呈现
             retry.style.cssText = 'display:inline-block;margin:12px auto;padding:8px 18px;background:var(--primary,#4c9aff);color:#fff;border:none;border-radius:18px;cursor:pointer;font-size:13px;';
-                        retry.textContent = '消息加载失败，点击重试';
+                        retry.textContent = '消息加载失败' + (listFailure && listFailure.status ? '（' + listFailure.status + '）' : '') + '，点击重试';
+                        if (listFailure && listFailure.code) retry.title = String(listFailure.code);
                         retry.addEventListener('click', function() {
                             retry.remove();
                             window.dockChatListCacheTime = 0;

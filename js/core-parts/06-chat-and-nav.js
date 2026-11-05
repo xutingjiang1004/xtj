@@ -95,11 +95,29 @@
                 }
                 var shouldAnimateTab = options.animate === true;
                 if (tab !== currentDockTab) {
+                    // FIX NAVA-02: 通知横幅等路径先 switchDockTab('chat') 再 openChat，
+                    // openChat 里的 currentDockTab === 'posts' 判断已失效。离开 posts 时统一快照滚动位置。
+                    if (currentDockTab === 'posts' && restorePostsScroll === null) {
+                        var postsScrollPanel = document.getElementById('panelPosts');
+                        if (postsScrollPanel) restorePostsScroll = postsScrollPanel.scrollTop;
+                    }
                     try { var imv = document.getElementById('imgViewer'); if (imv && imv.classList.contains('active')) closeImageViewer(); } catch(e) {}
                     try { var am = document.getElementById('announcementModal'); if (am && am.classList.contains('active')) closeAnnouncementModal(); } catch(e) {}
-                    try { var sm = document.getElementById('statModal'); if (sm && sm.classList.contains('active')) sm.classList.remove('active'); } catch(e) {}
-                    try { var cm = document.getElementById('commentModal'); if (cm && cm.classList.contains('active')) closeModal('commentModal'); } catch(e) {}
-                    document.body.style.overflow = '';
+                    try { var sm = document.getElementById('statModal'); if (sm && sm.classList.contains('active') && typeof closeModal === 'function') closeModal('statModal'); } catch(e) {}
+                    // FIX NAVA-01: body 级弹窗（帖子详情、个人资料、举报、登录等）不受
+                    // .dock-panel inert 影响。切 tab 时必须统一走 closeModal 清理状态，
+                    // 否则会整屏盖在新 tab 上，并残留 activePostId / 在途详情请求。
+                    try {
+                        var openOverlays = document.querySelectorAll('.modal-overlay.active, .report-modal-overlay.active, .announcement-modal-overlay.active');
+                        Array.prototype.forEach.call(openOverlays, function (el) {
+                            if (!el || !el.id || el.id === 'statModal' || el.id === 'announcementModal') return;
+                            try { if (typeof closeModal === 'function') closeModal(el.id); else el.classList.remove('active'); }
+                            catch (e2) { el.classList.remove('active'); }
+                        });
+                    } catch (e3) {}
+                    // FIX NAVA-01/AUTH-08: 滚动锁交给统一函数按当前弹窗重算，不再硬清。
+                    try { if (typeof syncHeaderModalBodyLock === 'function') syncHeaderModalBodyLock(); else document.body.style.overflow = ''; }
+                    catch (e4) { document.body.style.overflow = ''; }
                 }
                 if (shouldAnimateTab) {
                     var btn = document.querySelector('.dock-tab[data-tab="' + tab + '"]');
@@ -1142,7 +1160,7 @@
                     if (window.currentUser !== 'xxz') avatarUsers.push('xxz');
                     hydrateDockChatAvatars(avatarUsers, function(changed) {
                         if (changed) patchDockChatConversationAvatars(el);
-                    });
+                    }).catch(function() {});
                     // A full 180-row window might hide older contacts. Paint the first
                     // result now, then extend the list without blocking its first paint.
                     if (!authoritative && rawRows.length >= 180) {
@@ -1169,6 +1187,11 @@
                     // 此前无条件追加 retry 且 dockChatListCacheTime=0 会立刻触发下次重试，
                     // 可能反复请求。重试按钮只在无列表（首屏加载失败）时显示。
                     if (!hadRenderedList) {
+                        // FIX CHAT-02: 把失败原因（HTTP 状态 / 错误码）写进日志与按钮文案。
+                        //   以前这里静默吞掉真实原因，只剩一句"消息加载失败"，连是不是
+                        //   服务端 503 都看不出来，重试也只能盲试。
+                        var listFailure = typeof window.__xtjDmListFailure === 'function' ? window.__xtjDmListFailure() : null;
+                        console.warn('[chat-list] load failed:', e && e.message, listFailure);
                         el.innerHTML = '';
                         var previousRetry = el.querySelector('.chat-load-retry');
                         if (previousRetry) previousRetry.remove();
@@ -1177,7 +1200,8 @@
                         retry.className = 'chat-load-retry';
             // ★ 修复：全库无 .chat-load-retry 样式规则，按钮此前以浏览器默认外观呈现
             retry.style.cssText = 'display:inline-block;margin:12px auto;padding:8px 18px;background:var(--primary,#4c9aff);color:#fff;border:none;border-radius:18px;cursor:pointer;font-size:13px;';
-                        retry.textContent = '消息加载失败，点击重试';
+                        retry.textContent = '消息加载失败' + (listFailure && listFailure.status ? '（' + listFailure.status + '）' : '') + '，点击重试';
+                        if (listFailure && listFailure.code) retry.title = String(listFailure.code);
                         retry.addEventListener('click', function() {
                             retry.remove();
                             window.dockChatListCacheTime = 0;

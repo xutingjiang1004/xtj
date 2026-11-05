@@ -11,15 +11,21 @@
     var panel = img.closest('.dock-panel');
     return !panel || panel.classList.contains('active');
   }
+  function done(img) { return img.complete && img.naturalWidth > 0; }
   function pump() {
     var waiting = Array.from(tracked.entries()).filter(function (entry) {
+      // 已经加载完成的图不再参与排队：长列表滚到后面时，tracked 里会有上百个
+      // 已完成的条目，每帧遍历它们会让滚动越来越卡，也挤占真正待加载图的位置。
+      if (done(entry[0])) return false;
       return entry[1].visible && entry[0].isConnected && activePanel(entry[0]) && entry[0].getAttribute('data-post-src') && !entry[0].getAttribute('src');
     });
     waiting.sort(function (a, b) {
       var ar = a[0].getBoundingClientRect(), br = b[0].getBoundingClientRect();
       return Math.max(0, ar.top, -ar.bottom) - Math.max(0, br.top, -br.bottom);
     });
-    while (running < 4 && waiting.length) {
+    // 并发从 4 提到 6：深列表里每个图片都要走一次鉴权 + Storage 签名，
+    // 4 个并发时快速滚动会明显排队，用户看到的就是「下面的图一直不出来」。
+    while (running < 6 && waiting.length) {
       var entry = waiting.shift(), img = entry[0], state = entry[1], source = img.getAttribute('data-post-src');
       var rect = img.getBoundingClientRect();
       state.loading = true; running++;
@@ -66,6 +72,17 @@
       var state = tracked.get(entry.target);
       if (!state) return;
       state.visible = entry.isIntersecting;
+      // 已经滚得很远的图不再占着并发槽位：快速长距离滚动时，
+      // 前面几十张图会一直挂着请求，导致当前视口的图排在后面迟迟不开始。
+      if (!state.visible && state.loading) {
+        var rect = entry.boundingClientRect, height = window.innerHeight || 0;
+        if (rect.bottom < -1200 || rect.top > height + 1200) {
+          var pending = entry.target.getAttribute('src');
+          if (pending) { entry.target.removeAttribute('src'); entry.target.setAttribute('data-post-src', pending); }
+          stop(state);
+          release(state);
+        }
+      }
       arm(entry.target, state);
     });
     pump();
@@ -120,7 +137,13 @@
   }
   function recheck() {
     tracked.forEach(function (state, img) {
-      if (!state.visible && img.isConnected && activePanel(img) && nearViewport(img)) { state.visible = true; arm(img, state); }
+      // 只有「还没开始加载、正等队列」的图才需要补可见性。已加载完成的图会一直留在
+      // tracked 里，长列表滚动时每 120ms 为它们逐个 getBoundingClientRect 是纯浪费，
+      // 而且会强制同步布局 —— 这正是滚动掉帧的主要来源之一。
+      if (state.visible || done(img)) return;
+      if (!img.isConnected) return;
+      if (!img.getAttribute('data-post-src') || img.getAttribute('src')) return;
+      if (activePanel(img) && nearViewport(img)) { state.visible = true; arm(img, state); }
     });
     pump();
   }

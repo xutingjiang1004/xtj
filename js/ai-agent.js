@@ -4781,8 +4781,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var isTimeout = r && (r.status === 0 || r.error_code === 'timeout');
     var isNetwork = r && r.error_code === 'network_error';
     var isAuth = r && (r.error_code === 'auth' || r.status === 401);
+    // ★ 未登录访客的 AI 权限已关闭：这里不能再说「登录已失效」（他根本没登录过），
+    //   直接给一句「登录后即可使用」，按钮也换成登录。
+    var guestBlocked = isAuth && !readUserName();
     var tip = isAuth
-      ? '登录已失效，请重新登录后再发送'
+      ? (guestBlocked ? '登录后即可使用小猫 AI' : '登录已失效，请重新登录后再发送')
       : isTimeout
       ? '聊天记录加载超时，可继续发送消息或点击重试'
       : (isNetwork ? '网络连接异常，聊天记录更新失败' : '聊天记录暂时无法加载，你仍可发送新消息');
@@ -4791,10 +4794,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var retry = el('button', {
       type: 'button',
       class: 'ai-history-retry',
-      text: '重新加载聊天记录',
-      'aria-label': '重新加载聊天记录'
+      text: guestBlocked ? '登录' : '重新加载聊天记录',
+      'aria-label': guestBlocked ? '登录' : '重新加载聊天记录'
     });
     retry.addEventListener('click', function() {
+      if (guestBlocked && typeof window.openAuthModal === 'function') { window.openAuthModal('login'); return; }
       loadHistory(messagesEl, null);
     });
     state.appendChild(retry);
@@ -10750,7 +10754,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // Empty/invalid drafts must never interrupt a reply. A distinct valid send
     // replaces the active turn synchronously, including its auth/preflight phase.
     if (!text && !fileList.some(function(f) { return f && f.dataUrl; })) return;
-    if (!S.active) { notify('聊天面板未就绪，请重新打开或登录后再发送'); return; }
+    if (!readUserName() && !S.guestAi) { notify('请先登录后再和小猫聊天'); return; }
+    if (!S.active) { notify('聊天面板未就绪，请重新打开后再发送'); return; }
     if (text.length > 50000) { notify('消息过长，最多 50000 字符，请精简后重试'); return; }
     // ★ 2026-10-29（按用户确认恢复旧行为）：小猫 AI 正在回复时再次发送，
     //   语义是「打断上一条，直接回答新问题」，不做排队。

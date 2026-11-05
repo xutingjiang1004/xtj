@@ -297,6 +297,50 @@
                 return String(scope || "misc") + "/" + userPart + Date.now() + "_" + Math.random().toString(36).slice(2, 8) + "_" + sanitizeStorageFileName(fileName);
             }
 
+            // ★ 2026-11-02：帖子附件优先「浏览器直传阿里云 OSS」。
+            //   动机是额度：媒体经 Render 代理再从 Supabase 取，会把 Supabase 出站
+            //   （5GB/月）和 Render 出站（5GB/月）同时烧穿。直传之后字节只走 OSS，
+            //   而且上传时就带 immutable 缓存，同一个用户同一张图只下载一次。
+            //
+            //   降级：接口没配 OSS、签名失败、PUT 失败，一律返回 { ok:false } 让调用方
+            //   回退 Supabase 老链路——发帖绝不能因为存储切换而失败。
+            async function uploadPostObjectToOss(path, file, contentType, identity) {
+                var type = String(contentType || (file && file.type) || '').toLowerCase();
+                // 后端 oss-sign 只接受 image/ video/ audio/ 三种前缀，其余直接走老链路，
+                // 省掉一次必然失败的往返。
+                if (!/^(image|video|audio)\//.test(type)) return { ok: false, reason: 'type' };
+                // FIX MEDIA-03: OSS 的 fetch(PUT) 原先既无超时也不受发布取消控制，
+                // 弱网挂起时整个发帖流程永久停住、发布按钮不恢复。这里给 PUT 绑上
+                // AbortController（5 分钟兜底）并登记到进度组件，cancel() 可中止它。
+                var putTimer = 0, releaseWatch = function () {};
+                try {
+                    var signRes = await window.xtjProtectedFetch('/api/oss/sign', {
+                        method: 'POST',
+                        body: JSON.stringify({ path: path, content_type: type }),
+                        authOwner: identity && identity.owner,
+                        authEpoch: identity && identity.epoch
+                    });
+                    if (!signRes.ok) return { ok: false, reason: 'sign_' + signRes.status };
+                    var signed = await signRes.json();
+                    if (!signed || !signed.ok || !signed.url) return { ok: false, reason: 'sign_rejected' };
+                    var putController = typeof AbortController !== 'undefined' ? new AbortController() : null;
+                    if (putController) {
+                        var uploadProgress = identity && identity.progress;
+                        if (uploadProgress && typeof uploadProgress.watch === 'function') releaseWatch = uploadProgress.watch(putController) || releaseWatch;
+                        putTimer = setTimeout(function () { try { putController.abort(); } catch (_e2) {} }, 5 * 60 * 1000);
+                    }
+                    var putRes = await fetch(signed.url, { method: 'PUT', headers: signed.headers || { 'Content-Type': type }, body: file, signal: putController ? putController.signal : undefined });
+                    if (!putRes.ok) return { ok: false, reason: 'put_' + putRes.status };
+                    // 公网地址去掉签名查询串：签名 15 分钟后失效，落库的必须是稳定地址。
+                    return { ok: true, url: String(signed.url).split('?')[0] };
+                } catch (_e) {
+                    return { ok: false, reason: 'network' };
+                } finally {
+                    if (putTimer) clearTimeout(putTimer);
+                    releaseWatch();
+                }
+            }
+
             // ★ 2026-09-25 新增：私聊媒体上传路径（走后端 /api/dm/upload 时使用）。
             //   与 buildStorageUploadPath 的区别：**不含用户名**，改为 <uidHash>_ 前缀。
             //   原因：后端 validateDmUploadOwnership 要求 chat/<uidHash>_ 严格前缀匹配
@@ -551,10 +595,16 @@
                     //   反之亦然。这里统一命名、互相注销，保证任一路径结束后两个监听都不残留。
                     var onLoad = null;
                     var onError = null;
+                    // FIX STAT-01: 守卫改用闭包任务令牌。旧实现在赋 src 前就删掉
+                    // data-remote-src，导致 load/error/重试三处守卫恒为「不匹配」——
+                    // 成功不释放 blob、失败一次都不重试。属性改在本任务结束时移除。
+                    var swapToken = true;
                     var cleanupListeners = function() {
                         if (onLoad) { try { img.removeEventListener('load', onLoad); } catch (eL) {} onLoad = null; }
                         if (onError) { try { img.removeEventListener('error', onError); } catch (eE) {} onError = null; }
+                        swapToken = false;
                         try { img.removeAttribute('data-swapping'); } catch (eS) {}
+                        try { img.removeAttribute('data-remote-src'); } catch (eR) {}
                     };
                     var finishSwap = function() {
                         cleanupListeners();
@@ -591,13 +641,13 @@
                     };
                     var retryLeft = 2;
                     var scheduleRetry = function() {
-                        if (!img.parentNode || img.getAttribute('data-remote-src') !== remote) { cleanupListeners(); return; }
+                        if (!img.parentNode || !swapToken) { cleanupListeners(); return; }
                         if (retryLeft <= 0) { cleanupListeners(); return; }
                         retryLeft -= 1;
                         var delay = retryLeft === 1 ? 600 : 1800;
                         setTimeout(function() {
                             if (!img.parentNode) { cleanupListeners(); return; }
-                            if (img.getAttribute('data-remote-src') !== remote) { cleanupListeners(); return; }
+                            if (!swapToken) { cleanupListeners(); return; }
                             // error 之后 <img> 是空的 → 先把本地图重新铺成背景，避免露出空白
                             applyLocalBackdrop();
                             // 复用目标元素本身重新加载（命中缓存/失败重试都只算这一路）
@@ -606,7 +656,7 @@
                     };
                     applyLocalBackdrop();
                     onLoad = function() {
-                        if (!img.parentNode || img.getAttribute('data-remote-src') !== remote) { cleanupListeners(); return; }
+                        if (!img.parentNode || !swapToken) { cleanupListeners(); return; }
                         // ★ 2026-09-26（`object-fit` 改为 cover 后的必要条件）：只有远端图的
                         //   真实比例与占位比例**一致**时才允许换源。比例一旦不一致，cover 会把
                         //   远端图按占位盒子裁切（老消息没有 w/h，兜的是 4:3，会被裁掉一大块）。
@@ -636,7 +686,7 @@
                     img.addEventListener('load', onLoad);
                     img.addEventListener('error', onError);
                     // ★ 预加载到目标元素本身：只请求远端一次（onload 后浏览器已缓存）
-                    img.removeAttribute('data-remote-src');
+                    // data-remote-src 保留到本任务结束（见 cleanupListeners），守卫才有效。
                     try { img.src = remote; } catch (eSet) { cleanupListeners(); }
                 });
             }
@@ -1281,7 +1331,11 @@
             //   启动时两者在同一帧先后触发，等于并发打两次同一个重接口。
             //   这里做单飞 + 3 秒短缓存；缓存的是**解析后的 JSON**（Response body 只能消费一次，
             //   直接共享 Response 会让第二个调用方拿到 "body already used"）。
-            var _dmListShared = { at: 0, json: null, inflight: null, owner: '', epoch: 0, retryAt: 0, failures: 0 };
+            var _dmListShared = { at: 0, json: null, inflight: null, owner: '', epoch: 0, retryAt: 0, failures: 0, lastFailure: null };
+            // FIX CHAT-02: 会话列表失败时把"到底为什么失败"留存下来，供 UI 提示与排查。
+            //   以前所有失败都被压成 null，界面只能显示一句笼统的"消息加载失败"，
+            //   服务端 503 / 限流 429 / 断言失败在用户看来完全一样。
+            window.__xtjDmListFailure = function() { return _dmListShared.lastFailure || null; };
             window.__xtjInvalidateDmListShared = function() {
                 _dmListShared.epoch++;
                 _dmListShared.at = 0;
@@ -1333,10 +1387,19 @@
                     for (var attempt=0; attempt<2; attempt++) {
                         if (_dmListShared.epoch!==epoch || window.currentUser!==owner || (window._authStateEpoch || 0)!==identityEpoch) return null;
                         try {
-                            var response=await window.xtjProtectedFetch('/api/dm/list?limit='+encodeURIComponent(String(limit||180)), {background:options.background !== false,timeoutMs:12000,authOwner:owner,authEpoch:identityEpoch});
-                            if (response && response.ok) return await response.json();
+                            var response=await window.xtjProtectedFetch('/api/dm/list?limit='+encodeURIComponent(String(limit||180)), {background:options.background !== false,timeoutMs:15000,authOwner:owner,authEpoch:identityEpoch});
+                            if (response && response.ok) { _dmListShared.lastFailure = null; return await response.json(); }
+                            var failureCode = '';
+                            try { var failureJson = await response.clone().json(); failureCode = String((failureJson && (failureJson.code || failureJson.error)) || ''); } catch (_readFailure) {}
+                            _dmListShared.lastFailure = { status: response ? response.status : 0, code: failureCode, at: Date.now(), limit: limit };
+                            // 服务端 5xx/429 才值得再试一次；401/403 由鉴权链路处理，立刻结束。
                             if (!response || (response.status!==429 && response.status<500)) return null;
-                        } catch (_) {}
+                            // FIX CHAT-03: 若 5xx 是"重查询超时/负载"，用更小的窗口再试一次，
+                            //   把一次必然失败的等待换成一次更轻的请求（180→60 条）。
+                            if (attempt === 0 && Number(limit) > 60) { limit = 60; continue; }
+                        } catch (err) {
+                            _dmListShared.lastFailure = { status: 0, code: (err && err.code) || (err && err.name) || 'network', at: Date.now(), limit: limit };
+                        }
                         if (attempt===0) await new Promise(function(resolve){setTimeout(resolve,800);});
                     }
                     return null;
@@ -1369,9 +1432,13 @@
                 //   未读数是安全敏感数据，必须走后端（service_role）。这里改为复用
                 //   /api/dm/list，并用 aggregateDmUnread 保证与会话列表口径完全一致。
                 if (Date.now() - _dmUnreadFetchedAt < 5000) return;
+                var badgeOwner = window.currentUser, badgeEpoch = (typeof _authStateEpoch === 'number' ? _authStateEpoch : 0);
                 try {
                     // 走共享单飞请求：与会话列表复用同一份结果，不再并发两次
                     var result = await fetchDmListShared(180);
+                    // FIX STAT-03: 3 秒共享缓存可能命中上一账号的 JSON；切号后必须丢弃，
+                    // 否则旧账号的未读数、免打扰名单与会话快照会写进新账号。
+                    if (badgeOwner !== window.currentUser || badgeEpoch !== (typeof _authStateEpoch === 'number' ? _authStateEpoch : 0)) return;
                     if (!result || !result.ok) return;
                     _dmUnreadFetchedAt = Date.now();
                     setUnreadBadgeCount(Array.isArray(result.conversations)
@@ -1393,12 +1460,16 @@
 
             async function checkReportReplies() {
                 if (!window.currentUser) return;
+                // FIX STAT-02: 30 秒轮询在途时切号，迟到响应不得把上一账号的未读数
+                // 写到新账号（或已登出界面）的红点上。
+                var replyOwner = window.currentUser, replyEpoch = (typeof _authStateEpoch === 'number' ? _authStateEpoch : 0);
+                function sameReplyAccount() { return replyOwner === window.currentUser && replyEpoch === (typeof _authStateEpoch === 'number' ? _authStateEpoch : 0); }
                 try {
                     // 兼容新旧API：优先用后端通知API，降级到本地检测
                     var unread = 0;
                     if (typeof window.xtjProtectedFetch !== 'function') return;
                     var notifRes = await window.xtjProtectedFetch('/api/report/notifications', { background: true });
-                    if (!notifRes.ok) return;
+                    if (!sameReplyAccount() || !notifRes.ok) return;
                     var notifData = await notifRes.json().catch(function() { return {}; });
                     unread = Number(notifData.unread) || 0;
                         // 降级：本地检测旧版 admin_response（兼容旧逻辑）

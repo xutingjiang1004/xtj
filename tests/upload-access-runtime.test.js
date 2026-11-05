@@ -44,5 +44,5 @@ test('avatars may be cached by the browser while every other upload is still rev
  const avatar=await request(f.app).get('/api/uploads/media').query({path:'avatars/alice_1_abc_a.jpg'}).expect(200);
  assert.match(avatar.headers['cache-control'],/public, max-age=86400/);
  const media=await request(f.app).get('/api/uploads/media').query({path:post}).expect(200);
- assert.equal(media.headers['cache-control'],'private, no-cache, must-revalidate');
+ assert.equal(media.headers['cache-control'],'private, max-age=604800, must-revalidate');
 });

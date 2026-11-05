@@ -553,9 +553,15 @@ const ADMIN_NAME = "xxz";
                     // ★ 审计修复：logout 请求复用 xtjFetch 超时封装（8s），
                     // 避免 VPN/半开连接下 fetch 永不 settle（与 doLogout 的 8s 超时对齐）。
                     var logoutFetch = (typeof window.xtjFetch === 'function') ? window.xtjFetch : fetch;
-                    logoutFetch(API_BASE + '/api/user/logout', {
+                    // FIX BOOT-01: 身份不匹配分支的 logout 必须登记到 __xtjLogoutPending，
+                    // 否则用户立刻重试登录时，旧 logout 晚到会按当前 cookie 撤销新会话的 refresh。
+                    var pendingLogout = Promise.resolve(logoutFetch(API_BASE + '/api/user/logout', {
                         method: 'POST', credentials: 'include', headers: logoutHeaders
-                    }, 8000).catch(function(){});
+                    }, 8000)).catch(function(){});
+                    window.__xtjLogoutPending = pendingLogout;
+                    pendingLogout.then(function() {
+                        if (window.__xtjLogoutPending === pendingLogout) window.__xtjLogoutPending = null;
+                    });
                 } catch(e) {}
 
                 // ★ 广播退出事件到其他标签页（仅当非远程同步触发时）
@@ -1819,6 +1825,7 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
             fileSize: null,
             originalSize: null,
             mimeType: "",
+            poster_url: "",
         };
         let postSearchState = {
             keyword: "",
@@ -2495,6 +2502,9 @@ function isAdmin() {
                 location_city: post && post.location_city ? post.location_city : metaLocationCity,
                 location_district: post && post.location_district ? post.location_district : metaLocationDistrict,
                 location_level: post && post.location_level ? post.location_level : metaLocationLevel,
+                // 视频封面：后端能从帖子内容里解析出来就优先用它，解析不到再退回内容元数据。
+                // 封面单独存放而不是当附件，是因为带附件的帖子会被写成图片帖，视频会丢。
+                poster_url: (post && post.poster_url) || meta.poster_url || "",
                 media_items: window.XtjPostMedia ? window.XtjPostMedia.getPostMediaItems(Object.assign({}, post, { _contentMeta: meta })) : (post && post.media_items),
                 _contentMeta: meta
             });

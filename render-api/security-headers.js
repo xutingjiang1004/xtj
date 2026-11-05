@@ -45,7 +45,10 @@ var CSP = [
   // frame-src 放行同源与 blob:
   "frame-src 'self' blob:",
   // WebLLM 本地 Qwen：模型元数据在 huggingface.co，权重会重定向到区域 *.hf.co CDN，WASM 模型库在 raw.githubusercontent.com。
-  "connect-src 'self' https://xtj.onrender.com https://ithowxqignlhkwaykglt.supabase.co wss://ithowxqignlhkwaykglt.supabase.co https://huggingface.co https://*.hf.co https://raw.githubusercontent.com https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0-dev.20250409-89f8206ba4/dist/",
+  // 2026-11-02：帖子媒体改为浏览器直传阿里云 OSS，PUT 的目标域名必须在这里放行，
+  // 否则请求在离开浏览器前就被 CSP 拦下，前端只能静默回退 Supabase（表现为「一直没走 OSS」）。
+  // 读回不需要额外放行：img-src / media-src 已经是 https: 全通配。
+  "connect-src 'self' https://xtj.onrender.com https://ithowxqignlhkwaykglt.supabase.co wss://ithowxqignlhkwaykglt.supabase.co https://xtj-media-2026.oss-cn-hangzhou.aliyuncs.com https://huggingface.co https://*.hf.co https://raw.githubusercontent.com https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0-dev.20250409-89f8206ba4/dist/",
   // jsdelivr 为 gsap 脚本来源；本站无外链字体（全站系统字体栈），故 font-src 只留 self。
   "font-src 'self'",
   "frame-ancestors 'none'",

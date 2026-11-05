@@ -536,6 +536,11 @@
                 window.__xtjLogoutPending = logoutRequest;
                 closeModal('profileDetailModal');
                 closeModal('profileActivityModal');
+                // FIX PROF-02: 登出时还要关掉从帖子页点开的资料卡/举报记录/删除确认等弹窗，
+                // 否则旧账号界面盖在页面上，并让 07 的焦点表面把背景判为 inert。
+                ['userProfileModal', 'reportHistoryModal', 'reportModal', 'postDetailModal', 'delModal', 'statModal'].forEach(function (modalId) {
+                    try { if (typeof closeModal === 'function') closeModal(modalId); } catch (eModal) {}
+                });
 
                 try {
                     if (typeof window.__xtjAbortAiRequests === 'function') window.__xtjAbortAiRequests();
@@ -633,7 +638,9 @@
                     if (regNick) regNick.value = '';
                     if (regPw) regPw.value = '';
                 } catch (e) {}
-                document.body.style.overflow = '';
+                // FIX PROF-02: 滚动锁按当前弹窗状态重算，不再无条件写死，避免与 07 打架。
+                try { if (typeof syncHeaderModalBodyLock === 'function') syncHeaderModalBodyLock(); else document.body.style.overflow = ''; }
+                catch (eBodyLock) { document.body.style.overflow = ''; }
 
                 try { if (typeof window.__xtjBroadcastLogout === 'function') window.__xtjBroadcastLogout('manual'); } catch(e) {}
                 try { if (typeof window.queueBehavior === 'function') window.queueBehavior('logout', '用户退出登录'); } catch(e) {}
@@ -1003,6 +1010,10 @@ function renderProfileActivityList(kind) {
             };
 
             async function loadMyReportRecords() {
+                // FIX PROF-01: 查询期间退出/切号时，迟到响应不得把上一账号的举报记录
+                //（含管理员回复）写进当前弹窗。
+                var recordsOwner = currentUser, recordsEpoch = _authStateEpoch;
+                function sameAccount() { return recordsOwner === currentUser && recordsEpoch === _authStateEpoch; }
                 if (!window.currentUser) {
                     var list = document.getElementById('reportHistoryList') || document.getElementById('reportRecordsList');
                     if (list) list.innerHTML = '<div class="report-records-empty">请先登录</div>';
@@ -1021,6 +1032,7 @@ function renderProfileActivityList(kind) {
                         .eq('media_type', REPORT_MARKER)
                         .order('created_at', { ascending: false })
                         .limit(160);
+                    if (!sameAccount()) return;
                     if (res && res.error) throw res.error;
                     var records = (res.data || []).map(function(p) {
                         var c = {};
@@ -1078,7 +1090,7 @@ function renderProfileActivityList(kind) {
                     }).join('');
                 } catch(e) {
                     console.error('[XTJ] loadMyReportRecords error:', e);
-                    list.innerHTML = '<div class="report-records-empty">加载失败，请重试</div>';
+                    if (sameAccount()) list.innerHTML = '<div class="report-records-empty">加载失败，请重试</div>';
                 }
             }
 
@@ -1586,7 +1598,7 @@ function renderProfileActivityList(kind) {
                 window.__catAiPollStatus[commentIdStr] = { postId: String(postId) };
 
                 // 显示临时状态
-                showCatAiStatus(commentIdStr, '小猫正在组织毒液……');
+                showCatAiStatus(commentIdStr, '小猫正在回复中…');
 
                 function poll() {
                     if ((window._catAiCancelled || 0) !== myGlobalEpoch ||
@@ -1731,7 +1743,7 @@ function renderProfileActivityList(kind) {
                                 if (data.message && data.message.includes('同步')) {
                                     showCatAiStatus(commentIdStr, '回复已生成，正在同步……');
                                 } else {
-                                    showCatAiStatus(commentIdStr, '小猫正在组织毒液……');
+                                    showCatAiStatus(commentIdStr, '小猫正在回复中…');
                                 }
                                 window.__catAiPollTimers[commentIdStr] = setTimeout(poll, baseInterval);
                             } else {

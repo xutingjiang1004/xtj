@@ -15,6 +15,15 @@
   transition: opacity 180ms ease;
 }
 #panelPosts #feed > .post-feed-item:hover { transform: none; box-shadow: none !important; }
+/* content-visibility:auto 会把"还没滚到的卡片"按 contain-intrinsic-size:200px 估算高度。
+   整段重建（刷新/后台补数据/发帖后重排）时，视口上方的卡片全部退回 200px 估算，
+   真实高度差上千像素 → 浏览器/我们的锚点计算都会被带偏，表现为"往下翻着突然跳回上面"，
+   同时这些卡片的内容（含图片）要等重新进入视口才绘制，看起来像"照片消失几秒"。
+   信息流卡片保留 contain 隔离即可，不再跳过内容渲染。 */
+#panelPosts #feed > .post-feed-item {
+  content-visibility: visible !important;
+  contain-intrinsic-size: none !important;
+}
 #panelPosts #feed { gap: 0 !important; }
 #panelPosts #feed > .post-feed-item > .post-header { gap: 11px; margin-bottom: 13px; align-items: flex-start; }
 #panelPosts #feed > .post-feed-item .avatar:not(.comment-avatar) { width: 42px; height: 42px; flex: 0 0 42px; }
@@ -43,6 +52,10 @@
   padding: 0;
   border: 0;
   border-radius: 0;
+  /* 图片右边那块浅灰：外层通用 .media 规则自带 rgba(0,0,0,.02) 背景，
+     单图时单元格宽度只有 390px，右侧 170px 的容器底色就露出来了。网格本身
+     不需要底色（每个 cell 自带 --bg-secondary 占位），这里显式清掉。 */
+  background: transparent;
   box-shadow: none;
 }
 #panelPosts #feed .post-media-cell,

@@ -3,8 +3,9 @@ const crypto = require('node:crypto');
 const { Readable, Transform } = require('node:stream');
 const { mediaTraffic } = require('./media-traffic');
 const { pipeline } = require('node:stream/promises');
-const { parsePostMediaUrl } = require('./post-media');
+const { parsePostMediaUrl, isOssMediaUrl } = require('./post-media');
 const { loadPostAttachments } = require('./post-attachments');
+const { avatarImageUrl } = require('./avatar-image');
 const PHOTO_BUCKET = 'photo-wall';
 const PHOTO_COOKIE = 'xtj_photo_session';
 const POST_MEDIA_COOKIE = 'xtj_post_media_session';
@@ -156,7 +157,14 @@ async function migratePhotoStorage(supabase) {
 
 // Media is revalidated on every use because access can change. Avatars are the exception: they are
 // public by definition and every upload gets a new unique path, so a cached copy can never be stale.
-const PRIVATE_MEDIA_CACHE = 'private, no-cache, must-revalidate';
+// 免费版 Supabase 每月只有 5GB 出站。no-cache 会让每次刷新都回源校验，
+// 视频/大图反复打开时把额度烧光。
+// ★ 2026-11-02：原来改成的「私有缓存 1 小时」仍然太短——同一张图每小时就会被完整重新
+//   下载一次，是旧图出站流量的大头。存量媒体还没迁到 OSS，这部分流量全部记在 Supabase 账上。
+//   现在改为「私有缓存 7 天」：字节只留在用户自己的浏览器（private 不进 CDN、不跨账号共享），
+//   文件名唯一且内容永不覆盖，7 天内不会拿到过期副本；7 天后过期仍强制回源重新鉴权。
+//   新媒体走阿里云 OSS，上传时就是 public, max-age=31536000, immutable，不受此值影响。
+const PRIVATE_MEDIA_CACHE = 'private, max-age=604800, must-revalidate';
 async function streamOriginal(req, res, { supabase, bucket, path, fetchImpl = fetch, allowDownload = false, previews, cacheControl = PRIVATE_MEDIA_CACHE }) {
   mediaTraffic.identify(bucket, path, req.params && req.params.id);
   if (req.query && req.query.preview !== undefined) {
@@ -167,7 +175,8 @@ async function streamOriginal(req, res, { supabase, bucket, path, fetchImpl = fe
   const range = req.headers.range;
   if (range && !/^bytes=(?:\d+-\d*|-\d+)$/.test(range)) return res.status(416).end();
   const signed = await supabase.storage.from(bucket).createSignedUrl(path, 60);
-  if (!signed || signed.error || !signed.data || !signed.data.signedUrl) throw Error('media_storage_unavailable');
+  // 带上存储返回的原始原因（Object not found / 权限 / 网络），否则上层只能看到一个笼统的 unavailable。
+  if (!signed || signed.error || !signed.data || !signed.data.signedUrl) throw Error('media_storage_unavailable:' + String((signed && signed.error && (signed.error.message || signed.error.statusCode)) || 'no_url'));
   const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 120000);
   const closed = () => controller.abort(); res.on('close', closed);
   try {
@@ -298,6 +307,13 @@ function createPhotoAccess({ app, supabase, supabaseUrl, secret, authenticateUse
       if (!row || row.is_deleted === true || !['','text','image','video','audio','photo','album',null].includes(row.media_type) || !normalPostAllowed(row) || (row.visibility && row.visibility !== 'public' && row.user_name !== req.userName && req.userName !== adminName)) return missing(res);
       const posts = await readAttachments(row);
       const item = (posts[0].media_items || [])[Number(req.params.position)];
+      // ★ 2026-11-02：直传 OSS 的媒体不再经过本服务转发，鉴权通过后 302 过去，
+      //   字节从 OSS 直接进入浏览器——Render 和 Supabase 的出口都不再计费。
+      //   权限判定一律在本服务完成，OSS 那边只是存储。
+      if (item && isOssMediaUrl(item.media_url)) {
+        res.set('Cache-Control', 'public, max-age=600');
+        return res.redirect(302, item.media_url);
+      }
       const path = item && parsePostMediaUrl(item.media_url, supabaseUrl);
       if (!path) return missing(res);
       await streamOriginal(req,res,{supabase,bucket:'uploads',path,fetchImpl,previews});
@@ -307,10 +323,26 @@ function createPhotoAccess({ app, supabase, supabaseUrl, secret, authenticateUse
     try {
       if (!UUID.test(req.params.id)) return missing(res);
       const row = await checked(supabase.from('posts').select('id,user_name,media_type,media_url,content,visibility,is_deleted,created_at').eq('id',req.params.id).maybeSingle());
-      if (!row || row.is_deleted === true || !['image','photo','album'].includes(row.media_type) || (row.visibility && row.visibility !== 'public') || !normalPostAllowed(row)) return missing(res);
+      // 分享页面向游客公开，但只放行公开且未删除的普通帖子；
+      // 文字、图片、视频、音频帖子共用同一个分享地址，微信好友点开即可查看。
+      if (!row || row.is_deleted === true || !['','text','image','video','audio','photo','album',null].includes(row.media_type) || (row.visibility && row.visibility !== 'public') || !normalPostAllowed(row)) return missing(res);
       const posts = await loadPostAttachments(supabase,[row]);
-      const rows = (posts[0].media_items || []).map((item,index) => ({ ...row, share_media_url:'/api/post/' + row.id + '/media/' + index, content:JSON.stringify({caption:index ? '' : metadata(row).text || (String(row.content).startsWith('{') ? '' : row.content)}) }));
-      res.set({'Cache-Control':'no-store, private','Referrer-Policy':'no-referrer'}).type('html').send(renderSharePage(rows));
+      const items = (posts[0].media_items || []).map((item,index) => ({ ...item, share_media_url:'/api/post/' + row.id + '/media/' + index }));
+      const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'https').split(',')[0].trim();
+      const origin = (/^https?$/.test(proto) ? proto : 'https') + '://' + req.get('host');
+      // 正文里第一条公网链接做成卡片：音乐可试听、网页显示封面与标题，避免好友只看到裸 URL。
+      const preview = await linkPreview((String(postShareText(row)).match(POST_URL_RE) || [])[0]);
+      // 纯文字帖的微信卡片图用发布者头像；查不到就用站点默认封面。
+      let avatarUrl = '';
+      try {
+        const avatarRow = await checked(supabase.from('posts').select('media_url')
+          .eq('user_name', row.user_name).eq('media_type', '__avatar__').eq('actor_key', '__avatar__')
+          .order('created_at', { ascending: false }).limit(1).maybeSingle());
+        const avatarPath = avatarRow && avatarRow.media_url ? avatarImageUrl(row.user_name, avatarRow.media_url) : '';
+        // 微信抓取端对 webp 支持不稳定，这里显式要 JPEG。
+        if (avatarPath) avatarUrl = origin + avatarPath + '&size=large&format=jpg';
+      } catch (_) { avatarUrl = ''; }
+      res.set({'Cache-Control':'no-store, private','Referrer-Policy':'no-referrer'}).type('html').send(renderPostSharePage(posts[0] || row, items, origin, preview, { avatarUrl, sharer:String(req.query.from || ''), poster: sharePosterUrl(origin, posts[0] && posts[0].poster_url) }));
     } catch (_) { unavailable(res); }
   });
   return { photo, codec, authenticateMedia, migrate: () => migratePhotoStorage(supabase) };
@@ -320,4 +352,261 @@ function renderSharePage(rows, token) {
   const images = rows.map((row,index) => `<article><p class="author">${html(row.user_name)} <time>${html(String(row.created_at || '').slice(0,10))}</time></p><button class="photo" aria-label="查看第${index+1}张照片"><img data-original="${html(row.share_media_url || '/api/photo/shared/' + token + '/' + row.id + '/media')}" src="${html((row.share_media_url || '/api/photo/shared/' + token + '/' + row.id + '/media') + '?preview=1')}" alt="${html(metadata(row).caption || '作者分享的照片')}" loading="${index ? 'lazy' : 'eager'}"></button>${metadata(row).caption ? '<p>' + html(metadata(row).caption) + '</p>' : ''}<button class="retry" hidden>图片未加载 · 点击重试</button></article>`).join('');
   return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="referrer" content="no-referrer"><title>分享的照片 · XTJ</title><style>body{margin:0;background:#f0faf7;color:#233c37;font:16px/1.6 system-ui,sans-serif}header,main,footer{max-width:960px;margin:auto;padding:20px}header{display:flex;justify-content:space-between}a{color:#247d6c}main{display:grid;gap:24px}article{background:#ffffff70;border-radius:18px;padding:18px}p{white-space:pre-wrap;overflow-wrap:anywhere}.author{margin:0 0 12px}time{margin-left:12px;color:#718680;font-size:13px}button{font:inherit;color:inherit;cursor:pointer}.photo{display:block;width:100%;border:0;padding:0;background:transparent}.photo img{display:block;max-width:100%;max-height:70vh;width:auto;height:auto;margin:auto;border-radius:12px}.retry{border:0;background:transparent}footer{color:#718680;font-size:14px}dialog{padding:0;border:0;background:transparent;max-width:100vw;max-height:100dvh}dialog::backdrop{background:#10211feb}.viewer{display:flex;align-items:center;justify-content:center;width:100vw;height:100dvh;overflow:auto}.viewer img{max-width:100%;max-height:100%;object-fit:contain}.close{position:fixed;right:20px;top:20px;border:0;background:#ffffffdf;border-radius:50%;width:44px;height:44px;font-size:24px}.viewer{touch-action:none}.viewer.is-zoomed{touch-action:auto}.viewer img.zoomed{max-width:none;max-height:none}@media(min-width:720px){main{grid-template-columns:repeat(2,minmax(0,1fr))}}</style><script src="/js/media-cache.min.js?v=hq1920-v1" defer></script><script src="/js/photo-share.min.js?v=hq1920-v1" defer></script></head><body><header><strong>XTJ · 照片分享</strong><a href="/">打开网站</a></header><main>${images || '<p>这份分享已过期，或照片已被作者移除。</p>'}</main><footer>${rows.length ? '本次分享包含' + rows.length + '张照片，更多照片需登录网站查看。' : ''}</footer><dialog><div class="viewer"><img alt="照片预览"></div><button class="close" aria-label="关闭预览">×</button></dialog></body></html>`;
 }
-module.exports = { PHOTO_BUCKET, PHOTO_COOKIE, POST_MEDIA_COOKIE, setPhotoSession, photoStoragePath, safePhotoPath, originalPhotoPath, livePhoto, canReadPhoto, canReadSharedPhoto, photoMediaUrl, photoPayload, shareCodec, protectPhotoPath, migratePhotoStorage, streamOriginal, createPhotoAccess, renderSharePage };
+// 帖子正文可能是 v2 JSON 包装，分享页只取其中的纯文本，绝不回显原始 JSON。
+function postShareText(row) {
+  const raw = String(row && row.content || '');
+  if (!raw.trim().startsWith('{')) return raw;
+  const data = metadata(row);
+  return String(data.text || data.caption || '');
+}
+// ---------- 分享页链接卡片 ----------
+// 帖子正文常常只有一条链接（音乐/网页）。直接输出裸 URL，好友点开只看到一串字符；
+// 这里在服务端取一次链接元信息，渲染成封面卡片，音乐链接再加 30 秒试听。
+const LINK_CACHE = new Map();
+const LINK_TTL = 3600 * 1000;
+const LINK_TIMEOUT = 2600;
+const LINK_MAX_BYTES = 300000;
+const POST_URL_RE = /https?:\/\/[^\s<>"'）)\]】]+/g;
+const LINK_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15';
+
+function decodeEntities(value) {
+  const named = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
+  return String(value || '').replace(/&(#\d+|#x[0-9a-f]+|[a-z]+);/gi, (all, code) => {
+    if (code[0] === '#') {
+      const n = code[1] === 'x' || code[1] === 'X' ? parseInt(code.slice(2), 16) : parseInt(code.slice(1), 10);
+      return Number.isFinite(n) && n > 0 && n < 0x110000 ? String.fromCodePoint(n) : all;
+    }
+    const hit = named[code.toLowerCase()];
+    return hit === undefined ? all : hit;
+  });
+}
+
+// 只允许公网 http(s)：帖子内容用户可控，分享页绝不能变成探测内网的跳板。
+function publicLink(raw) {
+  let url;
+  try { url = new URL(String(raw || '')); } catch (_) { return null; }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+  if (url.username || url.password) return null;
+  const host = url.hostname.toLowerCase();
+  if (!host || host.includes(':') || host.startsWith('[')) return null;
+  if (!host.includes('.')) return null;
+  if (/(^|\.)(localhost|local|internal|intranet|lan|home|corp|test)$/i.test(host)) return null;
+  const ip = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (ip) {
+    const a = Number(ip[1]), b = Number(ip[2]);
+    if (a === 0 || a === 10 || a === 127 || a >= 224) return null;
+    if (a === 169 && b === 254) return null;
+    if (a === 172 && b >= 16 && b <= 31) return null;
+    if (a === 192 && b === 168) return null;
+  }
+  return url;
+}
+
+async function readHtmlHead(url, limit = LINK_MAX_BYTES) {
+  const res = await fetch(url, {
+    redirect: 'follow',
+    signal: AbortSignal.timeout(LINK_TIMEOUT),
+    headers: { 'user-agent': LINK_UA, accept: 'text/html,application/xhtml+xml' },
+  });
+  if (!res.ok) return '';
+  if (!/text\/html|application\/xhtml/i.test(String(res.headers.get('content-type') || ''))) return '';
+  if (!res.body) return String(await res.text()).slice(0, limit);
+  const reader = res.body.getReader();
+  const chunks = [];
+  let total = 0;
+  while (total < limit) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value) { chunks.push(Buffer.from(value)); total += value.length; }
+  }
+  try { await reader.cancel(); } catch (_) { /* 已经读够，取消剩余流 */ }
+  return Buffer.concat(chunks).toString('utf8').slice(0, limit);
+}
+
+function metaContent(page, keys) {
+  for (const key of keys) {
+    const tag = page.match(new RegExp('<meta[^>]+(?:property|name)=["\']' + key + '["\'][^>]*>', 'i'));
+    if (!tag) continue;
+    const content = tag[0].match(/content=["']([\s\S]*?)["']/i);
+    if (content && content[1].trim()) return decodeEntities(content[1].trim());
+  }
+  return '';
+}
+
+async function appleMusicPreview(url) {
+  const songId = url.searchParams.get('i');
+  const pathId = (url.pathname.match(/\d{6,}/g) || []).pop();
+  const ids = [songId, pathId].filter(Boolean).filter((id, i, all) => all.indexOf(id) === i);
+  for (const id of ids) {
+    for (const country of ['cn', 'us']) {
+      try {
+        const res = await fetch('https://itunes.apple.com/lookup?id=' + encodeURIComponent(id) + '&entity=song&country=' + country, {
+          signal: AbortSignal.timeout(LINK_TIMEOUT),
+          headers: { 'user-agent': LINK_UA },
+        });
+        if (!res.ok) continue;
+        const data = await res.json();
+        const hit = (data.results || []).find(item => item && (item.trackName || item.collectionName));
+        if (!hit) continue;
+        return {
+          kind: 'music',
+          host: 'Apple Music',
+          url: url.href,
+          title: hit.trackName || hit.collectionName || '',
+          desc: [hit.artistName, hit.collectionName].filter(Boolean).join(' · '),
+          image: String(hit.artworkUrl100 || hit.artworkUrl60 || '').replace(/\/\d+x\d+bb\./, '/600x600bb.'),
+          audio: hit.previewUrl || '',
+        };
+      } catch (_) { /* 换下一个 id / 地区 */ }
+    }
+  }
+  return null;
+}
+
+async function spotifyPreview(url) {
+  const res = await fetch('https://open.spotify.com/oembed?url=' + encodeURIComponent(url.href), {
+    signal: AbortSignal.timeout(LINK_TIMEOUT),
+    headers: { 'user-agent': LINK_UA },
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  if (!data || !data.title) return null;
+  return {
+    kind: 'music',
+    host: 'Spotify',
+    url: url.href,
+    title: data.title,
+    desc: data.provider_name || 'Spotify',
+    image: data.thumbnail_url || '',
+    audio: '',
+  };
+}
+
+async function ogPreview(url) {
+  const page = await readHtmlHead(url.href);
+  if (!page) return null;
+  let title = metaContent(page, ['og:title', 'twitter:title']);
+  if (!title) {
+    const t = page.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+    title = decodeEntities(String(t ? t[1] : '').replace(/\s+/g, ' ').trim());
+  }
+  let image = metaContent(page, ['og:image', 'og:image:secure_url', 'twitter:image']);
+  if (image.startsWith('//')) image = url.protocol + image;
+  else if (image.startsWith('/')) image = url.origin + image;
+  if (!/^https?:\/\//i.test(image)) image = '';
+  if (!title && !image) return null;
+  return {
+    kind: 'link',
+    host: url.hostname.replace(/^www\./i, ''),
+    url: url.href,
+    title: title || url.hostname.replace(/^www\./i, ''),
+    desc: metaContent(page, ['og:description', 'description', 'twitter:description']),
+    image,
+    audio: '',
+  };
+}
+
+async function linkPreview(raw) {
+  const url = publicLink(raw);
+  if (!url) return null;
+  const hit = LINK_CACHE.get(url.href);
+  if (hit && Date.now() - hit.at < LINK_TTL) return hit.data;
+  let data = null;
+  try {
+    if (/(^|\.)music\.apple\.com$/i.test(url.hostname)) data = await appleMusicPreview(url);
+    else if (/(^|\.)open\.spotify\.com$/i.test(url.hostname)) data = await spotifyPreview(url);
+    if (!data) data = await ogPreview(url);
+  } catch (_) { data = null; }
+  if (LINK_CACHE.size > 400) LINK_CACHE.clear();
+  LINK_CACHE.set(url.href, { at: Date.now(), data });
+  return data;
+}
+
+function linkCardHtml(preview) {
+  if (!preview) return '';
+  const music = preview.kind === 'music';
+  const cover = preview.image ? '<img class="lc-cover" src="' + html(preview.image) + '" alt="" loading="lazy" referrerpolicy="no-referrer">' : '';
+  const meta = music
+    ? html([preview.host, preview.audio ? '点播放试听 30 秒' : '点开收听'].filter(Boolean).join(' · '))
+    : html(preview.host || '');
+  const body = '<span class="lc-body"><span class="lc-title">' + html(preview.title || '') + '</span>'
+    + (preview.desc ? '<span class="lc-desc">' + html(preview.desc) + '</span>' : '')
+    + '<span class="lc-host">' + meta + '</span></span>';
+  const card = '<a class="lcard' + (music ? ' music' : '') + '" href="' + html(preview.url) + '" target="_blank" rel="noopener noreferrer">' + cover + body + '</a>';
+  const audio = music && preview.audio
+    ? '<audio class="lc-audio" controls preload="none" src="' + html(preview.audio) + '"></audio>'
+    : '';
+  return '<section class="lblock">' + card + audio + '</section>';
+}
+
+// 把存储里的封面转成同源 1080 JPEG 预览：私有桶地址微信抓不到，webp 微信也不认。
+function sharePosterUrl(origin, value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  let path = '';
+  const stored = raw.match(/\/storage\/v1\/object\/public\/uploads\/([^?#]+)/);
+  if (stored) path = decodeURIComponent(stored[1]);
+  else if (/^\/?api\/uploads\/media\?/.test(raw)) {
+    const match = raw.match(/[?&]path=([^&#]+)/);
+    if (match) path = decodeURIComponent(match[1]);
+  }
+  if (!path || !/^(posts|posters)\//.test(path)) return '';
+  return origin + '/api/uploads/media?path=' + encodeURIComponent(path) + '&preview=1&format=jpeg';
+}
+
+// 单个帖子的公开分享页：正文 + 图片（可点开缩放）+ 音视频，游客无需登录即可查看。
+// og:* 元信息让微信在聊天里展示帖子标题与摘要，而不是一条裸链接。
+function renderPostSharePage(row, items, origin, preview = null, options = {}) {
+  const text = postShareText(row).trim();
+  const media = Array.isArray(items) ? items : [];
+  const author = String(row.user_name || 'XTJ 用户');
+  const avatarUrl = String((options && options.avatarUrl) || '');
+  // 分享卡片上的「谁」是点分享的那个人，不是发帖人。
+  // 把链接转发给朋友后，朋友看到的是「我朋友转发了一篇某某的帖子」，标题写转发者才符合直觉。
+  const sharer = String((options && options.sharer) || '').trim().slice(0, 60);
+  // 标题与摘要里去掉裸链接本身，改用链接卡片的标题/简介，微信卡片才不会显示成一串网址。
+  const plain = text.replace(POST_URL_RE, ' ').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+  const firstImage = media.find(item => /^(image|photo)$/.test(String(item.media_type || '')));
+  const isVideo = String(row.media_type || '') === 'video';
+  // 视频封面单独存在帖子内容里（不能当附件，否则帖子会被写成图片帖）。
+  // 这里已经转成同源 1080 JPEG 预览地址，微信才抓得到。
+  const videoPoster = String((options && options.poster) || '');
+  // 标题统一「某某 分享的帖子」；某某优先取分享者，拿不到分享者才退回帖子作者。
+  const title = (sharer || author) + ' 分享的帖子';
+  // 描述统一「正文 · 来自 某某 的帖子，点开即可查看」；带图片的帖子正文由图片承担，不再重复文字。
+  const descParts = [];
+  if (isVideo) descParts.push('分享了一个视频');
+  else if (plain && !firstImage) descParts.push(plain.slice(0, 110));
+  descParts.push('来自 ' + author + ' 的帖子，点开即可查看');
+  const description = descParts.join(' · ');
+  // 纯文字帖没有配图时用发布者头像，而不是站点默认封面——好友一眼能看出是谁发的。
+  // 有图帖必须给微信一张「能抓到的图」：原图常常 1-4MB、4032px，微信抓取端会直接放弃，
+  // 卡片就变成灰块。这里固定用 1080 宽 JPEG 预览（约 100KB），格式也避开 webp。
+  const shareCover = firstImage ? origin + firstImage.share_media_url + '?preview=1&format=jpeg' : videoPoster;
+  const shareImage = shareCover || (preview && preview.image) || avatarUrl || origin + '/img/share-cover-v2.jpg';
+  // 只有回退到站点默认封面时才声明 1200×1200，避免给真实图片/头像标错尺寸。
+  const coverMeta = firstImage || videoPoster || (preview && preview.image) || avatarUrl ? '' : '<meta property="og:image:width" content="1200"><meta property="og:image:height" content="1200">';
+  const card = linkCardHtml(preview);
+  const textBlock = plain ? '<p class="text">' + html(plain) + '</p>' : '';
+  const date = html(String(row.created_at || '').slice(0, 10));
+  // 正文只有一条链接时，作者信息收成一行小字，避免出现一张空白卡片。
+  const postHead = textBlock
+    ? '<section class="post-card"><p class="author">' + html(author) + '<time>' + date + '</time></p>' + textBlock + '</section>'
+    : (media.length || card
+      ? '<p class="author-line">' + html(author) + '<time>' + date + '</time></p>'
+      : '<section class="post-card"><p class="author">' + html(author) + '<time>' + date + '</time></p><p class="empty">这篇帖子暂时没有可展示的内容</p></section>');
+  const body = media.map((item, index) => {
+    const url = String(item.share_media_url || '');
+    const kind = String(item.media_type || '');
+    if (!url) return '';
+    if (/^(image|photo)$/.test(kind)) return `<article><button class="photo" aria-label="查看第${index + 1}张图片"><img data-original="${html(url)}" src="${html(url + '?preview=1')}" alt="${html(text.slice(0, 60) || '帖子图片')}" loading="${index ? 'lazy' : 'eager'}"></button><button class="retry" hidden>图片未加载 · 点击重试</button></article>`;
+    // 视频不预加载：preload=none 下，没点播放就不会向存储要一个字节。
+    // 封面用上传时截的首帧（1080 JPEG），既出图快，也避免默认黑块。
+    if (kind === 'video') return `<section class="media"><video controls playsinline preload="none"${firstImage ? ` poster="${html(origin + firstImage.share_media_url + '?preview=1&format=jpeg')}"` : (videoPoster ? ` poster="${html(videoPoster)}"` : '')} src="${html(url)}"></video></section>`;
+    if (kind === 'audio') return `<section class="media"><audio controls preload="metadata" src="${html(url)}"></audio></section>`;
+    return '';
+  }).join('');
+  const shareUrl = origin + '/share/posts/' + encodeURIComponent(row.id);
+  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="referrer" content="no-referrer"><title>${html(title)} · XTJ</title><meta name="description" content="${html(description)}"><meta property="og:type" content="article"><meta property="og:site_name" content="XTJ"><meta property="og:title" content="${html(title)}"><meta property="og:description" content="${html(description)}"><meta property="og:url" content="${html(shareUrl)}"><meta property="og:image" content="${html(shareImage)}">${coverMeta}<meta name="twitter:card" content="summary_large_image"><meta name="twitter:image" content="${html(shareImage)}"><link rel="icon" type="image/png" sizes="192x192" href="${origin}/img/icon-192.png"><link rel="apple-touch-icon" sizes="180x180" href="${origin}/img/icon-180.png"><meta name="theme-color" content="#059669"><style>body{margin:0;background:#f0faf7;color:#233c37;font:16px/1.7 system-ui,sans-serif}header,main,footer{max-width:680px;margin:auto;padding:20px}header{display:flex;justify-content:space-between;align-items:center}a{color:#247d6c;text-decoration:none}main{display:grid;gap:16px}.post-card,article,.media{background:#ffffff80;border:1px solid #ffffffb0;border-radius:18px;padding:18px;margin:0}p{white-space:pre-wrap;overflow-wrap:anywhere}.author{margin:0 0 10px;font-weight:600}.author-line{margin:0 4px;color:#4a6660;font-size:14px;font-weight:600}time{margin-left:12px;color:#718680;font-size:13px;font-weight:400}.text{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font-size:17px}.empty{color:#718680;margin:0}button{font:inherit;color:inherit;cursor:pointer}.photo{display:block;width:100%;border:0;padding:0;background:transparent}.photo img{display:block;max-width:100%;max-height:70vh;width:auto;height:auto;margin:auto;border-radius:12px}.retry{border:0;background:transparent}.media{display:flex;justify-content:center}.media video{display:block;width:auto;height:auto;max-width:100%;max-height:70vh;border-radius:12px;background:#000;object-fit:contain}.media audio{width:100%}.lblock{display:grid;gap:10px}.lcard{display:flex;gap:14px;align-items:center;padding:14px;border-radius:18px;background:#ffffffcc;border:1px solid #ffffffb0;text-decoration:none;color:inherit}.lc-cover{width:76px;height:76px;border-radius:14px;object-fit:cover;flex:0 0 auto;background:#e8f5ef}.lcard.music .lc-cover{width:96px;height:96px}.lc-body{display:flex;flex-direction:column;gap:3px;min-width:0}.lc-title{font-weight:700;font-size:16px;line-height:1.35;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}.lc-desc{color:#4a6660;font-size:14px;line-height:1.4;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}.lc-host{color:#718680;font-size:13px}.lc-audio{width:100%}.cta{display:block;text-align:center;padding:14px 18px;border-radius:14px;background:linear-gradient(135deg,#3d9a6c,#2f7d57);color:#fff !important;font-weight:700;text-decoration:none;box-shadow:0 8px 20px rgba(61,154,108,.28)}.cta:active{transform:translateY(1px)}footer{color:#718680;font-size:14px}dialog{padding:0;border:0;background:transparent;max-width:100vw;max-height:100dvh}dialog::backdrop{background:#10211feb}.viewer{display:flex;align-items:center;justify-content:center;width:100vw;height:100dvh;overflow:auto}.viewer img{max-width:100%;max-height:100%;object-fit:contain}.close{position:fixed;right:20px;top:20px;border:0;background:#ffffffdf;border-radius:50%;width:44px;height:44px;font-size:24px}.viewer{touch-action:none}.viewer.is-zoomed{touch-action:auto}.viewer img.zoomed{max-width:none;max-height:none}</style><script src="/js/media-cache.min.js?v=hq1920-v1" defer></script><script src="/js/photo-share.min.js?v=hq1920-v1" defer></script></head><body><header><strong>XTJ · 帖子分享</strong><a href="/">打开网站</a></header><main>${postHead}${card}${body}<a class="cta" href="${html(origin)}">打开 XTJ 看更多</a></main><footer>这篇帖子来自 XTJ，打开网站可以看到更多精彩内容。</footer><dialog><div class="viewer"><img alt="图片预览"></div><button class="close" aria-label="关闭预览">×</button></dialog></body></html>`;
+}
+module.exports = { PHOTO_BUCKET, PHOTO_COOKIE, POST_MEDIA_COOKIE, setPhotoSession, photoStoragePath, safePhotoPath, originalPhotoPath, livePhoto, canReadPhoto, canReadSharedPhoto, photoMediaUrl, photoPayload, shareCodec, protectPhotoPath, migratePhotoStorage, streamOriginal, createPhotoAccess, renderSharePage, renderPostSharePage, linkPreview, publicLink };

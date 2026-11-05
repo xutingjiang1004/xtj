@@ -71,6 +71,106 @@
   function discard(entry) {
     entry.discarded = true;
     if (!entry.retained) URL.revokeObjectURL(entry.url);
+    if (entry.posterUrl) { try { URL.revokeObjectURL(entry.posterUrl); } catch (_) {} entry.posterUrl = ''; }
+    if (entry.thumbUrl) { try { URL.revokeObjectURL(entry.thumbUrl); } catch (_) {} entry.thumbUrl = ''; }
+  }
+  // 选视频时先截一帧当封面：发帖预览、信息流、微信分享卡片都靠它，
+  // 否则浏览器只给一块黑底 + 播放键，分享出去也只能退回发布者头像。
+  function capturePoster(entry, done) {
+    var video = document.createElement('video');
+    var settled = false, drawing = false, tries = 0;
+    var timer = setTimeout(function () { finish(null); }, 25000);
+    function finish(blob) {
+      if (settled) return; settled = true;
+      clearTimeout(timer);
+      video.removeAttribute('src'); try { video.load(); } catch (_) {}
+      done(blob || null);
+    }
+    function draw() {
+      if (drawing || settled) return;
+      var w = video.videoWidth, h = video.videoHeight;
+      // readyState < 2 时 drawImage 画出来是一张纯黑图，iOS 上尤其常见。宁可多等一会儿。
+      if (!w || !h || video.readyState < 2) { retry(); return; }
+      drawing = true;
+      // 720 档在 3x 屏上被放大到 1380 物理像素，封面看着发虚；提到 1080 才够。
+      var scale = Math.min(1, 1080 / Math.max(w, h));
+      var canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(w * scale));
+      canvas.height = Math.max(1, Math.round(h * scale));
+      try { canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height); } catch (_) { return finish(null); }
+      canvas.toBlob(function (blob) { finish(blob); }, 'image/jpeg', 0.85);
+    }
+    function retry() {
+      if (settled || drawing) return;
+      // iPhone 上解码慢，8 次 × 250ms 只有 2 秒就放弃了，poster_url 直接为空。
+      // 放宽到 50 次 × 400ms（20 秒），配合下面 25 秒的总超时。
+      if (tries++ >= 50) { finish(null); return; }
+      setTimeout(draw, 400);
+    }
+    function grabFrame() {
+      if (video.requestVideoFrameCallback) video.requestVideoFrameCallback(function () { draw(); });
+      setTimeout(draw, 120);
+    }
+    video.muted = true;
+    video.defaultMuted = true;
+    video.setAttribute('muted', '');
+    video.playsInline = true;
+    video.setAttribute('playsinline', '');
+    video.setAttribute('webkit-playsinline', '');
+    video.preload = 'auto';
+    video.addEventListener('loadedmetadata', function () {
+      var target = Math.min(0.1, (video.duration || 1) / 10);
+      if (target > 0) { try { video.currentTime = target; } catch (_) {} }
+      // iOS Safari 既不预加载也不解码，只有真的 play() 一下才会渲染出画面。
+      // muted + playsinline 下允许自动播放，截到帧立刻暂停，用户看不到闪动。
+      try {
+        var played = video.play();
+        if (played && played.then) {
+          played.then(function () {
+            grabFrame();
+            setTimeout(function () { try { video.pause(); } catch (_) {} }, 400);
+          }, function () { retry(); grabFrame(); });
+        } else {
+          setTimeout(function () { grabFrame(); try { video.pause(); } catch (_) {} }, 200);
+        }
+      } catch (_) { retry(); grabFrame(); }
+    });
+    // canplay 是 iPhone 上最可靠的信号：即使 play() 被系统拒绝或迟迟不 resolve，
+    // 只要这一帧解出来了就能画。之前只听 loadeddata/seeked，漏掉这条就永远截不到。
+    video.addEventListener('canplay', function () { if (!settled) grabFrame(); });
+    video.addEventListener('loadeddata', function () { setTimeout(draw, 80); });
+    video.addEventListener('seeked', function () { setTimeout(draw, 80); });
+    video.addEventListener('error', function () { finish(null); });
+    video.src = entry.url;
+    try { video.load(); } catch (_) {}
+  }
+  // 缩略图：信息流里一格只有 100–200 CSS px，却要拉 1MB 以上的原图，
+  // 手机首屏和存储出站流量都被它吃光。选片时在本地压一张 480px 的 JPEG，
+  // 原图照常上传（点开看原图），缩略图另存一份给列表用。
+  var THUMB_MAX_EDGE = 480;
+  function captureThumb(entry, done) {
+    var img = new Image();
+    var settled = false;
+    function finish(blob) {
+      if (settled) return; settled = true;
+      try { img.src = ''; } catch (_) {}
+      done(blob || null);
+    }
+    img.onload = function () {
+      try {
+        var w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+        if (!w || !h) return finish(null);
+        var scale = Math.min(1, THUMB_MAX_EDGE / Math.max(w, h));
+        var canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(w * scale));
+        canvas.height = Math.max(1, Math.round(h * scale));
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        if (canvas.toBlob) canvas.toBlob(function (blob) { finish(blob); }, 'image/jpeg', 0.72);
+        else finish(null);
+      } catch (_) { finish(null); }
+    };
+    img.onerror = function () { finish(null); };
+    try { img.src = entry.url; } catch (_) { finish(null); }
   }
   function retainImage(file) {
     var entry = entries.find(function(e) { return e.file === file; });
@@ -102,7 +202,9 @@
       var isVideo = fileType.startsWith('video/'), isAudio = fileType.startsWith('audio/');
       var media = document.createElement(isVideo ? 'video' : (isAudio ? 'audio' : 'img'));
       media.src = entry.url;
-      if (isVideo) { media.muted = true; media.playsInline = true; media.preload = 'metadata'; }
+      // 预览用的是本地 blob，不消耗网络，直接让浏览器解出画面；
+      // 以前用 metadata，iOS 下永远停在黑底。
+      if (isVideo) { media.muted = true; media.playsInline = true; media.setAttribute('playsinline', ''); media.preload = 'auto'; if (entry.posterUrl) media.poster = entry.posterUrl; else node.classList.add('is-video-pending'); }
       if (isAudio) { media.controls = true; media.preload = 'metadata'; node.classList.add('is-audio'); }
       if (!isVideo && !isAudio) { media.alt = '待发布图片 ' + (index + 1); media.decoding = 'sync'; }
       var remove = document.createElement('button'); remove.type = 'button'; remove.className = 'post-media-remove'; remove.textContent = '×';
@@ -125,10 +227,39 @@
     var created = [];
     try { added.forEach(function(file) { created.push({ file: file, url: URL.createObjectURL(file), retained: 0, discarded: false }); }); }
     catch (error) { created.forEach(function(e) { URL.revokeObjectURL(e.url); }); toast('无法预览附件，请重新选择'); return false; }
-    entries = entries.concat(created); selectionVersion++; render(); return true;
+    entries = entries.concat(created); selectionVersion++; render();
+    created.forEach(function (entry) {
+      var type = window.XtjPostMedia && window.XtjPostMedia.effectiveType ? window.XtjPostMedia.effectiveType(entry.file) : String(entry.file.type || '');
+      if (type.startsWith('image/')) {
+        captureThumb(entry, function (blob) {
+          if (!blob || entry.discarded) return;
+          try {
+            entry.thumbFile = new File([blob], 'thumb-' + Date.now() + '.jpg', { type: 'image/jpeg' });
+            entry.thumbUrl = URL.createObjectURL(blob);
+          } catch (_) { return; }
+        });
+        return;
+      }
+      if (!type.startsWith('video/')) return;
+      capturePoster(entry, function (blob) {
+        if (!blob || entry.discarded) return;
+        try {
+          entry.posterFile = new File([blob], 'poster-' + Date.now() + '.jpg', { type: 'image/jpeg' });
+          entry.posterUrl = URL.createObjectURL(blob);
+        } catch (_) { return; }
+        var thumb = entry.node && entry.node.querySelector('video');
+        if (thumb) { thumb.poster = entry.posterUrl; entry.node.classList.remove('is-video-pending'); return; }
+        render();
+      });
+    });
+    return true;
   }
   window.XtjPostComposerMedia = { getFiles: function() { finishDrag(); return entries.map(function(e) { return e.file; }); }, clear: clear, append: append, reorder: reorder,
     getVersion: function() { return selectionVersion; }, retainImage: retainImage,
+    // 视频封面（第一帧）在选片时就截好，发布时作为图片附件一起上传。
+    posterFile: function(file) { var entry = entries.find(function(e) { return e.file === file; }); return entry && entry.posterFile ? entry.posterFile : null; },
+    // 图片缩略图（480px JPEG）：发布时另存一份给信息流列表用，原图仍照常上传。
+    thumbFile: function(file) { var entry = entries.find(function(e) { return e.file === file; }); return entry && entry.thumbFile ? entry.thumbFile : null; },
     imageDimensions: function(file) {
       var entry = entries.find(function(e) { return e.file === file; });
       var img = entry && entry.node && entry.node.querySelector('img');

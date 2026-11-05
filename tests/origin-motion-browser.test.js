@@ -5,7 +5,7 @@ const { postBrowserFixture } = require('./helpers/post-browser-fixture');
 // Samples one element each animation frame so a window that flashes, jumps or starts from the wrong place is caught.
 const recorder = (sel, boxSel) => ({ sel, boxSel });
 function install(page, overlaySel, boxSel) {
-  return page.evaluate(([o, b]) => { window.__rec = []; (function tick() { const el = document.querySelector(o), box = document.querySelector(b); if (el && box) { const r = box.getBoundingClientRect(); window.__rec.push({ cx: r.left + r.width / 2, cy: r.top + r.height / 2, w: r.width, a: +getComputedStyle(box).opacity * +getComputedStyle(el).opacity, shown: el.classList.contains('active') }); } requestAnimationFrame(tick); })(); }, [overlaySel, boxSel]);
+  return page.evaluate(([o, b]) => { window.__rec = []; (function tick() { const el = document.querySelector(o), box = document.querySelector(b); if (el && box) { const r = box.getBoundingClientRect(), cover = [...box.children].find(c => c.style.zIndex === '2147483000'); window.__rec.push({ cx: r.left + r.width / 2, cy: r.top + r.height / 2, w: r.width, a: +getComputedStyle(box).opacity * +getComputedStyle(el).opacity, cover: cover ? +getComputedStyle(cover).opacity : null, shown: el.classList.contains('active') }); } requestAnimationFrame(tick); })(); }, [overlaySel, boxSel]);
 }
 test('a window opens out of the tapped avatar and closes back into it without a flash', { timeout: 90000 }, async () => {
   const s = await h.open({ settleMs: 2500, viewport: { width: 1180, height: 820 }, extraRoutes: async (url) => {
@@ -31,6 +31,9 @@ test('a window opens out of the tapped avatar and closes back into it without a 
       if (close[i].shown && close[i - 1].shown) assert.ok(close[i].a <= close[i - 1].a + 0.001, 'closing never brightens again (no flash): ' + close.map(f => f.a.toFixed(2)).join(' '));
     }
     assert.ok(seenHidden);
+    const coverOpacities = close.filter(f => f.shown && f.cover != null).map(f => f.cover);
+    assert.ok(coverOpacities.length > 0, 'the close cover was sampled');
+    assert.ok(coverOpacities.every(v => v >= .999), 'the white close cover never fades in halfway through closing (no white flash): ' + coverOpacities.join(' '));
     const lastShown = close.filter(f => f.shown).pop();
     assert.ok(Math.hypot(lastShown.cx - t.x, lastShown.cy - t.y) < 60, 'the window ends back at the avatar');
     assert.deepEqual(s.errors, []);

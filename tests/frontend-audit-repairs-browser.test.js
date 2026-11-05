@@ -47,7 +47,7 @@ test('audit repair: closed confirmation stays out of keyboard navigation and ope
  await p.keyboard.press('Escape');await p.waitForFunction(()=>document.getElementById('ppConfirmOverlay').inert&&document.activeElement.id==='pubBtn');assert.equal(await p.evaluate(()=>confirmExecuted),0);
 }));
 for(const viewport of [{width:1440,height:900},{width:390,height:844}])test('audit repair: opening filters after scrolling brings the fields into the actual '+viewport.width+'px reading viewport',{timeout:45000},()=>use(async f=>{
- const p=f.page;await p.getByRole('button',{name:'查看全部 6 条评论',exact:true}).scrollIntoViewIfNeeded();await p.getByRole('button',{name:'搜索与筛选帖子',exact:true}).click();
+ const p=f.page;await p.locator('#feed .post').last().scrollIntoViewIfNeeded();await p.getByRole('button',{name:'搜索与筛选帖子',exact:true}).click();
  await p.waitForFunction(()=>{const input=document.getElementById('postSearchInput'),r=input.getBoundingClientRect(),nav=document.querySelector('.posts-nav').getBoundingClientRect();return r.top>=nav.bottom&&r.bottom<=innerHeight;});
  await p.getByRole('button',{name:'搜索与筛选帖子',exact:true}).focus();await p.keyboard.press('Enter');await p.keyboard.press('Enter');await p.waitForFunction(()=>document.activeElement.id==='postSearchInput');
  const filter=p.locator('#postFilterPanel');assert.equal(await filter.isVisible(),true);assert.equal(await p.locator('#filterToggleBtn').getAttribute('aria-expanded'),'true');

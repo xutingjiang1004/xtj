@@ -432,8 +432,11 @@
                 const pw = document.getElementById("regPwInp").value;
                 const email = document.getElementById("regEmailInp").value.trim();
                 if (!name) { showToast("请输入昵称"); return; }
-                if (name.length < 2 || name.length > 20) { showToast("昵称长度2-20个字符"); return; }
-                if (!/^[\u4e00-\u9fa5a-zA-Z0-9_]+$/.test(name)) { showToast("昵称仅支持中英文、数字和下划线"); return; }
+                // 按码点计数：一个 Emoji 在 UTF-16 里占两个码元，用 length 会把 10 个表情算成 20。
+                var nickChars = Array.from(name).length;
+                if (nickChars < 2 || nickChars > 20) { showToast("昵称长度2-20个字符"); return; }
+                // 中文 / 字母 / 数字 / 下划线 / Emoji（含代理对、变体选择符、ZWJ 组合与符号类表情）
+                if (!/^(?:[\u4e00-\u9fa5A-Za-z0-9_]|[\uD800-\uDBFF][\uDC00-\uDFFF]|[\u2600-\u27BF\u2B00-\u2BFF\u2190-\u21FF\u00A9\u00AE\u2122\uFE0F\u200D\u20E3])+$/.test(name)) { showToast("昵称仅支持中英文、数字、下划线和 Emoji"); return; }
                 if (!pw) { showToast("请输入密码", "error"); if (_regPwInp) _regPwInp.focus(); return; }
                 if (pw.length < 6) { showToast("密码至少6位", "error"); if (_regPwInp) _regPwInp.focus(); return; }
                 if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showToast("邮箱格式不正确"); return; }

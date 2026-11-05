@@ -11,7 +11,12 @@ function fixture(){
  const app=express();app.use('/api/profile/posts',createAuthorPosts({express,supabase:db,optionalAuth:(req,res,next)=>{req.userName=req.headers['x-user']||'';next()},looksLikeSystemTelemetry:content=>content==='telemetry'}));return{app,posts,reads,attachmentReads,setFail(v){fail=v}};
 }
 test('author pages apply verified viewer privacy before a single batched attachment read',async()=>{
- const f=fixture();for(const actor of ['', 'bob','admin']){const r=await request(f.app).get('/api/profile/posts/alice').set('x-user',actor).expect(200);assert.equal(r.body.posts.length,5);assert.ok(r.body.posts.every(p=>p.visibility==='public'));assert.equal(r.body.posts[0].media_items.length,15);assert.ok(r.body.posts[0].media_items.every(p=>!('storage_path'in p)));assert.equal(r.headers['cache-control'],'no-store');}
+ const f=fixture();for(const actor of ['', 'bob','admin']){const r=await request(f.app).get('/api/profile/posts/alice').set('x-user',actor).expect(200);
+  // 未登录访客只拿到最近 3 条（guest_limited），登录用户看到全部 5 条公开动态。
+  assert.equal(r.body.posts.length,actor?5:3);
+  assert.equal(!!r.body.guest_limited,!actor);
+  if(!actor)assert.equal(r.body.has_more,false);
+  assert.ok(r.body.posts.every(p=>p.visibility==='public'));assert.equal(r.body.posts[0].media_items.length,15);assert.ok(r.body.posts[0].media_items.every(p=>!('storage_path'in p)));assert.equal(r.headers['cache-control'],'no-store');}
  const own=await request(f.app).get('/api/profile/posts/alice').set('x-user','alice').expect(200);assert.equal(own.body.posts.length,6);assert.equal(f.attachmentReads.length,4);assert.equal(f.attachmentReads.at(-1).length,6);assert.ok(f.reads.every(q=>!q.fields.includes('actor_key')));
 });
 test('equal-time author pagination preserves microseconds without losing or repeating posts',async()=>{

@@ -20,6 +20,9 @@ function createAuthorPosts({ express, supabase, optionalAuth, rateLimit, looksLi
     const limit = Math.min(40, Math.max(1, parseInt(req.query.limit, 10) || 20));
     // Match /api/post/detail: personal private posts are visible only to their owner.
     const canSeePrivate = req.userName === author;
+    // 未登录访客只能看到最近 3 条：给一个「看看主页长什么样」的预览，剩下的引导登录。
+    // 作者本人、以及任何已登录用户不受影响。
+    const GUEST_PREVIEW_COUNT = 3;
     const normal = 'media_type.is.null,media_type.eq."",' + NORMAL_POST_MEDIA_TYPES.map(type => 'media_type.eq.' + type).join(',');
     let cursor = at ? { at, id } : null, exhausted = false;
     const visible = [];
@@ -27,9 +30,13 @@ function createAuthorPosts({ express, supabase, optionalAuth, rateLimit, looksLi
       const settings = await readSettings(author);
       const profile = require('./profile-settings').publicProfile(settings);
       if (!canSeePrivate && (settings.timeline_visible === false || (!req.userName && settings.guests_allowed === false))) return res.json({ok:true,author,profile:{timeline_visible:false},posts:[],has_more:false,next_cursor:null,restricted:true});
+      // 作者开放了「允许他人查看」+「允许未登录访客查看」：访客仍只拿到 3 条，
+      // 页面上用一条分隔线提示登录后查看全部。
+      const guestPreview = !canSeePrivate && !req.userName;
+      const pageLimit = guestPreview ? Math.min(limit, GUEST_PREVIEW_COUNT) : limit;
       // Fill bounded pages past legacy telemetry. Preserve PostgreSQL's fractional
       // seconds in the cursor; Date.toISOString() would lose microseconds.
-      for (let scan = 0; scan < 8 && visible.length <= limit && !exhausted; scan++) {
+      for (let scan = 0; scan < 8 && visible.length <= pageLimit && !exhausted; scan++) {
         const before = cursor ? 'created_at.lt.' + cursor.at + ',and(created_at.eq.' + cursor.at + ',id.lt.' + cursor.id + ')' : '';
         let query = supabase.from('posts').select(FIELDS).eq('user_name', author).not('is_deleted', 'is', true);
         const filters = ['or(' + normal + ')'];
@@ -38,23 +45,23 @@ function createAuthorPosts({ express, supabase, optionalAuth, rateLimit, looksLi
         const rangeDays = { '3d':3, '1m':30, '6m':180 }[settings.timeline_range];
         if (!canSeePrivate && rangeDays) filters.push('created_at.gte.' + new Date(Date.now()-rangeDays*86400000).toISOString());
         query = query.or('and(' + filters.join(',') + ')');
-        const result = await query.order('created_at', { ascending: false }).order('id', { ascending: false }).limit(limit + 1);
+        const result = await query.order('created_at', { ascending: false }).order('id', { ascending: false }).limit(pageLimit + 1);
         if (!result || result.error) throw Error('author_posts_unavailable');
         const rows = result.data || [];
-        exhausted = rows.length < limit + 1;
+        exhausted = rows.length < pageLimit + 1;
         for (const post of rows) {
           cursor = { at: post.created_at, id: post.id };
           if (isNormalPost(post) && post.user_name === author && (canSeePrivate || !post.visibility || post.visibility === 'public') && !looksLikeSystemTelemetry(post.content)) visible.push(post);
-          if (visible.length > limit) break;
+          if (visible.length > pageLimit) break;
         }
       }
-      const hasMore = visible.length > limit || !exhausted;
-      const page = visible.slice(0, limit);
+      const hasMore = guestPreview ? false : (visible.length > pageLimit || !exhausted);
+      const page = visible.slice(0, pageLimit);
       const last = page[page.length - 1];
       // One attachment query for the whole visible page, never one per post.
       const posts = await loadPostAttachments(supabase, page);
-      res.json({ ok: true, author, profile, posts, has_more: hasMore,
-        next_cursor: hasMore ? (visible.length > limit && last ? { at: last.created_at, id: last.id } : cursor) : null });
+      res.json({ ok: true, author, profile, posts, has_more: hasMore, guest_limited: guestPreview,
+        next_cursor: hasMore ? (visible.length > pageLimit && last ? { at: last.created_at, id: last.id } : cursor) : null });
     } catch (_) {
       res.status(503).json({ ok: false, retryable: true, error: '动态暂时无法加载，请重试' });
     }
