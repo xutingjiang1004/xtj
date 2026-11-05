@@ -47,6 +47,8 @@ test('deleting a conversation invalidates an older history page and keeps pagina
   await p.evaluate(() => {
     const previous = fetch;
     window.repairHistoryCount = 0;
+    // The list loaded at start-up is reused for 20s; move past it so this click really fetches page one.
+    const realNow = Date.now.bind(Date); Date.now = () => realNow() + 60000;
     window.confirm = () => true; window.xtjConfirm = () => Promise.resolve(true);
     window.fetch = (url, options = {}) => {
       if (!new URL(url, location.href).pathname.endsWith('/chat/conversations')) return previous(url, options);
