@@ -17114,7 +17114,7 @@ app.delete('/admin/user/:userName', verifyToken, rateLimit(60000, 5), async (req
     async function deleteIdsInBatches(table, column, ids, marker) {
       var deletedCount = 0;
       for (var batchStart = 0; batchStart < ids.length; batchStart += 100) {
-        var query = supabase.from(table).delete().in(column, ids.slice(batchStart, batchStart + 100));
+        var query = supabase.from(table).delete({ count: 'exact' }).in(column, ids.slice(batchStart, batchStart + 100));
         if (marker) query = query.eq('media_type', marker);
         var deletion = await query;
         if (!deletion || deletion.error) return { ok: false, count: deletedCount, error: deletion && deletion.error };
@@ -17140,10 +17140,10 @@ app.delete('/admin/user/:userName', verifyToken, rateLimit(60000, 5), async (req
       if (!deletedDm.ok) return res.status(500).json({ error: '删除失败：删除私信失败', partial: partialDeleted });
       partialDeleted.dm_messages = deletedDm.count;
     }
-    var delLikesRes = await supabase.from('likes').delete().eq('user_name', userName);
+    var delLikesRes = await supabase.from('likes').delete({ count: 'exact' }).eq('user_name', userName);
     if (delLikesRes.error) return res.status(500).json({ error: '删除失败：删除点赞失败', partial: partialDeleted });
     partialDeleted.likes += delLikesRes.count || 0;
-    var delCommentsRes = await supabase.from('comments').delete().eq('user_name', userName);
+    var delCommentsRes = await supabase.from('comments').delete({ count: 'exact' }).eq('user_name', userName);
     if (delCommentsRes.error) return res.status(500).json({ error: '删除失败：删除评论失败', partial: partialDeleted });
     partialDeleted.comments += delCommentsRes.count || 0;
 
@@ -17152,9 +17152,9 @@ app.delete('/admin/user/:userName', verifyToken, rateLimit(60000, 5), async (req
       { key: 'comment_requests', query: supabase.rpc('xtj_forget_comment_requests', { p_owner: userName }) },
       { key: 'post_media_uploads', query: deleteQueuedAccountPostMediaUploads(supabase, userName, registeredPostPaths) },
       { key: 'ai_search_credit_claims', query: supabase.from('ai_search_credit_claims').delete().eq('user_name', String(userName).trim().toLowerCase()) },
-      { key: 'ai_search_results', query: supabase.from('ai_search_results').delete().eq('owner_name', userName) },
-      { key: 'ai_drafts', query: supabase.from('ai_drafts').delete().eq('owner_name', userName) },
-      { key: 'ai_action_confirmations', query: supabase.from('ai_action_confirmations').delete().eq('owner_name', userName) }
+      { key: 'ai_search_results', query: supabase.from('ai_search_results').delete({ count: 'exact' }).eq('owner_name', userName) },
+      { key: 'ai_drafts', query: supabase.from('ai_drafts').delete({ count: 'exact' }).eq('owner_name', userName) },
+      { key: 'ai_action_confirmations', query: supabase.from('ai_action_confirmations').delete({ count: 'exact' }).eq('owner_name', userName) }
     ];
     for (var accountCleanupIndex = 0; accountCleanupIndex < accountCleanupQueries.length; accountCleanupIndex++) {
       var accountCleanupItem = accountCleanupQueries[accountCleanupIndex];
@@ -17168,7 +17168,7 @@ app.delete('/admin/user/:userName', verifyToken, rateLimit(60000, 5), async (req
     // 清理所有已发现的 DM 媒体注册记录，包括对方发送到该用户 DM 的媒体。
     var dmRegistryIds = dmRegistryRows.map(function(row) { return row.id; }).filter(Boolean);
     if (dmRegistryIds.length) {
-      var delLinkedDmMediaRes = await supabase.from('dm_media_uploads').delete().in('id', dmRegistryIds);
+      var delLinkedDmMediaRes = await supabase.from('dm_media_uploads').delete({ count: 'exact' }).in('id', dmRegistryIds);
       if (!delLinkedDmMediaRes || delLinkedDmMediaRes.error) {
         return res.status(500).json({ error: '删除部分完成：清理关联私信媒体注册失败', code: 'delete_user_partial', partial: partialDeleted });
       }
