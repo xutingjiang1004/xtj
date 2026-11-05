@@ -304,7 +304,7 @@ function createPhotoAccess({ app, supabase, supabaseUrl, secret, authenticateUse
     try {
       if (!UUID.test(req.params.id) || !/^(?:0|[1-9]\d?)$/.test(req.params.position)) return missing(res);
       const row = await readPostMedia(req.params.id);
-      if (!row || row.is_deleted === true || !['','text','image','video','audio','photo','album',null].includes(row.media_type) || !normalPostAllowed(row) || (row.visibility && row.visibility !== 'public' && row.user_name !== req.userName && req.userName !== adminName)) return missing(res);
+      if (!row || row.is_deleted === true || !['','text','image','video','audio','photo','album',null].includes(row.media_type) || !normalPostAllowed(row) || (row.visibility && row.visibility !== 'public' && row.user_name !== req.userName)) return missing(res);
       const posts = await readAttachments(row);
       const item = (posts[0].media_items || [])[Number(req.params.position)];
       // ★ 2026-11-02：直传 OSS 的媒体不再经过本服务转发，鉴权通过后 302 过去，

@@ -5113,7 +5113,7 @@ async function aiSiteSearch(source, query, userName, limit, isAdmin, searchPlan)
     if (postRes.error) { console.error('[aiSiteSearch] posts query error:', postRes.error); return { results: [], error: { code: 'posts_query_failed', message: '帖子搜索暂时不可用' } }; }
     var candidates = (postRes.data || []).filter(function(p) {
       if (!isNormalPost(p)) return false;
-      if (p.visibility === 'private' && !isAdmin && p.user_name !== userName) return false;
+      if (p.visibility === 'private' && p.user_name !== userName) return false;
       return true;
     });
         // client-side filter: check extracted text content (not just raw JSON)
@@ -7661,7 +7661,7 @@ app.get('/api/comments/ai-reply-status', rateLimit(60000, 30), authenticateUser,
     var postRes = await supabase.from('posts').select('id, visibility, user_name').eq('id', commentRes.data.post_id).maybeSingle();
     if (postRes.error) return res.status(503).json({ error: 'post lookup temporarily unavailable', code: 'post_query_failed', retryable: true });
     if (!postRes.data) return res.status(404).json({ error: 'post not found' });
-    if (postRes.data.visibility === 'private' && postRes.data.user_name !== req.userName && req.userName !== ADMIN_USERNAME) {
+    if (postRes.data.visibility === 'private' && postRes.data.user_name !== req.userName) {
       return res.status(403).json({ error: 'access denied' });
     }
     // 查询任务状态，再从真实子评论解析 reply_comment_id 用于一致性检查
@@ -14450,7 +14450,7 @@ app.post('/api/post/comment', authenticateUser, rateLimit(60000, 30), async (req
     // 只允许对普通可见帖子评论：私密帖仅作者本人可评论，系统内部 marker（DM/登录事件等）不可评论
     var targetPost = postResult.data;
     if (!isNormalPost(targetPost)) return res.status(422).json({ error: '该帖子不存在、已删除或不可评论', code: 'not_normal_post' });
-    if (targetPost.visibility === 'private' && targetPost.user_name !== req.userName && req.userName !== ADMIN_USERNAME) {
+    if (targetPost.visibility === 'private' && targetPost.user_name !== req.userName) {
       return res.status(403).json({ error: '无法评论私密帖子', code: 'forbidden' });
     }
 
@@ -14599,7 +14599,7 @@ app.post('/api/post/like', authenticateUser, rateLimit(60000, 60), async (req, r
     if (postError) return res.status(500).json({ error: sanitizeError(postError), code: 'post_lookup_failed' });
     if (!post) return res.status(404).json({ error: 'Post not found', code: 'not_found' });
     if (!isNormalPost(post)) return res.status(404).json({ error: 'Post not found', code: 'not_found' });
-    if (post.visibility === 'private' && post.user_name !== req.userName && req.userName !== ADMIN_USERNAME) {
+    if (post.visibility === 'private' && post.user_name !== req.userName) {
       return res.status(404).json({ error: 'Post not found', code: 'not_found' });
     }
 
@@ -14775,7 +14775,6 @@ app.get('/api/feed', optionalAuth, rateLimit(60000, 60), async (req, res) => {
         next_offset: requestedOffset, next_cursor: null, endReached: true, guest_limited: true, login_required: true, total_post_count: null });
     }
 
-    var isAdmin = req.userName === ADMIN_USERNAME;
     var isLoggedIn = !!req.userName;
 
     // Kept as a documented marker inventory; the normal media type allowlist below is authoritative.
@@ -14799,10 +14798,9 @@ app.get('/api/feed', optionalAuth, rateLimit(60000, 60), async (req, res) => {
         ? supabase.from('posts').select(selectFields, { count: 'estimated' })
         : supabase.from('posts').select(selectFields);
       query = query.or('media_type.is.null,media_type.eq.\"\",media_type.in.(text,image,video,audio,photo,album)');
-      if (!isAdmin) {
-        if (isLoggedIn) query = query.or('visibility.eq.public,user_name.eq.' + pgrstQuote(req.userName));
-        else query = query.eq('visibility', 'public');
-      }
+      // 管理员和其他用户一样：只能看到公开帖和自己的帖子，看不到别人的私密帖。
+      if (isLoggedIn) query = query.or('visibility.eq.public,user_name.eq.' + pgrstQuote(req.userName));
+      else query = query.eq('visibility', 'public');
       query = query.or('is_deleted.is.null,is_deleted.eq.false');
       if (after) {
         query = query.or('created_at.lt.' + after.created_at + ',and(created_at.eq.' + after.created_at + ',id.lt.' + after.id + ')');
@@ -14818,7 +14816,7 @@ app.get('/api/feed', optionalAuth, rateLimit(60000, 60), async (req, res) => {
     if (req.query.q) {
       var searchPage = await require('./feed-search').readFeedSearch(supabase,req.query,req.userName,selectFields);
       posts=searchPage.posts.filter(function(post){return isNormalPost(post)&&!looksLikeSystemTelemetry(post.content)&&
-        (post.visibility==='public'||post.user_name===(req.userName||'')||isAdmin);});
+        (post.visibility==='public'||post.user_name===(req.userName||''));});
       scannedCount=searchPage.posts.length;nextCursor=searchPage.nextCursor;endReached=searchPage.endReached;
       res.set('Cache-Control','no-store');
     } else if (!cursorMode) {
@@ -27222,7 +27220,7 @@ async function loadPostToolPost(postId, userName) {
   if (found.error) throw new Error('post_lookup_failed');
   var post = found.data;
   if (!post || post.is_deleted === true || String(post.media_type || '').indexOf('__') === 0) throw new Error('post_not_found');
-  if (post.visibility === 'private' && post.user_name !== userName && userName !== ADMIN_USERNAME) throw new Error('post_not_visible');
+  if (post.visibility === 'private' && post.user_name !== userName) throw new Error('post_not_visible');
   return post;
 }
 

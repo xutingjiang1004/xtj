@@ -26,6 +26,17 @@ test('real Feed route batches only public/own attachments and fails explicitly o
  const own=await request(f.app).get('/api/feed').set('x-user','alice').expect(200);assert.deepEqual(own.body.posts.map(p=>p.id),[id(1),id(2)]);assert.deepEqual(f.reads.at(-1),[id(1),id(2)]);
  f.setFailAttachments(true);const unavailable=await request(f.app).get('/api/feed').expect(503);assert.equal(unavailable.body.retryable,true);await request(f.app).get('/api/post/detail/'+id(1)).expect(503);
 });
+test('the administrator sees only public posts and their own: no one else\'s private post in Feed, Detail or its relations',async()=>{
+ const f=fixture();
+ // id(2) is alice's private post. The administrator account (xxz) is another user as far as reading goes.
+ const feed=await request(f.app).get('/api/feed').set('x-user','xxz').expect(200);
+ assert.deepEqual(feed.body.posts.map(p=>p.id),[id(1)],'Feed hides alice\'s private post from the administrator');
+ assert.deepEqual(f.reads.at(-1),[id(1)],'and never reads its attachments');
+ await request(f.app).get('/api/post/detail/'+id(2)).set('x-user','xxz').expect(404);
+ await request(f.app).get('/api/post/detail/'+id(2)+'/relations/likes').set('x-user','xxz').expect(404);
+ const own=await request(f.app).get('/api/feed').set('x-user','alice').expect(200);
+ assert.deepEqual(own.body.posts.map(p=>p.id),[id(1),id(2)],'the author still sees the private post');
+});
 test('Detail bounds the first response and paginates complete replies past 500 with independent totals',async()=>{
  const f=fixture();const res=await request(f.app).get('/api/post/detail/'+id(1)).set('x-user','alice').expect(200);
  assert.equal(res.body.comments.length,30);assert.equal(res.body.post.views,7);assert.equal(res.body.post.like_count,55);assert.equal(res.body.post.liked_by_me,true);assert.equal(res.body.post.comment_count,501);
