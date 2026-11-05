@@ -28490,10 +28490,15 @@ async function checkUnreadDmForAdmin() {
     if (!ADMIN_DM_NOTIFY_EMAIL) return;
     var cutoff = new Date(Date.now() - DM_UNREAD_NOTIFY_TIMEOUT).toISOString();
     // 查询未读且未通知的 DM（发给 xxz）
+    // 只取「未读且还没提醒过」的行：已读（views>0，read_at 与 views 同时写入）和已提醒的消息
+    // 永远留在表里，若不在 SQL 里排除，按时间升序的前 50 条很快全是它们，
+    // 之后的新未读消息再也轮不到，提醒邮件就永久停发。
     var { data, error } = await supabase.from('posts')
       .select('id, user_name, content, created_at')
       .eq('media_type', DM_MARKER)
       .eq('media_url', ADMIN_DM_NOTIFY_USER)
+      .eq('views', 0)
+      .not('content', 'like', '%dm_notified_at%')
       .lt('created_at', cutoff)
       .order('created_at', { ascending: true })
       .limit(50);
@@ -28548,7 +28553,10 @@ async function checkUnreadDmForAdmin() {
           try { existingPayload = JSON.parse(rowData.content || '{}'); } catch (_) {}
         }
         existingPayload.dm_notified_at = new Date().toISOString();
-        await supabase.from('posts').update({ content: JSON.stringify(existingPayload) }).eq('id', msg.id);
+        // 比较并交换：发信期间若收件人已读，read_at 已写进 content，不能用发信前的旧快照覆盖回去。
+        var notifiedWrite = supabase.from('posts').update({ content: JSON.stringify(existingPayload) }).eq('id', msg.id);
+        if (rowData) notifiedWrite = notifiedWrite.eq('content', rowData.content);
+        await notifiedWrite;
       } catch (e) { /* 静默失败 */ }
     }
     // 清理通知集合（超过1000条时清理旧条目）
