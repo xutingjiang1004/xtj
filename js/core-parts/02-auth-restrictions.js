@@ -437,6 +437,8 @@
                 if (nickChars < 2 || nickChars > 20) { showToast("昵称长度2-20个字符"); return; }
                 // 中文 / 字母 / 数字 / 下划线 / Emoji（含代理对、变体选择符、ZWJ 组合与符号类表情）
                 if (!/^(?:[\u4e00-\u9fa5A-Za-z0-9_]|[\uD800-\uDBFF][\uDC00-\uDFFF]|[\u2600-\u27BF\u2B00-\u2BFF\u2190-\u21FF\u00A9\u00AE\u2122\uFE0F\u200D\u20E3])+$/.test(name)) { showToast("昵称仅支持中英文、数字、下划线和 Emoji"); return; }
+                // 至少要有一个看得见的字符：只由 ZWJ / 变体选择符 / 键帽符 / 标签字符组成的昵称在界面上是空白。
+                if (!/[\u4e00-\u9fa5A-Za-z0-9_\u2600-\u27BF\u2B00-\u2BFF\u2190-\u21FF\u00A9\u00AE\u2122]|[\uD800-\uDB3F\uDB41-\uDBFF][\uDC00-\uDFFF]/.test(name)) { showToast("昵称需包含至少一个可见字符"); return; }
                 if (!pw) { showToast("请输入密码", "error"); if (_regPwInp) _regPwInp.focus(); return; }
                 if (pw.length < 6) { showToast("密码至少6位", "error"); if (_regPwInp) _regPwInp.focus(); return; }
                 if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showToast("邮箱格式不正确"); return; }

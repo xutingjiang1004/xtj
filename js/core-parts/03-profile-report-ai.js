@@ -130,40 +130,18 @@
                         }
                     }
                     
-                    // 隐私收紧：__user_info__ 仅允许本人读取（RLS 035 已强制），
-                    // 非本人不再发起 anon 直读，直接显示占位。
-                    var userInfoRes = null;
-                    if (userName === currentUser) {
-                        userInfoRes = await sb.from("posts")
-                            .select("content")
-                            .eq("user_name", userName)
-                            .eq("media_type", "__user_info__")
-                            .order("created_at", { ascending: false })
-                            .limit(1);
-                    }
-                    
+                    // 隐私收紧：__user_info__ 匿名密钥读不到（RLS 035/055），本人的资料只经服务端
+                    // /api/user/profile 取；非本人不发请求，直接显示占位。
+                    var ownSnapshot = null;
+                    if (userName === currentUser) ownSnapshot = await loadCurrentUserInfoSnapshot(userName);
+
                     // S7 修复：同上，用户已切换则丢弃本次结果
                     if (_seq !== upcRequestSeq || upcTargetUser !== userName) return;
-                    
-                    // ★ 审计修复：userInfoRes 仅在本人分支被赋值（上方 RLS 收紧后
-                    //   非本人不再直读），查看他人资料时保持 null —— 旧代码
-                    //   `userInfoRes.data` 必然 TypeError 落入 catch，界面恒显示
-                    //   "最近登录：加载失败"，与注释"非本人直接显示占位"意图相悖。
-                    //   补空值守卫后非本人走 118 行的 '-' 占位。
-                    if (userInfoRes && userInfoRes.data && userInfoRes.data.length > 0) {
-                        try {
-                            var info = JSON.parse(userInfoRes.data[0].content);
-                            if (info.last_login) {
-                                upcLoginEl.textContent = '最近登录：' + window.safeParseDate(info.last_login).toLocaleString();
-                            } else {
-                                upcLoginEl.textContent = '最近登录：-';
-                            }
-                        } catch(e) {
-                            upcLoginEl.textContent = '最近登录：-';
-                        }
-                    } else {
-                        upcLoginEl.textContent = '最近登录：-';
-                    }
+
+                    var lastLoginTime = ownSnapshot && ownSnapshot.last_login ? window.safeParseDate(ownSnapshot.last_login) : null;
+                    upcLoginEl.textContent = lastLoginTime && Number.isFinite(lastLoginTime.getTime())
+                        ? '最近登录：' + lastLoginTime.toLocaleString()
+                        : '最近登录：-';
                 } catch(e) {
                     if (_seq !== upcRequestSeq || upcTargetUser !== userName) return;
                     upcLoginEl.textContent = '最近登录：加载失败';
@@ -1022,33 +1000,12 @@ function renderProfileActivityList(kind) {
                 var list = document.getElementById('reportHistoryList') || document.getElementById('reportRecordsList');
                 if (!list) return;
                 try {
-                    if (!window.sb) {
-                        list.innerHTML = '<div class="report-records-empty">数据库连接未初始化</div>';
-                        return;
-                    }
-                    var res = await sb.from('posts')
-                        .select('id, content, created_at')
-                        .eq('user_name', window.currentUser)
-                        .eq('media_type', REPORT_MARKER)
-                        .order('created_at', { ascending: false })
-                        .limit(160);
+                    // 匿名密钥读不到 __report__ 行（RLS 只放行公开帖子类型），必须走服务端按登录身份查询。
+                    var reportsResponse = await window.xtjProtectedFetch('/api/my-reports', { authOwner: recordsOwner, authEpoch: recordsEpoch });
+                    var reportsBody = await reportsResponse.json().catch(function() { return {}; });
                     if (!sameAccount()) return;
-                    if (res && res.error) throw res.error;
-                    var records = (res.data || []).map(function(p) {
-                        var c = {};
-                        try { c = JSON.parse(p.content || '{}'); } catch(e) {}
-                        return {
-                            id: p.id,
-                            created_at: p.created_at,
-                            target_type: c.target_type || 'post',
-                            target_id: c.target_id || '',
-                            target_user: c.target_user || '',
-                            report_reason: c.report_reason || '',
-                            status: c.status || 'pending',
-                            admin_response: c.admin_response || null,
-                            reviewed_at: c.reviewed_at || null
-                        };
-                    });
+                    if (!reportsResponse.ok || !reportsBody || !Array.isArray(reportsBody.data)) throw new Error((reportsBody && reportsBody.error) || '举报记录加载失败');
+                    var records = reportsBody.data;
                     if (!records.length) {
                         list.innerHTML = '<div class="report-records-empty">你还没有举报记录。</div>';
                         return;
@@ -2079,6 +2036,7 @@ function renderProfileActivityList(kind) {
                     } else {
                         __xtjDeferredWarmupQueued = false;
                         stopRestrictionPolling();
+                        userRestrictions = { is_banned: false, is_blacklisted: false, is_muted: false };
                         hideBlockedScreen();
                         hideMuteIndicator();
                     }
@@ -2116,6 +2074,9 @@ function renderProfileActivityList(kind) {
                     if (reportBtnWrapper) reportBtnWrapper.style.display = "none";
                     
                     stopRestrictionPolling();
+                    // 退出后复位限制状态：否则同一账号再次登录时限制集合没变，checkUserRestrictions
+                    // 不会重画禁言条/发布框锁定。
+                    userRestrictions = { is_banned: false, is_blacklisted: false, is_muted: false };
                     hideBlockedScreen();
                     hideMuteIndicator();
                     
