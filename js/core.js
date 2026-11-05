@@ -7093,7 +7093,8 @@ function renderProfileActivityList(kind) {
                 var INNER_VISUAL = 'img, .avatar, .avatar-wrap, canvas, video, svg, .post-media-cell, .upc-avatar';
                 var ANIMATED = { userProfileModal: 1, postDetailModal: 1, profileActivityModal: 1, profileDetailModal: 1, statModal: 1 };
                 // 窗口里和「被点的图」对应的那个元素：图飞到它那里。
-                var HERO_TARGET = { userProfileModal: '#upcAvatar img, #upcAvatar', postDetailModal: '.post-detail-media img, .post-detail-media-card img' };
+                // 每项是按顺序尝试的选择器：先找图片本身，找不到才退回外框（外框带 3px 边框，图要落在边框里面）。
+                var HERO_TARGET = { userProfileModal: ['#upcAvatar img', '#upcAvatar'], postDetailModal: ['.post-detail-media img', '.post-detail-media-card img'] };
                 var lastTap = { spec: null, at: 0 }, origins = Object.create(null);
                 var EASE = 'cubic-bezier(.3,.2,.1,1)';
                 var TIMING = { big: { open: 430, close: 320 }, small: { open: 430, close: 320 } };
@@ -7164,14 +7165,18 @@ function renderProfileActivityList(kind) {
                 function inView(r) {
                     return r && r.width >= 4 && r.height >= 4 && r.bottom > 0 && r.top < window.innerHeight && r.right > 0 && r.left < window.innerWidth;
                 }
-                function rectOfSpec(spec) {
+                function elementOfSpec(spec) {
                     if (!spec) return null;
                     var el = spec.el;
                     if (!el || !el.isConnected) {
                         el = null;
                         if (spec.key) { try { var holder = document.querySelector(spec.key.selector); el = holder && (spec.key.sub ? holder.querySelector(spec.key.sub) : holder); } catch (_) { el = null; } }
-                        if (!el) return null;
                     }
+                    return el || null;
+                }
+                function rectOfSpec(spec) {
+                    var el = elementOfSpec(spec);
+                    if (!el) return null;
                     var r = el.getBoundingClientRect();
                     var rect = { left: r.left + spec.dx, top: r.top + spec.dy, width: spec.w, height: spec.h };
                     rect.right = rect.left + rect.width; rect.bottom = rect.top + rect.height;
@@ -7181,6 +7186,18 @@ function renderProfileActivityList(kind) {
                     if (!el || !el.isConnected) return null;
                     var r = el.getBoundingClientRect();
                     return inView(r) ? r : null;
+                }
+                // 外框带边框和内边距时，图落在里面那块：个人动态的头像外框有 3px 边框，图是 66px 而不是 72px。
+                function contentRect(el) {
+                    var r = el.getBoundingClientRect();
+                    if (el.tagName === 'IMG') return r;
+                    try {
+                        var cs = getComputedStyle(el);
+                        var l = (parseFloat(cs.borderLeftWidth) || 0) + (parseFloat(cs.paddingLeft) || 0), t = (parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.paddingTop) || 0);
+                        var rr = (parseFloat(cs.borderRightWidth) || 0) + (parseFloat(cs.paddingRight) || 0), b = (parseFloat(cs.borderBottomWidth) || 0) + (parseFloat(cs.paddingBottom) || 0);
+                        if (!(l || t || rr || b)) return r;
+                        return { left: r.left + l, top: r.top + t, width: r.width - l - rr, height: r.height - t - b, right: r.right - rr, bottom: r.bottom - b };
+                    } catch (_) { return r; }
                 }
                 function afterPaint(fn) {
                     var ran = false;
@@ -7251,24 +7268,34 @@ function renderProfileActivityList(kind) {
                             }
                         }
                         // 飞行的图。
-                        var ghost = null, hiddenTarget = null, flight = false;
+                        var ghost = null, hiddenTarget = null, hiddenOrigin = null, originVisibility = '', flight = false, ghostRadius = null;
                         var hero = o.hero;
                         if (hero && hero.src) {
-                            var target = hero.target && hero.target.isConnected ? hero.target.getBoundingClientRect() : null;
+                            var target = hero.target && hero.target.isConnected ? contentRect(hero.target) : null;
                             var s = o.heroRect || rect;
                             ghost = document.createElement('img');
                             ghost.alt = ''; ghost.setAttribute('aria-hidden', 'true'); ghost.decoding = 'sync';
                             ghost.src = hero.src;
                             var same = target && target.width > 8 && target.height > 8 && Math.abs(Math.log((s.width / s.height) / (target.width / target.height))) < .22;
                             var gr = same ? target : s;
-                            ghost.style.cssText = 'position:fixed;left:' + gr.left + 'px;top:' + gr.top + 'px;width:' + gr.width + 'px;height:' + gr.height + 'px;margin:0;padding:0;max-width:none;max-height:none;pointer-events:none;z-index:2147483001;transform-origin:0 0;will-change:transform,opacity;object-fit:' + (hero.fit || 'cover') + ';border-radius:' + (same && hero.targetRadius != null ? hero.targetRadius : (hero.radius || 0)) + 'px';
+                            var layoutRadius = same && hero.targetRadius != null ? hero.targetRadius : (hero.radius || 0);
+                            ghost.style.cssText = 'position:fixed;left:' + gr.left + 'px;top:' + gr.top + 'px;width:' + gr.width + 'px;height:' + gr.height + 'px;margin:0;padding:0;max-width:none;max-height:none;pointer-events:none;z-index:2147483001;transform-origin:0 0;will-change:transform,opacity;object-fit:' + (hero.fit || 'cover') + ';border-radius:' + layoutRadius + 'px';
                             document.body.appendChild(ghost); nodes.push(ghost);
                             if (same) {
                                 flight = true;
                                 hiddenTarget = hero.target;
                                 hiddenTarget.style.visibility = 'hidden';
                                 restores.push(function() { hiddenTarget.style.visibility = ''; });
-                                handle.ghostFar = 'translate3d(' + (s.left - target.left).toFixed(2) + 'px,' + (s.top - target.top).toFixed(2) + 'px,0) scale(' + (s.width / target.width).toFixed(4) + ',' + (s.height / target.height).toFixed(4) + ')';
+                                var kx = s.width / target.width, ky = s.height / target.height;
+                                handle.ghostFar = 'translate3d(' + (s.left - target.left).toFixed(2) + 'px,' + (s.top - target.top).toFixed(2) + 'px,0) scale(' + kx.toFixed(4) + ',' + ky.toFixed(4) + ')';
+                                // 缩放会把圆角一起缩放：小的一头要显示成「被点的头像」自己的圆角，所以版面圆角在小的一头放大 1/k 倍。
+                                if (hero.radius != null && hero.targetRadius != null) ghostRadius = { far: Math.min(Math.min(target.width, target.height) / 2, hero.radius / Math.max(.05, Math.min(kx, ky))), near: hero.targetRadius };
+                                // 被点的那个头像/缩略图：飞行期间不画（否则和飞行的图叠成两张，落点处出现缺口和闪烁），落地的同一帧再还给它。
+                                if (hero.origin && hero.origin.isConnected && hero.origin !== hero.target) {
+                                    hiddenOrigin = hero.origin; originVisibility = hiddenOrigin.style.visibility;
+                                    hiddenOrigin.style.visibility = 'hidden';
+                                    restores.push(function() { hiddenOrigin.style.visibility = originVisibility; });
+                                }
                             }
                         }
                         var open = kind === 'open';
@@ -7279,7 +7306,10 @@ function renderProfileActivityList(kind) {
                         if (cover) add(cover, open ? [{ opacity: 1 }, { opacity: 1, offset: .14 }, { opacity: 0, offset: .62 }, { opacity: 0 }] : [{ opacity: 0 }, { opacity: 1, offset: .4 }, { opacity: 1 }], { duration: D, easing: 'linear' });
                         if (scrim) add(scrim, open ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 1 }, { opacity: 0 }], { duration: D * (open ? .7 : .9), easing: 'ease-out' });
                         if (ghost) {
-                            if (flight) add(ghost, open ? [{ transform: handle.ghostFar }, { transform: 'none' }] : [{ transform: 'none' }, { transform: handle.ghostFar }], { duration: D, easing: EASE });
+                            if (flight) {
+                                add(ghost, open ? [{ transform: handle.ghostFar }, { transform: 'none' }] : [{ transform: 'none' }, { transform: handle.ghostFar }], { duration: D, easing: EASE });
+                                if (ghostRadius) add(ghost, open ? [{ borderRadius: ghostRadius.far + 'px' }, { borderRadius: ghostRadius.near + 'px' }] : [{ borderRadius: ghostRadius.near + 'px' }, { borderRadius: ghostRadius.far + 'px' }], { duration: D, easing: EASE });
+                            }
                             else add(ghost, open ? [{ opacity: 1 }, { opacity: 1, offset: .12 }, { opacity: 0, offset: .55 }, { opacity: 0 }] : [{ opacity: 0 }, { opacity: 0, offset: .5 }, { opacity: 1 }], { duration: D, easing: 'linear' });
                         }
                         // 初始姿态先停在第 0 帧，等它真的画出来之后再开始走。
@@ -7318,6 +7348,7 @@ function renderProfileActivityList(kind) {
                         if (ghost && ghost.parentNode) ghost.parentNode.removeChild(ghost);
                         if (scrim && scrim.parentNode) scrim.parentNode.removeChild(scrim);
                         if (hiddenTarget) hiddenTarget.style.visibility = '';
+                        if (hiddenOrigin) hiddenOrigin.style.visibility = originVisibility;
                         if (o.hide) { try { o.hide(); } catch (_) {} }
                         cleanup(140);
                     }
@@ -7346,16 +7377,33 @@ function renderProfileActivityList(kind) {
                     open: function(box, o) { return run('open', box, o); },
                     close: function(box, o) { return run('close', box, o); },
                     abort: function(box) { var h = runs && runs.get(box); if (h) h.abort(); },
+                    // 这个窗口的打开/关闭是不是由转场接管了（core-animations 的 GSAP 淡入淡出据此让路）。
+                    claims: function(id, phase) {
+                        var el = document.getElementById(id);
+                        if (!el || !ANIMATED[id] || !motionOk()) return false;
+                        var box = el.querySelector('.modal-box');
+                        if (!box || !box.animate) return false;
+                        if (phase === 'open') { var h = runs && runs.get(box); return !!(h && !h.ended); }
+                        if (el.__xtjClosing) return true;
+                        return !!(el.classList.contains('active') && rectOfSpec(origins[id]));
+                    },
                     running: function(box) { var h = runs && runs.get(box); return !!(h && !h.ended); }
                 };
                 window.xtjOrigin = window.xtjMorph;
 
                 function heroFor(id, spec, box) {
-                    var image = spec && spec.image, selector = HERO_TARGET[id];
+                    var image = spec && spec.image, selectors = [].concat(HERO_TARGET[id] || []);
                     if (!image || !box) return null;
-                    var target = selector ? box.querySelector(selector) : null;
-                    var tr = target ? target.getBoundingClientRect() : null;
-                    return { src: image.src, fit: image.fit, radius: image.radius, target: target, targetRadius: target ? px(getComputedStyle(target).borderTopLeftRadius, Math.min(tr.width, tr.height)) : null };
+                    var target = null;
+                    for (var i = 0; i < selectors.length && !target; i++) { try { target = box.querySelector(selectors[i]); } catch (_) { target = null; } }
+                    var radius = null;
+                    if (target) {
+                        var tr = contentRect(target), tcs = getComputedStyle(target), side = Math.min(tr.width, tr.height);
+                        radius = px(tcs.borderTopLeftRadius, side);
+                        // 退回到外框时，里面那块的圆角比外框小一个边框宽度。
+                        if (target.tagName !== 'IMG') radius = Math.max(0, radius - (parseFloat(tcs.borderTopWidth) || 0));
+                    }
+                    return { src: image.src, fit: image.fit, radius: image.radius, target: target, targetRadius: radius, origin: elementOfSpec(spec) };
                 }
 
                 // ----- modals -----
