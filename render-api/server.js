@@ -29,6 +29,7 @@ const {
   validateDmStoragePath,
   validateDmMediaKind,
   validateDmUploadOwnership,
+  dmTextActorKey,
   MEDIA_KINDS: ALLOWED_KINDS,
   dmMediaQuotaRemainingBytes,
   tryConsumeDmMediaQuota,
@@ -16087,6 +16088,7 @@ app.post('/api/dm/upload/abort', authenticateUser, rateLimit(60000, 60), async (
   }
 });
 
+var dmTextSendInflight = new Set();
 app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res) => {
   try {
     var banCheck = userBanError(req);
@@ -16172,6 +16174,23 @@ app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res
     var mediaPayload = null;
     var mediaClaim = null;
     var registryRow = null;
+    // 纯文字消息的幂等：客户端重发（响应丢失/超时）带同一个 client_message_id，
+    // 命中已落库的那条就直接返回它，而不是再插一条重复消息。
+    var textIdempotencyKey = '';
+    if (!storagePath) {
+      textIdempotencyKey = dmTextActorKey(sender, targetUser, req.body && req.body.client_message_id);
+      if (textIdempotencyKey) {
+        if (dmTextSendInflight.has(textIdempotencyKey)) {
+          return res.status(409).json({ error: '这条消息正在发送，请稍候', code: 'dm_send_in_progress', retryable: true });
+        }
+        var priorText = await findDmMessageByActorKey(sender, textIdempotencyKey, targetUser);
+        if (priorText.error) return res.status(503).json({ error: '消息发送状态暂时无法确认，请稍后重试', code: 'dm_send_lookup_retry', retryable: true });
+        if (priorText.data) return res.json({ ok: true, message: priorText.data, idempotent: true });
+        actorKey = textIdempotencyKey;
+        dmTextSendInflight.add(textIdempotencyKey);
+        res.on('close', function() { dmTextSendInflight.delete(textIdempotencyKey); });
+      }
+    }
     if (storagePath) {
       if (storagePath.indexOf('..') >= 0 || storagePath.indexOf('\\') >= 0) {
         return res.status(400).json({ error: 'Invalid media path', code: 'invalid_media_path' });
@@ -16377,6 +16396,12 @@ app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res
 
     if (insertErr || !inserted || !inserted.id) {
       console.error('[API] dm send insert error:', insertErr);
+      if (textIdempotencyKey) {
+        // 抛出的传输错误不能说明有没有提交：按确定性 actor_key 对账，已提交就当成功。
+        var committedText = await findDmMessageByActorKey(sender, textIdempotencyKey, targetUser);
+        if (committedText.error) return res.status(503).json({ error: '消息保存结果未确认，请稍后重试', code: 'DM_COMMIT_UNKNOWN', retryable: true });
+        if (committedText.data) return res.json({ ok: true, message: committedText.data, idempotent: true });
+      }
       if (storagePath) {
         var committedAfterError = await findDmMessageByActorKey(sender, actorKey, targetUser);
         if (committedAfterError.error) {
