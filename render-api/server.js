@@ -4537,6 +4537,15 @@ function validateDurationHours(value) {
   return { value: Math.floor(raw) };
 }
 
+// 封禁/禁言/黑名单记录是否仍然有效：is_active 为真且未到期（expires_at 为空表示永久）。
+// 过期记录要等管理员加载 /admin/data 才会被异步清除，重新处置时不能把它们当作有效记录而报 409。
+function moderationRecordIsLive(row) {
+  if (!row || !row.is_active) return false;
+  if (!row.expires_at) return true;
+  var expires = new Date(row.expires_at).getTime();
+  return !Number.isFinite(expires) || expires > Date.now();
+}
+
 // ===================== 中间件 ======================
 function isAllowedWebOrigin(origin) {
   if (!origin) return true;
@@ -16690,9 +16699,9 @@ app.post('/admin/ban', verifyToken, rateLimit(60000, 30), async (req, res) => {
     expiresAt = new Date(Date.now() + durationHoursVal * 3600000).toISOString();
   }
   
-  const { data: existing } = await supabase.from('bans').select('id, is_active').eq('user_name', userNameVal).order('banned_at', { ascending: false }).limit(1);
+  const { data: existing } = await supabase.from('bans').select('id, is_active, expires_at').eq('user_name', userNameVal).order('banned_at', { ascending: false }).limit(1);
   if (existing && existing.length) {
-    const activeBan = existing.find(b => b.is_active);
+    const activeBan = existing.find(moderationRecordIsLive);
     if (activeBan) return res.status(409).json({ error: '该用户已被拉黑封禁' });
     
     const { error } = await supabase.from('bans').update({
@@ -16777,8 +16786,8 @@ app.post('/admin/mute', verifyToken, rateLimit(60000, 30), async (req, res) => {
   if (reasonVal && reasonVal.error) return res.status(400).json({ error: reasonVal.error });
   if (isProtectedAdminTarget(userNameVal)) return res.status(403).json({ error: 'Operation not allowed for admin user' });
   
-  const { data: existingMutes } = await supabase.from('mutes').select('id').eq('user_name', userNameVal).eq('is_active', true).limit(1);
-  if (existingMutes && existingMutes.length) return res.status(409).json({ error: '该用户已被禁言' });
+  const { data: existingMutes } = await supabase.from('mutes').select('id, is_active, expires_at').eq('user_name', userNameVal).eq('is_active', true);
+  if (existingMutes && existingMutes.some(moderationRecordIsLive)) return res.status(409).json({ error: '该用户已被禁言' });
   
   let expiresAt = null;
   if (durationHoursVal > 0) {
@@ -16843,9 +16852,9 @@ app.post('/admin/blacklist', verifyToken, rateLimit(60000, 30), async (req, res)
     expiresAt = new Date(Date.now() + durationHoursVal * 3600000).toISOString();
   }
   
-  const { data: existing } = await supabase.from('blacklist').select('id, is_active').eq('user_name', userNameVal);
+  const { data: existing } = await supabase.from('blacklist').select('id, is_active, expires_at').eq('user_name', userNameVal);
   if (existing && existing.length) {
-    const activeEntry = existing.find(e => e.is_active);
+    const activeEntry = existing.find(moderationRecordIsLive);
     if (activeEntry) return res.status(409).json({ error: '该用户已在黑名单中' });
     
     const { error } = await supabase.from('blacklist').update({
