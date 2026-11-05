@@ -3056,9 +3056,10 @@ async function executeToolCallInner(toolCall, context) {
                 '，超过单文件 ' + toolHelpers.formatBytes(ZIP_MAX_ENTRY_UNCOMPRESSED) + ' 上限，拒绝读取'
             };
           }
-          var rzText = await rzZip.files[rzTarget].async('string');
-          rzText = String(rzText || '');
-          var rzTrunc = rzText.length > 12000;
+          // 声明的大小可以被伪造：只流式读取前 256KB（展示只需要 12000 字符），读够即停。
+          var rzPrefix = await toolHelpers.readZipEntryText(rzZip.files[rzTarget], 256 * 1024);
+          var rzText = String(rzPrefix.text || '');
+          var rzTrunc = rzPrefix.truncated || rzText.length > 12000;
           if (rzTrunc) rzText = rzText.slice(0, 12000) + '\n...(内容过长已截断)';
           return {
             tool_name: name,
