@@ -97,3 +97,26 @@ test('a profile list that arrives while the window is still opening is drawn aft
     assert.deepEqual(f.errors, []);
   } finally { await f.close(); }
 });
+
+test('a window opened over another one is interactive and the one underneath is inert; closing it hands interactivity back', { timeout: 60000 }, async () => {
+  const f = await profileFixture(0);
+  try {
+    const p = f.page;
+    await avatar(p).press('Enter'); await p.waitForSelector('#authorPostsList .author-post-row'); await settled(p); await p.waitForTimeout(300);
+    await p.locator('.author-post-entry').nth(1).click();
+    await p.waitForFunction(() => document.querySelectorAll('#postDetailBody .post-media-cell').length === 15);
+    await p.waitForFunction(() => { const b = document.querySelector('#postDetailModal .modal-box, #postDetailModal > div'); return !window.xtjMorph.running(b) && !window.__xtjMorphLanding; }, null, { timeout: 5000 });
+    await p.waitForTimeout(300);
+    const both = await p.evaluate(() => ({ detailInert: document.getElementById('postDetailModal').inert, profileInert: document.getElementById('userProfileModal').inert, focus: document.getElementById('postDetailModal').contains(document.activeElement) }));
+    assert.deepEqual(both, { detailInert: false, profileInert: true, focus: true }, 'the top window is interactive, the one under it is not');
+    await p.evaluate(() => closeModal('postDetailModal'));
+    await p.waitForFunction(() => !document.getElementById('postDetailModal').classList.contains('active'));
+    await p.waitForTimeout(500);
+    const back = await p.evaluate(() => ({ detailInert: document.getElementById('postDetailModal').inert, profileInert: document.getElementById('userProfileModal').inert }));
+    assert.deepEqual(back, { detailInert: true, profileInert: false }, 'the profile is interactive again once the detail is gone');
+    await p.locator('.author-post-entry').first().click();
+    await p.waitForFunction(() => document.querySelectorAll('#postDetailBody .post-media-cell').length === 3);
+    await p.locator('#postDetailBody .like-btn').click({ timeout: 8000 });
+    assert.deepEqual(f.errors, []);
+  } finally { await f.close(); }
+});

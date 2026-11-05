@@ -24178,8 +24178,16 @@ function renderProfileActivityList(kind) {
                 });
             }
             function applyBackground(next) {
-                background.forEach(function(wasInert, node) { if (!next.has(node)) node.inert = wasInert; });
-                next.forEach(function(wasInert, node) { if (!background.has(node) && !node.inert) node.inert = true; });
+                background.forEach(function(wasInert, node) {
+                    if (next.has(node)) return;
+                    // Surfaces and dock panels get their state from the loops in sync(); putting back the value recorded earlier
+                    // would make an open window inert again when it was the background of another one.
+                    if (surfaces.has(node) || (node.classList && node.classList.contains('dock-panel'))) return;
+                    if (node.inert !== wasInert) node.inert = wasInert;
+                });
+                // An open surface that is only background now (a window under another window) must be inert again even though
+                // the surface loop has just made it interactive.
+                next.forEach(function(wasInert, node) { if (!node.inert) node.inert = true; });
                 background = next;
             }
             function sync() {
