@@ -12,9 +12,7 @@
     <meta name="theme-color" content="#eef7f3" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#0b1311" media="(prefers-color-scheme: dark)" />
     <link rel="icon" type="image/svg+xml" href="icon.svg" />
-    <link rel="icon" type="image/png" sizes="192x192" href="img/icon-192.png" />
-    <link rel="apple-touch-icon" sizes="180x180" href="img/icon-180.png" />
-    <meta name="theme-color" content="#059669" />
+    <link rel="apple-touch-icon" href="icon.svg" />
     <link rel="preconnect" href="https://ithowxqignlhkwaykglt.supabase.co" />
     <link rel="dns-prefetch" href="https://ithowxqignlhkwaykglt.supabase.co" />
     <script>
@@ -91,7 +89,7 @@
          DCL 因此推迟到 4s 量级。preload 只提前「下载」，不改变执行顺序
          （defer 仍按文档顺序执行），构建脚本会同步刷新 ?v= 指纹。 -->
     <link rel="preload" as="script" href="js/vendor/supabase.min.js?v=e8c548fa1b" />
-    <link rel="preload" as="script" href="js/core.min.js?v=e1a994bbfb" />
+    <link rel="preload" as="script" href="js/core.min.js?v=7d8ada6403" />
     <!-- 小猫 AI 模块按需加载，但实测它会被首屏图片请求挤在连接队列里几十秒，
          用户点开只看到「正在加载 AI 模块」且无法返回。这里在第一波就把它取下来，
          执行时机仍由模块加载器决定（不会提前执行）。 -->
@@ -115,7 +113,7 @@
     <meta name="xtj-module-photo-data" content="js/photo-wall/data.min.js?v=92621d5881">
     <meta name="xtj-module-photo-render" content="js/photo-wall/render.min.js?v=5fd1382d80">
     <meta name="xtj-module-photo-main" content="js/photo-wall/photo-wall.min.js?v=af904af583">
-    <meta name="xtj-module-core-animations" content="js/core-animations.min.js?v=5cd42c663e">
+    <meta name="xtj-module-core-animations" content="js/core-animations.min.js?v=81eba41a86">
     <meta name="xtj-module-features" content="js/features.min.js?v=93266150b7">
     <meta name="xtj-module-ui-effects" content="js/ui-effects.min.js?v=91dbf623d2">
 
@@ -1033,24 +1031,6 @@
         </div>
     </div>
 
-    <!-- 浏览 / 点赞用户统计面板：帖子里点「浏览 N」「点赞 N」打开，左栏浏览用户、右栏点赞用户 -->
-    <div class="modal-overlay" id="postStatsModal" role="dialog" aria-modal="true" aria-labelledby="postStatsTitle" tabindex="-1" aria-hidden="true" onclick="if(event.target===this)closeModal('postStatsModal')">
-        <div class="modal-box post-stats-panel" onclick="event.stopPropagation()">
-            <h2 id="postStatsTitle" class="sr-only">浏览与点赞用户</h2>
-            <button type="button" class="post-stats-close" aria-label="关闭浏览与点赞用户" onclick="closeModal('postStatsModal')">✕</button>
-            <div class="post-stats-columns">
-                <section class="post-stats-col" aria-labelledby="postStatsViewsHead">
-                    <h3 class="post-stats-head" id="postStatsViewsHead">浏览用户 <span id="postStatsViewsCount">0</span></h3>
-                    <ul class="post-stats-list" id="postStatsViewsList"></ul>
-                </section>
-                <section class="post-stats-col" aria-labelledby="postStatsLikesHead">
-                    <h3 class="post-stats-head" id="postStatsLikesHead">点赞用户 <span id="postStatsLikesCount">0</span></h3>
-                    <ul class="post-stats-list" id="postStatsLikesList"></ul>
-                </section>
-            </div>
-        </div>
-    </div>
-
     <!-- 个人资料详情模态框 -->
     <div class="modal-overlay" id="profileDetailModal" onclick="if(event.target===this)closeModal('profileDetailModal')">
         <div class="modal-box glass profile-detail-modal" onclick="event.stopPropagation()">
@@ -1209,19 +1189,12 @@
         // 防御性 fallback: 保证 inline onclick 引用的核心函数永远存在
         // core.js 加载并正确定义后会覆盖这些, 这里只是兜底防止 ReferenceError
         (function() {
-            function revealModal(el) {
-                if (!el) return;
-                // FIX UI-01: 登录/注册弹窗静态带 inert，冷启动窗口期只加 .active 会
-                // 让弹窗「看得见却点不动」；core.js 到达后真实实现因 active 早退不会补做。
-                el.removeAttribute('inert');
-                el.setAttribute('aria-hidden', 'false');
-                el.classList.add('active');
-            }
             function showModalById(id) {
                 var el = document.getElementById(id);
-                if (el) revealModal(el);
+                if (el) el.classList.add('active');
                 else document.addEventListener('DOMContentLoaded', function() {
-                    revealModal(document.getElementById(id));
+                    var el2 = document.getElementById(id);
+                    if (el2) el2.classList.add('active');
                 });
             }
             window.openAuthModal = window.openAuthModal || function(mode) {
@@ -1292,7 +1265,7 @@
     <script defer src="js/core-utils.min.js?v=a376d5219e"></script>
     <script defer src="js/photo-wall/story.min.js?v=167ce053d3"></script>
     <script defer src="js/voice-transcription.min.js?v=6247e4303f"></script>
-    <script defer src="js/core.min.js?v=e1a994bbfb"></script>
+    <script defer src="js/core.min.js?v=7d8ada6403"></script>
     <script defer src="js/login-device.min.js?v=7f402fc787"></script>
     <script defer src="js/theme-toggle.min.js?v=f67dfa81a9"></script>
     <script defer src="js/desktop-shell.min.js?v=8420dc4713"></script>

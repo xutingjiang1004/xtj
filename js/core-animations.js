@@ -63,6 +63,13 @@
     '.comments'
   ].join(',');
 
+  // 窗口已经由「共享元素转场」（xtjMorph，04-posts-interactions）接管时，GSAP 不能再在同一个窗口上叠一层淡入/淡出：
+  // 它会先把窗口淡掉、再在转场开始的瞬间把窗口恢复成不透明（关闭时闪一下）、还把窗口位置偏移 12px 之后再去量起点终点，
+  // 头像因此对不准；打开时则是 GSAP 与转场同时改同一个窗口的 transform / opacity，每帧多出主线程工作而掉帧。
+  function morphOwns(id, phase) {
+    try { return !!(window.xtjMorph && typeof window.xtjMorph.claims === 'function' && window.xtjMorph.claims(id, phase)); } catch (_) { return false; }
+  }
+
   // 捕获既有实现（若此前模块已定义），再统一包装；调用时经引用惰性解析，避免加载顺序问题
   if (!window.__xtjOrigOpenModal && typeof window.openModal === 'function') window.__xtjOrigOpenModal = window.openModal;
   window.openModal = function (id) {
@@ -78,6 +85,7 @@
     var orig = window.__xtjOrigOpenModal;
     if (typeof orig === 'function') orig(id);
     else { overlay.style.display = ''; overlay.classList.add('active'); }
+    if (morphOwns(id, 'open')) return;
     if (perfMode() === 'lite') return;
     var overlayRef = overlay;
     delete _closeModalGuard[id];
@@ -104,6 +112,11 @@
   var _closeModalGuard = {};
   window.closeModal = function (id) {
     var overlay = document.getElementById(id);
+    if (overlay && morphOwns(id, 'close')) {
+      delete _closeModalGuard[id];
+      if (_origCloseModal) _origCloseModal(id);
+      return;
+    }
     if (!overlay || !hasGSAP() || perfMode() === 'lite') {
       if (_origCloseModal) _origCloseModal(id);
       return;
