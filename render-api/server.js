@@ -7,6 +7,7 @@ const { saveCustomChatTurn, saveInterruptedChatTurn, saveDeepThinkChatTurn } = r
 const assistantOutput = require('./ai-assistant-output');
 const { aiConversationActorPattern, parseAiHistoryCursor, queryAiHistoryPage } = require('./ai-history');
 const { createComment, readRelationPage, readFeedEngagement } = require('./post-interactions');
+const { readPostViewers } = require('./post-viewers');
 const { readPhotoWallPage } = require('./photo-wall-page');
 const { createAdaptivePoller } = require('./adaptive-poller');
 const { createMediaPreviews } = require('./media-previews');
@@ -5241,7 +5242,7 @@ async function readPostDetailComments(db, postId) {
 app.get('/api/post/detail/:id/relations/:kind', optionalAuth, rateLimit(60000,120), async (req,res) => {
   try {
     var id=normalizePostId(req.params.id),kind=req.params.kind;
-    if(!id || !['likes','comments','engagement'].includes(kind))return res.status(400).json({ok:false,error:'分页参数无效'});
+    if(!id || !['likes','comments','engagement','views'].includes(kind))return res.status(400).json({ok:false,error:'分页参数无效'});
     var lookup=await supabase.from('posts').select('id,user_name,media_type,visibility,is_deleted').eq('id',id).maybeSingle();
     if(lookup.error)return res.status(503).json({ok:false,error:'互动暂不可用，请重试',retryable:true});
     if(!isNormalPost(lookup.data)||(lookup.data.visibility==='private'&&lookup.data.user_name!==(req.userName||'')))return res.status(404).json({ok:false,error:'帖子不存在或不可查看'});
@@ -5250,9 +5251,11 @@ app.get('/api/post/detail/:id/relations/:kind', optionalAuth, rateLimit(60000,12
       var stats=engagement.posts[0];
       return res.json({ok:true,stats:{id:stats.id,like_count:stats.like_count,comment_count:stats.comment_count,liked_by_me:stats.liked_by_me}});
     }
-    var page=await readRelationPage(supabase,id,kind,{cursor:req.query.cursor,limit:req.query.limit});
+    var page=kind==='views'
+      ? await readPostViewers(supabase,id,{cursor:req.query.cursor,limit:req.query.limit})
+      : await readRelationPage(supabase,id,kind,{cursor:req.query.cursor,limit:req.query.limit});
     if(page.error)return res.status(503).json({ok:false,error:'互动暂不可用，请重试',retryable:true});
-    return res.json({ok:true,data:page.data,has_more:page.has_more,next_cursor:page.next_cursor});
+    return res.json({ok:true,data:page.data,has_more:page.has_more,next_cursor:page.next_cursor,total:Number.isFinite(Number(page.count))?Number(page.count):undefined});
   } catch(error) { return res.status(error.message==='invalid_cursor'?400:503).json({ok:false,error:error.message==='invalid_cursor'?'分页参数无效':'互动暂不可用，请重试',retryable:error.message!=='invalid_cursor'}); }
 });
 
