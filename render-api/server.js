@@ -29,6 +29,7 @@ const {
   validateDmStoragePath,
   validateDmMediaKind,
   validateDmUploadOwnership,
+  dmTextActorKey,
   MEDIA_KINDS: ALLOWED_KINDS,
   dmMediaQuotaRemainingBytes,
   tryConsumeDmMediaQuota,
@@ -16087,6 +16088,7 @@ app.post('/api/dm/upload/abort', authenticateUser, rateLimit(60000, 60), async (
   }
 });
 
+var dmTextSendInflight = new Set();
 app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res) => {
   try {
     var banCheck = userBanError(req);
@@ -16172,6 +16174,23 @@ app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res
     var mediaPayload = null;
     var mediaClaim = null;
     var registryRow = null;
+    // 纯文字消息的幂等：客户端重发（响应丢失/超时）带同一个 client_message_id，
+    // 命中已落库的那条就直接返回它，而不是再插一条重复消息。
+    var textIdempotencyKey = '';
+    if (!storagePath) {
+      textIdempotencyKey = dmTextActorKey(sender, targetUser, req.body && req.body.client_message_id);
+      if (textIdempotencyKey) {
+        if (dmTextSendInflight.has(textIdempotencyKey)) {
+          return res.status(409).json({ error: '这条消息正在发送，请稍候', code: 'dm_send_in_progress', retryable: true });
+        }
+        var priorText = await findDmMessageByActorKey(sender, textIdempotencyKey, targetUser);
+        if (priorText.error) return res.status(503).json({ error: '消息发送状态暂时无法确认，请稍后重试', code: 'dm_send_lookup_retry', retryable: true });
+        if (priorText.data) return res.json({ ok: true, message: priorText.data, idempotent: true });
+        actorKey = textIdempotencyKey;
+        dmTextSendInflight.add(textIdempotencyKey);
+        res.on('close', function() { dmTextSendInflight.delete(textIdempotencyKey); });
+      }
+    }
     if (storagePath) {
       if (storagePath.indexOf('..') >= 0 || storagePath.indexOf('\\') >= 0) {
         return res.status(400).json({ error: 'Invalid media path', code: 'invalid_media_path' });
@@ -16377,6 +16396,12 @@ app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res
 
     if (insertErr || !inserted || !inserted.id) {
       console.error('[API] dm send insert error:', insertErr);
+      if (textIdempotencyKey) {
+        // 抛出的传输错误不能说明有没有提交：按确定性 actor_key 对账，已提交就当成功。
+        var committedText = await findDmMessageByActorKey(sender, textIdempotencyKey, targetUser);
+        if (committedText.error) return res.status(503).json({ error: '消息保存结果未确认，请稍后重试', code: 'DM_COMMIT_UNKNOWN', retryable: true });
+        if (committedText.data) return res.json({ ok: true, message: committedText.data, idempotent: true });
+      }
       if (storagePath) {
         var committedAfterError = await findDmMessageByActorKey(sender, actorKey, targetUser);
         if (committedAfterError.error) {
@@ -28473,10 +28498,15 @@ async function checkUnreadDmForAdminOnce() {
     if (!ADMIN_DM_NOTIFY_EMAIL) return;
     var cutoff = new Date(Date.now() - DM_UNREAD_NOTIFY_TIMEOUT).toISOString();
     // 查询未读且未通知的 DM（发给 xxz）
+    // 只取「未读且还没提醒过」的行：已读（views>0，read_at 与 views 同时写入）和已提醒的消息
+    // 永远留在表里，若不在 SQL 里排除，按时间升序的前 50 条很快全是它们，
+    // 之后的新未读消息再也轮不到，提醒邮件就永久停发。
     var { data, error } = await supabase.from('posts')
       .select('id, user_name, content, created_at')
       .eq('media_type', DM_MARKER)
       .eq('media_url', ADMIN_DM_NOTIFY_USER)
+      .eq('views', 0)
+      .not('content', 'like', '%dm_notified_at%')
       .lt('created_at', cutoff)
       // 已读（read_at 为时间串）与已提醒的私信必须在库里就排除：这里按时间正序只取 50 条，
       // 如果让它们占满窗口，管理员已读私信累计超过 50 条后，新的未读私信永远查不到、提醒静默失效。
@@ -28536,7 +28566,10 @@ async function checkUnreadDmForAdminOnce() {
           try { existingPayload = JSON.parse(rowData.content || '{}'); } catch (_) {}
         }
         existingPayload.dm_notified_at = new Date().toISOString();
-        await supabase.from('posts').update({ content: JSON.stringify(existingPayload) }).eq('id', msg.id);
+        // 比较并交换：发信期间若收件人已读，read_at 已写进 content，不能用发信前的旧快照覆盖回去。
+        var notifiedWrite = supabase.from('posts').update({ content: JSON.stringify(existingPayload) }).eq('id', msg.id);
+        if (rowData) notifiedWrite = notifiedWrite.eq('content', rowData.content);
+        await notifiedWrite;
       } catch (e) { /* 静默失败 */ }
     }
     // 清理通知集合（超过1000条时清理旧条目）
