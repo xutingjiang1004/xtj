@@ -8649,6 +8649,7 @@
             if (typeof clearReportReplyBadge === 'function') clearReportReplyBadge();
             var overlay = document.getElementById('reportModal');
             if (!overlay) return;
+            if (typeof window.__xtjResetReportAiScan === 'function') window.__xtjResetReportAiScan();
             normalizeReportModalStructure();
             if (!window.__xtjReportModalPrimedV1) {
                 ensureReportHistoryModal();

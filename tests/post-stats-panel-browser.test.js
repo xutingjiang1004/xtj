@@ -71,3 +71,30 @@ test('a like toggle keeps the stats buttons clickable and a late answer never fi
     assert.equal(await card.locator('.post-stat-link').count(), 2, 'the buttons survive count updates');
   } finally { await f.close(); }
 });
+
+test('a guest is told to sign in and never requests the viewer list; the like list still loads', { timeout: 60000 }, async () => {
+  const f = await postBrowserFixture({ counts: [1], publicPosts: true, user: '' });
+  try {
+    const post = f.posts[0];
+    let viewerRequests = 0;
+    await f.page.route('**/api/post/detail/' + post.id + '/relations/views**', route => { viewerRequests += 1; return route.fulfill({ status: 401, json: { ok: false, code: 'login_required' } }); });
+    await f.page.route('**/api/post/detail/' + post.id + '/relations/likes**', route => route.fulfill({ json: { ok: true, data: [person('fan', 0, post.id)], has_more: false, next_cursor: null, total: 1 } }));
+    await f.page.evaluate(id => window.openPostStatsPanel(id), post.id);
+    await f.page.waitForFunction(() => document.querySelectorAll('#postStatsLikesList .post-stats-row').length === 1, null, { timeout: 15000 });
+    assert.match(await f.page.locator('#postStatsViewsList').textContent(), /登录后可以查看浏览用户/);
+    assert.equal(await f.page.locator('#postStatsViewsList .post-stats-retry').count(), 0, 'no retry button for something that needs a login');
+    assert.equal(viewerRequests, 0, 'the guest never asks the server for the list');
+  } finally { await f.close(); }
+});
+
+test('a login that expires while the panel is open also ends with the sign-in hint, not an error', { timeout: 60000 }, async () => {
+  const f = await postBrowserFixture({ counts: [1] });
+  try {
+    const post = f.posts[0];
+    await f.page.route('**/api/post/detail/' + post.id + '/relations/views**', route => route.fulfill({ status: 401, json: { ok: false, code: 'login_required' } }));
+    await f.page.route('**/api/post/detail/' + post.id + '/relations/likes**', route => route.fulfill({ json: { ok: true, data: [], has_more: false, next_cursor: null, total: 0 } }));
+    await f.page.evaluate(id => window.openPostStatsPanel(id), post.id);
+    await f.page.waitForFunction(() => /登录后可以查看浏览用户/.test(document.getElementById('postStatsViewsList').textContent), null, { timeout: 15000 });
+    assert.equal(await f.page.locator('#postStatsViewsList .post-stats-retry').count(), 0);
+  } finally { await f.close(); }
+});

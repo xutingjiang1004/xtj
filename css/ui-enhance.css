@@ -1992,3 +1992,14 @@ html[data-xtj-motion=off] .ai-tool-round-list-wrap { transition: none !important
   background: transparent; color: inherit; font: inherit; cursor: pointer;
 }
 @media (prefers-reduced-motion: reduce) { #postStatsModal, #postStatsModal .modal-box { transition: none !important; } }
+
+/* ===== 举报弹窗里的 AI 检测结果 ===== */
+.report-ai-scan {
+  padding: 10px 12px; border-radius: 12px; border-left: 3px solid #5aa57c; font-size: 13px; line-height: 1.6;
+  background: rgba(86, 150, 113, 0.08); color: var(--text-main, #17313a); overflow-wrap: anywhere;
+}
+.report-ai-scan.risk-medium { border-left-color: #d99a2b; background: rgba(217, 154, 43, 0.1); }
+.report-ai-scan.risk-high { border-left-color: #d9534f; background: rgba(217, 83, 79, 0.1); }
+.report-ai-scan.is-loading, .report-ai-scan.is-error { border-left-color: transparent; color: var(--text-muted, #667f87); }
+.report-ai-scan-head { font-weight: 800; margin-bottom: 2px; }
+.report-ai-scan-meta { margin-top: 4px; font-size: 12px; color: var(--text-muted, #667f87); }

@@ -5254,6 +5254,8 @@ app.get('/api/post/detail/:id/relations/:kind', optionalAuth, rateLimit(60000,12
   try {
     var id=normalizePostId(req.params.id),kind=req.params.kind;
     if(!id || !['likes','comments','engagement','views'].includes(kind))return res.status(400).json({ok:false,error:'分页参数无效'});
+    // 浏览用户名单只给登录用户看（点赞名单、评论仍然公开可读）。
+    if(kind==='views'&&!req.userName)return res.status(401).json({ok:false,code:'login_required',error:'登录后才能查看浏览用户'});
     var lookup=await supabase.from('posts').select('id,user_name,media_type,visibility,is_deleted').eq('id',id).maybeSingle();
     if(lookup.error)return res.status(503).json({ok:false,error:'互动暂不可用，请重试',retryable:true});
     if(!isNormalPost(lookup.data)||(lookup.data.visibility==='private'&&lookup.data.user_name!==(req.userName||'')))return res.status(404).json({ok:false,error:'帖子不存在或不可查看'});

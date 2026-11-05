@@ -3796,15 +3796,52 @@
                     // 兜底：目标始终未出现时 5s 强制断开，避免监听器常驻泄漏
                     window.setTimeout(function() { try { observer.disconnect(); } catch (e) {} }, 5000);
                 }
+                // 每次点「举报」调用一次 AI 检测，把结果显示在举报表单里（「选择要举报的内容」下面）。
+                // 仅供参考，不影响提交；用序号丢弃晚到的旧结果，换帖子或关闭后不会写进新的表单。
+                var seq = window.__xtjReportScanSeq = (window.__xtjReportScanSeq || 0) + 1;
+                var field = document.getElementById('reportAiScanField'), box = document.getElementById('reportAiScanBox');
+                window.__xtjReportAiScan = null;
+                function show(kind, build) {
+                    if (!field || !box || seq !== window.__xtjReportScanSeq) return;
+                    field.style.display = '';
+                    box.className = 'report-ai-scan ' + kind;
+                    box.textContent = '';
+                    build(box);
+                }
+                show('is-loading', function(el) { el.textContent = 'AI 正在检测这条内容…'; });
                 postToolFetch({ post_id: postId, action: 'report_scan' }).then(function(data) {
-                    window.__xtjReportAiScan = data.scan || null;
-                    var form = document.getElementById('reportModal');
-                    if (!form || !data.scan) return;
-                    var old = form.querySelector('.report-ai-scan'); if (old) old.remove();
-                    var scan = document.createElement('div'); scan.className = 'report-ai-scan';
-                    scan.textContent = 'AI 检测：' + String(data.scan.summary || '未发现明确风险');
-                    form.querySelector('.report-form, .report-content, .modal-box').appendChild(scan);
-                }).catch(function() { window.__xtjReportAiScan = null; });
+                    if (seq !== window.__xtjReportScanSeq) return;
+                    var scan = data && data.scan;
+                    window.__xtjReportAiScan = scan || null;
+                    if (!scan) { show('is-error', function(el) { el.textContent = 'AI 检测暂时不可用，不影响举报。'; }); return; }
+                    var level = scan.risk_level === 'high' ? 'high' : (scan.risk_level === 'medium' ? 'medium' : 'low');
+                    var levelText = { high: '高', medium: '中', low: '低' }[level];
+                    show('risk-' + level, function(el) {
+                        var head = document.createElement('div'); head.className = 'report-ai-scan-head';
+                        head.textContent = (scan.suspected ? '疑似违规 · ' : '未发现明确违规 · ') + '风险' + levelText;
+                        el.appendChild(head);
+                        var summary = String(scan.summary || '').trim();
+                        if (summary) { var line = document.createElement('div'); line.textContent = summary; el.appendChild(line); }
+                        var cats = Array.isArray(scan.categories) ? scan.categories.map(String).filter(Boolean).slice(0, 4) : [];
+                        if (cats.length) { var c = document.createElement('div'); c.className = 'report-ai-scan-meta'; c.textContent = '类型：' + cats.join('、'); el.appendChild(c); }
+                        var evidence = Array.isArray(scan.evidence) ? scan.evidence.map(String).filter(Boolean).slice(0, 3) : [];
+                        if (evidence.length) { var e = document.createElement('div'); e.className = 'report-ai-scan-meta'; e.textContent = '依据：' + evidence.join('；'); el.appendChild(e); }
+                    });
+                }).catch(function(error) {
+                    window.__xtjReportAiScan = null;
+                    var code = String(error && error.message || '');
+                    var text = code === 'post_has_no_text' ? '这条内容没有文字，AI 只检测文字，不影响举报。'
+                        : (/quota|limit|rate|额度|次数/i.test(code) ? 'AI 次数已用完，暂时无法检测，不影响举报。' : 'AI 检测暂时不可用，不影响举报。');
+                    show('is-error', function(el) { el.textContent = text; });
+                });
+            };
+            // 打开举报弹窗（含不是从帖子菜单进来的）时先清掉上一次的 AI 检测，并作废在途结果。
+            window.__xtjResetReportAiScan = function() {
+                window.__xtjReportScanSeq = (window.__xtjReportScanSeq || 0) + 1;
+                window.__xtjReportAiScan = null;
+                var field = document.getElementById('reportAiScanField'), box = document.getElementById('reportAiScanBox');
+                if (field) field.style.display = 'none';
+                if (box) { box.textContent = ''; box.className = 'report-ai-scan'; }
             };
 
             function buildPostLocationHtml(normalized) {
@@ -7206,9 +7243,10 @@
                     var list = byId(kind === 'views' ? 'postStatsViewsList' : 'postStatsLikesList');
                     var count = byId(kind === 'views' ? 'postStatsViewsCount' : 'postStatsLikesCount');
                     if (!list || !count) return;
-                    count.textContent = String(state.total != null ? state.total : state.rows.length);
+                    count.textContent = state.loginRequired ? '–' : String(state.total != null ? state.total : state.rows.length);
                     var html;
-                    if (state.rows.length) html = state.rows.map(function(row) { return rowHtml(row.user_name); }).join('');
+                    if (state.loginRequired) html = '<li class="post-stats-note">登录后可以查看浏览用户</li>';
+                    else if (state.rows.length) html = state.rows.map(function(row) { return rowHtml(row.user_name); }).join('');
                     else if (state.error) html = '';
                     else if (state.loading) html = '<li class="post-stats-note" role="status">加载中…</li>';
                     else html = '<li class="post-stats-note">' + (kind === 'views' ? '还没有人浏览' : '还没有人点赞') + '</li>';
@@ -7230,6 +7268,7 @@
                             var response = await window.xtjOptionalAuthFetch(path, { timeoutMs: 15000, authOwner: owner, authEpoch: epoch });
                             var body = await response.json().catch(function() { return {}; });
                             if (!current()) return;
+                            if (response.status === 401 && kind === 'views') { state.loginRequired = true; state.rows = []; break; }
                             if (!response.ok || !body.ok) throw new Error(body.error || '加载失败，请重试');
                             (body.data || []).forEach(function(row) {
                                 if (!row || !row.user_name || seen.has(String(row.id))) return;
@@ -7247,8 +7286,10 @@
                     }
                 }
                 function start(kind, postId, token) {
-                    var state = { rows: [], total: null, cursor: null, loading: false, error: '' };
+                    var state = { rows: [], total: null, cursor: null, loading: false, error: '', loginRequired: false };
                     panelStates[kind] = state;
+                    // 游客不请求浏览名单：服务端也会拒绝，这里直接提示登录。
+                    if (kind === 'views' && !currentUser) { state.loginRequired = true; paint(kind, state); return Promise.resolve(); }
                     return load(kind, postId, token, state);
                 }
                 var panelStates = {};
