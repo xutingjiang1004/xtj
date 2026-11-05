@@ -12,7 +12,9 @@
     <meta name="theme-color" content="#eef7f3" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#0b1311" media="(prefers-color-scheme: dark)" />
     <link rel="icon" type="image/svg+xml" href="icon.svg" />
-    <link rel="apple-touch-icon" href="icon.svg" />
+    <link rel="icon" type="image/png" sizes="192x192" href="img/icon-192.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="img/icon-180.png" />
+    <meta name="theme-color" content="#059669" />
     <link rel="preconnect" href="https://ithowxqignlhkwaykglt.supabase.co" />
     <link rel="dns-prefetch" href="https://ithowxqignlhkwaykglt.supabase.co" />
     <script>
@@ -1031,6 +1033,24 @@
         </div>
     </div>
 
+    <!-- 浏览 / 点赞用户统计面板：帖子里点「浏览 N」「点赞 N」打开，左栏浏览用户、右栏点赞用户 -->
+    <div class="modal-overlay" id="postStatsModal" role="dialog" aria-modal="true" aria-labelledby="postStatsTitle" tabindex="-1" aria-hidden="true" onclick="if(event.target===this)closeModal('postStatsModal')">
+        <div class="modal-box post-stats-panel" onclick="event.stopPropagation()">
+            <h2 id="postStatsTitle" class="sr-only">浏览与点赞用户</h2>
+            <button type="button" class="post-stats-close" aria-label="关闭浏览与点赞用户" onclick="closeModal('postStatsModal')">✕</button>
+            <div class="post-stats-columns">
+                <section class="post-stats-col" aria-labelledby="postStatsViewsHead">
+                    <h3 class="post-stats-head" id="postStatsViewsHead">浏览用户 <span id="postStatsViewsCount">0</span></h3>
+                    <ul class="post-stats-list" id="postStatsViewsList"></ul>
+                </section>
+                <section class="post-stats-col" aria-labelledby="postStatsLikesHead">
+                    <h3 class="post-stats-head" id="postStatsLikesHead">点赞用户 <span id="postStatsLikesCount">0</span></h3>
+                    <ul class="post-stats-list" id="postStatsLikesList"></ul>
+                </section>
+            </div>
+        </div>
+    </div>
+
     <!-- 个人资料详情模态框 -->
     <div class="modal-overlay" id="profileDetailModal" onclick="if(event.target===this)closeModal('profileDetailModal')">
         <div class="modal-box glass profile-detail-modal" onclick="event.stopPropagation()">
@@ -1189,12 +1209,19 @@
         // 防御性 fallback: 保证 inline onclick 引用的核心函数永远存在
         // core.js 加载并正确定义后会覆盖这些, 这里只是兜底防止 ReferenceError
         (function() {
+            function revealModal(el) {
+                if (!el) return;
+                // FIX UI-01: 登录/注册弹窗静态带 inert，冷启动窗口期只加 .active 会
+                // 让弹窗「看得见却点不动」；core.js 到达后真实实现因 active 早退不会补做。
+                el.removeAttribute('inert');
+                el.setAttribute('aria-hidden', 'false');
+                el.classList.add('active');
+            }
             function showModalById(id) {
                 var el = document.getElementById(id);
-                if (el) el.classList.add('active');
+                if (el) revealModal(el);
                 else document.addEventListener('DOMContentLoaded', function() {
-                    var el2 = document.getElementById(id);
-                    if (el2) el2.classList.add('active');
+                    revealModal(document.getElementById(id));
                 });
             }
             window.openAuthModal = window.openAuthModal || function(mode) {
