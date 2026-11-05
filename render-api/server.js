@@ -18970,8 +18970,13 @@ app.post('/admin/security-settings', verifyToken, rateLimit(60000, 10), async (r
 // 不再假定每批都全部成功，使用 succeeded/failed/partial 等真实字段。
 app.post('/admin/cleanup-logs', verifyToken, rateLimit(60000, 3), async (req, res) => {
   try {
+    // 非 JSON 请求体时 req.body 为 undefined；types 只接受字符串或字符串数组，其余按 400 处理。
+    if (!req.body || typeof req.body !== 'object') return res.status(400).json({ ok: false, error: '请求格式无效', code: 'invalid_request' });
     var types = req.body.types || ['login', 'security', 'error', 'behavior'];
     if (typeof types === 'string') types = [types];
+    if (!Array.isArray(types) || types.some(function(t) { return typeof t !== 'string'; })) {
+      return res.status(400).json({ ok: false, error: '日志类型无效', code: 'invalid_request' });
+    }
     var VALID_TYPES = ['login', 'security', 'error', 'behavior', 'all'];
     var results = {};
     var totalAttempted = 0;
@@ -19016,7 +19021,7 @@ app.post('/admin/cleanup-logs', verifyToken, rateLimit(60000, 3), async (req, re
     return res.status(500).json({
       ok: false,
       partial: false,
-      error: { code: 'CLEANUP_ERROR', message: e.message || '清理失败' },
+      error: { code: 'CLEANUP_ERROR', message: '清理失败，请稍后重试' },
       retryable: true
     });
   }
