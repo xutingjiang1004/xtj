@@ -4541,6 +4541,15 @@ function validateDurationHours(value) {
   return { value: Math.floor(raw) };
 }
 
+// 封禁/禁言/黑名单记录是否仍然有效：is_active 为真且未到期（expires_at 为空表示永久）。
+// 过期记录要等管理员加载 /admin/data 才会被异步清除，重新处置时不能把它们当作有效记录而报 409。
+function moderationRecordIsLive(row) {
+  if (!row || !row.is_active) return false;
+  if (!row.expires_at) return true;
+  var expires = new Date(row.expires_at).getTime();
+  return !Number.isFinite(expires) || expires > Date.now();
+}
+
 // ===================== 中间件 ======================
 function isAllowedWebOrigin(origin) {
   if (!origin) return true;
@@ -16733,9 +16742,9 @@ app.post('/admin/ban', verifyToken, rateLimit(60000, 30), async (req, res) => {
     expiresAt = new Date(Date.now() + durationHoursVal * 3600000).toISOString();
   }
   
-  const { data: existing } = await supabase.from('bans').select('id, is_active').eq('user_name', userNameVal).order('banned_at', { ascending: false }).limit(1);
+  const { data: existing } = await supabase.from('bans').select('id, is_active, expires_at').eq('user_name', userNameVal).order('banned_at', { ascending: false }).limit(1);
   if (existing && existing.length) {
-    const activeBan = existing.find(b => b.is_active);
+    const activeBan = existing.find(moderationRecordIsLive);
     if (activeBan) return res.status(409).json({ error: '该用户已被拉黑封禁' });
     
     const { error } = await supabase.from('bans').update({
@@ -16820,8 +16829,8 @@ app.post('/admin/mute', verifyToken, rateLimit(60000, 30), async (req, res) => {
   if (reasonVal && reasonVal.error) return res.status(400).json({ error: reasonVal.error });
   if (isProtectedAdminTarget(userNameVal)) return res.status(403).json({ error: 'Operation not allowed for admin user' });
   
-  const { data: existingMutes } = await supabase.from('mutes').select('id').eq('user_name', userNameVal).eq('is_active', true).limit(1);
-  if (existingMutes && existingMutes.length) return res.status(409).json({ error: '该用户已被禁言' });
+  const { data: existingMutes } = await supabase.from('mutes').select('id, is_active, expires_at').eq('user_name', userNameVal).eq('is_active', true);
+  if (existingMutes && existingMutes.some(moderationRecordIsLive)) return res.status(409).json({ error: '该用户已被禁言' });
   
   let expiresAt = null;
   if (durationHoursVal > 0) {
@@ -16886,9 +16895,9 @@ app.post('/admin/blacklist', verifyToken, rateLimit(60000, 30), async (req, res)
     expiresAt = new Date(Date.now() + durationHoursVal * 3600000).toISOString();
   }
   
-  const { data: existing } = await supabase.from('blacklist').select('id, is_active').eq('user_name', userNameVal);
+  const { data: existing } = await supabase.from('blacklist').select('id, is_active, expires_at').eq('user_name', userNameVal);
   if (existing && existing.length) {
-    const activeEntry = existing.find(e => e.is_active);
+    const activeEntry = existing.find(moderationRecordIsLive);
     if (activeEntry) return res.status(409).json({ error: '该用户已在黑名单中' });
     
     const { error } = await supabase.from('blacklist').update({
@@ -19006,8 +19015,13 @@ app.post('/admin/security-settings', verifyToken, rateLimit(60000, 10), async (r
 // 不再假定每批都全部成功，使用 succeeded/failed/partial 等真实字段。
 app.post('/admin/cleanup-logs', verifyToken, rateLimit(60000, 3), async (req, res) => {
   try {
+    // 非 JSON 请求体时 req.body 为 undefined；types 只接受字符串或字符串数组，其余按 400 处理。
+    if (!req.body || typeof req.body !== 'object') return res.status(400).json({ ok: false, error: '请求格式无效', code: 'invalid_request' });
     var types = req.body.types || ['login', 'security', 'error', 'behavior'];
     if (typeof types === 'string') types = [types];
+    if (!Array.isArray(types) || types.some(function(t) { return typeof t !== 'string'; })) {
+      return res.status(400).json({ ok: false, error: '日志类型无效', code: 'invalid_request' });
+    }
     var VALID_TYPES = ['login', 'security', 'error', 'behavior', 'all'];
     var results = {};
     var totalAttempted = 0;
@@ -19052,7 +19066,7 @@ app.post('/admin/cleanup-logs', verifyToken, rateLimit(60000, 3), async (req, re
     return res.status(500).json({
       ok: false,
       partial: false,
-      error: { code: 'CLEANUP_ERROR', message: e.message || '清理失败' },
+      error: { code: 'CLEANUP_ERROR', message: '清理失败，请稍后重试' },
       retryable: true
     });
   }
@@ -28251,6 +28265,21 @@ app.get('/admin/ai-agent/conversation', verifyToken, securityRateLimit(60000, 60
   }
 });
 
+// 批量删除过期 AI 消息：PostgREST 的 DELETE 带 limit 必须同时给 order，
+// 原写法 delete().select().limit(n) 没有 order，会被拒绝，清理删不掉任何行。
+// 与 cleanupExpiredRateLimitRows 一致：先按时间取 id，再按 id 删除。返回本批删除条数，失败抛错。
+async function deleteAiMessageBatch(cutoff, batchSize) {
+  var picked = await supabase.from('posts').select('id')
+    .eq('media_type', AI_AGENT_MESSAGE_MARKER).lt('created_at', cutoff)
+    .order('created_at', { ascending: true }).order('id', { ascending: true }).limit(batchSize);
+  if (picked.error) throw picked.error;
+  var ids = (picked.data || []).map(function(r) { return r.id; });
+  if (!ids.length) return 0;
+  var removed = await supabase.from('posts').delete().select('id').in('id', ids);
+  if (removed.error) throw removed.error;
+  return removed.data ? removed.data.length : 0;
+}
+
 // POST /admin/ai-agent/cleanup — 清理过期的 AI 聊天记录
 // older_than_days: 默认 30 天
 app.post('/admin/ai-agent/cleanup', verifyToken, securityRateLimit(600000, 5), async (req, res) => {
@@ -28279,14 +28308,9 @@ app.post('/admin/ai-agent/cleanup', verifyToken, securityRateLimit(600000, 5), a
     var deleted = 0;
     var batchSize = 500;
     while (deleted < count) {
-      var { data: delData, error: delErr } = await supabase.from('posts')
-        .delete()
-        .select('id')
-        .eq('media_type', AI_AGENT_MESSAGE_MARKER)
-        .lt('created_at', cutoff)
-        .limit(batchSize);
-      if (delErr) return res.status(500).json({ error: '删除失败: ' + sanitizeError(delErr), deleted: deleted, total: count });
-      var batchDeleted = (delData && delData.length) ? delData.length : 0;
+      var batchDeleted;
+      try { batchDeleted = await deleteAiMessageBatch(cutoff, batchSize); }
+      catch (delErr) { return res.status(500).json({ error: '删除失败: ' + sanitizeError(delErr), deleted: deleted, total: count }); }
       if (batchDeleted <= 0) break; // 无更多可删，防止死循环
       deleted += batchDeleted;
       await new Promise(function(r) { setTimeout(r, 200); });
@@ -28358,9 +28382,9 @@ async function autoCleanupAiMessages() {
 
     var deleted = 0;
     while (deleted < count) {
-      var { data: delData, error: delErr } = await supabase.from('posts').delete().select('id').eq('media_type', AI_AGENT_MESSAGE_MARKER).lt('created_at', cutoff).limit(500);
-      if (delErr) { console.error('[AUTO-CLEANUP] delete error:', delErr && delErr.message); break; }
-      var batchDeleted = (delData && delData.length) ? delData.length : 0;
+      var batchDeleted;
+      try { batchDeleted = await deleteAiMessageBatch(cutoff, 500); }
+      catch (delErr) { console.error('[AUTO-CLEANUP] delete error:', delErr && delErr.message); break; }
       if (batchDeleted <= 0) break; // 无更多可删，防止死循环
       deleted += batchDeleted;
       await new Promise(function(r) { setTimeout(r, 300); });
