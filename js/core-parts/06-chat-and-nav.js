@@ -9374,7 +9374,7 @@
                     quickPost = (Array.isArray(feedAllPosts) ? feedAllPosts : []).find(function(p) { return p && String(p.id) === String(postId); }) ||
                         (typeof window.__xtjAuthorPostLookup === 'function' ? window.__xtjAuthorPostLookup(postId) : null);
                 } catch (_) { quickPost = null; }
-                var quickShown = false;
+                var quickShown = false, deferredDetailDraw = false;
                 if (body) body.innerHTML = getXtjLoadingHtml('加载中..', '加载中..', 'feed');
                 if (quickPost && quickPost.user_name && quickPost.created_at && body) {
                     try {
@@ -9457,9 +9457,16 @@
                         return;
                     }
                     trackView(postId);
-                    var keepScroll = quickShown && body ? body.scrollTop : 0;
-                    renderPostDetail(post, likes, comments);
-                    if (keepScroll && body) body.scrollTop = keepScroll;
+                    var drawDetail = function() {
+                        if (!isCurrentDetail()) return;
+                        var keepScroll = quickShown && body ? body.scrollTop : 0;
+                        renderPostDetail(post, likes, comments);
+                        if (keepScroll && body) body.scrollTop = keepScroll;
+                        if (body) body.setAttribute('aria-busy', 'false');
+                    };
+                    // The window is still opening: the full redraw waits until it has landed (the quick preview is already on screen).
+                    if (quickShown && window.xtjMorph && window.xtjMorph.defer && window.xtjMorph.defer(drawDetail)) deferredDetailDraw = true;
+                    else drawDetail();
                 } catch (e) {
                     if (isCurrentDetail() && body) {
                         // 已经画出了本机的帖子内容时，只把点赞/评论区域改成失败提示，正文留着。
@@ -9470,7 +9477,7 @@
                     console.error(e);
                 } finally {
                     if (isCurrentDetail() && body) {
-                        body.setAttribute('aria-busy', 'false');
+                        if (!deferredDetailDraw) body.setAttribute('aria-busy', 'false');
                         if (!body.querySelector('.post-detail-shell')) {
                             var retry = document.createElement('button'); retry.type = 'button'; retry.className = 'btn btn-ghost'; retry.textContent = '重新加载';
                             retry.addEventListener('click', function() { window.openPostDetail(postId); });

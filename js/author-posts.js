@@ -128,6 +128,8 @@
   }
   function render(s, options) {
     if (!current(s)) return;
+    // The window is still opening or closing: draw the list once the motion has landed instead of fighting it for the main thread.
+    if (window.xtjMorph && window.xtjMorph.defer && window.xtjMorph.defer(function () { render(s, options); })) return;
     var list = byId('authorPostsList');
     if (!list) return;
     var appendFrom = options && Number.isInteger(options.appendFrom) ? options.appendFrom : 0;

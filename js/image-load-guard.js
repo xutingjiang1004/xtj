@@ -25,16 +25,19 @@
     });
     // 并发从 4 提到 6：深列表里每个图片都要走一次鉴权 + Storage 签名，
     // 4 个并发时快速滚动会明显排队，用户看到的就是「下面的图一直不出来」。
-    while (running < 6 && waiting.length) {
-      var entry = waiting.shift(), img = entry[0], state = entry[1], source = img.getAttribute('data-post-src');
-      var rect = img.getBoundingClientRect();
+    // Read every rectangle first, then write: reading after each src write forced a layout per image.
+    var batch = [];
+    while (running + batch.length < 6 && waiting.length) batch.push(waiting.shift());
+    var rects = batch.map(function (entry) { return entry[0].getBoundingClientRect(); });
+    batch.forEach(function (entry, index) {
+      var img = entry[0], state = entry[1], source = img.getAttribute('data-post-src'), rect = rects[index];
       state.loading = true; running++;
       img.loading = 'eager';
       img.fetchPriority = rect.top < innerHeight && rect.bottom > 0 ? 'high' : 'low';
       img.removeAttribute('data-post-src');
       img.src = source;
       arm(img, state);
-    }
+    });
   }
   window.xtjRetryOriginalImageUrl = function (value) {
     try {

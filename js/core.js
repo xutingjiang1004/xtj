@@ -7206,6 +7206,20 @@ function renderProfileActivityList(kind) {
                     return 'rgb(' + p.slice(0, 3).join(',') + ')';
                 }
                 var runs = typeof WeakMap === 'function' ? new WeakMap() : null;
+                // 转场正在播放时，别的代码里重活（整块列表重绘、重新量布局）会和动画抢主线程，掉帧。
+                // defer(cb)：正在播放就等它收尾、画完那一帧之后再跑，返回 true；没在播放返回 false（由调用方自己继续）。
+                var playing = 0, deferred = [], flushTimer = 0;
+                function motionStarted(handle) { if (handle.__counted) return; handle.__counted = true; playing++; }
+                function flushDeferred() {
+                    clearTimeout(flushTimer); flushTimer = 0;
+                    var list = deferred.splice(0);
+                    list.forEach(function(fn) { try { fn(); } catch (_) {} });
+                }
+                function motionEnded(handle) {
+                    if (!handle.__counted || handle.__released) return;
+                    handle.__released = true; playing = Math.max(0, playing - 1);
+                    if (!playing && deferred.length) requestAnimationFrame(function() { setTimeout(function() { if (!playing) flushDeferred(); }, 0); });
+                }
 
                 // kind: 'open' | 'close'.  box 已经在最终位置（关闭时是当前位置）。
                 // o.rect: 起点（打开）/终点（关闭）矩形，视口坐标。o.overlay: 带背景压暗的外层（可无）。
@@ -7319,7 +7333,7 @@ function renderProfileActivityList(kind) {
                         // 初始姿态先停在第 0 帧，等它真的画出来之后再开始走。
                         anims.forEach(function(a) { a.pause(); a.currentTime = 0; });
                         var started = false;
-                        afterPaint(function() { if (handle.ended || started) return; started = true; anims.forEach(function(a) { a.play(); }); });
+                        afterPaint(function() { if (handle.ended || started) return; started = true; motionStarted(handle); anims.forEach(function(a) { a.play(); }); });
                     } catch (buildError) { cleanup(0); return null; }
 
                     var cleaned = false, endTimer = 0;
@@ -7343,6 +7357,7 @@ function renderProfileActivityList(kind) {
                         if (handle.ended) return;
                         handle.ended = true;
                         cleanup(0);
+                        motionEnded(handle);
                     }
                     var closeDone = false;
                     function finishClose() {
@@ -7353,13 +7368,24 @@ function renderProfileActivityList(kind) {
                         if (scrim && scrim.parentNode) scrim.parentNode.removeChild(scrim);
                         if (hiddenTarget) hiddenTarget.style.visibility = '';
                         if (hiddenOrigin) hiddenOrigin.style.visibility = originVisibility;
+                        // 落地这一帧只做「飞行图消失、头像出现、窗口隐藏」；焦点/inert 这类会让整页重算样式的收尾等这一帧画完再做。
+                        window.__xtjMorphLanding = true;
+                        var landed = false;
+                        function afterLanding() {
+                            if (landed) return; landed = true;
+                            window.__xtjMorphLanding = false;
+                            if (window.__xtjSyncFocusSurfaces) { try { window.__xtjSyncFocusSurfaces(); } catch (_) {} }
+                        }
+                        requestAnimationFrame(function() { setTimeout(afterLanding, 0); });
+                        setTimeout(afterLanding, 300);
                         if (o.hide) { try { o.hide(); } catch (_) {} }
                         cleanup(140);
+                        motionEnded(handle);
                     }
                     var onEnd = open ? finishOpen : finishClose;
                     move.onfinish = onEnd;
                     endTimer = setTimeout(onEnd, D + 260);
-                    handle.abort = function() { clearTimeout(endTimer); handle.ended = true; closeDone = true; cleanup(0); };
+                    handle.abort = function() { clearTimeout(endTimer); handle.ended = true; closeDone = true; cleanup(0); motionEnded(handle); };
                     // 打开途中被关：沿原路退回（打开用的那些动画反着放），退回到头再按关闭收尾。
                     handle.reverse = function(next) {
                         if (handle.ended) return null;
@@ -7381,6 +7407,12 @@ function renderProfileActivityList(kind) {
                     open: function(box, o) { return run('open', box, o); },
                     close: function(box, o) { return run('close', box, o); },
                     abort: function(box) { var h = runs && runs.get(box); if (h) h.abort(); },
+                    defer: function(cb) {
+                        if (!playing) return false;
+                        deferred.push(cb);
+                        if (!flushTimer) flushTimer = setTimeout(function() { flushTimer = 0; flushDeferred(); }, 1500);
+                        return true;
+                    },
                     // 这个窗口的打开/关闭是不是由转场接管了（core-animations 的 GSAP 淡入淡出据此让路）。
                     claims: function(id, phase) {
                         var el = document.getElementById(id);
@@ -7422,12 +7454,19 @@ function renderProfileActivityList(kind) {
                     var keepTransition = el ? el.style.transition : '';
                     // The page's own fade on the window would stack on the morph; the scrim and the morph own the motion.
                     if (from && !wasActive && el) el.style.transition = 'none';
+                    // The page-wide inert/focus pass (tens of ms of style work) waits until the window has landed.
+                    var holdsFocus = !!(from && !wasActive && box && el);
+                    if (holdsFocus) { window.__xtjMorphLanding = true; setTimeout(function() { if (window.__xtjMorphLanding && holdsFocus) { window.__xtjMorphLanding = false; if (window.__xtjSyncFocusSurfaces) { try { window.__xtjSyncFocusSurfaces(); } catch (_) {} } } }, 1500); }
                     var result = baseOpen.apply(this, arguments);
                     if (ANIMATED[id]) origins[id] = from ? spec : null;
                     if (from && !wasActive && box && el) {
                         void el.offsetWidth;
-                        var handle = window.xtjMorph.open(box, { rect: from, overlay: el, hero: heroFor(id, spec, box), after: function() { el.style.transition = keepTransition; } });
-                        if (!handle) el.style.transition = keepTransition;
+                        var releaseFocusHold = function() {
+                            if (!holdsFocus) return; holdsFocus = false;
+                            requestAnimationFrame(function() { setTimeout(function() { window.__xtjMorphLanding = false; if (window.__xtjSyncFocusSurfaces) { try { window.__xtjSyncFocusSurfaces(); } catch (_) {} } }, 0); });
+                        };
+                        var handle = window.xtjMorph.open(box, { rect: from, overlay: el, hero: heroFor(id, spec, box), after: function() { el.style.transition = keepTransition; releaseFocusHold(); } });
+                        if (!handle) { el.style.transition = keepTransition; releaseFocusHold(); }
                     } else if (el && from) el.style.transition = keepTransition;
                     return result;
                 };
@@ -23979,7 +24018,7 @@ function renderProfileActivityList(kind) {
                     quickPost = (Array.isArray(feedAllPosts) ? feedAllPosts : []).find(function(p) { return p && String(p.id) === String(postId); }) ||
                         (typeof window.__xtjAuthorPostLookup === 'function' ? window.__xtjAuthorPostLookup(postId) : null);
                 } catch (_) { quickPost = null; }
-                var quickShown = false;
+                var quickShown = false, deferredDetailDraw = false;
                 if (body) body.innerHTML = getXtjLoadingHtml('加载中..', '加载中..', 'feed');
                 if (quickPost && quickPost.user_name && quickPost.created_at && body) {
                     try {
@@ -24062,9 +24101,16 @@ function renderProfileActivityList(kind) {
                         return;
                     }
                     trackView(postId);
-                    var keepScroll = quickShown && body ? body.scrollTop : 0;
-                    renderPostDetail(post, likes, comments);
-                    if (keepScroll && body) body.scrollTop = keepScroll;
+                    var drawDetail = function() {
+                        if (!isCurrentDetail()) return;
+                        var keepScroll = quickShown && body ? body.scrollTop : 0;
+                        renderPostDetail(post, likes, comments);
+                        if (keepScroll && body) body.scrollTop = keepScroll;
+                        if (body) body.setAttribute('aria-busy', 'false');
+                    };
+                    // The window is still opening: the full redraw waits until it has landed (the quick preview is already on screen).
+                    if (quickShown && window.xtjMorph && window.xtjMorph.defer && window.xtjMorph.defer(drawDetail)) deferredDetailDraw = true;
+                    else drawDetail();
                 } catch (e) {
                     if (isCurrentDetail() && body) {
                         // 已经画出了本机的帖子内容时，只把点赞/评论区域改成失败提示，正文留着。
@@ -24075,7 +24121,7 @@ function renderProfileActivityList(kind) {
                     console.error(e);
                 } finally {
                     if (isCurrentDetail() && body) {
-                        body.setAttribute('aria-busy', 'false');
+                        if (!deferredDetailDraw) body.setAttribute('aria-busy', 'false');
                         if (!body.querySelector('.post-detail-shell')) {
                             var retry = document.createElement('button'); retry.type = 'button'; retry.className = 'btn btn-ghost'; retry.textContent = '重新加载';
                             retry.addEventListener('click', function() { window.openPostDetail(postId); });
@@ -24103,15 +24149,26 @@ function renderProfileActivityList(kind) {
                 if (root.id === 'ppInfoModal') return root.getAttribute('aria-hidden') === 'false' && root.style.display !== 'none';
                 return !root.hidden && root.style.display !== 'none' && (root.classList.contains('active') || root.classList.contains('show'));
             }
+            var CONTROL_SELECTOR = 'button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+            function usable(node) {
+                return !node.disabled && node.tabIndex >= 0 && !node.closest('[inert], [hidden], [aria-hidden="true"]') && node.getClientRects().length && getComputedStyle(node).visibility !== 'hidden';
+            }
             function controls(root) {
-                return Array.from(root.querySelectorAll('button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])')).filter(function(node) {
-                    return !node.disabled && node.tabIndex >= 0 && !node.closest('[inert], [hidden], [aria-hidden="true"]') && node.getClientRects().length && getComputedStyle(node).visibility !== 'hidden';
-                });
+                return Array.from(root.querySelectorAll(CONTROL_SELECTOR)).filter(usable);
+            }
+            // Opening only needs the first one; checking every control of a window with hundreds of buttons forces a layout for each.
+            function firstControl(root) {
+                var nodes = root.querySelectorAll(CONTROL_SELECTOR);
+                for (var i = 0; i < nodes.length; i++) if (usable(nodes[i])) return nodes[i];
+                return null;
             }
             function focusFirst(root) {
-                var first = controls(root)[0];
+                var first = firstControl(root);
                 if (!first) { root.tabIndex = -1; first = root; }
                 first.focus({ preventScroll: true });
+            }
+            function mayBeSurface(node) {
+                return node.nodeType === 1 && (node.matches(selector) || !!node.querySelector(selector));
             }
             function register() {
                 document.querySelectorAll(selector).forEach(function(root) {
@@ -24120,25 +24177,37 @@ function renderProfileActivityList(kind) {
                     new MutationObserver(sync).observe(root, { attributes: true, attributeFilter: root.id === 'ppInfoModal' ? ['class','hidden','aria-hidden'] : ['class','hidden'] });
                 });
             }
+            function applyBackground(next) {
+                background.forEach(function(wasInert, node) { if (!next.has(node)) node.inert = wasInert; });
+                next.forEach(function(wasInert, node) { if (!background.has(node) && !node.inert) node.inert = true; });
+                background = next;
+            }
             function sync() {
                 if (syncing) return; syncing = true;
                 try {
-                    background.forEach(function(wasInert,node) { node.inert = wasInert; }); background.clear();
+                    // 窗口正在做转场（打开中，或刚落地的这一帧）：整页 inert 和移动焦点会让整页重算样式（几十毫秒），
+                    // 先只更新窗口自己的状态，其余等转场落地、那一帧画完之后再做（见 04 里的 __xtjMorphLanding）。
+                    var heavy = !window.__xtjMorphLanding;
+                    // Every inert flip invalidates the style of the whole subtree (the whole page for the body's children), so
+                    // only the nodes whose state really changes are touched; this used to flip all of them off and on again.
+                    var nextBackground = new Map();
                     var research = document.body.classList.contains('xtj-research-open'), ai = document.body.classList.contains('xtj-ai-page-open');
-                    document.querySelectorAll('.dock-panel').forEach(function(panel) {
+                    if (heavy) document.querySelectorAll('.dock-panel').forEach(function(panel) {
                         var open = panel.classList.contains('active') && !panel.classList.contains('hidden') && (panel.id === 'panelDeepThink' || !research && !ai);
-                        panel.inert = !open; panel.setAttribute('aria-hidden', String(!open));
+                        if (panel.inert !== !open) panel.inert = !open;
+                        if (panel.getAttribute('aria-hidden') !== String(!open)) panel.setAttribute('aria-hidden', String(!open));
                     });
                     var oldTop = top, active = [];
                     surfaces.forEach(function(state,root) {
                         if (!root.isConnected) { surfaces.delete(root); return; }
                         var open = visible(root);
                         if (open && !state.open) { state.order = ++sequence; state.origin = document.activeElement; }
-                        state.open = open; root.inert = !open;
+                        state.open = open; if (root.inert !== !open) root.inert = !open;
                         if (root.getAttribute('aria-hidden') !== String(!open)) root.setAttribute('aria-hidden', String(!open));
                         if (open) active.push({ root: root, state: state });
                     });
                     active.sort(function(a,b) { return a.state.order - b.state.order; });
+                    if (!heavy) return;
                     top = active.length ? active[active.length - 1].root : null;
                     if (top) {
                         var branch = top;
@@ -24147,17 +24216,20 @@ function renderProfileActivityList(kind) {
                             Array.from(parent.children).forEach(function(sibling) {
                                 if (sibling === branch) return;
                                 if (sibling.matches('.toast,[role="status"],[role="alert"]')) return;
-                                if (!background.has(sibling)) background.set(sibling, sibling.inert);
-                                sibling.inert = true;
+                                if (!nextBackground.has(sibling)) nextBackground.set(sibling, background.has(sibling) ? background.get(sibling) : sibling.inert);
                             });
                             branch = parent;
                         }
+                        applyBackground(nextBackground);
                         if (oldTop !== top && !top.contains(document.activeElement)) {
                             var nestedOrigin = oldTop && surfaces.get(oldTop) && surfaces.get(oldTop).origin;
                             if (nestedOrigin && nestedOrigin.isConnected && top.contains(nestedOrigin) && !nestedOrigin.closest('[inert]')) nestedOrigin.focus({ preventScroll: true });
                             else focusFirst(top);
                         }
-                    } else if (oldTop && oldTop.contains(document.activeElement)) {
+                    } else {
+                        applyBackground(nextBackground);
+                    }
+                    if (!top && oldTop && oldTop.contains(document.activeElement)) {
                         var origin = surfaces.get(oldTop) && surfaces.get(oldTop).origin;
                         if (origin && origin.isConnected && !origin.closest('[inert]')) origin.focus({ preventScroll: true });
                     }
@@ -24166,7 +24238,13 @@ function renderProfileActivityList(kind) {
             register();
             document.querySelectorAll('.dock-panel').forEach(function(panel) { new MutationObserver(sync).observe(panel,{ attributes: true, attributeFilter: ['class'] }); });
             new MutationObserver(sync).observe(document.body,{ attributes: true, attributeFilter: ['class'] });
-            new MutationObserver(function() { register(); sync(); }).observe(document.body,{ childList: true });
+            new MutationObserver(function(records) {
+                var relevant = records.some(function(record) {
+                    return Array.prototype.some.call(record.addedNodes, mayBeSurface) || Array.prototype.some.call(record.removedNodes, mayBeSurface);
+                });
+                if (!relevant) return;
+                register(); sync();
+            }).observe(document.body,{ childList: true });
             window.__xtjSyncFocusSurfaces = sync;
             window.__xtjGetFocusSurface = function() { return top; };
             document.addEventListener('keydown',function(event) {
@@ -24180,7 +24258,7 @@ function renderProfileActivityList(kind) {
                     if (!nodes.length) focusFirst(top); else (event.shiftKey ? last : first).focus({ preventScroll: true });
                 }
             },true);
-            document.addEventListener('focusin',function(event) { if (top && !top.contains(event.target) && !syncing) focusFirst(top); });
+            document.addEventListener('focusin',function(event) { if (top && !top.contains(event.target) && !syncing && !window.__xtjMorphLanding) focusFirst(top); });
             sync();
         })();
 
