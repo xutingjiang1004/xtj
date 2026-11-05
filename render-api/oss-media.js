@@ -74,12 +74,17 @@ function presignedPutUrl(path, options) {
   const ttl = Math.max(60, Math.min(MAX_PRESIGN_SECONDS, Number(opts.expires) || 900));
   const expires = Math.floor(Date.now() / 1000) + ttl;
   const contentType = String(opts.contentType || 'application/octet-stream');
+  // 前缀 x-oss- 的请求头必须参与 V1 签名（CanonicalizedOSSHeaders，每行 name:value\n），
+  // 且上传时要原样带上。forbid-overwrite 让同名对象已存在时直接 409：
+  // 路径由浏览器自拟且公开可见，没有这一条，任何登录用户都能给他人的媒体路径签 PUT 并覆盖内容。
+  const forbidOverwrite = opts.forbidOverwrite !== false;
+  const ossHeaders = forbidOverwrite ? 'x-oss-forbid-overwrite:true\n' : '';
   const stringToSign = [
     'PUT',
     '',            // Content-MD5：不校验，留空
     contentType,
     String(expires),
-    canonicalResource(clean)
+    ossHeaders + canonicalResource(clean)
   ].join('\n');
   const signature = hmac(c.keySecret, stringToSign);
   const query = [
@@ -88,6 +93,7 @@ function presignedPutUrl(path, options) {
     'Signature=' + encodeURIComponent(signature)
   ].join('&');
   const headers = { 'Content-Type': contentType };
+  if (forbidOverwrite) headers['x-oss-forbid-overwrite'] = 'true';
   // Cache-Control 不属于 V1 签名覆盖的字段，可以安全附加；
   // 但它必须在上传时就落成对象元数据，后续 GET 才不会回源。
   if (opts.cacheControl) headers['Cache-Control'] = String(opts.cacheControl);

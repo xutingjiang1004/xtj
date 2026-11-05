@@ -316,7 +316,7 @@
                 try {
                     var signRes = await window.xtjProtectedFetch('/api/oss/sign', {
                         method: 'POST',
-                        body: JSON.stringify({ path: path, content_type: type }),
+                        body: JSON.stringify({ path: path, content_type: type, size: Number(file && file.size) || 0 }),
                         authOwner: identity && identity.owner,
                         authEpoch: identity && identity.epoch
                     });
@@ -1233,12 +1233,32 @@
                     });
                 }
             });
-            window.addEventListener('online', function() {
-                // ★ 2026-09-26（审计 P2-30）：恢复联网时撤掉离线提示条
+            function removeOfflineBar() {
                 try {
                     var offlineBar = document.getElementById('xtjOfflineBar');
                     if (offlineBar && offlineBar.parentNode) offlineBar.parentNode.removeChild(offlineBar);
                 } catch (eOff) {}
+            }
+            function showOfflineBar() {
+                try {
+                    if (document.getElementById('xtjOfflineBar')) return;
+                    var bar = document.createElement('div');
+                    bar.id = 'xtjOfflineBar';
+                    bar.setAttribute('role', 'status');
+                    bar.setAttribute('aria-live', 'polite');
+                    bar.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom, 0px) + 76px);z-index:9999;background:#ff3b60;color:#fff;padding:8px 16px;border-radius:999px;font-size:13px;box-shadow:0 6px 18px rgba(255,59,96,.35);';
+                    bar.textContent = '网络已断开，请检查连接';
+                    if (document.body) document.body.appendChild(bar);
+                } catch (eOff2) {}
+            }
+            // 加载时已离线、或离线期间页面被冻结/放进 bfcache 后恢复，都不会再有 offline/online 事件，按当前状态对一遍。
+            function syncOfflineBar() {
+                if (typeof navigator !== 'undefined' && navigator.onLine === false) showOfflineBar();
+                else removeOfflineBar();
+            }
+            window.addEventListener('online', function() {
+                // ★ 2026-09-26（审计 P2-30）：恢复联网时撤掉离线提示条
+                removeOfflineBar();
                 if (window.currentUser) {
                     if (!commentRealtime || commentRealtime.state === 'closed') {
                         subscribeToComments();
@@ -1252,18 +1272,10 @@
             // ★ 2026-09-26（审计 P2-30）：断网提示。此前只有 online 恢复路径，
             //   断网时点发布/点赞只能等到超时才给出笼统提示。这里加一个常驻提示条，
             //   并让 xtjProtectedFetch 在 navigator.onLine === false 时立刻给出明确文案。
-            window.addEventListener('offline', function() {
-                try {
-                    if (document.getElementById('xtjOfflineBar')) return;
-                    var bar = document.createElement('div');
-                    bar.id = 'xtjOfflineBar';
-                    bar.setAttribute('role', 'status');
-                    bar.setAttribute('aria-live', 'polite');
-                    bar.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom, 0px) + 76px);z-index:9999;background:#ff3b60;color:#fff;padding:8px 16px;border-radius:999px;font-size:13px;box-shadow:0 6px 18px rgba(255,59,96,.35);';
-                    bar.textContent = '网络已断开，请检查连接';
-                    if (document.body) document.body.appendChild(bar);
-                } catch (eOff2) {}
-            });
+            window.addEventListener('offline', showOfflineBar);
+            document.addEventListener('visibilitychange', function() { if (!document.hidden) syncOfflineBar(); });
+            window.addEventListener('pageshow', syncOfflineBar);
+            syncOfflineBar();
             window.addEventListener('pageshow', function() {
                 if (window.currentUser) {
                     if (!commentRealtime || commentRealtime.state === 'closed') {

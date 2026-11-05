@@ -13,6 +13,7 @@ function fixture(){
 test('legacy uploads enforce post visibility and deletion while preserving public originals',async()=>{
  const f=fixture(),path='posts/secret.png';f.rows.posts.push({id:'post',user_name:'alice',media_type:'image',media_url:url(path),visibility:'private'});
  await request(f.app).get('/api/uploads/media').query({path}).expect(404);await request(f.app).get('/api/uploads/media').query({path}).set('x-user','bob').expect(404);assert.equal(f.reads,0);
+ await request(f.app).get('/api/uploads/media').query({path}).set('x-user','admin').expect(404); // adminName is 'admin' here: private originals stay with the author
  const response=await request(f.app).get('/api/uploads/media').query({path}).set('x-user','alice').expect(200);assert.equal(response.body.toString(),'original bytes');assert.match(response.headers['cache-control'],/must-revalidate/);
  f.rows.posts[0].visibility='public';await request(f.app).get('/api/uploads/media').query({path}).expect(200);
  f.rows.posts[0].is_deleted=true;await request(f.app).get('/api/uploads/media').query({path}).set('x-user','alice').expect(404);

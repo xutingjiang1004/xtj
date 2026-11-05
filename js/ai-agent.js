@@ -13464,7 +13464,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       try { clearInterval(_idleCheckTimer); } catch (e) {}
       cancelAnswerPromote();
       // Normal done/EOF path: release the reader/body instead of waiting for GC.
-      try { if (reader && typeof reader.cancel === 'function') reader.cancel(); } catch (eReaderDone) {}
+      try { if (reader && typeof reader.cancel === 'function') cancelAiStreamReader(reader); } catch (eReaderDone) {}
 
       // H-25: 45s 无数据超时 — 清理节点、复位状态并提示，避免永久"处理中"
       if (timedOut) {
@@ -17039,6 +17039,8 @@ function showChatMessages() {
     if(aiFeatureRequestClient)aiFeatureRequestClient.clear();
     modelCapabilityCache.clear();
     serverModelCatalog = []; serverModelIdentity = null;
+    // 60 秒同步缓存属于上一个账号：不清掉的话，换账号后 openAiChat 会跳过同步，托管模型目录与新账号的模型、研究模型偏好都要等一分钟。
+    S._customModelsSyncedAt = 0;
     if (S.selectedModel === CUSTOM_MODEL_PREFIX + OPENROUTER_MODEL_UID) {
       S.selectedModel = DEFAULT_AI_MODEL;
       try { localStorage.setItem('xtj_ai_model',DEFAULT_AI_MODEL); } catch (_) {}

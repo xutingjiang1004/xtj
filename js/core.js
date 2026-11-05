@@ -540,6 +540,10 @@ const ADMIN_NAME = "xxz";
                 try { if (window.__xtjResetDmNotifications) window.__xtjResetDmNotifications(); } catch(e) {}
                 try { if (window.XTJVoiceTranscription) window.XTJVoiceTranscription.reset(); } catch(e) {}
                 try { if (typeof window.__xtjResetDmBroadcast === 'function') window.__xtjResetDmBroadcast(); } catch(e) {}
+                // 其他标签页退出 / 会话过期 / 身份不一致也必须清掉上一个账号的资料快照与聊天渲染态，
+                // 不能只有主动退出（doLogout）才清；否则邮箱、属地和私聊气泡会留在游客界面上。
+                try { window.currentUserInfoSnapshot = null; } catch(e) {}
+                try { if (typeof window.__xtjResetChatPanels === 'function') window.__xtjResetChatPanels(); } catch(e) {}
                 // ★ 清理浏览历史与 feed 缓存：不含用户名的缓存键必须随账号切换清空，防止跨用户串扰（隐私泄漏）
                 try { window.safeStorage.remove('xtj_view_history'); } catch(e) {}
                 try { sessionStorage.removeItem('xtj_view_history'); } catch(e) {}
@@ -3399,6 +3403,8 @@ function isAdmin() {
                 if (nickChars < 2 || nickChars > 20) { showToast("昵称长度2-20个字符"); return; }
                 // 中文 / 字母 / 数字 / 下划线 / Emoji（含代理对、变体选择符、ZWJ 组合与符号类表情）
                 if (!/^(?:[\u4e00-\u9fa5A-Za-z0-9_]|[\uD800-\uDBFF][\uDC00-\uDFFF]|[\u2600-\u27BF\u2B00-\u2BFF\u2190-\u21FF\u00A9\u00AE\u2122\uFE0F\u200D\u20E3])+$/.test(name)) { showToast("昵称仅支持中英文、数字、下划线和 Emoji"); return; }
+                // 至少要有一个看得见的字符：只由 ZWJ / 变体选择符 / 键帽符 / 标签字符组成的昵称在界面上是空白。
+                if (!/[\u4e00-\u9fa5A-Za-z0-9_\u2600-\u27BF\u2B00-\u2BFF\u2190-\u21FF\u00A9\u00AE\u2122]|[\uD800-\uDB3F\uDB41-\uDBFF][\uDC00-\uDFFF]/.test(name)) { showToast("昵称需包含至少一个可见字符"); return; }
                 if (!pw) { showToast("请输入密码", "error"); if (_regPwInp) _regPwInp.focus(); return; }
                 if (pw.length < 6) { showToast("密码至少6位", "error"); if (_regPwInp) _regPwInp.focus(); return; }
                 if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showToast("邮箱格式不正确"); return; }
@@ -3611,40 +3617,18 @@ function isAdmin() {
                         }
                     }
                     
-                    // 隐私收紧：__user_info__ 仅允许本人读取（RLS 035 已强制），
-                    // 非本人不再发起 anon 直读，直接显示占位。
-                    var userInfoRes = null;
-                    if (userName === currentUser) {
-                        userInfoRes = await sb.from("posts")
-                            .select("content")
-                            .eq("user_name", userName)
-                            .eq("media_type", "__user_info__")
-                            .order("created_at", { ascending: false })
-                            .limit(1);
-                    }
-                    
+                    // 隐私收紧：__user_info__ 匿名密钥读不到（RLS 035/055），本人的资料只经服务端
+                    // /api/user/profile 取；非本人不发请求，直接显示占位。
+                    var ownSnapshot = null;
+                    if (userName === currentUser) ownSnapshot = await loadCurrentUserInfoSnapshot(userName);
+
                     // S7 修复：同上，用户已切换则丢弃本次结果
                     if (_seq !== upcRequestSeq || upcTargetUser !== userName) return;
-                    
-                    // ★ 审计修复：userInfoRes 仅在本人分支被赋值（上方 RLS 收紧后
-                    //   非本人不再直读），查看他人资料时保持 null —— 旧代码
-                    //   `userInfoRes.data` 必然 TypeError 落入 catch，界面恒显示
-                    //   "最近登录：加载失败"，与注释"非本人直接显示占位"意图相悖。
-                    //   补空值守卫后非本人走 118 行的 '-' 占位。
-                    if (userInfoRes && userInfoRes.data && userInfoRes.data.length > 0) {
-                        try {
-                            var info = JSON.parse(userInfoRes.data[0].content);
-                            if (info.last_login) {
-                                upcLoginEl.textContent = '最近登录：' + window.safeParseDate(info.last_login).toLocaleString();
-                            } else {
-                                upcLoginEl.textContent = '最近登录：-';
-                            }
-                        } catch(e) {
-                            upcLoginEl.textContent = '最近登录：-';
-                        }
-                    } else {
-                        upcLoginEl.textContent = '最近登录：-';
-                    }
+
+                    var lastLoginTime = ownSnapshot && ownSnapshot.last_login ? window.safeParseDate(ownSnapshot.last_login) : null;
+                    upcLoginEl.textContent = lastLoginTime && Number.isFinite(lastLoginTime.getTime())
+                        ? '最近登录：' + lastLoginTime.toLocaleString()
+                        : '最近登录：-';
                 } catch(e) {
                     if (_seq !== upcRequestSeq || upcTargetUser !== userName) return;
                     upcLoginEl.textContent = '最近登录：加载失败';
@@ -4503,33 +4487,12 @@ function renderProfileActivityList(kind) {
                 var list = document.getElementById('reportHistoryList') || document.getElementById('reportRecordsList');
                 if (!list) return;
                 try {
-                    if (!window.sb) {
-                        list.innerHTML = '<div class="report-records-empty">数据库连接未初始化</div>';
-                        return;
-                    }
-                    var res = await sb.from('posts')
-                        .select('id, content, created_at')
-                        .eq('user_name', window.currentUser)
-                        .eq('media_type', REPORT_MARKER)
-                        .order('created_at', { ascending: false })
-                        .limit(160);
+                    // 匿名密钥读不到 __report__ 行（RLS 只放行公开帖子类型），必须走服务端按登录身份查询。
+                    var reportsResponse = await window.xtjProtectedFetch('/api/my-reports', { authOwner: recordsOwner, authEpoch: recordsEpoch });
+                    var reportsBody = await reportsResponse.json().catch(function() { return {}; });
                     if (!sameAccount()) return;
-                    if (res && res.error) throw res.error;
-                    var records = (res.data || []).map(function(p) {
-                        var c = {};
-                        try { c = JSON.parse(p.content || '{}'); } catch(e) {}
-                        return {
-                            id: p.id,
-                            created_at: p.created_at,
-                            target_type: c.target_type || 'post',
-                            target_id: c.target_id || '',
-                            target_user: c.target_user || '',
-                            report_reason: c.report_reason || '',
-                            status: c.status || 'pending',
-                            admin_response: c.admin_response || null,
-                            reviewed_at: c.reviewed_at || null
-                        };
-                    });
+                    if (!reportsResponse.ok || !reportsBody || !Array.isArray(reportsBody.data)) throw new Error((reportsBody && reportsBody.error) || '举报记录加载失败');
+                    var records = reportsBody.data;
                     if (!records.length) {
                         list.innerHTML = '<div class="report-records-empty">你还没有举报记录。</div>';
                         return;
@@ -5560,6 +5523,7 @@ function renderProfileActivityList(kind) {
                     } else {
                         __xtjDeferredWarmupQueued = false;
                         stopRestrictionPolling();
+                        userRestrictions = { is_banned: false, is_blacklisted: false, is_muted: false };
                         hideBlockedScreen();
                         hideMuteIndicator();
                     }
@@ -5597,6 +5561,9 @@ function renderProfileActivityList(kind) {
                     if (reportBtnWrapper) reportBtnWrapper.style.display = "none";
                     
                     stopRestrictionPolling();
+                    // 退出后复位限制状态：否则同一账号再次登录时限制集合没变，checkUserRestrictions
+                    // 不会重画禁言条/发布框锁定。
+                    userRestrictions = { is_banned: false, is_blacklisted: false, is_muted: false };
                     hideBlockedScreen();
                     hideMuteIndicator();
                     
@@ -5756,6 +5723,7 @@ function renderProfileActivityList(kind) {
                 if (!match) return;
                 var current = parseInt(match[1], 10) || 0;
                 var next = liked ? current + 1 : Math.max(0, current - 1);
+                if (setPostStatCount(statsEl, 'likes', next)) return;
                 statsEl.textContent = text.replace(/(点赞|❤)\s*\d+/, '$1 ' + next);
             }
 
@@ -5770,6 +5738,7 @@ function renderProfileActivityList(kind) {
                     if (String(postEl.getAttribute('data-post-id') || '') !== pid) return;
                     var statsEl = postEl.querySelector('.post-stats-text');
                     if (!statsEl) return;
+                    if (setPostStatCount(statsEl, 'likes', count)) return;
                     statsEl.textContent = (statsEl.textContent || '').replace(/(点赞|❤)\s*\d+/, '$1 ' + count);
                 });
             }
@@ -8043,7 +8012,7 @@ function renderProfileActivityList(kind) {
                             //   正常文案「浏览 1｜点赞 0｜评论 0」下恰好是浏览数，
                             //   但一旦文案改版（如「3 小时前 · 浏览 1」）就会把时间数字改掉。
                             //   改为锚定「浏览」/👁 后的数字，只替换目标位置。
-                            if (statsEl) {
+                            if (statsEl && !setPostStatCount(statsEl, 'views', authoritativeViews)) {
                                 statsEl.textContent = statsEl.textContent.replace(
                                     /((?:浏览|👁)\s*)(\d+)/,
                                     function (_m, prefix) { return prefix + String(authoritativeViews); }
@@ -8052,7 +8021,7 @@ function renderProfileActivityList(kind) {
                             var detailModal = document.getElementById('postDetailModal');
                             var detailStats = document.querySelector('#postDetailBody .post-detail-stats');
                             if (detailModal && detailModal.classList.contains('active') &&
-                                String(window.__xtjPostDetailCurrentId || '') === String(postId) && detailStats) {
+                                String(window.__xtjPostDetailCurrentId || '') === String(postId) && detailStats && !setPostStatCount(detailStats, 'views', authoritativeViews)) {
                                 detailStats.textContent = detailStats.textContent.replace(
                                     /((?:浏览|👁)\s*)(\d+)/,
                                     function (_m, prefix) { return prefix + String(authoritativeViews); }
@@ -9151,9 +9120,20 @@ function renderProfileActivityList(kind) {
 
             function buildPostStatsLine(post, likeCount, commentCount) {
                 var normalized = normalizePostForRender(post);
-                return '浏览 ' + (normalized.views || 0) +
-                    ' | 点赞 ' + (likeCount || 0) +
-                    ' | 评论 ' + (commentCount || 0);
+                // 浏览、点赞两个数字可点开统计面板；整行仍是一个 flex 子项，文字内容与原来逐字相同。
+                return '<span class="post-stats-line">' +
+                    '<button type="button" class="post-stat-link" data-stat-kind="views" aria-haspopup="dialog" aria-label="查看浏览用户">浏览 ' + (normalized.views || 0) + '</button>' +
+                    ' | <button type="button" class="post-stat-link" data-stat-kind="likes" aria-haspopup="dialog" aria-label="查看点赞用户">点赞 ' + (likeCount || 0) + '</button>' +
+                    ' | 评论 ' + (commentCount || 0) + '</span>';
+            }
+
+            // 局部改数字：整段 textContent 回写会把可点的浏览／点赞按钮冲成纯文字。
+            function setPostStatCount(statsEl, kind, count) {
+                if (!statsEl || !statsEl.querySelector) return false;
+                var link = statsEl.querySelector('.post-stat-link[data-stat-kind="' + kind + '"]');
+                if (!link) return false;
+                link.textContent = (kind === 'views' ? '浏览 ' : '点赞 ') + count;
+                return true;
             }
 
             // ★ 关键修复：删除此处的 buildPostBadges 重新赋值！
@@ -11745,8 +11725,12 @@ function renderProfileActivityList(kind) {
                 btn.innerHTML = flight.markup || '<span>发动态</span>'; delete btn._composeMarkup; delete btn.dataset.originalText;
             }
             function pendingPostMediaKey(owner) { return 'xtj_post_media_pending_' + encodeURIComponent(owner); }
+            // 发布请求键由「草稿内容 + 草稿编号」决定：同一份草稿失败重试时编号不变（服务端据此认出重试，
+            // 丢了响应也不会发两条）；发布成功后编号作废，下一次哪怕文字和附件完全相同也是一条新帖。
+            var postDraftNonce = '';
             function postRequestKeyFor(owner, text, files, visibility, location) {
-                var seed = [String(owner || ''), String(text || ''), (files || []).map(function(file) { return file.name + ':' + file.size + ':' + (file.lastModified || 0); }).join('|'), String(visibility || ''), location ? JSON.stringify(location) : ''].join('\u0000');
+                if (!postDraftNonce) postDraftNonce = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+                var seed = [postDraftNonce, String(owner || ''), String(text || ''), (files || []).map(function(file) { return file.name + ':' + file.size + ':' + (file.lastModified || 0); }).join('|'), String(visibility || ''), location ? JSON.stringify(location) : ''].join('\u0000');
                 var h1 = 2166136261, h2 = 0;
                 for (var i = 0; i < seed.length; i++) {
                     var code = seed.charCodeAt(i);
@@ -12010,6 +11994,7 @@ function renderProfileActivityList(kind) {
                         uploadedMedia = [];
                     }
                     postUploadCache.delete(requestKey);
+                    postDraftNonce = '';
                     uploadedMedia.forEach(function(item) { forgetPendingPostMedia(flight.owner, item.storage_path); });
                     if (flight.progress) flight.progress.confirmed();
                     uploadedMedia = [];
@@ -12827,6 +12812,108 @@ function renderProfileActivityList(kind) {
 
             // 统计预加载（使用后端快照接口，避免全量读取）
 
+            // ===================== 浏览 / 点赞用户统计面板 =====================
+            // 点帖子里的「浏览 N」「点赞 N」打开同一块满屏面板：左栏浏览用户，右栏点赞用户，每人头像 + 名字。
+            (function installPostStatsPanel() {
+                var MODAL_ID = 'postStatsModal', PAGE_SIZE = 50, MAX_PAGES = 40;
+                var session = 0;
+
+                function byId(id) { return document.getElementById(id); }
+                function rowHtml(userName) {
+                    return '<li class="post-stats-row">' + getAvatarHtml(userName, null) +
+                        '<span class="post-stats-name">' + escapeHtml(userName) + '</span></li>';
+                }
+                function paint(kind, state) {
+                    var list = byId(kind === 'views' ? 'postStatsViewsList' : 'postStatsLikesList');
+                    var count = byId(kind === 'views' ? 'postStatsViewsCount' : 'postStatsLikesCount');
+                    if (!list || !count) return;
+                    count.textContent = String(state.total != null ? state.total : state.rows.length);
+                    var html;
+                    if (state.rows.length) html = state.rows.map(function(row) { return rowHtml(row.user_name); }).join('');
+                    else if (state.error) html = '';
+                    else if (state.loading) html = '<li class="post-stats-note" role="status">加载中…</li>';
+                    else html = '<li class="post-stats-note">' + (kind === 'views' ? '还没有人浏览' : '还没有人点赞') + '</li>';
+                    if (state.rows.length && state.loading) html += '<li class="post-stats-note" role="status">加载中…</li>';
+                    if (state.error) html += '<li class="post-stats-note post-stats-error" role="status">' + escapeHtml(state.error) +
+                        ' <button type="button" class="post-stats-retry" data-stat-retry="' + kind + '">重试</button></li>';
+                    list.innerHTML = html;
+                    if (window.__xtjEnsureAvatars && state.rows.length) window.__xtjEnsureAvatars(state.rows.map(function(row) { return row.user_name; }), list);
+                }
+                async function load(kind, postId, token, state) {
+                    var owner = currentUser, epoch = _authStateEpoch;
+                    function current() { return token === session && owner === currentUser && epoch === _authStateEpoch; }
+                    state.loading = true; state.error = ''; paint(kind, state);
+                    try {
+                        var seen = new Set(state.rows.map(function(row) { return String(row.id); }));
+                        for (var page = 0; page < MAX_PAGES && current(); page++) {
+                            var path = '/api/post/detail/' + encodeURIComponent(postId) + '/relations/' + kind + '?limit=' + PAGE_SIZE +
+                                (state.cursor ? '&cursor=' + encodeURIComponent(state.cursor) : '');
+                            var response = await window.xtjOptionalAuthFetch(path, { timeoutMs: 15000, authOwner: owner, authEpoch: epoch });
+                            var body = await response.json().catch(function() { return {}; });
+                            if (!current()) return;
+                            if (!response.ok || !body.ok) throw new Error(body.error || '加载失败，请重试');
+                            (body.data || []).forEach(function(row) {
+                                if (!row || !row.user_name || seen.has(String(row.id))) return;
+                                seen.add(String(row.id)); state.rows.push(row);
+                            });
+                            if (Number.isFinite(Number(body.total))) state.total = Number(body.total);
+                            state.cursor = body.has_more && body.next_cursor ? body.next_cursor : null;
+                            paint(kind, state);
+                            if (!state.cursor) break;
+                        }
+                    } catch (error) {
+                        if (current()) state.error = (error && error.message) || '加载失败，请重试';
+                    } finally {
+                        if (current()) { state.loading = false; paint(kind, state); }
+                    }
+                }
+                function start(kind, postId, token) {
+                    var state = { rows: [], total: null, cursor: null, loading: false, error: '' };
+                    panelStates[kind] = state;
+                    return load(kind, postId, token, state);
+                }
+                var panelStates = {};
+
+                window.openPostStatsPanel = function(postId) {
+                    var modal = byId(MODAL_ID);
+                    if (!modal || !postId) return;
+                    var token = ++session;
+                    panelStates = {};
+                    modal.setAttribute('data-post-id', String(postId));
+                    start('views', postId, token);
+                    start('likes', postId, token);
+                    window.openModal(MODAL_ID);
+                    ['postStatsViewsList', 'postStatsLikesList'].forEach(function(id) { var node = byId(id); if (node) node.scrollTop = 0; });
+                    var close = modal.querySelector('.post-stats-close');
+                    if (close) try { close.focus({ preventScroll: true }); } catch (_) {}
+                };
+
+                // 关闭（含 Esc、点遮罩）后作废在途请求，晚到的结果不会写进下一次打开的面板。
+                var baseClose = window.closeModal;
+                window.closeModal = function(id) {
+                    if (id === MODAL_ID) session++;
+                    return baseClose.apply(this, arguments);
+                };
+
+                document.addEventListener('click', function(event) {
+                    var target = event.target && event.target.closest ? event.target : null;
+                    if (!target) return;
+                    var retry = target.closest('.post-stats-retry');
+                    if (retry) {
+                        var modal = byId(MODAL_ID), kind = retry.getAttribute('data-stat-retry'), state = panelStates[kind];
+                        if (modal && state && !state.loading) { event.preventDefault(); load(kind, modal.getAttribute('data-post-id'), session, state); }
+                        return;
+                    }
+                    var link = target.closest('.post-stat-link');
+                    if (!link) return;
+                    var host = link.closest('.post[data-post-id]');
+                    var postId = host ? host.getAttribute('data-post-id') : (link.closest('#postDetailBody') ? window.__xtjPostDetailCurrentId : '');
+                    if (!postId) return;
+                    event.preventDefault(); event.stopPropagation();
+                    window.openPostStatsPanel(postId);
+                }, true);
+            })();
+
 /**
  * core-parts/05-feed-stats.js
  * Feed render, filters, stats state (pre-chat)
@@ -13145,7 +13232,7 @@ function renderProfileActivityList(kind) {
                 try {
                     var signRes = await window.xtjProtectedFetch('/api/oss/sign', {
                         method: 'POST',
-                        body: JSON.stringify({ path: path, content_type: type }),
+                        body: JSON.stringify({ path: path, content_type: type, size: Number(file && file.size) || 0 }),
                         authOwner: identity && identity.owner,
                         authEpoch: identity && identity.epoch
                     });
@@ -14062,12 +14149,32 @@ function renderProfileActivityList(kind) {
                     });
                 }
             });
-            window.addEventListener('online', function() {
-                // ★ 2026-09-26（审计 P2-30）：恢复联网时撤掉离线提示条
+            function removeOfflineBar() {
                 try {
                     var offlineBar = document.getElementById('xtjOfflineBar');
                     if (offlineBar && offlineBar.parentNode) offlineBar.parentNode.removeChild(offlineBar);
                 } catch (eOff) {}
+            }
+            function showOfflineBar() {
+                try {
+                    if (document.getElementById('xtjOfflineBar')) return;
+                    var bar = document.createElement('div');
+                    bar.id = 'xtjOfflineBar';
+                    bar.setAttribute('role', 'status');
+                    bar.setAttribute('aria-live', 'polite');
+                    bar.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom, 0px) + 76px);z-index:9999;background:#ff3b60;color:#fff;padding:8px 16px;border-radius:999px;font-size:13px;box-shadow:0 6px 18px rgba(255,59,96,.35);';
+                    bar.textContent = '网络已断开，请检查连接';
+                    if (document.body) document.body.appendChild(bar);
+                } catch (eOff2) {}
+            }
+            // 加载时已离线、或离线期间页面被冻结/放进 bfcache 后恢复，都不会再有 offline/online 事件，按当前状态对一遍。
+            function syncOfflineBar() {
+                if (typeof navigator !== 'undefined' && navigator.onLine === false) showOfflineBar();
+                else removeOfflineBar();
+            }
+            window.addEventListener('online', function() {
+                // ★ 2026-09-26（审计 P2-30）：恢复联网时撤掉离线提示条
+                removeOfflineBar();
                 if (window.currentUser) {
                     if (!commentRealtime || commentRealtime.state === 'closed') {
                         subscribeToComments();
@@ -14081,18 +14188,10 @@ function renderProfileActivityList(kind) {
             // ★ 2026-09-26（审计 P2-30）：断网提示。此前只有 online 恢复路径，
             //   断网时点发布/点赞只能等到超时才给出笼统提示。这里加一个常驻提示条，
             //   并让 xtjProtectedFetch 在 navigator.onLine === false 时立刻给出明确文案。
-            window.addEventListener('offline', function() {
-                try {
-                    if (document.getElementById('xtjOfflineBar')) return;
-                    var bar = document.createElement('div');
-                    bar.id = 'xtjOfflineBar';
-                    bar.setAttribute('role', 'status');
-                    bar.setAttribute('aria-live', 'polite');
-                    bar.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom, 0px) + 76px);z-index:9999;background:#ff3b60;color:#fff;padding:8px 16px;border-radius:999px;font-size:13px;box-shadow:0 6px 18px rgba(255,59,96,.35);';
-                    bar.textContent = '网络已断开，请检查连接';
-                    if (document.body) document.body.appendChild(bar);
-                } catch (eOff2) {}
-            });
+            window.addEventListener('offline', showOfflineBar);
+            document.addEventListener('visibilitychange', function() { if (!document.hidden) syncOfflineBar(); });
+            window.addEventListener('pageshow', syncOfflineBar);
+            syncOfflineBar();
             window.addEventListener('pageshow', function() {
                 if (window.currentUser) {
                     if (!commentRealtime || commentRealtime.state === 'closed') {

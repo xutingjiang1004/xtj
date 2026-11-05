@@ -1,6 +1,6 @@
 'use strict';
 const { MAX_POST_IMAGES, MAX_POST_FILE_BYTES, getPostMediaItems } = require('../js/post-media');
-const { parsePostMediaUrl } = require('./post-media');
+const { parsePostMediaUrl, isOssMediaUrl } = require('./post-media');
 const FIELDS = 'id,post_id,position,media_type,media_url,width,height,file_size,created_at';
 // 视频封面不走 post_attachments：数据库函数会把「带附件的帖子」强制写成 image，
 // 视频帖一挂附件就变成图片帖。封面改成存在帖子内容的元数据里，读取时再取出来。
@@ -10,6 +10,8 @@ function contentPosterUrl(content) {
   if (!parsed || parsed.__type !== '__xtj_post_v2__' || !parsed.meta) return null;
   const url = typeof parsed.meta.poster_url === 'string' ? parsed.meta.poster_url.trim() : '';
   if (!url || url.length > 2048 || !/^https:\/\//i.test(url)) return null;
+  // 封面直传 OSS 后地址是本站 OSS 桶的公网地址（posters/ 或 posts/ 前缀），同样放行。
+  if (isOssMediaUrl(url)) return url;
   // 只认存储里的封面图（新帖在 posters/，老帖在 posts/），避免把任意地址渲染成封面。
   if (!/\/storage\/v1\/object\/public\/uploads\/posters\//.test(url) && !/\/storage\/v1\/object\/public\/uploads\/posts\//.test(url)
     && !/\/api\/uploads\/media\?path=(posters|posts)(%2F|\/)/i.test(url)) return null;

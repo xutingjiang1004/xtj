@@ -7,6 +7,8 @@ const { saveCustomChatTurn, saveInterruptedChatTurn, saveDeepThinkChatTurn } = r
 const assistantOutput = require('./ai-assistant-output');
 const { aiConversationActorPattern, parseAiHistoryCursor, queryAiHistoryPage } = require('./ai-history');
 const { createComment, readRelationPage, readFeedEngagement } = require('./post-interactions');
+const { readPostViewers } = require('./post-viewers');
+const { readPostOssPaths, deleteOssObjects } = require('./oss-cleanup');
 const { readPhotoWallPage } = require('./photo-wall-page');
 const { createAdaptivePoller } = require('./adaptive-poller');
 const { createMediaPreviews } = require('./media-previews');
@@ -29,13 +31,14 @@ const {
   validateDmStoragePath,
   validateDmMediaKind,
   validateDmUploadOwnership,
+  dmTextActorKey,
   MEDIA_KINDS: ALLOWED_KINDS,
   dmMediaQuotaRemainingBytes,
   tryConsumeDmMediaQuota,
   refundDmMediaQuota,
   acquireDmMediaSlot
 } = require('./dm-media');
-const { enqueueStorageCleanupJob, removeStorageWithQueue, isNotFoundError } = require('./storage-cleanup');
+const { enqueueStorageCleanupJob, removeStorageWithQueue, isNotFoundError, sweepAbandonedPhotoUploads } = require('./storage-cleanup');
 const { applySecurityHeaders } = require('./security-headers');
 // ★ 2026-09-26：provider-registry 模块已删除（无任何运行时/前端消费），见文末说明。
 const {
@@ -3056,9 +3059,10 @@ async function executeToolCallInner(toolCall, context) {
                 '，超过单文件 ' + toolHelpers.formatBytes(ZIP_MAX_ENTRY_UNCOMPRESSED) + ' 上限，拒绝读取'
             };
           }
-          var rzText = await rzZip.files[rzTarget].async('string');
-          rzText = String(rzText || '');
-          var rzTrunc = rzText.length > 12000;
+          // 声明的大小可以被伪造：只流式读取前 256KB（展示只需要 12000 字符），读够即停。
+          var rzPrefix = await toolHelpers.readZipEntryText(rzZip.files[rzTarget], 256 * 1024);
+          var rzText = String(rzPrefix.text || '');
+          var rzTrunc = rzPrefix.truncated || rzText.length > 12000;
           if (rzTrunc) rzText = rzText.slice(0, 12000) + '\n...(内容过长已截断)';
           return {
             tool_name: name,
@@ -4537,6 +4541,15 @@ function validateDurationHours(value) {
   return { value: Math.floor(raw) };
 }
 
+// 封禁/禁言/黑名单记录是否仍然有效：is_active 为真且未到期（expires_at 为空表示永久）。
+// 过期记录要等管理员加载 /admin/data 才会被异步清除，重新处置时不能把它们当作有效记录而报 409。
+function moderationRecordIsLive(row) {
+  if (!row || !row.is_active) return false;
+  if (!row.expires_at) return true;
+  var expires = new Date(row.expires_at).getTime();
+  return !Number.isFinite(expires) || expires > Date.now();
+}
+
 // ===================== 中间件 ======================
 function isAllowedWebOrigin(origin) {
   if (!origin) return true;
@@ -5110,7 +5123,7 @@ async function aiSiteSearch(source, query, userName, limit, isAdmin, searchPlan)
     if (postRes.error) { console.error('[aiSiteSearch] posts query error:', postRes.error); return { results: [], error: { code: 'posts_query_failed', message: '帖子搜索暂时不可用' } }; }
     var candidates = (postRes.data || []).filter(function(p) {
       if (!isNormalPost(p)) return false;
-      if (p.visibility === 'private' && !isAdmin && p.user_name !== userName) return false;
+      if (p.visibility === 'private' && p.user_name !== userName) return false;
       return true;
     });
         // client-side filter: check extracted text content (not just raw JSON)
@@ -5197,9 +5210,10 @@ async function aiSiteSearch(source, query, userName, limit, isAdmin, searchPlan)
       return aiSiteResult('dm', m.id, '与 ' + peer + ' 的聊天', aiSiteSnippet(m.content, q), m.created_at, { type: 'dm', user: peer, message_id: m.id }, q, score);
     });
   } else if (source === 'ai_history') {
-    var aiRes = await supabase.from('posts').select('id,content,media_url,created_at').eq('user_name', userName).eq('media_type', AI_AGENT_MESSAGE_MARKER).ilike('content', pattern).order('created_at', { ascending: false }).limit(take);
+    var aiRes = await supabase.from('posts').select('id,content,media_url,created_at').eq('user_name', userName).eq('media_type', AI_AGENT_MESSAGE_MARKER).ilike('content', pattern).order('created_at', { ascending: false }).limit(take * 3);
     if (aiRes.error) { console.error('[aiSiteSearch] ai_history query error:', aiRes.error); return { results: [], error: { code: 'ai_history_query_failed', message: '小猫历史搜索暂时不可用' } }; }
-    rows = (aiRes.data || []).map(function(m) {
+    // 用户删除的对话只是软删除（meta.deleted），不能再被检索出来；多取一些再过滤，免得被它们挤掉有效结果。
+    rows = (aiRes.data || []).filter(function(m) { return !(parseMsgMeta(m) || {}).deleted; }).slice(0, take).map(function(m) {
       var meta = parseMsgMeta(m);
       var text = aiSiteText(m.content, 10000);
       var score = aiSiteMatchScore(text, q);
@@ -5239,7 +5253,7 @@ async function readPostDetailComments(db, postId) {
 app.get('/api/post/detail/:id/relations/:kind', optionalAuth, rateLimit(60000,120), async (req,res) => {
   try {
     var id=normalizePostId(req.params.id),kind=req.params.kind;
-    if(!id || !['likes','comments','engagement'].includes(kind))return res.status(400).json({ok:false,error:'分页参数无效'});
+    if(!id || !['likes','comments','engagement','views'].includes(kind))return res.status(400).json({ok:false,error:'分页参数无效'});
     var lookup=await supabase.from('posts').select('id,user_name,media_type,visibility,is_deleted').eq('id',id).maybeSingle();
     if(lookup.error)return res.status(503).json({ok:false,error:'互动暂不可用，请重试',retryable:true});
     if(!isNormalPost(lookup.data)||(lookup.data.visibility==='private'&&lookup.data.user_name!==(req.userName||'')))return res.status(404).json({ok:false,error:'帖子不存在或不可查看'});
@@ -5248,9 +5262,11 @@ app.get('/api/post/detail/:id/relations/:kind', optionalAuth, rateLimit(60000,12
       var stats=engagement.posts[0];
       return res.json({ok:true,stats:{id:stats.id,like_count:stats.like_count,comment_count:stats.comment_count,liked_by_me:stats.liked_by_me}});
     }
-    var page=await readRelationPage(supabase,id,kind,{cursor:req.query.cursor,limit:req.query.limit});
+    var page=kind==='views'
+      ? await readPostViewers(supabase,id,{cursor:req.query.cursor,limit:req.query.limit})
+      : await readRelationPage(supabase,id,kind,{cursor:req.query.cursor,limit:req.query.limit});
     if(page.error)return res.status(503).json({ok:false,error:'互动暂不可用，请重试',retryable:true});
-    return res.json({ok:true,data:page.data,has_more:page.has_more,next_cursor:page.next_cursor});
+    return res.json({ok:true,data:page.data,has_more:page.has_more,next_cursor:page.next_cursor,total:Number.isFinite(Number(page.count))?Number(page.count):undefined});
   } catch(error) { return res.status(error.message==='invalid_cursor'?400:503).json({ok:false,error:error.message==='invalid_cursor'?'分页参数无效':'互动暂不可用，请重试',retryable:error.message!=='invalid_cursor'}); }
 });
 
@@ -7656,7 +7672,7 @@ app.get('/api/comments/ai-reply-status', rateLimit(60000, 30), authenticateUser,
     var postRes = await supabase.from('posts').select('id, visibility, user_name').eq('id', commentRes.data.post_id).maybeSingle();
     if (postRes.error) return res.status(503).json({ error: 'post lookup temporarily unavailable', code: 'post_query_failed', retryable: true });
     if (!postRes.data) return res.status(404).json({ error: 'post not found' });
-    if (postRes.data.visibility === 'private' && postRes.data.user_name !== req.userName && req.userName !== ADMIN_USERNAME) {
+    if (postRes.data.visibility === 'private' && postRes.data.user_name !== req.userName) {
       return res.status(403).json({ error: 'access denied' });
     }
     // 查询任务状态，再从真实子评论解析 reply_comment_id 用于一致性检查
@@ -12218,7 +12234,9 @@ app.post('/api/user/register', securityRateLimit(60000, 5), async (req, res) => 
     var password = req.body && req.body.password;
     // 昵称允许中文/字母/数字/下划线/Emoji；长度按码点算，避免一个表情被当成两个字。
     var userNameChars = Array.from(userNameVal || '').length;
-    if (!userNameVal || userNameChars < 2 || userNameChars > 20 || !/^(?:[\u4e00-\u9fa5A-Za-z0-9_]|[\uD800-\uDBFF][\uDC00-\uDFFF]|[\u2600-\u27BF\u2B00-\u2BFF\u2190-\u21FF\u00A9\u00AE\u2122\uFE0F\u200D\u20E3])+$/.test(userNameVal)) {
+    if (!userNameVal || userNameChars < 2 || userNameChars > 20 || !/^(?:[\u4e00-\u9fa5A-Za-z0-9_]|[\uD800-\uDBFF][\uDC00-\uDFFF]|[\u2600-\u27BF\u2B00-\u2BFF\u2190-\u21FF\u00A9\u00AE\u2122\uFE0F\u200D\u20E3])+$/.test(userNameVal) ||
+        // 至少要有一个看得见的字符：全是 ZWJ / 变体选择符 / 键帽符 / 标签字符（U+E0000 段）的昵称在界面上是空白。
+        !/[\u4e00-\u9fa5A-Za-z0-9_\u2600-\u27BF\u2B00-\u2BFF\u2190-\u21FF\u00A9\u00AE\u2122]|[\uD800-\uDB3F\uDB41-\uDBFF][\uDC00-\uDFFF]/.test(userNameVal)) {
       return res.status(400).json({ error: '昵称格式不正确' });
     }
     // ★ 安全:管理员用户名是保留字,禁止通过普通注册流程占用。
@@ -13476,6 +13494,7 @@ async function hardDeleteContent(params) {
 }
 
 var _storageCleanupRunning = false;
+var _abandonedPhotoSweepAt = 0;
 var STORAGE_CLEANUP_CLAIM_TIMEOUT_MS = 60 * 1000;
 var STORAGE_CLEANUP_LEASE_MS = 60 * 1000;
 var STORAGE_CLEANUP_REMOVE_TIMEOUT_MS = 30 * 1000;
@@ -13506,6 +13525,14 @@ async function processStorageCleanupJobs() {
   try {
     var orphanSweep = await supabase.rpc('enqueue_managed_image_orphans');
     if (!orphanSweep || orphanSweep.error) console.warn('[storage-cleanup] managed image sweep unavailable');
+    // 放弃的照片上传（只有文件、没有照片记录）每小时最多扫一次，每次最多 100 条。
+    if (Date.now() - _abandonedPhotoSweepAt > 60 * 60 * 1000) {
+      _abandonedPhotoSweepAt = Date.now();
+      try {
+        var abandoned = await sweepAbandonedPhotoUploads(supabase);
+        if (abandoned && abandoned.swept) console.log('[storage-cleanup] 放弃的照片上传已清理 ' + abandoned.swept + ' 个');
+      } catch (abandonedError) { console.warn('[storage-cleanup] abandoned photo sweep failed:', abandonedError && abandonedError.message || abandonedError); }
+    }
     var pending = await supabase.from('storage_cleanup_jobs')
       .select('id, bucket, paths, attempts, status, updated_at, claim_token, lease_until')
       .in('status', ['pending', 'processing'])
@@ -14306,7 +14333,7 @@ app.post('/api/post/delete', authenticateUser, rateLimit(60000, 20), async (req,
   try {
     var postId = normalizePostId(req.body && req.body.post_id);
     if (!postId) return res.status(400).json({ error: '帖子参数无效', code: 'invalid_post_id' });
-    var lookup = await supabase.from('posts').select('user_name, actor_key, media_type, media_url').eq('id', postId).maybeSingle();
+    var lookup = await supabase.from('posts').select('user_name, actor_key, media_type, media_url, content').eq('id', postId).maybeSingle();
     if (lookup.error) return res.status(500).json({ error: sanitizeError(lookup.error), code: 'delete_lookup_failed' });
     var post = lookup.data;
     if (!post) return res.json({ ok: true, deleted: false, already_deleted: true, post_id: postId });
@@ -14319,6 +14346,8 @@ app.post('/api/post/delete', authenticateUser, rateLimit(60000, 20), async (req,
     }
     if (!isAdmin && post.user_name !== req.userName) return res.status(403).json({ error: '无权删除' });
     var actorKey = post.actor_key || 'post_' + postId + '_' + Date.now();
+    // 附件行会随帖子一起删，所以删之前先把这条帖子在 OSS 上的对象路径读出来。
+    var ossPathsToClean = await readPostOssPaths(supabase, post, postId);
     var hardDelete = await hardDeleteContent({
       postId: postId,
       actorUser: req.userName,
@@ -14335,6 +14364,8 @@ app.post('/api/post/delete', authenticateUser, rateLimit(60000, 20), async (req,
       var status = result.code === 'forbidden' ? 403 : result.code === 'not_found' ? 404 : 500;
       return res.status(status).json({ error: result.error || '删除未生效', code: result.code || 'delete_not_applied' });
     }
+    // 删帖已确认：清掉它在 OSS 上的原图、缩略图、封面。尽力而为，失败不影响删帖结果。
+    if (result.deleted === true && ossPathsToClean.length) deleteOssObjects(ossPathsToClean).catch(function() {});
     return res.json({ ok: true, deleted: result.deleted === true, already_deleted: result.already_deleted === true, post_id: postId });
   } catch (e) { console.error('[API] post delete:', e.message); return res.status(500).json({ error: '删除失败' }); }
 });
@@ -14443,7 +14474,7 @@ app.post('/api/post/comment', authenticateUser, rateLimit(60000, 30), async (req
     // 只允许对普通可见帖子评论：私密帖仅作者本人可评论，系统内部 marker（DM/登录事件等）不可评论
     var targetPost = postResult.data;
     if (!isNormalPost(targetPost)) return res.status(422).json({ error: '该帖子不存在、已删除或不可评论', code: 'not_normal_post' });
-    if (targetPost.visibility === 'private' && targetPost.user_name !== req.userName && req.userName !== ADMIN_USERNAME) {
+    if (targetPost.visibility === 'private' && targetPost.user_name !== req.userName) {
       return res.status(403).json({ error: '无法评论私密帖子', code: 'forbidden' });
     }
 
@@ -14592,7 +14623,7 @@ app.post('/api/post/like', authenticateUser, rateLimit(60000, 60), async (req, r
     if (postError) return res.status(500).json({ error: sanitizeError(postError), code: 'post_lookup_failed' });
     if (!post) return res.status(404).json({ error: 'Post not found', code: 'not_found' });
     if (!isNormalPost(post)) return res.status(404).json({ error: 'Post not found', code: 'not_found' });
-    if (post.visibility === 'private' && post.user_name !== req.userName && req.userName !== ADMIN_USERNAME) {
+    if (post.visibility === 'private' && post.user_name !== req.userName) {
       return res.status(404).json({ error: 'Post not found', code: 'not_found' });
     }
 
@@ -14768,7 +14799,6 @@ app.get('/api/feed', optionalAuth, rateLimit(60000, 60), async (req, res) => {
         next_offset: requestedOffset, next_cursor: null, endReached: true, guest_limited: true, login_required: true, total_post_count: null });
     }
 
-    var isAdmin = req.userName === ADMIN_USERNAME;
     var isLoggedIn = !!req.userName;
 
     // Kept as a documented marker inventory; the normal media type allowlist below is authoritative.
@@ -14792,10 +14822,9 @@ app.get('/api/feed', optionalAuth, rateLimit(60000, 60), async (req, res) => {
         ? supabase.from('posts').select(selectFields, { count: 'estimated' })
         : supabase.from('posts').select(selectFields);
       query = query.or('media_type.is.null,media_type.eq.\"\",media_type.in.(text,image,video,audio,photo,album)');
-      if (!isAdmin) {
-        if (isLoggedIn) query = query.or('visibility.eq.public,user_name.eq.' + pgrstQuote(req.userName));
-        else query = query.eq('visibility', 'public');
-      }
+      // 管理员和其他用户一样：只能看到公开帖和自己的帖子，看不到别人的私密帖。
+      if (isLoggedIn) query = query.or('visibility.eq.public,user_name.eq.' + pgrstQuote(req.userName));
+      else query = query.eq('visibility', 'public');
       query = query.or('is_deleted.is.null,is_deleted.eq.false');
       if (after) {
         query = query.or('created_at.lt.' + after.created_at + ',and(created_at.eq.' + after.created_at + ',id.lt.' + after.id + ')');
@@ -14811,7 +14840,7 @@ app.get('/api/feed', optionalAuth, rateLimit(60000, 60), async (req, res) => {
     if (req.query.q) {
       var searchPage = await require('./feed-search').readFeedSearch(supabase,req.query,req.userName,selectFields);
       posts=searchPage.posts.filter(function(post){return isNormalPost(post)&&!looksLikeSystemTelemetry(post.content)&&
-        (post.visibility==='public'||post.user_name===(req.userName||'')||isAdmin);});
+        (post.visibility==='public'||post.user_name===(req.userName||''));});
       scannedCount=searchPage.posts.length;nextCursor=searchPage.nextCursor;endReached=searchPage.endReached;
       res.set('Cache-Control','no-store');
     } else if (!cursorMode) {
@@ -16087,6 +16116,7 @@ app.post('/api/dm/upload/abort', authenticateUser, rateLimit(60000, 60), async (
   }
 });
 
+var dmTextSendInflight = new Set();
 app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res) => {
   try {
     var banCheck = userBanError(req);
@@ -16172,6 +16202,23 @@ app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res
     var mediaPayload = null;
     var mediaClaim = null;
     var registryRow = null;
+    // 纯文字消息的幂等：客户端重发（响应丢失/超时）带同一个 client_message_id，
+    // 命中已落库的那条就直接返回它，而不是再插一条重复消息。
+    var textIdempotencyKey = '';
+    if (!storagePath) {
+      textIdempotencyKey = dmTextActorKey(sender, targetUser, req.body && req.body.client_message_id);
+      if (textIdempotencyKey) {
+        if (dmTextSendInflight.has(textIdempotencyKey)) {
+          return res.status(409).json({ error: '这条消息正在发送，请稍候', code: 'dm_send_in_progress', retryable: true });
+        }
+        var priorText = await findDmMessageByActorKey(sender, textIdempotencyKey, targetUser);
+        if (priorText.error) return res.status(503).json({ error: '消息发送状态暂时无法确认，请稍后重试', code: 'dm_send_lookup_retry', retryable: true });
+        if (priorText.data) return res.json({ ok: true, message: priorText.data, idempotent: true });
+        actorKey = textIdempotencyKey;
+        dmTextSendInflight.add(textIdempotencyKey);
+        res.on('close', function() { dmTextSendInflight.delete(textIdempotencyKey); });
+      }
+    }
     if (storagePath) {
       if (storagePath.indexOf('..') >= 0 || storagePath.indexOf('\\') >= 0) {
         return res.status(400).json({ error: 'Invalid media path', code: 'invalid_media_path' });
@@ -16377,6 +16424,12 @@ app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res
 
     if (insertErr || !inserted || !inserted.id) {
       console.error('[API] dm send insert error:', insertErr);
+      if (textIdempotencyKey) {
+        // 抛出的传输错误不能说明有没有提交：按确定性 actor_key 对账，已提交就当成功。
+        var committedText = await findDmMessageByActorKey(sender, textIdempotencyKey, targetUser);
+        if (committedText.error) return res.status(503).json({ error: '消息保存结果未确认，请稍后重试', code: 'DM_COMMIT_UNKNOWN', retryable: true });
+        if (committedText.data) return res.json({ ok: true, message: committedText.data, idempotent: true });
+      }
       if (storagePath) {
         var committedAfterError = await findDmMessageByActorKey(sender, actorKey, targetUser);
         if (committedAfterError.error) {
@@ -16690,9 +16743,9 @@ app.post('/admin/ban', verifyToken, rateLimit(60000, 30), async (req, res) => {
     expiresAt = new Date(Date.now() + durationHoursVal * 3600000).toISOString();
   }
   
-  const { data: existing } = await supabase.from('bans').select('id, is_active').eq('user_name', userNameVal).order('banned_at', { ascending: false }).limit(1);
+  const { data: existing } = await supabase.from('bans').select('id, is_active, expires_at').eq('user_name', userNameVal).order('banned_at', { ascending: false }).limit(1);
   if (existing && existing.length) {
-    const activeBan = existing.find(b => b.is_active);
+    const activeBan = existing.find(moderationRecordIsLive);
     if (activeBan) return res.status(409).json({ error: '该用户已被拉黑封禁' });
     
     const { error } = await supabase.from('bans').update({
@@ -16777,8 +16830,8 @@ app.post('/admin/mute', verifyToken, rateLimit(60000, 30), async (req, res) => {
   if (reasonVal && reasonVal.error) return res.status(400).json({ error: reasonVal.error });
   if (isProtectedAdminTarget(userNameVal)) return res.status(403).json({ error: 'Operation not allowed for admin user' });
   
-  const { data: existingMutes } = await supabase.from('mutes').select('id').eq('user_name', userNameVal).eq('is_active', true).limit(1);
-  if (existingMutes && existingMutes.length) return res.status(409).json({ error: '该用户已被禁言' });
+  const { data: existingMutes } = await supabase.from('mutes').select('id, is_active, expires_at').eq('user_name', userNameVal).eq('is_active', true);
+  if (existingMutes && existingMutes.some(moderationRecordIsLive)) return res.status(409).json({ error: '该用户已被禁言' });
   
   let expiresAt = null;
   if (durationHoursVal > 0) {
@@ -16843,9 +16896,9 @@ app.post('/admin/blacklist', verifyToken, rateLimit(60000, 30), async (req, res)
     expiresAt = new Date(Date.now() + durationHoursVal * 3600000).toISOString();
   }
   
-  const { data: existing } = await supabase.from('blacklist').select('id, is_active').eq('user_name', userNameVal);
+  const { data: existing } = await supabase.from('blacklist').select('id, is_active, expires_at').eq('user_name', userNameVal);
   if (existing && existing.length) {
-    const activeEntry = existing.find(e => e.is_active);
+    const activeEntry = existing.find(moderationRecordIsLive);
     if (activeEntry) return res.status(409).json({ error: '该用户已在黑名单中' });
     
     const { error } = await supabase.from('blacklist').update({
@@ -17112,7 +17165,7 @@ app.delete('/admin/user/:userName', verifyToken, rateLimit(60000, 5), async (req
     async function deleteIdsInBatches(table, column, ids, marker) {
       var deletedCount = 0;
       for (var batchStart = 0; batchStart < ids.length; batchStart += 100) {
-        var query = supabase.from(table).delete().in(column, ids.slice(batchStart, batchStart + 100));
+        var query = supabase.from(table).delete({ count: 'exact' }).in(column, ids.slice(batchStart, batchStart + 100));
         if (marker) query = query.eq('media_type', marker);
         var deletion = await query;
         if (!deletion || deletion.error) return { ok: false, count: deletedCount, error: deletion && deletion.error };
@@ -17138,10 +17191,10 @@ app.delete('/admin/user/:userName', verifyToken, rateLimit(60000, 5), async (req
       if (!deletedDm.ok) return res.status(500).json({ error: '删除失败：删除私信失败', partial: partialDeleted });
       partialDeleted.dm_messages = deletedDm.count;
     }
-    var delLikesRes = await supabase.from('likes').delete().eq('user_name', userName);
+    var delLikesRes = await supabase.from('likes').delete({ count: 'exact' }).eq('user_name', userName);
     if (delLikesRes.error) return res.status(500).json({ error: '删除失败：删除点赞失败', partial: partialDeleted });
     partialDeleted.likes += delLikesRes.count || 0;
-    var delCommentsRes = await supabase.from('comments').delete().eq('user_name', userName);
+    var delCommentsRes = await supabase.from('comments').delete({ count: 'exact' }).eq('user_name', userName);
     if (delCommentsRes.error) return res.status(500).json({ error: '删除失败：删除评论失败', partial: partialDeleted });
     partialDeleted.comments += delCommentsRes.count || 0;
 
@@ -17150,9 +17203,9 @@ app.delete('/admin/user/:userName', verifyToken, rateLimit(60000, 5), async (req
       { key: 'comment_requests', query: supabase.rpc('xtj_forget_comment_requests', { p_owner: userName }) },
       { key: 'post_media_uploads', query: deleteQueuedAccountPostMediaUploads(supabase, userName, registeredPostPaths) },
       { key: 'ai_search_credit_claims', query: supabase.from('ai_search_credit_claims').delete().eq('user_name', String(userName).trim().toLowerCase()) },
-      { key: 'ai_search_results', query: supabase.from('ai_search_results').delete().eq('owner_name', userName) },
-      { key: 'ai_drafts', query: supabase.from('ai_drafts').delete().eq('owner_name', userName) },
-      { key: 'ai_action_confirmations', query: supabase.from('ai_action_confirmations').delete().eq('owner_name', userName) }
+      { key: 'ai_search_results', query: supabase.from('ai_search_results').delete({ count: 'exact' }).eq('owner_name', userName) },
+      { key: 'ai_drafts', query: supabase.from('ai_drafts').delete({ count: 'exact' }).eq('owner_name', userName) },
+      { key: 'ai_action_confirmations', query: supabase.from('ai_action_confirmations').delete({ count: 'exact' }).eq('owner_name', userName) }
     ];
     for (var accountCleanupIndex = 0; accountCleanupIndex < accountCleanupQueries.length; accountCleanupIndex++) {
       var accountCleanupItem = accountCleanupQueries[accountCleanupIndex];
@@ -17166,7 +17219,7 @@ app.delete('/admin/user/:userName', verifyToken, rateLimit(60000, 5), async (req
     // 清理所有已发现的 DM 媒体注册记录，包括对方发送到该用户 DM 的媒体。
     var dmRegistryIds = dmRegistryRows.map(function(row) { return row.id; }).filter(Boolean);
     if (dmRegistryIds.length) {
-      var delLinkedDmMediaRes = await supabase.from('dm_media_uploads').delete().in('id', dmRegistryIds);
+      var delLinkedDmMediaRes = await supabase.from('dm_media_uploads').delete({ count: 'exact' }).in('id', dmRegistryIds);
       if (!delLinkedDmMediaRes || delLinkedDmMediaRes.error) {
         return res.status(500).json({ error: '删除部分完成：清理关联私信媒体注册失败', code: 'delete_user_partial', partial: partialDeleted });
       }
@@ -17461,6 +17514,7 @@ app.post('/admin/report/:id/delete-post', verifyToken, securityRateLimit(60000, 
       if (fetchPostErr) return sendAdminDbFailure(res,fetchPostErr);
       if (post) {
         const expectPhoto = targetType === 'photo' || post.media_type === '__photo_wall__';
+        const ossPathsToClean = expectPhoto ? [] : await readPostOssPaths(supabase, post, normalizedTargetId);
         const deletion = await hardDeleteContent({
           postId: normalizedTargetId,
           actorUser: ADMIN_USERNAME,
@@ -17474,6 +17528,7 @@ app.post('/admin/report/:id/delete-post', verifyToken, securityRateLimit(60000, 
           return res.status(500).json({ error: deletion.result && deletion.result.error || '删除未生效', code: deletion.result && deletion.result.code || 'delete_not_applied' });
         }
         if (expectPhoto) await processStorageCleanupJobs();
+        if (ossPathsToClean.length && deletion.result.deleted === true) deleteOssObjects(ossPathsToClean).catch(function() {});
       }
     }
     // 标记举报已处理
@@ -17652,7 +17707,7 @@ app.get('/api/my-reports', rateLimit(60000, 20), authenticateUser, async (req, r
     .eq('media_type', REPORT_MARKER)
     .eq('user_name', userName)
     .order('created_at', { ascending: false })
-    .limit(50);
+    .limit(160);
   if (error) return res.status(400).json({ error: sanitizeError(error) });
   const reports = (data || []).map(function(p) {
     var c = {};
@@ -18961,8 +19016,13 @@ app.post('/admin/security-settings', verifyToken, rateLimit(60000, 10), async (r
 // 不再假定每批都全部成功，使用 succeeded/failed/partial 等真实字段。
 app.post('/admin/cleanup-logs', verifyToken, rateLimit(60000, 3), async (req, res) => {
   try {
+    // 非 JSON 请求体时 req.body 为 undefined；types 只接受字符串或字符串数组，其余按 400 处理。
+    if (!req.body || typeof req.body !== 'object') return res.status(400).json({ ok: false, error: '请求格式无效', code: 'invalid_request' });
     var types = req.body.types || ['login', 'security', 'error', 'behavior'];
     if (typeof types === 'string') types = [types];
+    if (!Array.isArray(types) || types.some(function(t) { return typeof t !== 'string'; })) {
+      return res.status(400).json({ ok: false, error: '日志类型无效', code: 'invalid_request' });
+    }
     var VALID_TYPES = ['login', 'security', 'error', 'behavior', 'all'];
     var results = {};
     var totalAttempted = 0;
@@ -19007,7 +19067,7 @@ app.post('/admin/cleanup-logs', verifyToken, rateLimit(60000, 3), async (req, re
     return res.status(500).json({
       ok: false,
       partial: false,
-      error: { code: 'CLEANUP_ERROR', message: e.message || '清理失败' },
+      error: { code: 'CLEANUP_ERROR', message: '清理失败，请稍后重试' },
       retryable: true
     });
   }
@@ -27191,7 +27251,7 @@ async function loadPostToolPost(postId, userName) {
   if (found.error) throw new Error('post_lookup_failed');
   var post = found.data;
   if (!post || post.is_deleted === true || String(post.media_type || '').indexOf('__') === 0) throw new Error('post_not_found');
-  if (post.visibility === 'private' && post.user_name !== userName && userName !== ADMIN_USERNAME) throw new Error('post_not_visible');
+  if (post.visibility === 'private' && post.user_name !== userName) throw new Error('post_not_visible');
   return post;
 }
 
@@ -28206,6 +28266,21 @@ app.get('/admin/ai-agent/conversation', verifyToken, securityRateLimit(60000, 60
   }
 });
 
+// 批量删除过期 AI 消息：PostgREST 的 DELETE 带 limit 必须同时给 order，
+// 原写法 delete().select().limit(n) 没有 order，会被拒绝，清理删不掉任何行。
+// 与 cleanupExpiredRateLimitRows 一致：先按时间取 id，再按 id 删除。返回本批删除条数，失败抛错。
+async function deleteAiMessageBatch(cutoff, batchSize) {
+  var picked = await supabase.from('posts').select('id')
+    .eq('media_type', AI_AGENT_MESSAGE_MARKER).lt('created_at', cutoff)
+    .order('created_at', { ascending: true }).order('id', { ascending: true }).limit(batchSize);
+  if (picked.error) throw picked.error;
+  var ids = (picked.data || []).map(function(r) { return r.id; });
+  if (!ids.length) return 0;
+  var removed = await supabase.from('posts').delete().select('id').in('id', ids);
+  if (removed.error) throw removed.error;
+  return removed.data ? removed.data.length : 0;
+}
+
 // POST /admin/ai-agent/cleanup — 清理过期的 AI 聊天记录
 // older_than_days: 默认 30 天
 app.post('/admin/ai-agent/cleanup', verifyToken, securityRateLimit(600000, 5), async (req, res) => {
@@ -28234,14 +28309,9 @@ app.post('/admin/ai-agent/cleanup', verifyToken, securityRateLimit(600000, 5), a
     var deleted = 0;
     var batchSize = 500;
     while (deleted < count) {
-      var { data: delData, error: delErr } = await supabase.from('posts')
-        .delete()
-        .select('id')
-        .eq('media_type', AI_AGENT_MESSAGE_MARKER)
-        .lt('created_at', cutoff)
-        .limit(batchSize);
-      if (delErr) return res.status(500).json({ error: '删除失败: ' + sanitizeError(delErr), deleted: deleted, total: count });
-      var batchDeleted = (delData && delData.length) ? delData.length : 0;
+      var batchDeleted;
+      try { batchDeleted = await deleteAiMessageBatch(cutoff, batchSize); }
+      catch (delErr) { return res.status(500).json({ error: '删除失败: ' + sanitizeError(delErr), deleted: deleted, total: count }); }
       if (batchDeleted <= 0) break; // 无更多可删，防止死循环
       deleted += batchDeleted;
       await new Promise(function(r) { setTimeout(r, 200); });
@@ -28313,9 +28383,9 @@ async function autoCleanupAiMessages() {
 
     var deleted = 0;
     while (deleted < count) {
-      var { data: delData, error: delErr } = await supabase.from('posts').delete().select('id').eq('media_type', AI_AGENT_MESSAGE_MARKER).lt('created_at', cutoff).limit(500);
-      if (delErr) { console.error('[AUTO-CLEANUP] delete error:', delErr && delErr.message); break; }
-      var batchDeleted = (delData && delData.length) ? delData.length : 0;
+      var batchDeleted;
+      try { batchDeleted = await deleteAiMessageBatch(cutoff, 500); }
+      catch (delErr) { console.error('[AUTO-CLEANUP] delete error:', delErr && delErr.message); break; }
       if (batchDeleted <= 0) break; // 无更多可删，防止死循环
       deleted += batchDeleted;
       await new Promise(function(r) { setTimeout(r, 300); });
@@ -28454,7 +28524,15 @@ const ADMIN_DM_NOTIFY_USER = process.env.ADMIN_DM_NOTIFY_USER || '';
 var dmUnreadNotifyTimer = null;
 var dmUnreadNotifiedIds = new Set(); // 已通知的消息ID，防止重复发送
 
+// 每 60 秒触发一次；SMTP 慢于一个周期时，上一轮还没写入「已提醒」标记，
+// 下一轮会把同一批私信再发一封，所以同一时刻只允许一轮在跑。
+var dmUnreadNotifyBusy = false;
 async function checkUnreadDmForAdmin() {
+  if (dmUnreadNotifyBusy) return;
+  dmUnreadNotifyBusy = true;
+  try { await checkUnreadDmForAdminOnce(); } finally { dmUnreadNotifyBusy = false; }
+}
+async function checkUnreadDmForAdminOnce() {
   try {
     // ★ 修复：原写法 `!mailTransporter && !getMailTransporter()` 引用了 mail-transport
     //   的模块私有变量 mailTransporter（未导出）→ ReferenceError 被外层 catch 吞掉
@@ -28465,11 +28543,21 @@ async function checkUnreadDmForAdmin() {
     if (!ADMIN_DM_NOTIFY_EMAIL) return;
     var cutoff = new Date(Date.now() - DM_UNREAD_NOTIFY_TIMEOUT).toISOString();
     // 查询未读且未通知的 DM（发给 xxz）
+    // 只取「未读且还没提醒过」的行：已读（views>0，read_at 与 views 同时写入）和已提醒的消息
+    // 永远留在表里，若不在 SQL 里排除，按时间升序的前 50 条很快全是它们，
+    // 之后的新未读消息再也轮不到，提醒邮件就永久停发。
     var { data, error } = await supabase.from('posts')
       .select('id, user_name, content, created_at')
       .eq('media_type', DM_MARKER)
       .eq('media_url', ADMIN_DM_NOTIFY_USER)
+      .eq('views', 0)
+      .not('content', 'like', '%dm_notified_at%')
       .lt('created_at', cutoff)
+      // 已读（read_at 为时间串）与已提醒的私信必须在库里就排除：这里按时间正序只取 50 条，
+      // 如果让它们占满窗口，管理员已读私信累计超过 50 条后，新的未读私信永远查不到、提醒静默失效。
+      // 用户文本在 JSON 里引号会被转义成 \"，不会误命中这两个模式。
+      .not('content', 'like', '%"read_at":"%')
+      .not('content', 'like', '%"dm_notified_at":%')
       .order('created_at', { ascending: true })
       .limit(50);
     if (error || !data || !data.length) return;
@@ -28523,7 +28611,10 @@ async function checkUnreadDmForAdmin() {
           try { existingPayload = JSON.parse(rowData.content || '{}'); } catch (_) {}
         }
         existingPayload.dm_notified_at = new Date().toISOString();
-        await supabase.from('posts').update({ content: JSON.stringify(existingPayload) }).eq('id', msg.id);
+        // 比较并交换：发信期间若收件人已读，read_at 已写进 content，不能用发信前的旧快照覆盖回去。
+        var notifiedWrite = supabase.from('posts').update({ content: JSON.stringify(existingPayload) }).eq('id', msg.id);
+        if (rowData) notifiedWrite = notifiedWrite.eq('content', rowData.content);
+        await notifiedWrite;
       } catch (e) { /* 静默失败 */ }
     }
     // 清理通知集合（超过1000条时清理旧条目）

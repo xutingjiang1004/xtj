@@ -102,6 +102,7 @@
                 if (!match) return;
                 var current = parseInt(match[1], 10) || 0;
                 var next = liked ? current + 1 : Math.max(0, current - 1);
+                if (setPostStatCount(statsEl, 'likes', next)) return;
                 statsEl.textContent = text.replace(/(点赞|❤)\s*\d+/, '$1 ' + next);
             }
 
@@ -116,6 +117,7 @@
                     if (String(postEl.getAttribute('data-post-id') || '') !== pid) return;
                     var statsEl = postEl.querySelector('.post-stats-text');
                     if (!statsEl) return;
+                    if (setPostStatCount(statsEl, 'likes', count)) return;
                     statsEl.textContent = (statsEl.textContent || '').replace(/(点赞|❤)\s*\d+/, '$1 ' + count);
                 });
             }
@@ -2389,7 +2391,7 @@
                             //   正常文案「浏览 1｜点赞 0｜评论 0」下恰好是浏览数，
                             //   但一旦文案改版（如「3 小时前 · 浏览 1」）就会把时间数字改掉。
                             //   改为锚定「浏览」/👁 后的数字，只替换目标位置。
-                            if (statsEl) {
+                            if (statsEl && !setPostStatCount(statsEl, 'views', authoritativeViews)) {
                                 statsEl.textContent = statsEl.textContent.replace(
                                     /((?:浏览|👁)\s*)(\d+)/,
                                     function (_m, prefix) { return prefix + String(authoritativeViews); }
@@ -2398,7 +2400,7 @@
                             var detailModal = document.getElementById('postDetailModal');
                             var detailStats = document.querySelector('#postDetailBody .post-detail-stats');
                             if (detailModal && detailModal.classList.contains('active') &&
-                                String(window.__xtjPostDetailCurrentId || '') === String(postId) && detailStats) {
+                                String(window.__xtjPostDetailCurrentId || '') === String(postId) && detailStats && !setPostStatCount(detailStats, 'views', authoritativeViews)) {
                                 detailStats.textContent = detailStats.textContent.replace(
                                     /((?:浏览|👁)\s*)(\d+)/,
                                     function (_m, prefix) { return prefix + String(authoritativeViews); }
@@ -3497,9 +3499,20 @@
 
             function buildPostStatsLine(post, likeCount, commentCount) {
                 var normalized = normalizePostForRender(post);
-                return '浏览 ' + (normalized.views || 0) +
-                    ' | 点赞 ' + (likeCount || 0) +
-                    ' | 评论 ' + (commentCount || 0);
+                // 浏览、点赞两个数字可点开统计面板；整行仍是一个 flex 子项，文字内容与原来逐字相同。
+                return '<span class="post-stats-line">' +
+                    '<button type="button" class="post-stat-link" data-stat-kind="views" aria-haspopup="dialog" aria-label="查看浏览用户">浏览 ' + (normalized.views || 0) + '</button>' +
+                    ' | <button type="button" class="post-stat-link" data-stat-kind="likes" aria-haspopup="dialog" aria-label="查看点赞用户">点赞 ' + (likeCount || 0) + '</button>' +
+                    ' | 评论 ' + (commentCount || 0) + '</span>';
+            }
+
+            // 局部改数字：整段 textContent 回写会把可点的浏览／点赞按钮冲成纯文字。
+            function setPostStatCount(statsEl, kind, count) {
+                if (!statsEl || !statsEl.querySelector) return false;
+                var link = statsEl.querySelector('.post-stat-link[data-stat-kind="' + kind + '"]');
+                if (!link) return false;
+                link.textContent = (kind === 'views' ? '浏览 ' : '点赞 ') + count;
+                return true;
             }
 
             // ★ 关键修复：删除此处的 buildPostBadges 重新赋值！
@@ -6091,8 +6104,12 @@
                 btn.innerHTML = flight.markup || '<span>发动态</span>'; delete btn._composeMarkup; delete btn.dataset.originalText;
             }
             function pendingPostMediaKey(owner) { return 'xtj_post_media_pending_' + encodeURIComponent(owner); }
+            // 发布请求键由「草稿内容 + 草稿编号」决定：同一份草稿失败重试时编号不变（服务端据此认出重试，
+            // 丢了响应也不会发两条）；发布成功后编号作废，下一次哪怕文字和附件完全相同也是一条新帖。
+            var postDraftNonce = '';
             function postRequestKeyFor(owner, text, files, visibility, location) {
-                var seed = [String(owner || ''), String(text || ''), (files || []).map(function(file) { return file.name + ':' + file.size + ':' + (file.lastModified || 0); }).join('|'), String(visibility || ''), location ? JSON.stringify(location) : ''].join('\u0000');
+                if (!postDraftNonce) postDraftNonce = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+                var seed = [postDraftNonce, String(owner || ''), String(text || ''), (files || []).map(function(file) { return file.name + ':' + file.size + ':' + (file.lastModified || 0); }).join('|'), String(visibility || ''), location ? JSON.stringify(location) : ''].join('\u0000');
                 var h1 = 2166136261, h2 = 0;
                 for (var i = 0; i < seed.length; i++) {
                     var code = seed.charCodeAt(i);
@@ -6356,6 +6373,7 @@
                         uploadedMedia = [];
                     }
                     postUploadCache.delete(requestKey);
+                    postDraftNonce = '';
                     uploadedMedia.forEach(function(item) { forgetPendingPostMedia(flight.owner, item.storage_path); });
                     if (flight.progress) flight.progress.confirmed();
                     uploadedMedia = [];
@@ -7172,3 +7190,105 @@
             // 真正生效的 handler 在 line 2602 区域（带锁 + 超时 + 乐观删除 + 入口强制解锁）。
 
             // 统计预加载（使用后端快照接口，避免全量读取）
+
+            // ===================== 浏览 / 点赞用户统计面板 =====================
+            // 点帖子里的「浏览 N」「点赞 N」打开同一块满屏面板：左栏浏览用户，右栏点赞用户，每人头像 + 名字。
+            (function installPostStatsPanel() {
+                var MODAL_ID = 'postStatsModal', PAGE_SIZE = 50, MAX_PAGES = 40;
+                var session = 0;
+
+                function byId(id) { return document.getElementById(id); }
+                function rowHtml(userName) {
+                    return '<li class="post-stats-row">' + getAvatarHtml(userName, null) +
+                        '<span class="post-stats-name">' + escapeHtml(userName) + '</span></li>';
+                }
+                function paint(kind, state) {
+                    var list = byId(kind === 'views' ? 'postStatsViewsList' : 'postStatsLikesList');
+                    var count = byId(kind === 'views' ? 'postStatsViewsCount' : 'postStatsLikesCount');
+                    if (!list || !count) return;
+                    count.textContent = String(state.total != null ? state.total : state.rows.length);
+                    var html;
+                    if (state.rows.length) html = state.rows.map(function(row) { return rowHtml(row.user_name); }).join('');
+                    else if (state.error) html = '';
+                    else if (state.loading) html = '<li class="post-stats-note" role="status">加载中…</li>';
+                    else html = '<li class="post-stats-note">' + (kind === 'views' ? '还没有人浏览' : '还没有人点赞') + '</li>';
+                    if (state.rows.length && state.loading) html += '<li class="post-stats-note" role="status">加载中…</li>';
+                    if (state.error) html += '<li class="post-stats-note post-stats-error" role="status">' + escapeHtml(state.error) +
+                        ' <button type="button" class="post-stats-retry" data-stat-retry="' + kind + '">重试</button></li>';
+                    list.innerHTML = html;
+                    if (window.__xtjEnsureAvatars && state.rows.length) window.__xtjEnsureAvatars(state.rows.map(function(row) { return row.user_name; }), list);
+                }
+                async function load(kind, postId, token, state) {
+                    var owner = currentUser, epoch = _authStateEpoch;
+                    function current() { return token === session && owner === currentUser && epoch === _authStateEpoch; }
+                    state.loading = true; state.error = ''; paint(kind, state);
+                    try {
+                        var seen = new Set(state.rows.map(function(row) { return String(row.id); }));
+                        for (var page = 0; page < MAX_PAGES && current(); page++) {
+                            var path = '/api/post/detail/' + encodeURIComponent(postId) + '/relations/' + kind + '?limit=' + PAGE_SIZE +
+                                (state.cursor ? '&cursor=' + encodeURIComponent(state.cursor) : '');
+                            var response = await window.xtjOptionalAuthFetch(path, { timeoutMs: 15000, authOwner: owner, authEpoch: epoch });
+                            var body = await response.json().catch(function() { return {}; });
+                            if (!current()) return;
+                            if (!response.ok || !body.ok) throw new Error(body.error || '加载失败，请重试');
+                            (body.data || []).forEach(function(row) {
+                                if (!row || !row.user_name || seen.has(String(row.id))) return;
+                                seen.add(String(row.id)); state.rows.push(row);
+                            });
+                            if (Number.isFinite(Number(body.total))) state.total = Number(body.total);
+                            state.cursor = body.has_more && body.next_cursor ? body.next_cursor : null;
+                            paint(kind, state);
+                            if (!state.cursor) break;
+                        }
+                    } catch (error) {
+                        if (current()) state.error = (error && error.message) || '加载失败，请重试';
+                    } finally {
+                        if (current()) { state.loading = false; paint(kind, state); }
+                    }
+                }
+                function start(kind, postId, token) {
+                    var state = { rows: [], total: null, cursor: null, loading: false, error: '' };
+                    panelStates[kind] = state;
+                    return load(kind, postId, token, state);
+                }
+                var panelStates = {};
+
+                window.openPostStatsPanel = function(postId) {
+                    var modal = byId(MODAL_ID);
+                    if (!modal || !postId) return;
+                    var token = ++session;
+                    panelStates = {};
+                    modal.setAttribute('data-post-id', String(postId));
+                    start('views', postId, token);
+                    start('likes', postId, token);
+                    window.openModal(MODAL_ID);
+                    ['postStatsViewsList', 'postStatsLikesList'].forEach(function(id) { var node = byId(id); if (node) node.scrollTop = 0; });
+                    var close = modal.querySelector('.post-stats-close');
+                    if (close) try { close.focus({ preventScroll: true }); } catch (_) {}
+                };
+
+                // 关闭（含 Esc、点遮罩）后作废在途请求，晚到的结果不会写进下一次打开的面板。
+                var baseClose = window.closeModal;
+                window.closeModal = function(id) {
+                    if (id === MODAL_ID) session++;
+                    return baseClose.apply(this, arguments);
+                };
+
+                document.addEventListener('click', function(event) {
+                    var target = event.target && event.target.closest ? event.target : null;
+                    if (!target) return;
+                    var retry = target.closest('.post-stats-retry');
+                    if (retry) {
+                        var modal = byId(MODAL_ID), kind = retry.getAttribute('data-stat-retry'), state = panelStates[kind];
+                        if (modal && state && !state.loading) { event.preventDefault(); load(kind, modal.getAttribute('data-post-id'), session, state); }
+                        return;
+                    }
+                    var link = target.closest('.post-stat-link');
+                    if (!link) return;
+                    var host = link.closest('.post[data-post-id]');
+                    var postId = host ? host.getAttribute('data-post-id') : (link.closest('#postDetailBody') ? window.__xtjPostDetailCurrentId : '');
+                    if (!postId) return;
+                    event.preventDefault(); event.stopPropagation();
+                    window.openPostStatsPanel(postId);
+                }, true);
+            })();

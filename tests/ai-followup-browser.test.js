@@ -281,6 +281,8 @@ test('third-party research files use the selected account configuration without 
       if(p.pathname==='/api/agent/custom-chat/deep-stream'||p.pathname==='/api/agent/chat') {selectedResearchCalls.push({path:p.pathname,body:JSON.parse(options.body)});return Promise.resolve(new Response(new ReadableStream({start(c){window.selectedResearchStream=c;}}),{headers:{'Content-Type':'text/event-stream'}}));}
       return base(url,options);
     };
+    // The start-up sync is reused for 60s on re-open; move past it so this open fetches the account models.
+    const realNow=Date.now.bind(Date);Date.now=()=>realNow()+61000;
     await __xtjAiAgent.close();await __xtjAiAgent.open();
   });
   await f.page.waitForFunction(()=>localStorage.getItem('xtj_ai_custom_models__alice')?.includes('research-custom'));

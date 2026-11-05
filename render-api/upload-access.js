@@ -36,7 +36,7 @@ function installUploadAccess(app, { supabase, supabaseUrl, optionalAuth, rateLim
         // 接口只能回 503 —— 用户看到的就是「图片一直转圈，点重试也没用」。
         // 改成按完整 URL 精确匹配，命中就走，不再全表扫描。
         const full = String(supabaseUrl || '').replace(/\/+$/, '') + '/storage/v1/object/public/uploads/' + path;
-        const readable = row => isNormalPost(row) && (!row.visibility || row.visibility === 'public' || row.user_name === req.userName || req.userName === adminName);
+        const readable = row => isNormalPost(row) && (!row.visibility || row.visibility === 'public' || row.user_name === req.userName);
         const exact = await checked(supabase.from('posts').select('id,user_name,media_type,media_url,visibility,is_deleted').eq('media_url', full).limit(20));
         allowed = (exact || []).some(readable);
         if (!allowed) {

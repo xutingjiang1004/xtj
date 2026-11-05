@@ -27,7 +27,7 @@ test('custom actual usage and one generated followup survive durable history wit
  const meta=JSON.parse(rows[1].media_url);assert.equal(meta.usage.total_tokens,150);assert.deepEqual(meta.followups,['问题一？']);assert.equal(rows[1].content,'实际回答');
 });
 const {toolFeedback,runRequiredSearch}=require('../render-api/ai-tool-feedback');
-const {appendProcessEvent,getProcessEvents}=require('../render-api/ai-process-events');
+const {appendProcessEvent,getProcessEvents,settleThinkingElapsed}=require('../render-api/ai-process-events');
 const source=fs.readFileSync('render-api/server.js','utf8');
 const startMeta=source.indexOf('function buildMsgMeta(');
 const buildMeta=new Function('assistantOutput','require','deepseekWeb',source.slice(startMeta,source.indexOf("app.get('/api/agent/profile'",startMeta))+'return buildMsgMeta;')(assistantOutput,name=>require('../render-api/'+name.replace('./','')),require('../render-api/deepseek-web'));
@@ -40,7 +40,7 @@ for(const status of ['ok','error','throw'])test('third-party chat reports actual
 });
 async function routeFixture({failSave=false,disconnect=false,incomplete=false,usage=null,contextManaged=false,history=[]}={}){
  const frames=[],stored=[],payloads=[],usageRecords=[];let handler,calls=0,signal;
- const c={require:name=>require('../render-api/'+name.replace('./','')),endSse:require('../render-api/sse-write').endSse,app:{post(...args){handler=args.at(-1);}},authenticateUser(){},aiChatConcurrencyGate(){},aiRequestMiddleware(){},resolveAiModelReference(){},rateLimit:()=>null,express:{json:()=>null},
+ const c={settleThinkingElapsed,require:name=>require('../render-api/'+name.replace('./','')),endSse:require('../render-api/sse-write').endSse,app:{post(...args){handler=args.at(-1);}},authenticateUser(){},aiChatConcurrencyGate(){},aiRequestMiddleware(){},resolveAiModelReference(){},rateLimit:()=>null,express:{json:()=>null},
   // ★ 2026-10-27 限时公开：路由片段内引用了 OpenRouter 公开期鉴权中间件，vm 上下文必须提供。
   guestOpenRouterAuth:require('../render-api/openrouter').createGuestOpenRouterAuth({authenticateUser(){},now:()=>Date.now()}),AI_CHAT_HOURLY_IP_LIMIT:100,AI_CHAT_MESSAGE_MAX_LEN:12000,ADMIN_USERNAME:'admin',validateString:value=>value,genConvId:()=>'ABCDEF-NEW',AI_AGENT_MESSAGE_MARKER:'ai-message',URL,AbortController,TextDecoder,setTimeout,clearTimeout,setInterval,clearInterval,console,
   deepseekWeb:require('../render-api/deepseek-web'),deepSeekPricing:require('../render-api/deepseek-pricing'),normalizeDeepSeekModelName:model=>model,require:name=>require('../render-api/'+name.replace('./','')),assistantOutput,aiTaskPolicy:require('../render-api/ai-task-policy'),enforceAiChatAccess:async()=>({allowed:true}),getAiQuotaErrorMessage:()=>'',assertSafeWebUrl:async url=>({parsed:new URL(url),addresses:['93.184.216.34']}),extractVisionImageUrls:()=>[],getAiConfig:async()=>({name:'configured'}),buildAiCorePrompt:config=>'Configured '+config.name,aiToolsForWorkMode:()=>[{type:'function',function:{name:'get_weather'}}],toolFeedback,runRequiredSearch,normalizeToolResultItems:normalize,saveCustomChatTurn,saveInterruptedChatTurn,buildMsgMeta:buildMeta,getProcessEvents,

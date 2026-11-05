@@ -14,12 +14,16 @@
 //     浏览器拿到的是「一次性写入这个确切路径」的地址，不是 AccessKey。
 
 const ossMedia = require('./oss-media');
+const { MAX_POST_FILE_BYTES } = require('../js/post-media');
 
 // 与 render-api/post-media.js 的 PATH 保持同样的字符集，避免两边对同一路径
 // 给出不同结论（那边只认 posts/，封面另走 posters/）。
 const PATH_RE = /^(?:posts|posters)\/[a-zA-Z0-9_\u4e00-\u9fff.-]{1,200}$/;
 const TYPE_RE = /^(?:image|video|audio)\/[a-z0-9.+-]{1,60}$/;
 const SIGN_TTL_SECONDS = 900;
+// 单个照片/视频最大 50MB（与前端选片、发帖校验同一个常量）。OSS V1 预签名 PUT 没法把长度写进签名，
+// 所以这里按浏览器申报的 size 把关：申报超限直接不签，前端本来就不会发出超限请求。
+const MAX_MEDIA_BYTES = MAX_POST_FILE_BYTES;
 // 文件名唯一且内容不可覆盖，所以可以放心让浏览器缓存一年，永不回源。
 const OBJECT_CACHE_CONTROL = 'public, max-age=31536000, immutable';
 
@@ -50,6 +54,9 @@ function installOssSign(app, { authenticateUser, rateLimit, banError } = {}) {
     const contentType = String((req.body && req.body.content_type) || '').toLowerCase();
     if (!validMediaPath(path)) return res.status(400).json({ ok: false, code: 'invalid_media_path' });
     if (!TYPE_RE.test(contentType)) return res.status(400).json({ ok: false, code: 'invalid_media_type' });
+    const size = req.body && req.body.size;
+    if (!Number.isSafeInteger(size) || size <= 0) return res.status(400).json({ ok: false, code: 'invalid_media_size' });
+    if (size > MAX_MEDIA_BYTES) return res.status(413).json({ ok: false, code: 'file_too_large', error: '每个文件不能超过50MB' });
     try {
       const signed = ossMedia.presignedPutUrl(path, {
         contentType,
@@ -64,4 +71,4 @@ function installOssSign(app, { authenticateUser, rateLimit, banError } = {}) {
   });
 }
 
-module.exports = { installOssSign, validMediaPath, OBJECT_CACHE_CONTROL, SIGN_TTL_SECONDS };
+module.exports = { installOssSign, validMediaPath, OBJECT_CACHE_CONTROL, SIGN_TTL_SECONDS, MAX_MEDIA_BYTES };

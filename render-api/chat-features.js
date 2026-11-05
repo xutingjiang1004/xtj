@@ -21,6 +21,8 @@ function createChatFeatures(options) {
   const transcription = createChatTranscription(options);
   router.use(authenticateUser);
   if (rateLimit) router.use(rateLimit(60000, 90));
+  // Express 5 leaves req.body undefined for requests without a JSON body; answer 400, not a TypeError 500.
+  router.use((req, _res, next) => { if (!req.body || typeof req.body !== 'object') req.body = {}; next(); });
   async function context(actor, peer) {
     const state = await data(supabase.rpc('chat_get_conversation_state', { p_actor_name: actor, p_peer_name: peer }));
     if (!state || state.status !== 'ok' || state.deleted || !state.conversation_id) return null;

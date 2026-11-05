@@ -1435,6 +1435,40 @@ var ZIP_TEXT_EXT = ['txt', 'md', 'markdown', 'csv', 'tsv', 'json', 'xml', 'html'
   'jsx', 'tsx', 'py', 'java', 'c', 'cpp', 'h', 'hpp', 'go', 'rs', 'rb', 'php', 'sh', 'bat', 'sql',
   'yml', 'yaml', 'toml', 'ini', 'conf', 'log', 'env', 'gitignore', 'vue', 'svelte', 'scss', 'less'];
 
+// 只读取压缩包条目的前 maxBytes 字节并立即停止解压。
+// 条目头里的 uncompressedSize 是压缩包自己声明的值，可以被伪造成很小，
+// JSZip 的 async() 要把整条数据解压完才会发现「声明值与实际不符」，
+// 几百 KB 的伪造压缩包即可在报错前吃掉上 GB 内存。流式读取并在够用时暂停可避免。
+function readZipEntryText(file, maxBytes) {
+  return new Promise(function(resolve, reject) {
+    var chunks = [], total = 0, settled = false, helper = null;
+    function finish(error, truncated) {
+      if (settled) return;
+      settled = true;
+      if (error) { reject(error); return; }
+      var bytes = Buffer.concat(chunks.map(function(chunk) { return Buffer.from(chunk.buffer, chunk.byteOffset, chunk.length); }), total);
+      resolve({ text: new TextDecoder('utf-8', { ignoreBOM: true }).decode(bytes), truncated: truncated === true });
+    }
+    try {
+      helper = file.internalStream('uint8array');
+      helper.on('data', function(chunk) {
+        if (settled) return;
+        var room = maxBytes - total;
+        if (chunk.length > room) {
+          if (room > 0) { chunks.push(chunk.subarray(0, room)); total += room; }
+          try { helper.pause(); } catch (_) {}
+          finish(null, true);
+          return;
+        }
+        chunks.push(chunk); total += chunk.length;
+      });
+      helper.on('error', function(error) { finish(error); });
+      helper.on('end', function() { finish(null, false); });
+      helper.resume();
+    } catch (error) { finish(error); }
+  });
+}
+
 function isZipTextFile(name) {
   var base = String(name || '').split('/').pop();
   var idx = base.lastIndexOf('.');
@@ -1471,5 +1505,6 @@ module.exports = {
   extractLinksFromHtml: extractLinksFromHtml,
   formatBytes: formatBytes,
   isZipTextFile: isZipTextFile,
+  readZipEntryText: readZipEntryText,
   CHART_PALETTE: CHART_PALETTE
 };

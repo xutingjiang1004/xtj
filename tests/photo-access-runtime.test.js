@@ -157,6 +157,7 @@ test('public post albums and website share pages remain readable by guests; priv
   const page=await request(f.app).get('/share/posts/'+f.publicPost.id).expect(200);assert.match(page.text,/公开帖子/);assert.ok(!page.text.includes(A));
   await request(f.app).get('/api/post/'+A+'/media/0').expect(404);await request(f.app).get(path+'2').expect(404);await request(f.app).get(path+'0?storage_path=photos/0.png').expect(200);
   f.publicPost.visibility='private';await request(f.app).get(path+'0').expect(404);await request(f.app).get('/share/posts/'+f.publicPost.id).expect(404);
+  await request(f.app).get(path+'0').set('Authorization','Bearer xxz').expect(404); // the administrator is no exception for someone else's private post
   await request(f.app).get(path+'0').set('Cookie',POST_MEDIA_COOKIE+'=owner~'+SESSION).expect(200);f.setActive(false);await request(f.app).get(path+'0').set('Cookie',POST_MEDIA_COOKIE+'=owner~'+SESSION).expect(404);
 });
 

@@ -394,7 +394,18 @@ function validateDmUploadOwnership(storagePath, uidHash) {
   return { ok: true, storagePath: parsed.storagePath };
 }
 
+// 纯文字私信的幂等键：客户端为每条消息生成稳定的 client_message_id（重发复用同一个值）。
+// 由 (发件人, 收件人, client_message_id) 派生确定性的 actor_key，
+// 服务端据此在写入前对账，响应丢失后的重发不会产生第二条消息。
+function dmTextActorKey(sender, target, clientMessageId) {
+  const id = String(clientMessageId == null ? '' : clientMessageId).trim();
+  if (!/^[A-Za-z0-9_-]{8,100}$/.test(id) || !sender || !target) return '';
+  return 'dm_c_' + require('node:crypto').createHash('sha256')
+    .update(String(sender) + '\u0000' + String(target) + '\u0000' + id).digest('hex').slice(0, 48);
+}
+
 module.exports = {
+  dmTextActorKey,
   MAX_DM_MEDIA_SIZE,
   MEDIA_KINDS,
   validateDmStoragePath,
