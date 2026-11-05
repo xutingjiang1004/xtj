@@ -42,6 +42,32 @@ test('视频帖封面直传 OSS 后服务端仍返回 poster_url（否则分享�
   assert.equal(post.poster_url, poster);
 }));
 
+function mediaApp(row) {
+  const express = require('express');
+  const { createPhotoAccess } = require('../render-api/photo-access');
+  const db = { from() { const q = { select() { return q; }, eq() { return q; }, in() { return q; }, order() { return q; },
+    maybeSingle: async () => ({ data: row }), then(resolve, reject) { return Promise.resolve({ data: [] }).then(resolve, reject); } }; return q; } };
+  const app = express();
+  createPhotoAccess({ app, supabase: db, supabaseUrl: 'https://project.supabase.test', secret: 'local-test', authenticateUser: (req, res, next) => next(),
+    optionalAuth: (req, res, next) => { req.userName = req.headers.authorization || undefined; next(); }, rateLimit: () => (req, res, next) => next(), fetchImpl: async () => { throw Error('no network'); } });
+  return app;
+}
+
+test('OSS 媒体 302 之前先过权限：私密帖对他人 404，对作者 302 且只允许私有缓存', () => withOss(async () => {
+  const request = require('supertest');
+  const row = { id: postId, user_name: 'alice', media_type: 'image', media_url: OSS + '/posts/alice_1_a_pic.jpg', content: '', visibility: 'private' };
+  const app = mediaApp(row);
+  await request(app).get('/api/post/' + postId + '/media/0').expect(404);
+  await request(app).get('/api/post/' + postId + '/media/0').set('Authorization', 'bob').expect(404);
+  const own = await request(app).get('/api/post/' + postId + '/media/0').set('Authorization', 'alice').expect(302);
+  assert.equal(own.headers.location, row.media_url);
+  // 私密帖的重定向目标是能力地址：共享缓存（CDN/代理）不得保存。
+  assert.match(own.headers['cache-control'], /^private\b/);
+  const open = mediaApp(Object.assign({}, row, { visibility: 'public' }));
+  const pub = await request(open).get('/api/post/' + postId + '/media/0').expect(302);
+  assert.match(pub.headers['cache-control'], /^public\b/);
+}));
+
 test('分享页封面：OSS 封面直接给公网地址，不绕会 404 的 /api/uploads/media', () => withOss(() => {
   const { sharePosterUrl } = require('../render-api/photo-access');
   const poster = OSS + '/posters/alice_1_b_poster-1.jpg';
