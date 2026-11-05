@@ -46,7 +46,7 @@ function fixture(rows, { onSend } = {}) {
     escapeHtml: x => String(x),
     supabase: { from: table },
     getMailTransporter: () => ({ sendMail: async mail => { sent.push(mail); if (onSend) onSend(); } }),
-    dmUnreadNotifiedIds: new Set(),
+    dmUnreadNotifiedIds: new Set(), dmUnreadNotifyBusy: false,
   });
   const start = source.indexOf('async function checkUnreadDmForAdmin');
   const end = source.indexOf('function startDmUnreadNotifier', start);

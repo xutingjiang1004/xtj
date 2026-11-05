@@ -54,7 +54,7 @@ function loadNotifier(rows, sent, hold) {
 }
 
 function dm(id, minutesAgo, payload) {
-  return { id, user_name: 'alice', media_type: '__dm__', media_url: 'xxz', created_at: new Date(Date.now() - minutesAgo * 60000).toISOString(), content: JSON.stringify(payload) };
+  return { id, user_name: 'alice', media_type: '__dm__', media_url: 'xxz', views: payload && payload.read_at ? 1 : 0, created_at: new Date(Date.now() - minutesAgo * 60000).toISOString(), content: JSON.stringify(payload) };
 }
 
 test('管理员的已读私信积累超过 50 条后，新的未读私信仍会触发邮件提醒', async () => {
