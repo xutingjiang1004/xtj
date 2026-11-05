@@ -2036,6 +2036,7 @@ function renderProfileActivityList(kind) {
                     } else {
                         __xtjDeferredWarmupQueued = false;
                         stopRestrictionPolling();
+                        userRestrictions = { is_banned: false, is_blacklisted: false, is_muted: false };
                         hideBlockedScreen();
                         hideMuteIndicator();
                     }
@@ -2073,6 +2074,9 @@ function renderProfileActivityList(kind) {
                     if (reportBtnWrapper) reportBtnWrapper.style.display = "none";
                     
                     stopRestrictionPolling();
+                    // 退出后复位限制状态：否则同一账号再次登录时限制集合没变，checkUserRestrictions
+                    // 不会重画禁言条/发布框锁定。
+                    userRestrictions = { is_banned: false, is_blacklisted: false, is_muted: false };
                     hideBlockedScreen();
                     hideMuteIndicator();
                     
