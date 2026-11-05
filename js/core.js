@@ -11677,8 +11677,12 @@ function renderProfileActivityList(kind) {
                 btn.innerHTML = flight.markup || '<span>发动态</span>'; delete btn._composeMarkup; delete btn.dataset.originalText;
             }
             function pendingPostMediaKey(owner) { return 'xtj_post_media_pending_' + encodeURIComponent(owner); }
+            // 发布请求键由「草稿内容 + 草稿编号」决定：同一份草稿失败重试时编号不变（服务端据此认出重试，
+            // 丢了响应也不会发两条）；发布成功后编号作废，下一次哪怕文字和附件完全相同也是一条新帖。
+            var postDraftNonce = '';
             function postRequestKeyFor(owner, text, files, visibility, location) {
-                var seed = [String(owner || ''), String(text || ''), (files || []).map(function(file) { return file.name + ':' + file.size + ':' + (file.lastModified || 0); }).join('|'), String(visibility || ''), location ? JSON.stringify(location) : ''].join('\u0000');
+                if (!postDraftNonce) postDraftNonce = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+                var seed = [postDraftNonce, String(owner || ''), String(text || ''), (files || []).map(function(file) { return file.name + ':' + file.size + ':' + (file.lastModified || 0); }).join('|'), String(visibility || ''), location ? JSON.stringify(location) : ''].join('\u0000');
                 var h1 = 2166136261, h2 = 0;
                 for (var i = 0; i < seed.length; i++) {
                     var code = seed.charCodeAt(i);
@@ -11942,6 +11946,7 @@ function renderProfileActivityList(kind) {
                         uploadedMedia = [];
                     }
                     postUploadCache.delete(requestKey);
+                    postDraftNonce = '';
                     uploadedMedia.forEach(function(item) { forgetPendingPostMedia(flight.owner, item.storage_path); });
                     if (flight.progress) flight.progress.confirmed();
                     uploadedMedia = [];
@@ -13179,7 +13184,7 @@ function renderProfileActivityList(kind) {
                 try {
                     var signRes = await window.xtjProtectedFetch('/api/oss/sign', {
                         method: 'POST',
-                        body: JSON.stringify({ path: path, content_type: type }),
+                        body: JSON.stringify({ path: path, content_type: type, size: Number(file && file.size) || 0 }),
                         authOwner: identity && identity.owner,
                         authEpoch: identity && identity.epoch
                     });
