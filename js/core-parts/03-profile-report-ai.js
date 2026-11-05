@@ -130,40 +130,18 @@
                         }
                     }
                     
-                    // 隐私收紧：__user_info__ 仅允许本人读取（RLS 035 已强制），
-                    // 非本人不再发起 anon 直读，直接显示占位。
-                    var userInfoRes = null;
-                    if (userName === currentUser) {
-                        userInfoRes = await sb.from("posts")
-                            .select("content")
-                            .eq("user_name", userName)
-                            .eq("media_type", "__user_info__")
-                            .order("created_at", { ascending: false })
-                            .limit(1);
-                    }
-                    
+                    // 隐私收紧：__user_info__ 匿名密钥读不到（RLS 035/055），本人的资料只经服务端
+                    // /api/user/profile 取；非本人不发请求，直接显示占位。
+                    var ownSnapshot = null;
+                    if (userName === currentUser) ownSnapshot = await loadCurrentUserInfoSnapshot(userName);
+
                     // S7 修复：同上，用户已切换则丢弃本次结果
                     if (_seq !== upcRequestSeq || upcTargetUser !== userName) return;
-                    
-                    // ★ 审计修复：userInfoRes 仅在本人分支被赋值（上方 RLS 收紧后
-                    //   非本人不再直读），查看他人资料时保持 null —— 旧代码
-                    //   `userInfoRes.data` 必然 TypeError 落入 catch，界面恒显示
-                    //   "最近登录：加载失败"，与注释"非本人直接显示占位"意图相悖。
-                    //   补空值守卫后非本人走 118 行的 '-' 占位。
-                    if (userInfoRes && userInfoRes.data && userInfoRes.data.length > 0) {
-                        try {
-                            var info = JSON.parse(userInfoRes.data[0].content);
-                            if (info.last_login) {
-                                upcLoginEl.textContent = '最近登录：' + window.safeParseDate(info.last_login).toLocaleString();
-                            } else {
-                                upcLoginEl.textContent = '最近登录：-';
-                            }
-                        } catch(e) {
-                            upcLoginEl.textContent = '最近登录：-';
-                        }
-                    } else {
-                        upcLoginEl.textContent = '最近登录：-';
-                    }
+
+                    var lastLoginTime = ownSnapshot && ownSnapshot.last_login ? window.safeParseDate(ownSnapshot.last_login) : null;
+                    upcLoginEl.textContent = lastLoginTime && Number.isFinite(lastLoginTime.getTime())
+                        ? '最近登录：' + lastLoginTime.toLocaleString()
+                        : '最近登录：-';
                 } catch(e) {
                     if (_seq !== upcRequestSeq || upcTargetUser !== userName) return;
                     upcLoginEl.textContent = '最近登录：加载失败';
