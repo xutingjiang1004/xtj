@@ -19,6 +19,8 @@ function isOssMediaUrl(value) {
   if (!origin) return false;
   try {
     const url = new URL(value);
+    // 与 Supabase 地址同一标准：不接受查询串、片段和账号信息，落库的必须是稳定的公网地址。
+    if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) return false;
     return url.origin === origin && (PATH.test(decodeURIComponent(url.pathname.slice(1))) || POSTER_PATH.test(decodeURIComponent(url.pathname.slice(1))));
   } catch (_) { return false; }
 }
