@@ -12218,7 +12218,9 @@ app.post('/api/user/register', securityRateLimit(60000, 5), async (req, res) => 
     var password = req.body && req.body.password;
     // 昵称允许中文/字母/数字/下划线/Emoji；长度按码点算，避免一个表情被当成两个字。
     var userNameChars = Array.from(userNameVal || '').length;
-    if (!userNameVal || userNameChars < 2 || userNameChars > 20 || !/^(?:[\u4e00-\u9fa5A-Za-z0-9_]|[\uD800-\uDBFF][\uDC00-\uDFFF]|[\u2600-\u27BF\u2B00-\u2BFF\u2190-\u21FF\u00A9\u00AE\u2122\uFE0F\u200D\u20E3])+$/.test(userNameVal)) {
+    if (!userNameVal || userNameChars < 2 || userNameChars > 20 || !/^(?:[\u4e00-\u9fa5A-Za-z0-9_]|[\uD800-\uDBFF][\uDC00-\uDFFF]|[\u2600-\u27BF\u2B00-\u2BFF\u2190-\u21FF\u00A9\u00AE\u2122\uFE0F\u200D\u20E3])+$/.test(userNameVal) ||
+        // 至少要有一个看得见的字符：全是 ZWJ / 变体选择符 / 键帽符 / 标签字符（U+E0000 段）的昵称在界面上是空白。
+        !/[\u4e00-\u9fa5A-Za-z0-9_\u2600-\u27BF\u2B00-\u2BFF\u2190-\u21FF\u00A9\u00AE\u2122]|[\uD800-\uDB3F\uDB41-\uDBFF][\uDC00-\uDFFF]/.test(userNameVal)) {
       return res.status(400).json({ error: '昵称格式不正确' });
     }
     // ★ 安全:管理员用户名是保留字,禁止通过普通注册流程占用。
