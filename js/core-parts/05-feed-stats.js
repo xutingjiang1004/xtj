@@ -316,7 +316,7 @@
                 try {
                     var signRes = await window.xtjProtectedFetch('/api/oss/sign', {
                         method: 'POST',
-                        body: JSON.stringify({ path: path, content_type: type }),
+                        body: JSON.stringify({ path: path, content_type: type, size: Number(file && file.size) || 0 }),
                         authOwner: identity && identity.owner,
                         authEpoch: identity && identity.epoch
                     });
