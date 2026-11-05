@@ -534,6 +534,10 @@ const ADMIN_NAME = "xxz";
                 try { if (window.__xtjResetDmNotifications) window.__xtjResetDmNotifications(); } catch(e) {}
                 try { if (window.XTJVoiceTranscription) window.XTJVoiceTranscription.reset(); } catch(e) {}
                 try { if (typeof window.__xtjResetDmBroadcast === 'function') window.__xtjResetDmBroadcast(); } catch(e) {}
+                // 其他标签页退出 / 会话过期 / 身份不一致也必须清掉上一个账号的资料快照与聊天渲染态，
+                // 不能只有主动退出（doLogout）才清；否则邮箱、属地和私聊气泡会留在游客界面上。
+                try { window.currentUserInfoSnapshot = null; } catch(e) {}
+                try { if (typeof window.__xtjResetChatPanels === 'function') window.__xtjResetChatPanels(); } catch(e) {}
                 // ★ 清理浏览历史与 feed 缓存：不含用户名的缓存键必须随账号切换清空，防止跨用户串扰（隐私泄漏）
                 try { window.safeStorage.remove('xtj_view_history'); } catch(e) {}
                 try { sessionStorage.removeItem('xtj_view_history'); } catch(e) {}
