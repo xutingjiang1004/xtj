@@ -902,9 +902,10 @@
                 function _ppCleanupFn() {
                     P && (clearTimeout(P), P = null), I && (clearTimeout(I), I = null), h && (cancelAnimationFrame(h),
                     h = null), m.clear(), v = null, y = null, B.isActive = !1;
-                    // 移除 resize 监听器，防止内存泄漏
+                    // S2(2026-11-06): 关闭时照旧解绑，但下面的绑定块只在首次打开执行一次；
+                    // 每次打开都会调 _ppBindViewportListeners() 补挂，否则重开预览后
+                    // resize/orientationchange 永久缺失 → 旋屏后 M() 不再重算、轨道错位。
                     if (d._ppResizeHandler) { window.removeEventListener("resize", d._ppResizeHandler); d._ppResizeHandler = null; }
-                    // P4: 移除 orientationchange 监听器
                     if (d._ppOrientationHandler) { window.removeEventListener("orientationchange", d._ppOrientationHandler); d._ppOrientationHandler = null; }
                 }
                 d._cleanupPreview = _ppCleanupFn, d.addEventListener("pointerdown", function(e) {
@@ -1068,25 +1069,31 @@
                     }
                     o.scale <= 1.01 && A(0);
                 });
-                // 将 resize handler 存为具名引用，便于 _cleanupPreview 时移除，防止内存泄漏
-                d._ppResizeHandler = function() { e && (M(), O(i), q()); };
-                window.addEventListener("resize", d._ppResizeHandler);
-                // P4: orientationchange 时释放动画锁（c）并清理交互状态
-                d._ppOrientationHandler = function() {
-                    if (!e) return;
-                    // 释放动画锁，防止旋转时 transitionend 丢失导致 c 卡死
-                    c = !1;
-                    if (s) {
-                        s.classList.remove("snapping");
-                        s.style.transition = "";
+                // S2: 绑定抽成可重入方法。关闭会解绑，所以每次打开都要重新确保监听在位。
+                d._ppBindViewportListeners = function() {
+                    if (!d._ppResizeHandler) {
+                        d._ppResizeHandler = function() { e && (M(), O(i), q()); };
+                        window.addEventListener("resize", d._ppResizeHandler);
                     }
-                    // 重新计算视口尺寸并重置滑动轨道位置
-                    M();
-                    O(i);
-                    q();
+                    if (!d._ppOrientationHandler) {
+                        d._ppOrientationHandler = function() {
+                            if (!e) return;
+                            // 释放动画锁，防止旋转时 transitionend 丢失导致 c 卡死
+                            c = !1;
+                            if (s) {
+                                s.classList.remove("snapping");
+                                s.style.transition = "";
+                            }
+                            // 重新计算视口尺寸并重置滑动轨道位置
+                            M();
+                            O(i);
+                            q();
+                        };
+                        window.addEventListener("orientationchange", d._ppOrientationHandler);
+                    }
                 };
-                window.addEventListener("orientationchange", d._ppOrientationHandler);
-            }(_), d = !0), q(), e = !0, t = n[b] || null, window.photoPreviewCurrent = t, i = b;
+                d._ppBindViewportListeners();
+            }(_), d = !0), _._ppBindViewportListeners && _._ppBindViewportListeners(), q(), e = !0, t = n[b] || null, window.photoPreviewCurrent = t, i = b;
             if (t && window.syncPhotoViewCount) window.syncPhotoViewCount(t);
             var S = n[b];
             // 缩略图路径下方已有独立原图预加载器；不要再由缓存预热器并发下载同一原图。

@@ -1837,7 +1837,11 @@
     if(reducedMotion()||!wrap||!wrap.animate){forceClosePhotoPreview();return;}
     root.classList.add('pp-transition-closing','pp-motion-active');var token=motionEpoch;
     motionAnimations=[wrap.animate([{transform:from,opacity:1},{transform:to,opacity:.3}],{duration:240,easing:'cubic-bezier(.4,0,.2,1)',fill:'forwards'}),root.animate([{opacity:getComputedStyle(root).opacity},{opacity:0}],{duration:240,easing:'ease-in',fill:'forwards'})];
-    Promise.all(motionAnimations.map(function(animation){return animation.finished;})).then(function(){if(token===motionEpoch)forceClosePhotoPreview();}).catch(function(){});
+    // S1(2026-11-06): animation.finished 在动画被取消、页面隐藏或进 bfcache 时会 reject，
+    // 原来的空 catch 会让 overlay 永久停在 pp-transition-closing 半关闭态（全屏遮罩锁死页面）。
+    // 注册一次 520ms 强制收尾兜底；forceClosePhotoPreview 内部会清掉这个定时器。
+    scheduleCloseFallback(520);
+    Promise.all(motionAnimations.map(function(animation){return animation.finished;})).then(function(){if(token===motionEpoch)forceClosePhotoPreview();}).catch(function(){if(motionClosing&&token===motionEpoch)forceClosePhotoPreview();});
   }
 
   window.showPhotoInfo = function () {
