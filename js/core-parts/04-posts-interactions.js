@@ -6940,14 +6940,18 @@
                 // Keep a keyboard-accessible continuation after the bounded filter scan.
                 var renderedAfterAppend = getFeedRenderedSliceStart();
                 var appendedThisRound = startIdx < filteredPosts.length;
-                if (!feedEndReached && (appendedThisRound || renderedAfterAppend < filteredPosts.length)) {
-                    if (hasActiveFeedFilters()) showFeedSearchContinueControl();
+                // 有筛选时，一轮有界扫描可能一条都没匹配到、服务端也还没到末尾：此时既没有追加也没有
+                //   未渲染的内存帖子，哨兵却一直贴着视口（不会再有第二次相交事件）。必须无条件给出
+                //   「继续查找帖子」入口，否则列表停住且没有任何出路；只有自动续翻才需要「本轮有进展」。
+                if (!feedEndReached && hasActiveFeedFilters()) {
+                    showFeedSearchContinueControl();
+                } else if (!feedEndReached && (appendedThisRound || renderedAfterAppend < filteredPosts.length)) {
                     // FIX FEED-STALL-01: 没有筛选时这里以前什么都不做。可一旦本次只追加了
                     //   少量帖子、哨兵仍停在视口里（列表还没铺满一屏），IntersectionObserver
                     //   不会再触发第二次 → 无限滚动就此停住，用户只看到"加载不动"。
                     //   只要这一轮确实追加了帖子（或内存里还有没画出来的帖子）、且哨兵仍
                     //   贴着视口，就主动再走一轮；某一轮追加不到任何新内容时不再排下一次。
-                    else if (!_feedAutoContinueTimer) {
+                    if (!_feedAutoContinueTimer) {
                         var sentinelNode = document.getElementById('feedSentinel');
                         var sentinelNear = false;
                         try {
