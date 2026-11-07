@@ -49,7 +49,9 @@ test('retry completed status returns full cat_ai comment data structure', () => 
   const fnBlock = server.slice(fnStart, fnStart + 1200);
   assert.match(fnBlock, /\.eq\('user_name', CAT_AI_USERNAME\)/);
   assert.match(fnBlock, /\.eq\('generated_by_ai', true\)/);
-  assert.match(fnBlock, /id(?:::text)?,\s*post_id,\s*user_name,\s*content,\s*created_at[^)]*updated_at[^)]*parent_comment_id[^)]*generated_by_ai/);
+  // comments 表没有 updated_at 列：select 完整字段但不得带它（带上会让每次查询失败）。
+  assert.match(fnBlock, /id(?:::text)?,\s*post_id,\s*user_name,\s*content,\s*created_at,\s*parent_comment_id(?:::text)?,\s*generated_by_ai/);
+  assert.doesNotMatch(fnBlock, /select\([^)]*updated_at/);
 });
 
 // 5: failed transient error can retry

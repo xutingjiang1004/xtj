@@ -26,7 +26,9 @@ describe('cat-ai-reply-status API behavior', function() {
   it('统一查询函数 fetchCatReplyByParent 必须存在并过滤 cat_ai/generated_by_ai、String 化父 id、order+limit 容错多行（B3/B5）', function() {
     const fnStart = server.indexOf('async function fetchCatReplyByParent');
     assert.ok(fnStart !== -1, '必须存在统一查询函数 fetchCatReplyByParent');
-    const fnBlock = server.slice(fnStart, fnStart + 1200);
+    // 只取这个函数本身：固定 1200 字符会带进紧随其后的 commentRepliesToCat（它合法地用了 maybeSingle）。
+    const fnEnd = server.indexOf('\n}\n', fnStart);
+    const fnBlock = server.slice(fnStart, fnEnd > fnStart ? fnEnd : fnStart + 1200);
     assert.match(fnBlock, /\.eq\('generated_by_ai', true\)/, '必须过滤 generated_by_ai');
     assert.match(fnBlock, /\.eq\('user_name', CAT_AI_USERNAME\)/, '必须限定 user_name=cat_ai（B5）');
     assert.match(fnBlock, /String\(parentCommentId\)/, '父 id 必须 String 化，防 BigInt');
@@ -53,8 +55,10 @@ describe('cat-ai-reply-status API behavior', function() {
   it('统一查询不得返回只有 id 的精简对象（必须 select 完整列）', function() {
     const fnStart = server.indexOf('async function fetchCatReplyByParent');
     const fnBlock = server.slice(fnStart, fnStart + 1200);
-    // 必须包含完整字段（含 updated_at），杜绝只 select id 的 buildSummaryQuery 式精简查询
-    assert.match(fnBlock, /id(?:::text)?,\s*post_id,\s*user_name,\s*content,\s*created_at,\s*updated_at,\s*parent_comment_id(?:::text)?,\s*generated_by_ai/, '统一函数必须 select 完整列');
+    // 必须包含完整字段，杜绝只 select id 的 buildSummaryQuery 式精简查询。
+    // 不含 updated_at：线上 comments 表没有这一列，带上它会让每次查询都失败、小猫回复全部卡住（见 server.js 注释）。
+    assert.match(fnBlock, /id(?:::text)?,\s*post_id,\s*user_name,\s*content,\s*created_at,\s*parent_comment_id(?:::text)?,\s*generated_by_ai/, '统一函数必须 select 完整列');
+    assert.doesNotMatch(fnBlock, /select\([^)]*updated_at/, 'comments 表没有 updated_at 列，select 里不能再带它');
   });
 });
 
