@@ -54,7 +54,8 @@ for (const theme of ['light','dark']) {
       // the 190ms opening before a second Playwright round trip arrives.
       const opening = await trigger.evaluate(button => {button.click();const e=document.querySelector('.post-tools-menu');return {duration:e.getAnimations()[0]?.effect.getTiming().duration,frames:e.getAnimations()[0]?.effect.getKeyframes(),items:Array.from(e.querySelectorAll('[data-post-tool]')).map(b => b.dataset.postTool)}});
       assert.equal(opening.duration,190); assert.equal(opening.frames[0].opacity,'0'); assert.equal(opening.frames.at(-1).opacity,'1');
-      assert.deepEqual(opening.items,['translate','ask-ai','report']);
+      // 工具菜单现在第一项是「分享」（分享面板另有专门用例）；其余三项照旧。
+      assert.deepEqual(opening.items,['share','translate','ask-ai','report']);
       const interrupted = await page.evaluate(() => {
         const menu=document.querySelector('.post-tools-menu'),trigger=document.querySelector('#feed .post-tools-trigger');
         window.closePostToolsMenu();
