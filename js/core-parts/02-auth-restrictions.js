@@ -224,6 +224,8 @@
                     return;
                 }
                 if (event.key !== 'Escape') return;
+                // 这次按键已被更靠近目标的窗口处理（举报弹窗等会 preventDefault）：不能再关下一层。
+                if (event.defaultPrevented) return;
                 var closedAuth = ['loginModal', 'registerModal'].some(function (id) {
                     var modal = document.getElementById(id);
                     if (modal && modal.classList.contains('active')) {
@@ -235,7 +237,11 @@
                 if (closedAuth) return;
                 // Other plain .modal-overlay dialogs (profile, stats, post detail, ...) never reacted to Escape.
                 var openOverlays = Array.prototype.filter.call(document.querySelectorAll('.modal-overlay.active'), function (el) { return el.id && !/^(announcement|report|ppConfirm)/.test(el.id) && !el.hasAttribute('data-xtj-ai-modal'); });
-                var topOverlay = openOverlays[openOverlays.length - 1];
+                // 以「当前最上层的窗口」为准（焦点面管理器登记的最近打开者），不能取页面源码里排最后的那个：
+                // 详情叠在个人资料上时，后者在源码里更靠后，Esc 会把下面的个人资料关掉。
+                // 最上层若是举报、图片预览、确认框这类自己处理 Esc 的窗口，这里不动，免得一次 Esc 连下面的窗口一起关掉。
+                var surface = typeof window.__xtjGetFocusSurface === 'function' ? window.__xtjGetFocusSurface() : null;
+                var topOverlay = surface ? (openOverlays.indexOf(surface) >= 0 ? surface : null) : openOverlays[openOverlays.length - 1];
                 if (topOverlay && typeof window.closeModal === 'function') { event.preventDefault(); window.closeModal(topOverlay.id); }
             });
             var btn = document.getElementById('loginSubmitBtn');

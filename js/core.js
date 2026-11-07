@@ -3190,6 +3190,8 @@ function isAdmin() {
                     return;
                 }
                 if (event.key !== 'Escape') return;
+                // 这次按键已被更靠近目标的窗口处理（举报弹窗等会 preventDefault）：不能再关下一层。
+                if (event.defaultPrevented) return;
                 var closedAuth = ['loginModal', 'registerModal'].some(function (id) {
                     var modal = document.getElementById(id);
                     if (modal && modal.classList.contains('active')) {
@@ -3201,7 +3203,11 @@ function isAdmin() {
                 if (closedAuth) return;
                 // Other plain .modal-overlay dialogs (profile, stats, post detail, ...) never reacted to Escape.
                 var openOverlays = Array.prototype.filter.call(document.querySelectorAll('.modal-overlay.active'), function (el) { return el.id && !/^(announcement|report|ppConfirm)/.test(el.id) && !el.hasAttribute('data-xtj-ai-modal'); });
-                var topOverlay = openOverlays[openOverlays.length - 1];
+                // 以「当前最上层的窗口」为准（焦点面管理器登记的最近打开者），不能取页面源码里排最后的那个：
+                // 详情叠在个人资料上时，后者在源码里更靠后，Esc 会把下面的个人资料关掉。
+                // 最上层若是举报、图片预览、确认框这类自己处理 Esc 的窗口，这里不动，免得一次 Esc 连下面的窗口一起关掉。
+                var surface = typeof window.__xtjGetFocusSurface === 'function' ? window.__xtjGetFocusSurface() : null;
+                var topOverlay = surface ? (openOverlays.indexOf(surface) >= 0 ? surface : null) : openOverlays[openOverlays.length - 1];
                 if (topOverlay && typeof window.closeModal === 'function') { event.preventDefault(); window.closeModal(topOverlay.id); }
             });
             var btn = document.getElementById('loginSubmitBtn');
@@ -6223,6 +6229,8 @@ function renderProfileActivityList(kind) {
                 var inp = document.createElement('input');
                 inp.type = 'text';
                 inp.className = 'inline-comment-inp';
+                inp.setAttribute('enterkeyhint', 'send');
+                inp.setAttribute('aria-label', reply ? ('回复 ' + (reply.parentName || '') + ' 的评论') : '写评论');
                 inp.placeholder = reply ? ('回复 @' + (reply.parentName || '') + '…') : '写下你的想法...';
                 inp.style.flex = '1';
                 inp.style.minWidth = '0';
@@ -9265,6 +9273,7 @@ function renderProfileActivityList(kind) {
                 var menu = document.createElement('div');
                 menu.className = 'post-tools-menu';
                 menu.setAttribute('role', 'menu');
+                menu.setAttribute('aria-label', '帖子工具');
                 var svgTranslate = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/></svg>';
                 var svgAi = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3l1.9 5.8 1.9-5.8a2 2 0 0 1 1.3-1.3l5.8-1.9-5.8-1.9a2 2 0 0 1-1.3-1.3z"/></svg>';
                 var svgReport = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" x2="4" y1="22" y2="15"/></svg>';
@@ -11621,6 +11630,19 @@ function renderProfileActivityList(kind) {
                 var post = (feedAllPosts || []).find(function(p) { return String(p.id) === card.getAttribute('data-post-id'); });
                 if (canOpenFeedPostDetail(post)) window.openPostDetail(post.id);
             });
+            // role="menu" 向键盘和读屏用户承诺的是方向键导航：上下键在菜单项之间移动，Home / End 跳到首尾。
+            document.addEventListener('keydown', function(e) {
+                if (!activePostToolsMenu || !/^(ArrowDown|ArrowUp|Home|End)$/.test(e.key)) return;
+                var items = Array.prototype.filter.call(activePostToolsMenu.menu.querySelectorAll('[role="menuitem"]'), function(item) { return !item.disabled; });
+                if (!items.length) return;
+                e.preventDefault();
+                var at = items.indexOf(document.activeElement), last = items.length - 1, next;
+                if (e.key === 'Home') next = 0;
+                else if (e.key === 'End') next = last;
+                else if (e.key === 'ArrowDown') next = at < 0 ? 0 : (at + 1) % items.length;
+                else next = at < 0 ? last : (at - 1 + items.length) % items.length;
+                try { items[next].focus(); } catch (_) {}
+            });
             document.addEventListener('keydown', function(e) {
                 if (e.key !== 'Escape') return;
                 var toolsTrigger = activePostToolsMenu && activePostToolsMenu.trigger;
@@ -13113,7 +13135,7 @@ function renderProfileActivityList(kind) {
                     if (dragged) { dragged = false; return; }
                     clicked = true;
                     if (autoHideTimer) { clearTimeout(autoHideTimer); autoHideTimer = null; }
-                    switchDockTab('chat');
+                    // openChat 自己会切到聊天标签，并在此之前记下帖子页的位置；先 switchDockTab 会让它丢掉「从帖子来」。
                     openChat(userName);
                     bubble.classList.remove('show');
                     bubble.classList.add('hide');
@@ -14780,12 +14802,12 @@ function renderProfileActivityList(kind) {
                 }
                 var shouldAnimateTab = options.animate === true;
                 if (tab !== currentDockTab) {
-                    // FIX NAVA-02: 通知横幅等路径先 switchDockTab('chat') 再 openChat，
-                    // openChat 里的 currentDockTab === 'posts' 判断已失效。离开 posts 时统一快照滚动位置。
-                    if (currentDockTab === 'posts' && restorePostsScroll === null) {
-                        var postsScrollPanel = document.getElementById('panelPosts');
-                        if (postsScrollPanel) restorePostsScroll = postsScrollPanel.scrollTop;
-                    }
+                    // 「返回时回到帖子页」只属于从帖子直接打开某个会话的路径，由 openChat 在入口处记录。
+                    // 这里不能在每次离开帖子页时都记：用户只是点底部「聊天」标签、再在列表里点开会话，
+                    // 点返回时就会被送回帖子页，而不是回到会话列表。
+                    // 反过来，人已经回到帖子页（用底部标签，而不是聊天里的返回键），旧记录就作废；
+                    // 聊天里的返回键自己会先把值取走再切换（见 dockChatGoBack）。
+                    if (tab === 'posts') restorePostsScroll = null;
                     try { var imv = document.getElementById('imgViewer'); if (imv && imv.classList.contains('active')) closeImageViewer(); } catch(e) {}
                     try { var am = document.getElementById('announcementModal'); if (am && am.classList.contains('active')) closeAnnouncementModal(); } catch(e) {}
                     try { var sm = document.getElementById('statModal'); if (sm && sm.classList.contains('active') && typeof closeModal === 'function') closeModal('statModal'); } catch(e) {}
@@ -15559,11 +15581,12 @@ function renderProfileActivityList(kind) {
                     window.__xtjResetIOSChatViewport();
                 }
                 if (restorePostsScroll !== null) {
+                    var restoreTo = restorePostsScroll;
+                    restorePostsScroll = null;
                     switchDockTab('posts');
                     requestAnimationFrame(() => {
                         const postsPanel = document.getElementById('panelPosts');
-                        if (postsPanel) postsPanel.scrollTop = restorePostsScroll;
-                        restorePostsScroll = null;
+                        if (postsPanel) postsPanel.scrollTop = restoreTo;
                     });
                 }
             }
@@ -15594,6 +15617,9 @@ function renderProfileActivityList(kind) {
                 if (currentDockTab === 'posts') {
                     const postsPanel = document.getElementById('panelPosts');
                     if (postsPanel) restorePostsScroll = postsPanel.scrollTop;
+                } else if (!dockChatActiveUser) {
+                    // 已经在聊天里、从列表打开会话：之前残留的「回帖子页」记录作废，返回就是回会话列表。
+                    restorePostsScroll = null;
                 }
                 if (_dockChatDraftTimer && dockChatActiveUser) {
                     clearTimeout(_dockChatDraftTimer);
@@ -23628,7 +23654,11 @@ function renderProfileActivityList(kind) {
         var reportOverlay = document.getElementById('reportModal');
         if (reportOverlay) {
             reportOverlay.addEventListener('keydown', function(e) {
-                if (e.key === 'Escape') closeReportModal();
+                if (e.key !== 'Escape') return;
+                // 这次按键已经用来关举报弹窗了：必须声明，否则它冒泡到 document 时，窗口管理器已把最上层换成下面的详情，
+                // 通用的 Esc 处理会再把详情也关掉，一次按键关两层。
+                e.preventDefault();
+                closeReportModal();
             });
         }
 
@@ -24174,6 +24204,27 @@ function renderProfileActivityList(kind) {
             };
 
         })();
+
+            // 聊天输入框最长 500 字：粘贴更长的文字时浏览器会悄悄截断，用户发出去才发现少了一截。
+            // 截断本身照旧（上限不变），只是把它告诉用户；showToast 自带去重，连续触发不会堆叠。
+            (function installDockChatLengthNotice() {
+                function limitOf(el) { var n = Number(el && el.getAttribute('maxlength')); return n > 0 ? n : 0; }
+                document.addEventListener('paste', function(event) {
+                    var el = event.target;
+                    if (!el || el.id !== 'dockChatInput') return;
+                    var max = limitOf(el);
+                    if (!max) return;
+                    var text = (event.clipboardData && event.clipboardData.getData('text')) || '';
+                    var selected = Math.max(0, (el.selectionEnd || 0) - (el.selectionStart || 0));
+                    if (el.value.length - selected + text.length > max) showToast('消息最多 ' + max + ' 字，超出的部分没有粘贴进来');
+                }, true);
+                document.addEventListener('beforeinput', function(event) {
+                    var el = event.target;
+                    if (!el || el.id !== 'dockChatInput' || event.inputType !== 'insertText') return;
+                    var max = limitOf(el);
+                    if (max && el.value.length >= max && el.selectionStart === el.selectionEnd) showToast('消息最多 ' + max + ' 字');
+                }, true);
+            })();
 
 /**
  * core-parts/07-final-overrides.js

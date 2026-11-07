@@ -1929,10 +1929,12 @@ html[data-xtj-motion=off] .ai-tool-round-list-wrap { transition: none !important
 #panelPosts .post-stats-text .post-stat-link {
   /* The site-wide button rule adds a 40px target, padding and a flex box; the stats line must look exactly as plain text did. */
   display: inline !important; min-height: 0 !important; min-width: 0 !important; height: auto !important; width: auto !important;
-  margin: 0 !important; padding: 0 !important; border: 0 !important; border-radius: 0 !important;
+  /* 文字只有 17px 高，手指很难点中：内边距把点击范围向四周放大 9px / 5px，等量负外边距把它抵消回去，排版与外观不变。
+     上下各 9px 落在统计行与上下内容之间的空白里（到点赞按钮约 19px），不会盖住它。 */
+  margin: -9px -5px !important; padding: 9px 5px !important; border: 0 !important; border-radius: 0 !important;
   background: none !important; box-shadow: none !important; transform: none !important; transition: none !important;
   color: inherit !important; font: inherit !important; letter-spacing: inherit; line-height: inherit !important; text-align: inherit;
-  cursor: pointer; -webkit-appearance: none; appearance: none; position: static;
+  cursor: pointer; -webkit-appearance: none; appearance: none; position: relative;
   -webkit-tap-highlight-color: transparent; touch-action: manipulation;
 }
 .post-stats-text .post-stat-link::before, .post-stats-text .post-stat-link::after { content: none !important; }

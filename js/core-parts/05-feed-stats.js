@@ -117,7 +117,7 @@
                     if (dragged) { dragged = false; return; }
                     clicked = true;
                     if (autoHideTimer) { clearTimeout(autoHideTimer); autoHideTimer = null; }
-                    switchDockTab('chat');
+                    // openChat 自己会切到聊天标签，并在此之前记下帖子页的位置；先 switchDockTab 会让它丢掉「从帖子来」。
                     openChat(userName);
                     bubble.classList.remove('show');
                     bubble.classList.add('hide');

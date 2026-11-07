@@ -95,12 +95,12 @@
                 }
                 var shouldAnimateTab = options.animate === true;
                 if (tab !== currentDockTab) {
-                    // FIX NAVA-02: 通知横幅等路径先 switchDockTab('chat') 再 openChat，
-                    // openChat 里的 currentDockTab === 'posts' 判断已失效。离开 posts 时统一快照滚动位置。
-                    if (currentDockTab === 'posts' && restorePostsScroll === null) {
-                        var postsScrollPanel = document.getElementById('panelPosts');
-                        if (postsScrollPanel) restorePostsScroll = postsScrollPanel.scrollTop;
-                    }
+                    // 「返回时回到帖子页」只属于从帖子直接打开某个会话的路径，由 openChat 在入口处记录。
+                    // 这里不能在每次离开帖子页时都记：用户只是点底部「聊天」标签、再在列表里点开会话，
+                    // 点返回时就会被送回帖子页，而不是回到会话列表。
+                    // 反过来，人已经回到帖子页（用底部标签，而不是聊天里的返回键），旧记录就作废；
+                    // 聊天里的返回键自己会先把值取走再切换（见 dockChatGoBack）。
+                    if (tab === 'posts') restorePostsScroll = null;
                     try { var imv = document.getElementById('imgViewer'); if (imv && imv.classList.contains('active')) closeImageViewer(); } catch(e) {}
                     try { var am = document.getElementById('announcementModal'); if (am && am.classList.contains('active')) closeAnnouncementModal(); } catch(e) {}
                     try { var sm = document.getElementById('statModal'); if (sm && sm.classList.contains('active') && typeof closeModal === 'function') closeModal('statModal'); } catch(e) {}
@@ -874,11 +874,12 @@
                     window.__xtjResetIOSChatViewport();
                 }
                 if (restorePostsScroll !== null) {
+                    var restoreTo = restorePostsScroll;
+                    restorePostsScroll = null;
                     switchDockTab('posts');
                     requestAnimationFrame(() => {
                         const postsPanel = document.getElementById('panelPosts');
-                        if (postsPanel) postsPanel.scrollTop = restorePostsScroll;
-                        restorePostsScroll = null;
+                        if (postsPanel) postsPanel.scrollTop = restoreTo;
                     });
                 }
             }
@@ -909,6 +910,9 @@
                 if (currentDockTab === 'posts') {
                     const postsPanel = document.getElementById('panelPosts');
                     if (postsPanel) restorePostsScroll = postsPanel.scrollTop;
+                } else if (!dockChatActiveUser) {
+                    // 已经在聊天里、从列表打开会话：之前残留的「回帖子页」记录作废，返回就是回会话列表。
+                    restorePostsScroll = null;
                 }
                 if (_dockChatDraftTimer && dockChatActiveUser) {
                     clearTimeout(_dockChatDraftTimer);
@@ -8943,7 +8947,11 @@
         var reportOverlay = document.getElementById('reportModal');
         if (reportOverlay) {
             reportOverlay.addEventListener('keydown', function(e) {
-                if (e.key === 'Escape') closeReportModal();
+                if (e.key !== 'Escape') return;
+                // 这次按键已经用来关举报弹窗了：必须声明，否则它冒泡到 document 时，窗口管理器已把最上层换成下面的详情，
+                // 通用的 Esc 处理会再把详情也关掉，一次按键关两层。
+                e.preventDefault();
+                closeReportModal();
             });
         }
 
@@ -9489,3 +9497,24 @@
             };
 
         })();
+
+            // 聊天输入框最长 500 字：粘贴更长的文字时浏览器会悄悄截断，用户发出去才发现少了一截。
+            // 截断本身照旧（上限不变），只是把它告诉用户；showToast 自带去重，连续触发不会堆叠。
+            (function installDockChatLengthNotice() {
+                function limitOf(el) { var n = Number(el && el.getAttribute('maxlength')); return n > 0 ? n : 0; }
+                document.addEventListener('paste', function(event) {
+                    var el = event.target;
+                    if (!el || el.id !== 'dockChatInput') return;
+                    var max = limitOf(el);
+                    if (!max) return;
+                    var text = (event.clipboardData && event.clipboardData.getData('text')) || '';
+                    var selected = Math.max(0, (el.selectionEnd || 0) - (el.selectionStart || 0));
+                    if (el.value.length - selected + text.length > max) showToast('消息最多 ' + max + ' 字，超出的部分没有粘贴进来');
+                }, true);
+                document.addEventListener('beforeinput', function(event) {
+                    var el = event.target;
+                    if (!el || el.id !== 'dockChatInput' || event.inputType !== 'insertText') return;
+                    var max = limitOf(el);
+                    if (max && el.value.length >= max && el.selectionStart === el.selectionEnd) showToast('消息最多 ' + max + ' 字');
+                }, true);
+            })();

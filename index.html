@@ -73,15 +73,15 @@
          这里加 preload 让浏览器解析到本行就立即高优先级抓取，缩短空窗期。
          注意：href 必须与下方异步 link 完全一致（含 ?v= 指纹），构建脚本会统一刷新。 -->
     <link rel="preload" as="style" href="css/visual-refinements.min.css?v=3fd6a30cd9" />
-    <link rel="preload" as="style" href="css/ui-enhance.min.css?v=23cd2203d9" />
+    <link rel="preload" as="style" href="css/ui-enhance.min.css?v=843a414644" />
     <link rel="stylesheet" href="css/visual-refinements.min.css?v=3fd6a30cd9" media="print" onload="this.media='all'" />
-    <noscript><link rel="stylesheet" href="css/visual-refinements.min.css?v=3fd6a30cd9" /><link rel="stylesheet" href="css/ai-agent.min.css?v=47bcef6987" /><link rel="stylesheet" href="css/ui-enhance.min.css?v=23cd2203d9" /><link rel="stylesheet" href="css/ui-shell.min.css?v=394a92c9e6" /></noscript>
+    <noscript><link rel="stylesheet" href="css/visual-refinements.min.css?v=3fd6a30cd9" /><link rel="stylesheet" href="css/ai-agent.min.css?v=47bcef6987" /><link rel="stylesheet" href="css/ui-enhance.min.css?v=843a414644" /><link rel="stylesheet" href="css/ui-shell.min.css?v=394a92c9e6" /></noscript>
     <!-- ★ 2026-09-22 响应式修复（补完）：desktop.css 自身首条断点就是 @media (min-width: 768px)，
          只按宽度加载会让「横屏手机」（宽 ≥768、高 ≈390）也套上桌面两列栅格，与 ui-shell.css 侧
          已加的 min-height:480px 门禁不一致（会出现"桌面栅格 + 移动外壳"的混合布局）。
          故加载条件补上同一高度门禁，让横屏手机真正落回移动布局。 -->
     <link rel="stylesheet" media="(min-width: 768px) and (min-height: 480px)" href="css/desktop.min.css?v=d872211228" />
-    <link rel="stylesheet" href="css/ui-enhance.min.css?v=23cd2203d9" media="print" onload="this.media='all'">
+    <link rel="stylesheet" href="css/ui-enhance.min.css?v=843a414644" media="print" onload="this.media='all'">
     <link rel="stylesheet" href="css/ui-shell.min.css?v=394a92c9e6">
     <link rel="stylesheet" href="css/post-feed.min.css?v=08feeaf41d">
     <link rel="stylesheet" href="css/profile-settings.min.css?v=5c673b31fb">
@@ -91,7 +91,7 @@
          DCL 因此推迟到 4s 量级。preload 只提前「下载」，不改变执行顺序
          （defer 仍按文档顺序执行），构建脚本会同步刷新 ?v= 指纹。 -->
     <link rel="preload" as="script" href="js/vendor/supabase.min.js?v=e8c548fa1b" />
-    <link rel="preload" as="script" href="js/core.min.js?v=e67c60de3e" />
+    <link rel="preload" as="script" href="js/core.min.js?v=68e2e754f9" />
     <!-- 小猫 AI 模块按需加载，但实测它会被首屏图片请求挤在连接队列里几十秒，
          用户点开只看到「正在加载 AI 模块」且无法返回。这里在第一波就把它取下来，
          执行时机仍由模块加载器决定（不会提前执行）。 -->
@@ -427,7 +427,7 @@
                         <div class="chat-input-row">
                             <div class="chat-input-wrap">
                                 <div id="chatRecordingIndicator" class="chat-recording-indicator" hidden><span class="chat-recording-dot" aria-hidden="true"></span><span class="chat-recording-wave" aria-hidden="true"><i style="--record-delay:-0.0s"></i><i style="--record-delay:-0.07s"></i><i style="--record-delay:-0.14s"></i><i style="--record-delay:-0.21000000000000002s"></i><i style="--record-delay:-0.28s"></i><i style="--record-delay:-0.35000000000000003s"></i><i style="--record-delay:-0.42000000000000004s"></i><i style="--record-delay:-0.49000000000000005s"></i><i style="--record-delay:-0.56s"></i><i style="--record-delay:-0.6300000000000001s"></i><i style="--record-delay:-0.7000000000000001s"></i><i style="--record-delay:-0.77s"></i></span><span id="chatRecordingTimer">00:00</span></div>
-                                <input id="dockChatInput" placeholder="输入消息 · 空白处长按录音" title="空白输入框长按录音，松开发送，上滑取消" maxlength="500" />
+                                <input id="dockChatInput" placeholder="输入消息 · 空白处长按录音" title="空白输入框长按录音，松开发送，上滑取消" maxlength="500" aria-label="输入消息" enterkeyhint="send" autocomplete="off" />
                             </div>
                             <!-- ★ 2026-09-26：原图开关改成「圆圈 + 圆点」的单选反馈（未选＝空心圆，已选＝圆里有个点）。
                                  默认「未选」＝照片压缩后发送；主动勾选才按原始画质发送
@@ -995,7 +995,7 @@
     </div>
 
     <div class="img-viewer" id="imgViewer" role="dialog" aria-modal="true" aria-label="图片预览" tabindex="-1" inert aria-hidden="true">
-        <button id="ivClose" class="iv-close" onclick="window.closeImageViewer()">&times;</button>
+        <button id="ivClose" class="iv-close" aria-label="关闭预览" onclick="window.closeImageViewer()">&times;</button>
         <div class="iv-wrapper" id="ivWrapper">
             <img id="ivImg" src="" alt="预览" draggable="false" />
         </div>
@@ -1296,7 +1296,7 @@
     <script defer src="js/core-utils.min.js?v=a376d5219e"></script>
     <script defer src="js/photo-wall/story.min.js?v=167ce053d3"></script>
     <script defer src="js/voice-transcription.min.js?v=6247e4303f"></script>
-    <script defer src="js/core.min.js?v=e67c60de3e"></script>
+    <script defer src="js/core.min.js?v=68e2e754f9"></script>
     <script defer src="js/login-device.min.js?v=7f402fc787"></script>
     <script defer src="js/theme-toggle.min.js?v=f67dfa81a9"></script>
     <script defer src="js/desktop-shell.min.js?v=8420dc4713"></script>

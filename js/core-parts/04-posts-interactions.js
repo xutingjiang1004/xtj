@@ -602,6 +602,8 @@
                 var inp = document.createElement('input');
                 inp.type = 'text';
                 inp.className = 'inline-comment-inp';
+                inp.setAttribute('enterkeyhint', 'send');
+                inp.setAttribute('aria-label', reply ? ('回复 ' + (reply.parentName || '') + ' 的评论') : '写评论');
                 inp.placeholder = reply ? ('回复 @' + (reply.parentName || '') + '…') : '写下你的想法...';
                 inp.style.flex = '1';
                 inp.style.minWidth = '0';
@@ -3644,6 +3646,7 @@
                 var menu = document.createElement('div');
                 menu.className = 'post-tools-menu';
                 menu.setAttribute('role', 'menu');
+                menu.setAttribute('aria-label', '帖子工具');
                 var svgTranslate = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/></svg>';
                 var svgAi = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3l1.9 5.8 1.9-5.8a2 2 0 0 1 1.3-1.3l5.8-1.9-5.8-1.9a2 2 0 0 1-1.3-1.3z"/></svg>';
                 var svgReport = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" x2="4" y1="22" y2="15"/></svg>';
@@ -5999,6 +6002,19 @@
                 if (window.getSelection && String(window.getSelection()).trim()) return;
                 var post = (feedAllPosts || []).find(function(p) { return String(p.id) === card.getAttribute('data-post-id'); });
                 if (canOpenFeedPostDetail(post)) window.openPostDetail(post.id);
+            });
+            // role="menu" 向键盘和读屏用户承诺的是方向键导航：上下键在菜单项之间移动，Home / End 跳到首尾。
+            document.addEventListener('keydown', function(e) {
+                if (!activePostToolsMenu || !/^(ArrowDown|ArrowUp|Home|End)$/.test(e.key)) return;
+                var items = Array.prototype.filter.call(activePostToolsMenu.menu.querySelectorAll('[role="menuitem"]'), function(item) { return !item.disabled; });
+                if (!items.length) return;
+                e.preventDefault();
+                var at = items.indexOf(document.activeElement), last = items.length - 1, next;
+                if (e.key === 'Home') next = 0;
+                else if (e.key === 'End') next = last;
+                else if (e.key === 'ArrowDown') next = at < 0 ? 0 : (at + 1) % items.length;
+                else next = at < 0 ? last : (at - 1 + items.length) % items.length;
+                try { items[next].focus(); } catch (_) {}
             });
             document.addEventListener('keydown', function(e) {
                 if (e.key !== 'Escape') return;
