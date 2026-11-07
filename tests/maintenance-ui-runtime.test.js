@@ -25,7 +25,9 @@ function element(id = '') {
 function imageQueueRepro() {
   let intersection;
   const timers = new Map(); let clockId = 0;
-  const imgs = Array.from({ length: 5 }, () => element());
+  // 并发上限现为 6（见 image-load-guard.js 的 pump）：用 6 张占满槽位，第 7 张才会排队。
+  const SLOTS = 6;
+  const imgs = Array.from({ length: SLOTS + 1 }, () => element());
   imgs.forEach((img, i) => { img.setAttribute('data-post-src', '/api/post/test/media/' + i); img.complete = false; img.naturalWidth = 0; });
   const body = element(); body.querySelectorAll = () => imgs; body.matches = () => false; body.nodeType = 1;
   const context = { document: { body, querySelectorAll: () => [] }, innerHeight: 800, location: { href: 'https://xtj.test/', origin: 'https://xtj.test' }, URL, Map, Event,
@@ -34,14 +36,17 @@ function imageQueueRepro() {
     MutationObserver: class { observe() {} }
   }; context.window = context;
   vm.runInNewContext(read('js/image-load-guard.js'), context);
-  intersection(imgs.slice(0, 4).map(target => ({ target, isIntersecting: true })));
-  assert.equal(imgs.filter(img => img.src).length, 4);
-  // All four network requests remain pending while a new group scrolls into view.
-  intersection(imgs.slice(0, 4).map(target => ({ target, isIntersecting: false })).concat({ target: imgs[4], isIntersecting: true }));
-  assert.equal(imgs[4].src, '');
-  assert.equal(timers.size, 4, 'off-screen requests keep their deadlines');
+  const first = imgs.slice(0, SLOTS), last = imgs[SLOTS];
+  intersection(first.map(target => ({ target, isIntersecting: true, boundingClientRect: { top: 0, bottom: 100 } })));
+  assert.equal(imgs.filter(img => img.src).length, SLOTS);
+  // All network requests remain pending while a new group scrolls into view.
+  // 真实的 IntersectionObserver 条目总带 boundingClientRect；这里是「刚滚出视口、仍在 1200px 以内」的位置，
+  // 请求不会被立即回收，只靠 30 秒期限放槽位。
+  intersection(first.map(target => ({ target, isIntersecting: false, boundingClientRect: { top: 900, bottom: 1000 } })).concat({ target: last, isIntersecting: true, boundingClientRect: { top: 0, bottom: 100 } }));
+  assert.equal(last.src, '');
+  assert.equal(timers.size, SLOTS, 'off-screen requests keep their deadlines');
   [...timers.values()][0]();
-  assert.ok(imgs[4].src, 'deadline releases a slot for the newly visible original');
+  assert.ok(last.src, 'deadline releases a slot for the newly visible original');
 
 }
 async function profileOrderRepro() {
