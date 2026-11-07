@@ -6,7 +6,7 @@ const context={Buffer,console,Date,Intl,require:createRequire(filename),toolHelp
   aiSiteCard:(type,title,data)=>({protocol:'xtj.ai.ui.v1',id:'test-'+type,type,title,data})};
 vm.createContext(context);
 const definitionStart=source.indexOf('const AI_TOOLS = ['),definitionEnd=source.indexOf('\n];',definitionStart)+3;
-vm.runInContext(source.slice(definitionStart,definitionEnd)+';AI_TOOLS.push(...aiRequestFeatures.DOCUMENT_TOOLS);this.definitions=AI_TOOLS;',context);
+vm.runInContext(source.slice(definitionStart,definitionEnd)+';AI_TOOLS.push(...aiRequestFeatures.DOCUMENT_TOOLS,...require("./ai-knowledge-tools").TOOL_DEFS,...require("./ai-agent-tools").TOOL_DEFS);this.definitions=AI_TOOLS;',context);
 vm.runInContext(source.slice(source.indexOf('function safeEvalMath('),source.indexOf('function normalizeMarketSymbol(')),context);
 const start=source.indexOf('async function executeToolCall('),end=source.indexOf('// 搜索结果自动补全',start);
 vm.runInContext(source.slice(start,end)+';this.execute=executeToolCall;',context);

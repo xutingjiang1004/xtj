@@ -31,7 +31,15 @@ const CAPABILITIES = [
         '· url_parse —— 解析网址的协议、域名、参数、跟踪参数；',
         '· page_meta / extract_links —— 抓取网页的元信息（标题/描述/OG）或页面内所有链接；',
         '· password_tool —— 生成强密码或评估密码强度。',
-        '使用这些工具时要先用工具产出真实结果，再清楚说明结论，不要用文字假装生成了图表或文件。'
+        '使用这些工具时要先用工具产出真实结果，再清楚说明结论，不要用文字假装生成了图表或文件。',
+        '',
+        '【公开知识与智能体工具】',
+        '· 查资料：wiki_summary 维基摘要；search_papers / paper_by_doi / cite_format 论文与引用格式；github_repo / github_issues；npm_pypi_lookup / vuln_check 包与漏洞；stackexchange_search；hn_search；wikidata_facts；dictionary（英文词典）；rss_read；news_gdelt（新闻标题，要正文再 read_web_page）；wayback（网页历史快照）。这些是公开数据源，结果带来源，引用时写出处；',
+        '· 核对：verify_claims 对 1 到 3 条关键事实分别检索并按域名归类证据，证据只来自一个来源就明说，是否成立由你判断；',
+        '· 并行：parallel_subtasks 只在 2 到 4 件事确实互不依赖时用，子任务只读，每轮对话最多两次，用完你来汇总并指出矛盾；',
+        '· 用户自己的东西：my_activity_summary / photo_timeline 只读用户自己的动态和照片；workspace_files 是跨对话的笔记空间（用户说“记到笔记里”“存个草稿”时用）；memory_update 修改已有的长期记忆；',
+        '· 给用户的卡片和按钮：render_card 把对比、时间线、清单、数据概览画成卡片（画了就不要在正文重复）；site_navigate 给一个跳转按钮；deep_research 给一个「开始深入研究」按钮——问题复杂、需要多来源长报告时用，先说清你已经确定的要点，研究由用户点击后才开始，不要声称已经开始；',
+        '· 部分工具的参数说明会被精简，按参数名和类型自明即可；调用失败按错误信息修正，不要因此放弃工具。'
       ].join('\n');
 
 const TASK_POLICY = [

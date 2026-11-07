@@ -58,7 +58,7 @@ function search(task){
   if(scope&&!scope.searchDepth){if(scope.policy.maxSearches!==null&&scope.policy.searches>=scope.policy.maxSearches)throw failure('task_search_budget_exceeded','本次检索次数已达到设置的上限，已保留现有结果');scope.policy.searches++;}
   return scope?requests.run({...scope,searchDepth:(scope.searchDepth||0)+1},task):task();
 }
-const NETWORK_TOOLS=new Set(['search_web','tavily_search','search_social','get_weather','get_exchange_rate','get_stock_quote','read_web_page','read_document','web_extract','read_zip','image_info','image_process','page_meta','extract_links','search_posts','search_comments','search_photos','search_dm_messages','search_ai_history','search_users','search_everything']);
+const NETWORK_TOOLS=new Set(['search_web','tavily_search','search_social','get_weather','get_exchange_rate','get_stock_quote','read_web_page','read_document','web_extract','read_zip','image_info','image_process','page_meta','extract_links','search_posts','search_comments','search_photos','search_dm_messages','search_ai_history','search_users','search_everything'].concat(require('./ai-knowledge-tools').NETWORK_TOOL_NAMES,['verify_claims','parallel_subtasks','my_activity_summary','photo_timeline']));
 function guardTool(name){if(NETWORK_TOOLS.has(name))assertNetwork();}
 function makeMiddleware(deps={}){
   const cache=deps.store||store;
@@ -98,6 +98,8 @@ function makeMiddleware(deps={}){
       scope.documents=Array.from(refs.values()).slice(0,10);
       if(body.network_mode==='off')body.web_search=false;
       if(body.network_mode==='required')body.web_search=true;
+      // Ordinary chat only: shrink the definitions of tools this message does not look like it needs (every tool stays visible).
+      if(/^\/api\/agent\/chat(?:\/stream)?$/.test(String(req.path||''))&&!body.work_mode&&!body.deep_think)scope.toolRoute=require('./ai-tool-router').routeBody(body);
       req.aiRequestScope=scope;
       function cleanup(){if(timer)clearTimeout(timer);res.removeListener('finish',cleanup);res.removeListener('close',cleanup);scope.controller.abort();}
       res.once('finish',cleanup);res.once('close',cleanup);
@@ -138,7 +140,9 @@ const DOCUMENT_TOOLS=[
   {type:'function',function:{name:'read_document_section',description:'读取已提供文件的指定连续段落。仅返回实际提取内容，明确文件提取上限，不能声称已读完整文件。',parameters:{type:'object',properties:{attachment_ref:{type:'string'},start_paragraph:{type:'integer',description:'从 1 开始的真实提取段落编号'},offset:{type:'integer',description:'长段落的字符偏移，默认 0，可沿返回的 next_offset 继续'},count:{type:'integer',description:'读取段数，1–20'}},required:['attachment_ref','start_paragraph']}}}
 ];
 function tools(list){
-  const scope=current(),catalog=scope?.documents.map((row,index)=>`F${index+1}: ${JSON.stringify(row.name)} · attachment_ref=${row.ref}`).join('\n')||'本次没有可检索的附件引用；请用户先提供文件。';
+  const scope=current();
+  if(scope&&scope.toolRoute)list=require('./ai-tool-router').apply(list,scope.toolRoute);
+  const catalog=scope?.documents.map((row,index)=>`F${index+1}: ${JSON.stringify(row.name)} · attachment_ref=${row.ref}`).join('\n')||'本次没有可检索的附件引用；请用户先提供文件。';
   return list.map(tool=>DOCUMENT_TOOLS.some(item=>item.function.name===tool.function?.name)?{...tool,function:{...tool.function,description:tool.function.description+'\n当前附件目录：\n'+catalog}}:tool);
 }
 async function paragraphs(row,parse){

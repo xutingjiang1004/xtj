@@ -460,7 +460,7 @@ test('E4：toolLabel 的每个调用点都必须看得到定义（产物同名�
   // 若定义在错误作用域，Terser 只会改定义名、调用点保留原名 → 两者不一致。
   const min = read('js/ai-agent.min.js');
   // 映射表与 toolLabel 之间可能夹着别的小函数（如 inProcessRail），所以只要求「表之后最近的、以 var x = String 开头的单参函数」。
-  const def = min.match(/(?:规划任务|向你确认)"\};[\s\S]{0,400}?function\s+([A-Za-z_$][\w$]*)\s*\(\s*[A-Za-z_$][\w$]*\s*\)\s*\{\s*var\s+[A-Za-z_$][\w$]*\s*=\s*String/);
+  const def = min.match(/(?:规划任务|向你确认|生成卡片)"\};[\s\S]{0,400}?function\s+([A-Za-z_$][\w$]*)\s*\(\s*[A-Za-z_$][\w$]*\s*\)\s*\{\s*var\s+[A-Za-z_$][\w$]*\s*=\s*String/);
   assert.ok(def, '产物中必须能定位到工具名映射函数（紧随映射表定义之后）');
   const fnName = def[1];
   // 混淆名可能以 $ 开头，\b 在 $ 前不成立，所以用「前一个字符不是标识符字符」代替。
