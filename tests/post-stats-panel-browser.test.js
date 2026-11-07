@@ -31,6 +31,8 @@ test('clicking 浏览 or 点赞 opens one bottom half-screen panel: viewers on t
     assert.deepEqual(await modal.locator('#postStatsViewsList .post-stats-name').allTextContents(), ['viewer00', 'viewer01', 'viewer02']);
     assert.deepEqual(await modal.locator('#postStatsLikesList .post-stats-name').allTextContents(), ['fan00', 'fan01']);
     assert.equal(await modal.locator('.post-stats-row .avatar').count(), 5, 'every user shows an avatar (or initial)');
+    // The panel slides in for 0.18s: measure it once it has settled at the bottom, not mid-transition.
+    await f.page.waitForFunction(() => { const r = document.querySelector('#postStatsModal .post-stats-panel').getBoundingClientRect(); return Math.abs(r.bottom - innerHeight) <= 1; }, null, { timeout: 5000 });
     const box = await modal.locator('.post-stats-panel').boundingBox(), viewport = f.page.viewportSize();
     assert.ok(box.width >= viewport.width - 1, 'the panel spans the width of the site');
     assert.ok(Math.abs(box.height - viewport.height / 2) <= 2, 'the panel takes half of the site height');
