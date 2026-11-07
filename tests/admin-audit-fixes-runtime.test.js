@@ -199,6 +199,10 @@ test('AB-02 administrator cookie gateway enforces validation/revocation before r
  await request(app).get('/api/uploads/media').query({path}).set('Cookie','xtj_admin_token=invalid').expect(401);
  await request(app).get('/api/uploads/media').query({path}).set('Cookie','xtj_admin_token=revoked').expect(401);
  assert.equal(bytesRead,0);
+ // 用户决定（2026-11-05）：管理员也不能读别人的私密帖原图；校验通过后同样返回 404，且不读取原图字节。
+ await request(app).get('/api/uploads/media').query({path}).set('Cookie','xtj_admin_token=verified-admin').expect(404);assert.equal(bytesRead,0);
+ // 公开帖的原图：校验通过的管理员仍可读取。
+ rows[0].visibility='public';
  const result=await request(app).get('/api/uploads/media').query({path}).set('Cookie','xtj_admin_token=verified-admin').expect(200);assert.equal(result.body.toString(),'unchanged-original');assert.equal(bytesRead,1);
  rows[0].is_deleted=true;await request(app).get('/api/uploads/media').query({path}).set('Cookie','xtj_admin_token=verified-admin').expect(404);assert.equal(bytesRead,1);
 });

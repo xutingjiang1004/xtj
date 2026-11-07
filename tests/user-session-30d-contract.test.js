@@ -189,7 +189,10 @@ test('前端：refresh 对 5xx / 网络异常必须退避重试，不得判定�
 
 test('前端：瞬时失败后不得主动登出（保留本地会话）', () => {
   const start = coreSrc.indexOf('async function refreshUserTokenViaCookie(');
-  const body = coreSrc.slice(start, start + 4800);
+  // 按函数边界截取（函数随 409 回执恢复等逻辑变长，固定字符窗口会漏掉收尾注释）
+  const end = coreSrc.indexOf('window.getUserAuthHeaders', start);
+  assert.ok(end > start, '必须能定位 refreshUserTokenViaCookie 的结尾');
+  const body = coreSrc.slice(start, end);
   const tail = body.slice(body.indexOf('if (attempts < 2)'));
   assert.match(tail, /不主动登出/,
     '重试仍失败时必须保留本地会话，交由下次交互重试');
