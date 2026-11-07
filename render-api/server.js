@@ -1621,7 +1621,7 @@ function toResponsesFunctionTool(openaiTool) {
 //   与内置 web_search 的潜在重复由 executeToolCall 的配额 gate 与
 //   模型自主选择处理，不会造成双份网络开销。
 // 研究、深度思考的 worker 不需要「给用户的卡片/按钮」「并行子任务」「笔记空间」这类只属于用户自己聊天的工具。
-var AI_WORKER_EXCLUDED_TOOLS = new Set(['deep_research', 'parallel_subtasks', 'workspace_files', 'site_navigate', 'render_card', 'memory_update']);
+var AI_WORKER_EXCLUDED_TOOLS = new Set(['deep_research', 'parallel_subtasks', 'self_check', 'workspace_files', 'site_navigate', 'render_card', 'memory_update']);
 function aiToolsForSearch(includeTavily, forWorker) {
   var filtered = [];
   for (var i = 0; i < AI_TOOLS.length; i++) {
@@ -1834,6 +1834,7 @@ async function executeToolCall(toolCall, context) {
   if (/^(search_web|tavily_search|search_social|web_extract|read_web_page|page_meta|extract_links)$/.test(guardName)) guardLimit = 45000;
   else if (/^(wiki_summary|search_papers|paper_by_doi|github_repo|github_issues|npm_pypi_lookup|vuln_check|stackexchange_search|hn_search|wikidata_facts|dictionary|rss_read|news_gdelt|wayback)$/.test(guardName)) guardLimit = 45000;
   else if (guardName === 'verify_claims') guardLimit = 60000;
+  else if (guardName === 'self_check') guardLimit = 40000;
   else if (guardName === 'parallel_subtasks') guardLimit = 75000;
   else if (/^(read_document|read_zip|search_document|read_document_section|generate_pdf|make_chart|make_file|image_process)$/.test(guardName)) guardLimit = 60000;
   else if (guardName === 'run_code') guardLimit = 75000;
@@ -4978,6 +4979,7 @@ const aiAgentTools = require('./ai-agent-tools').createAgentTools({
   photoUrl: function(id) { return photoMediaUrl(id); },
   executeToolCall: function(toolCall, context) { return executeToolCall(toolCall, context); },
   runSubtask: function(task, context) { return runAiSubtask(task, context); },
+  runCritic: function(input, context) { return runAiCritic(input, context); },
   recordUsage: function(userName, usage, meta) {
     var model = normalizeDeepSeekUsageModel(meta.model || DEEPSEEK_MODEL_FLASH, DEEPSEEK_MODEL_FLASH);
     return recordAiTurnUsage(userName, usage, { conversation_id: meta.conversationId || null, model: model, source: meta.source, message: '', content: '', reasoning: '', search_count: 0, did_search: false });
@@ -4998,6 +5000,20 @@ async function runAiSubtask(task, context) {
     thinking_mode: 'off', model: DEEPSEEK_MODEL_FLASH, tools: tools, _userName: context.userName || '',
     max_tokens: 1800, max_tool_rounds: 3, total_timeout_ms: 55000, signal: context.signal || undefined,
     tool_executor: function(toolCall) { return executeToolCall(toolCall, context); },
+    onContentChunk: function(chunk) { text += chunk; }
+  });
+  return { text: text || (result && result.content) || '', usage: result && result.usage || null, model: result && result.model_used || DEEPSEEK_MODEL_FLASH };
+}
+
+// 回答自查：快速模型当严格的审稿人，只指出问题、不重写。无工具，25 秒；用量由 self_check 单独计费。
+async function runAiCritic(input, context) {
+  var text = '';
+  var result = await callDeepSeekViaResponses([
+    { role: 'system', content: '你是严格的审稿人，审的是另一个助手准备发给用户的回答草稿。只指出问题，不重写答案，不客套，不超过 5 条，每条一行，格式「[类型] 具体问题 → 建议」。类型只能是：未回答（用户问的某件事没答）、无来源数字（给了数字、日期、人名但没有依据）、可能矛盾（草稿内部或与依据冲突）、口径不一致（时间、单位、范围不统一）、过度确定（证据只有一个来源却写成定论）、缺证据（关键结论没有出处）。没有问题就只回复「未发现明显问题」。' },
+    { role: 'user', content: '用户的问题：\n' + input.question + '\n\n回答草稿：\n' + input.draft + (input.evidence ? '\n\n助手用到的来源和事实：\n' + input.evidence : '') }
+  ], {
+    thinking_mode: 'off', model: DEEPSEEK_MODEL_FLASH, _userName: context.userName || '',
+    max_tokens: 600, total_timeout_ms: 25000, signal: context.signal || undefined,
     onContentChunk: function(chunk) { text += chunk; }
   });
   return { text: text || (result && result.content) || '', usage: result && result.usage || null, model: result && result.model_used || DEEPSEEK_MODEL_FLASH };
@@ -20963,7 +20979,8 @@ function buildAiCorePrompt(config) {
     //   3) 本轮已实测过：模型在工具报错后常直接编造天气/汇率数据，或以"换个城市名"敷衍过去。
     '工具使用规范：① 查天气时 location 只传规范城市名（如“成都”“大阪”“Los Angeles”），不要传省市区全称、不要带“市/区/县”后缀；② 查汇率/行情只传标准代码（如 USD、CNY、AAPL）；③ 工具返回中若含 recoverable=true，可修正参数重试一次；若 recoverable=false，说明是服务侧故障，直接如实告诉用户“该服务暂时不可用”，绝不编造数据、不反复重试同一工具；④ 绝不要把工具返回里的英文错误码或 JSON 原文念给用户，要用自然中文转述；⑤ 工具失败时告知真实原因（参数问题 vs 服务问题），不要笼统地说“换个城市名试试”来敷衍。',
     '回复规则：优先直接回答，按内容使用段落、列表或表格；不写“作为一个 AI”开场白，不用括号动作描写；图片消息只依据其中文字回答业务问题，不讨论 OCR/识别引擎；只答对话内容，不编造已执行操作，不查他人记录。中文回复。',
-    aiTaskPolicy.TASK_POLICY,
+    // 普通聊天按这句话涉及的工具组拼装能力说明（见 ai-tool-router）；研究、深度思考等没有路由的请求用完整版。
+    aiTaskPolicy.forRequest(typeof aiRequestFeatures === 'undefined' || !aiRequestFeatures.current() ? null : aiRequestFeatures.current().toolRoute || null),
     typeof aiRequestFeatures==='undefined'?'':aiRequestFeatures.instructions()
   ];
 

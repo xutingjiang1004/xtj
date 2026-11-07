@@ -3187,7 +3187,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     stackexchange_search: '搜索问答', hn_search: '搜索 Hacker News', wikidata_facts: '查询维基数据', dictionary: '查词典',
     rss_read: '读取订阅', news_gdelt: '搜索新闻', wayback: '查看网页快照',
     my_activity_summary: '汇总我的动态', photo_timeline: '浏览照片时间线', site_navigate: '准备跳转', deep_research: '建议深入研究',
-    parallel_subtasks: '并行处理子任务', verify_claims: '核对事实', workspace_files: '使用笔记空间', render_card: '生成卡片'
+    parallel_subtasks: '并行处理子任务', verify_claims: '核对事实', self_check: '自查回答', workspace_files: '使用笔记空间', render_card: '生成卡片'
   };
   function inProcessRail(node) {
     return !!(node && node.closest && node.closest('.ai-process-rail'));
@@ -3242,7 +3242,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     stackexchange_search: '问答检索', hn_search: 'Hacker News', wikidata_facts: '维基数据', dictionary: '词典',
     rss_read: '订阅内容', news_gdelt: '新闻检索', wayback: '网页快照',
     my_activity_summary: '我的动态', photo_timeline: '照片时间线', site_navigate: '跳转按钮', deep_research: '研究建议',
-    parallel_subtasks: '并行子任务', verify_claims: '事实核对', workspace_files: '笔记空间', render_card: '卡片'
+    parallel_subtasks: '并行子任务', verify_claims: '事实核对', self_check: '回答自查', workspace_files: '笔记空间', render_card: '卡片'
   };
   // 检索类工具：命中则走"已搜索 N 个网页"句式（用户点名要的形态）
   var TOOL_SEARCH_KINDS = {

@@ -29,14 +29,14 @@ const UUID = '22222222-2222-4222-8222-222222222222';
 
 test('definitions are complete: every tool has a definition and a handler, descriptions stay short, meta tools are never offered to workers', () => {
   const t = createAgentTools(deps());
-  assert.equal(TOOL_DEFS.length, 8);
+  assert.equal(TOOL_DEFS.length, 9);
   for (const def of TOOL_DEFS) {
     const name = def.function.name;
     assert.ok(TOOL_NAMES.includes(name) && t.has(name), name);
     for (const r of def.function.parameters.required) assert.ok(def.function.parameters.properties[r], name + ' requires undeclared ' + r);
     assert.ok(def.function.description.length < 150, name + ' description too long: ' + def.function.description.length);
   }
-  for (const name of ['deep_research', 'parallel_subtasks', 'workspace_files', 'site_navigate', 'render_card', 'memory_update', 'ask_user']) assert.ok(META_TOOL_NAMES.includes(name), name);
+  for (const name of ['deep_research', 'parallel_subtasks', 'self_check', 'workspace_files', 'site_navigate', 'render_card', 'memory_update', 'ask_user']) assert.ok(META_TOOL_NAMES.includes(name), name);
   assert.equal(t.has('constructor'), false);
   assert.deepEqual(dateBound('2026-03', false), '2026-03-01T00:00:00.000Z'); assert.deepEqual(dateBound('2026-12', true), '2027-01-01T00:00:00.000Z');
   assert.deepEqual(dateBound('2026-02-28', true), '2026-03-01T00:00:00.000Z'); assert.equal(dateBound('2026/02', false), null); assert.equal(dateBound('2026-13-01', false), new Date(Date.UTC(2026, 12, 1)).toISOString());
@@ -203,7 +203,7 @@ test('wiring: every new tool is defined, dispatched, guarded for offline mode, t
   const client = fs.readFileSync(path.join(__dirname, '..', 'js', 'ai-agent.js'), 'utf8');
   const knowledge = require('../render-api/ai-knowledge-tools'), features = require('../render-api/ai-request-features');
   const all = knowledge.TOOL_NAMES.concat(TOOL_NAMES, ['memory_update']);
-  assert.equal(all.length, 24);
+  assert.equal(all.length, 25);
   // dispatch happens before the big switch and tolerates the isolated executor used by other tests
   const dispatch = server.indexOf("typeof aiKnowledgeTools !== 'undefined' && aiKnowledgeTools.has(name)");
   assert.ok(dispatch > 0 && dispatch < server.indexOf("  switch (name) {\n    case 'search_web'"), 'dispatch must run before the switch');
@@ -219,7 +219,7 @@ test('wiring: every new tool is defined, dispatched, guarded for offline mode, t
   assert.match(server, /source: meta\.source, message: '', content: '', reasoning: '', search_count: 0, did_search: false/);
   assert.match(server, /max_tokens: 1800, max_tool_rounds: 3, total_timeout_ms: 55000/);
   // research and deep-think workers never receive the user-facing tools
-  assert.match(server, /var AI_WORKER_EXCLUDED_TOOLS = new Set\(\['deep_research', 'parallel_subtasks', 'workspace_files', 'site_navigate', 'render_card', 'memory_update'\]\)/);
+  assert.match(server, /var AI_WORKER_EXCLUDED_TOOLS = new Set\(\['deep_research', 'parallel_subtasks', 'self_check', 'workspace_files', 'site_navigate', 'render_card', 'memory_update'\]\)/);
   assert.equal((server.match(/aiToolsForSearch\(true, true\)/g) || []).length, 3);
   // the UI has a Chinese step name and a finished-state noun for every tool
   const labels = client.slice(client.indexOf('var TOOL_LABELS = {'), client.indexOf('function inProcessRail')), done = client.slice(client.indexOf('var TOOL_DONE_LABELS = {'), client.indexOf('var TOOL_SEARCH_KINDS'));
@@ -244,4 +244,31 @@ test('in a "use only this conversation" request the network and site tools are r
   }));
   res.emit('finish');
   assert.deepEqual(allowed, []); assert.equal(refused.length, knowledge.NETWORK_TOOL_NAMES.length + 4);
+});
+
+test('self_check sends the question, draft and evidence to the reviewer, bills it, limits repeats and degrades quietly', async () => {
+  const calls = [], billed = [];
+  const t = createAgentTools(deps({
+    runCritic: async (input) => { calls.push(input); return { text: '[无来源数字] 草稿里的 1200 亿没有出处 → 补一个来源\n[未回答] 没说明时间范围 → 补上', usage: { prompt_tokens: 400, completion_tokens: 60 }, model: 'deepseek-flash' }; },
+    recordUsage: async (user, usage, meta) => { billed.push({ user, usage, meta }); }
+  }));
+  const c = ctx(); const draft = '这家公司 2025 年营收约 1200 亿元，同比增长 12%，主要来自云业务。'.repeat(2);
+  const r = await t.execute('self_check', { question: '这家公司去年营收多少', draft, evidence: '搜索摘要一条' }, c);
+  assert.match(r.content, /^自查意见（供你修改回答/); assert.match(r.content, /无来源数字/); assert.match(r.content, /不要把这段原样念给用户/);
+  assert.equal(calls[0].question, '这家公司去年营收多少'); assert.equal(calls[0].draft, draft); assert.equal(calls[0].evidence, '搜索摘要一条');
+  assert.equal(billed.length, 1); assert.equal(billed[0].usage.total_tokens, 460); assert.equal(billed[0].meta.source, 'self_check'); assert.equal(billed[0].user, 'alice');
+  await t.execute('self_check', { question: 'q', draft }, c);
+  assert.match((await t.execute('self_check', { question: 'q', draft }, c)).error, /已经自查过两次/);
+  assert.match((await t.execute('self_check', { question: 'q', draft: '太短' }, ctx())).error, /太短/);
+  assert.match((await t.execute('self_check', { draft }, ctx())).error, /请提供用户的原问题/);
+  assert.match((await t.execute('self_check', { question: 'q', draft }, { userName: '' })).error, /需要登录/);
+  const clean = createAgentTools(deps({ runCritic: async () => ({ text: '未发现明显问题', usage: null }) }));
+  assert.equal((await clean.execute('self_check', { question: 'q', draft }, ctx())).content, '自查：未发现明显问题，可以直接回答。');
+  const broken = createAgentTools(deps({ runCritic: async () => { throw new Error('upstream down'); } }));
+  assert.match((await broken.execute('self_check', { question: 'q', draft }, ctx())).error, /自查暂时不可用，直接回答即可（upstream down）/);
+  const empty = createAgentTools(deps({ runCritic: async () => ({ text: '  ' }) }));
+  assert.match((await empty.execute('self_check', { question: 'q', draft }, ctx())).error, /没有给出意见/);
+  assert.match((await createAgentTools(deps()).execute('self_check', { question: 'q', draft }, ctx())).error, /暂不可用/);
+  const long = createAgentTools(deps({ runCritic: async (input) => { calls.push(input); return { text: 'x'.repeat(5000) }; } }));
+  assert.ok((await long.execute('self_check', { question: 'q', draft: 'd'.repeat(20000) }, ctx())).content.length < 1700); assert.equal(calls.at(-1).draft.length, 6000);
 });

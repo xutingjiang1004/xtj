@@ -99,7 +99,7 @@ function makeMiddleware(deps={}){
       if(body.network_mode==='off')body.web_search=false;
       if(body.network_mode==='required')body.web_search=true;
       // Ordinary chat only: shrink the definitions of tools this message does not look like it needs (every tool stays visible).
-      if(/^\/api\/agent\/chat(?:\/stream)?$/.test(String(req.path||''))&&!body.work_mode&&!body.deep_think)scope.toolRoute=require('./ai-tool-router').routeBody(body);
+      if(/^\/api\/agent\/chat(?:\/stream)?$/.test(String(req.path||''))&&!body.work_mode&&!body.deep_think){const router=require('./ai-tool-router');scope.toolRoute=router.stickyRoutes.apply(CID.test(cid)?owner+'|'+cid:'',router.routeBody(body));}
       req.aiRequestScope=scope;
       function cleanup(){if(timer)clearTimeout(timer);res.removeListener('finish',cleanup);res.removeListener('close',cleanup);scope.controller.abort();}
       res.once('finish',cleanup);res.once('close',cleanup);

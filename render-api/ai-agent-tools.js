@@ -6,9 +6,9 @@
 // run with fakes and the server decides quotas, billing and models.
 const crypto = require('node:crypto');
 
-const TOOL_NAMES = ['my_activity_summary', 'photo_timeline', 'site_navigate', 'deep_research', 'parallel_subtasks', 'verify_claims', 'workspace_files', 'render_card'];
+const TOOL_NAMES = ['my_activity_summary', 'photo_timeline', 'site_navigate', 'deep_research', 'parallel_subtasks', 'verify_claims', 'self_check', 'workspace_files', 'render_card'];
 // Tools that only make sense in the user's own chat: research workers and subtasks never get them.
-const META_TOOL_NAMES = ['deep_research', 'parallel_subtasks', 'workspace_files', 'site_navigate', 'render_card', 'memory_update', 'save_memory', 'list_memories', 'forget_memory', 'ask_user'];
+const META_TOOL_NAMES = ['deep_research', 'parallel_subtasks', 'self_check', 'workspace_files', 'site_navigate', 'render_card', 'memory_update', 'save_memory', 'list_memories', 'forget_memory', 'ask_user'];
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const PAGES = { home: '首页', photos: '照片墙', chat: '私信', profile: '我的' };
 
@@ -36,6 +36,9 @@ const TOOL_DEFS = [
   tool('verify_claims', '核对 1 到 3 条关键事实（数字、日期、人名、政策等）：分别检索并按来源域名归类证据，告诉你有几个独立来源。结论由你根据证据判断。', {
     claims: { type: 'array', minItems: 1, maxItems: 3, items: { type: 'string' }, description: '要核对的陈述，每条一句话' }
   }, ['claims']),
+  tool('self_check', '回答前自查：提交你的回答草稿，审稿员返回未回答的问题、无来源的数字、可能的矛盾。回答里有关键数字日期或问题很多时，发出前调用一次。', {
+    question: str('用户的原问题'), draft: str('你准备给用户的完整回答草稿'), evidence: str('你用到的来源和关键事实，可空')
+  }, ['question', 'draft']),
   tool('workspace_files', '我的笔记空间：跨对话保存、读取、追加、删除文本笔记（如草稿、清单、资料摘录）。', {
     action: str('操作', { enum: ['list', 'read', 'write', 'append', 'delete'] }), title: str('笔记标题，read/write/append/delete 用'), content: str('正文，write/append 用，最多 20000 字')
   }, ['action']),
@@ -221,6 +224,29 @@ function createAgentTools(deps) {
     return { tool_name: 'verify_claims', results_count: claims.length, content, cards: [makeCard('info_card', '事实核对', { subtitle: claims.length + ' 条', text: summary.join('\n'), facts: [] })] };
   }
 
+  // ---- answer self-check: a fast model plays the strict reviewer, before the answer is streamed ----
+  async function self_check(args, ctx) {
+    if (!loggedIn(ctx)) return fail('self_check', '需要登录后使用');
+    const question = clip(args.question, 600);
+    const draft = String(args.draft == null ? '' : args.draft).replace(/\u0000/g, '').trim().slice(0, 6000);
+    const evidence = clip(args.evidence, 1500);
+    if (!question) return fail('self_check', '请提供用户的原问题');
+    if (draft.length < 20) return fail('self_check', '回答草稿太短，没有自查的必要，直接回答即可');
+    if (!d.runCritic) return fail('self_check', '回答自查暂不可用，直接回答即可');
+    ctx.__selfChecks = (ctx.__selfChecks || 0) + 1;
+    if (ctx.__selfChecks > 2) return fail('self_check', '这一轮已经自查过两次，请直接给出最终回答');
+    let result;
+    try { result = await d.runCritic({ question, draft, evidence }, ctx); }
+    catch (error) { return fail('self_check', '自查暂时不可用，直接回答即可（' + clip(error && error.message, 60) + '）'); }
+    const usage = result && result.usage || {};
+    const total = Number(usage.total_tokens) || ((Number(usage.prompt_tokens || usage.input_tokens) || 0) + (Number(usage.completion_tokens || usage.output_tokens) || 0));
+    if (d.recordUsage && total > 0) { try { await d.recordUsage(user(ctx), Object.assign({ model: result.model || '' }, usage, { total_tokens: total }), { source: 'self_check', model: result.model || '', conversationId: ctx.conversationId || null }); } catch (_) { /* logged by the recorder */ } }
+    const text = String(result && result.text || '').trim().slice(0, 1500);
+    if (!text) return fail('self_check', '审稿员没有给出意见，直接回答即可');
+    if (/未发现明显问题/.test(text) && text.length < 40) return { tool_name: 'self_check', content: '自查：未发现明显问题，可以直接回答。' };
+    return { tool_name: 'self_check', content: '自查意见（供你修改回答；成立的就改，不成立的忽略；不要把这段原样念给用户）：\n' + text };
+  }
+
   // ---- durable notes workspace (stored as workbench "note" assets, no new table) ----
   async function workspace_files(args, ctx) {
     if (!loggedIn(ctx) || !ctx.accountId) return fail('workspace_files', '需要登录后才能使用笔记空间');
@@ -303,7 +329,7 @@ function createAgentTools(deps) {
     return { tool_name: 'render_card', content: '卡片「' + title + '」已展示给用户。正文里不要再重复卡片里的内容，只补充结论或建议。', cards: [makeCard('rich_card', title, data)] };
   }
 
-  const handlers = { my_activity_summary, photo_timeline, site_navigate, deep_research, parallel_subtasks, verify_claims, workspace_files, render_card };
+  const handlers = { my_activity_summary, photo_timeline, site_navigate, deep_research, parallel_subtasks, verify_claims, self_check, workspace_files, render_card };
   return {
     has: name => Object.prototype.hasOwnProperty.call(handlers, name),
     async execute(name, args, context) {
