@@ -5,7 +5,14 @@ function fixture() {
   const registry = new Map(), files = new Set(), posts = [], calls = [], removals = [];
   let failCleanup = false, failRpc = false;
   const supabase = {
-    from(name) { assert.equal(name, 'post_media_uploads'); let path, change; const q = { update(v) { change=v; return q; }, then(a,b) { if(change&&registry.has(path)) Object.assign(registry.get(path),change); return Promise.resolve({data:[]}).then(a,b); }, select() { return q; }, eq(k, v) { if(k==='storage_path')path=v; return q; }, maybeSingle: async () => ({ data: registry.get(path) || null }), async insert(row) { if (registry.has(row.storage_path)) return { error: { code: '23505' } }; registry.set(row.storage_path, { ...row, status: 'pending' }); return { data: null }; } }; return q; },
+    from(name) {
+      if (name === 'posts') {
+        // 附属文件（缩略图/封面）是否仍被帖子内容元数据引用：select(id).ilike(content, %文件名%).limit(1)
+        let needle = ''; const pq = { select() { return pq; }, ilike(_c, pattern) { needle = String(pattern).replace(/^%|%$/g, ''); return pq; }, limit() { return pq; },
+          then(a, b) { return Promise.resolve({ data: posts.filter(p => String(p.content || '').includes(needle)).slice(0, 1).map(p => ({ id: p.id || 'x' })) }).then(a, b); } };
+        return pq;
+      }
+      assert.equal(name, 'post_media_uploads'); let path, change; const q = { update(v) { change=v; return q; }, then(a,b) { if(change&&registry.has(path)) Object.assign(registry.get(path),change); return Promise.resolve({data:[]}).then(a,b); }, select() { return q; }, eq(k, v) { if(k==='storage_path')path=v; return q; }, maybeSingle: async () => ({ data: registry.get(path) || null }), async insert(row) { if (registry.has(row.storage_path)) return { error: { code: '23505' } }; registry.set(row.storage_path, { ...row, status: 'pending' }); return { data: null }; } }; return q; },
     storage: { from() { return { exists: async path => ({ data: files.has(path) }), async remove(paths) { removals.push(paths); if (failCleanup) return { error: Error('offline') }; paths.forEach(p => files.delete(p)); return { data: paths.map(name => ({ name })) }; } }; } },
     async rpc(name, args) {
       calls.push([name, args]); if (failRpc) return { error: Error('RPC unavailable') };
@@ -114,4 +121,42 @@ test('already cleaned tombstone is removed after account disappears, without del
   const { sweepPostMediaUploads } = require('../render-api/post-media');const f=batchFixture(1);f.rows[0].status='cleanup';f.rows[0].cleaned_at='2020-01-02';
   await sweepPostMediaUploads(f.db);assert.equal(f.rows.length,1);
   f.auth.length=0;await sweepPostMediaUploads(f.db);assert.equal(f.rows.length,0);assert.equal(f.removals.length,0);
+});
+
+test('failed publish also removes the unreferenced thumbnail it names, never a referenced or malformed path', async () => {
+  const thumb = 'posts/thumb_' + 'a'.repeat(32) + '.jpg', other = 'posts/thumb_' + 'b'.repeat(32) + '.jpg';
+  const f = fixture(); await request(f.app).post('/api/post/media/prepare').set('authorization', 'A').send(body).expect(200);
+  for (const file of [path, thumb, other, 'posts/not_a_thumb.jpg', 'avatars/me.png']) f.files.add(file);
+  // 别人已发布的帖子引用了 other：即使点名也不能删；格式不对的路径一律忽略。
+  f.posts.push({ id: 'p-other', user_name: 'B', media_url: origin + '/storage/v1/object/public/uploads/posts/x.jpg', content: JSON.stringify({ meta: { thumbs: ['/api/uploads/media?path=' + encodeURIComponent(other)] } }) });
+  const bad = ['posts/../etc/passwd', 'posts/not_a_thumb.jpg', 'avatars/me.png', 42, null];
+  const result = await request(f.app).post('/api/post/media/cleanup').set('authorization', 'A').send({ ...body, extra_paths: [thumb, other, ...bad] }).expect(200);
+  assert.equal(result.body.referenced, false);
+  assert.equal(f.files.has(path), false); assert.equal(f.files.has(thumb), false);
+  assert.equal(f.files.has(other), true, 'a thumbnail still referenced by a post is never deleted');
+  assert.equal(f.files.has('posts/not_a_thumb.jpg'), true); assert.equal(f.files.has('avatars/me.png'), true);
+  assert.deepEqual(f.removals[0].slice().sort(), [path, thumb].sort());
+});
+
+test('failed video publish removes the unreferenced poster it names', async () => {
+  const poster = 'posters/用户_12345_cover.jpg';
+  const f = fixture(); await request(f.app).post('/api/post/media/prepare').set('authorization', 'A').send(body).expect(200);
+  f.files.add(path); f.files.add(poster);
+  await request(f.app).post('/api/post/media/cleanup').set('authorization', 'A').send({ ...body, extra_paths: [poster] }).expect(200);
+  assert.equal(f.files.has(poster), false); assert.equal(f.files.has(path), false);
+  // 更多点名路径会被截断：一个原图最多带一张缩略图或封面。
+  const g = fixture(); await request(g.app).post('/api/post/media/prepare').set('authorization', 'A').send(body).expect(200);
+  const many = Array.from({ length: 5 }, (_, i) => 'posts/thumb_' + String(i).repeat(32) + '.jpg'); many.forEach(file => g.files.add(file)); g.files.add(path);
+  await request(g.app).post('/api/post/media/cleanup').set('authorization', 'A').send({ ...body, extra_paths: many }).expect(200);
+  assert.equal(many.filter(file => g.files.has(file)).length, 3);
+});
+
+test('extra paths are ignored when the original is referenced or belongs to someone else', async () => {
+  const thumb = 'posts/thumb_' + 'c'.repeat(32) + '.jpg';
+  const f = fixture(); await request(f.app).post('/api/post/media/prepare').set('authorization', 'A').send(body).expect(200); f.files.add(path); f.files.add(thumb);
+  await request(f.app).post('/api/post/media/cleanup').set('authorization', 'B').send({ ...body, extra_paths: [thumb] }).expect(403);
+  assert.equal(f.files.has(thumb), true);
+  await createPostWithMedia(f.supabase, 'A', path, upload, post);
+  const result = await request(f.app).post('/api/post/media/cleanup').set('authorization', 'A').send({ ...body, extra_paths: [thumb] }).expect(200);
+  assert.equal(result.body.referenced, true); assert.equal(f.files.has(thumb), true); assert.equal(f.removals.length, 0);
 });

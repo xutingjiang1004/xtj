@@ -6214,19 +6214,22 @@
             function readPendingPostMedia(owner) {
                 try { var rows = JSON.parse(window.safeStorage.get(pendingPostMediaKey(owner)) || '[]'); return Array.isArray(rows) ? rows : []; } catch (_) { return []; }
             }
-            function rememberPendingPostMedia(owner, path, uploadId, keepForRetry) {
+            function rememberPendingPostMedia(owner, path, uploadId, keepForRetry, extraPaths) {
                 var rows = readPendingPostMedia(owner).filter(function(row) { return row.storage_path !== path; });
-                rows.push({ storage_path: path, upload_id: uploadId, keep_for_retry: !!keepForRetry });
+                var entry = { storage_path: path, upload_id: uploadId, keep_for_retry: !!keepForRetry };
+                // 缩略图/视频封面不在上传登记表里：把它们的路径跟原图记在一起，放弃发布时才清得掉。
+                if (Array.isArray(extraPaths) && extraPaths.length) entry.extra_paths = extraPaths.slice(0, 2);
+                rows.push(entry);
                 try { window.safeStorage.set(pendingPostMediaKey(owner), JSON.stringify(rows)); } catch (_) {}
             }
             function forgetPendingPostMedia(owner, path) {
                 try { window.safeStorage.set(pendingPostMediaKey(owner), JSON.stringify(readPendingPostMedia(owner).filter(function(row) { return row.storage_path !== path; }))); } catch (_) {}
             }
-            async function cleanupPendingPostMedia(identity, path, uploadId) {
+            async function cleanupPendingPostMedia(identity, path, uploadId, extraPaths) {
                 // Never use a new account to clean an old upload; the server's registry handles abandoned sessions.
                 if (identity.owner !== currentUser || identity.epoch !== _authStateEpoch) return;
                 try {
-                    var response = await window.xtjProtectedFetch('/api/post/media/cleanup', { method: 'POST', authOwner: identity.owner, authEpoch: identity.epoch, body: JSON.stringify({ storage_path: path, upload_id: uploadId }) });
+                    var response = await window.xtjProtectedFetch('/api/post/media/cleanup', { method: 'POST', authOwner: identity.owner, authEpoch: identity.epoch, body: JSON.stringify(Array.isArray(extraPaths) && extraPaths.length ? { storage_path: path, upload_id: uploadId, extra_paths: extraPaths.slice(0, 2) } : { storage_path: path, upload_id: uploadId }) });
                     var result = await response.json();
                     if (identity.owner !== currentUser || identity.epoch !== _authStateEpoch) return;
                     if (response.ok && result.ok) forgetPendingPostMedia(identity.owner, path);
@@ -6242,7 +6245,7 @@
                 readPendingPostMedia(identity.owner).forEach(function(row) {
                     if (row && row.keep_for_retry) return;
                     if (Array.from(activePostUploadFlights).some(function(flight) { return flight.owner === identity.owner; })) return;
-                    cleanupPendingPostMedia(identity, row.storage_path, row.upload_id);
+                    cleanupPendingPostMedia(identity, row.storage_path, row.upload_id, row.extra_paths);
                 });
             }
             window.addEventListener('auth-ready', function() {
@@ -6368,6 +6371,9 @@
                                 var thumbFile = window.XtjPostComposerMedia && typeof window.XtjPostComposerMedia.thumbFile === 'function' ? window.XtjPostComposerMedia.thumbFile(selectedFile) : null;
                                 if (thumbFile) {
                                     var thumbPath = 'posts/thumb_' + crypto.randomUUID().replace(/-/g, '') + '.jpg';
+                                    // 先登记再上传：上传途中失败/关页，清理也能带上这张缩略图。
+                                    pending.extra_paths = [thumbPath];
+                                    rememberPendingPostMedia(flight.owner, path, uploadId, false, pending.extra_paths);
                                     var thumbViaOss = await uploadPostObjectToOss(thumbPath, thumbFile, 'image/jpeg', { owner: flight.owner, epoch: flight.epoch, progress: flight.progress });
                                     if (thumbViaOss.ok) thumbUrl = thumbViaOss.url;
                                     else {
@@ -6379,8 +6385,11 @@
                                     }
                                 }
                                 thumbUrls[position] = thumbUrl || null;
-                                return Object.assign({}, pending, dimensions, { position: position, media_type: String(selectedType || '').split('/')[0],
+                                var uploadedItem = Object.assign({}, pending, dimensions, { position: position, media_type: String(selectedType || '').split('/')[0],
                                     media_url: viaOss.ok ? viaOss.url : sb.storage.from('uploads').getPublicUrl(path).data.publicUrl, thumb_url: thumbUrl, file_size: selectedFile.size });
+                                // extra_paths 只用于放弃发布时的清理，不属于要提交给服务端的附件字段。
+                                delete uploadedItem.extra_paths;
+                                return uploadedItem;
                             }, 3);
                             media_url = uploaded[0].media_url;
                             media_type = uploaded.length > 1 ? 'album' : uploaded[0].media_type;
@@ -6396,6 +6405,10 @@
                                 if (posterFile && posterFile.size > 0 && posterFile.size <= window.XtjPostMedia.MAX_POST_FILE_BYTES) {
                                     // 封面单独放 posters/：这个前缀按公开缩略图处理，不用回表匹配帖子。
                                     var posterPath = buildStorageUploadPath('posters', posterFile.name);
+                                    if (uploadedMedia[0]) {
+                                        uploadedMedia[0].extra_paths = (uploadedMedia[0].extra_paths || []).concat(posterPath).slice(0, 2);
+                                        rememberPendingPostMedia(flight.owner, uploadedMedia[0].storage_path, uploadedMedia[0].upload_id, false, uploadedMedia[0].extra_paths);
+                                    }
                                     // ★ 2026-11-02：封面同样优先直传 OSS，失败再回退 Supabase。
                                     var posterViaOss = await uploadPostObjectToOss(posterPath, posterFile, posterFile.type || 'image/jpeg', { owner: flight.owner, epoch: flight.epoch, progress: flight.progress });
                                     assertPostPublishIdentity(flight);
@@ -6449,19 +6462,19 @@
                     if (!insertRes.ok) {
                         var ambiguousFailure = !insertRes.status || insertRes.status >= 500;
                         if (ambiguousFailure) {
-                            uploadedMedia.forEach(function(item) { rememberPendingPostMedia(flight.owner, item.storage_path, item.upload_id, true); });
+                            uploadedMedia.forEach(function(item) { rememberPendingPostMedia(flight.owner, item.storage_path, item.upload_id, true, item.extra_paths); });
                             assertPostPublishIdentity(flight);
                             showToast("发布结果未确认，请重试；不会重复发布");
                             return;
                         }
                         postUploadCache.delete(requestKey);
-                        await Promise.all(uploadedMedia.map(function(item) { return cleanupPendingPostMedia(flight, item.storage_path, item.upload_id); }));
+                        await Promise.all(uploadedMedia.map(function(item) { return cleanupPendingPostMedia(flight, item.storage_path, item.upload_id, item.extra_paths); }));
                         assertPostPublishIdentity(flight);
                         showToast("发布失败: " + ((insertRes.error && insertRes.error.message) || "未知错误"));
                         return;
                     }
                     if (insertRes.duplicate && !reusedUpload && uploadedMedia.length) {
-                        await Promise.all(uploadedMedia.map(function(item) { return cleanupPendingPostMedia(flight, item.storage_path, item.upload_id); }));
+                        await Promise.all(uploadedMedia.map(function(item) { return cleanupPendingPostMedia(flight, item.storage_path, item.upload_id, item.extra_paths); }));
                         uploadedMedia = [];
                     }
                     postUploadCache.delete(requestKey);
@@ -6507,7 +6520,7 @@
                         try { window.XtjPostPublishMotion.stop(publishMotion); } catch (_) {}
                     }
                     postUploadCache.delete(requestKey);
-                    await Promise.all(uploadedMedia.map(function(item) { return cleanupPendingPostMedia(flight, item.storage_path, item.upload_id); }));
+                    await Promise.all(uploadedMedia.map(function(item) { return cleanupPendingPostMedia(flight, item.storage_path, item.upload_id, item.extra_paths); }));
                     if (postPublishIdentityCurrent(flight)) showToast("发布失败: " + (e.message || "网络错误"));
                 } finally {
                     activePostUploadFlights.delete(flight);

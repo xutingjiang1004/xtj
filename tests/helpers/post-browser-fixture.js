@@ -49,10 +49,10 @@ async function postBrowserFixture({viewport={width:390,height:844},theme='light'
   if(url.pathname==='/api/post/delete'){const index=posts.findIndex(p=>p.id===body.post_id);if(index>=0)posts.splice(index,1);data={ok:true,deleted:true,post_id:body.post_id};}
   if(url.pathname.startsWith('/api/post/detail/')){const post=posts.find(p=>p.id===url.pathname.split('/').at(-1));if(!post)return route.fulfill({status:404,json:{ok:false,error:'not_found'}});data={ok:true,post:{...post,like_count:likes.filter(l=>l.post_id===post.id).length,comment_count:comments.filter(c=>c.post_id===post.id).length},likes:likes.filter(l=>l.post_id===post.id),comments:comments.filter(c=>c.post_id===post.id)};}
   if(url.pathname==='/api/post/media/prepare')data={ok:true,storage_path:body.storage_path,upload_id:body.upload_id};
-  if(url.pathname==='/api/post/media/cleanup'){uploads.delete(body.storage_path);data={ok:true};}
+  if(url.pathname==='/api/post/media/cleanup'){uploads.delete(body.storage_path);for(const extra of body.extra_paths||[])uploads.delete(extra);data={ok:true};}
   if(url.pathname.startsWith('/test-supabase/storage/v1/object/uploads/')){uploadNumber++;const path=url.pathname.slice('/test-supabase/storage/v1/object/uploads/'.length);if(failUploadAt===uploadNumber){status=500;data={statusCode:'500',error:'Upload failed',message:'Injected upload failure'};}else{uploads.add(path);data={Key:'uploads/'+path};}}
   else if(url.pathname.startsWith('/test-supabase/')){data=[];if(feedUnavailable&&url.pathname==='/test-supabase/rest/v1/posts')data=posts.map(p=>{const copy={...p};delete copy.media_items;return copy;});}
-  if(url.pathname==='/api/post/create'){if(failCreate){status=503;data={ok:false,error:'Injected create failure'};}else{created={id:'8c1cb02d-74d0-4e45-9e15-000000009999',user_name:'alice',...body,media_items:body.attachments||undefined,created_at:'2026-10-03T12:30:00.000Z',ip_region_text:'福建',ip_region_status:'resolved',location_name:'福州'};data={ok:true,data:created};}}
+  if(url.pathname==='/api/post/create'){if(failCreate){status=failCreate===400?400:503;data={ok:false,error:'Injected create failure'};}else{created={id:'8c1cb02d-74d0-4e45-9e15-000000009999',user_name:'alice',...body,media_items:body.attachments||undefined,created_at:'2026-10-03T12:30:00.000Z',ip_region_text:'福建',ip_region_status:'resolved',location_name:'福州'};data={ok:true,data:created};}}
   await route.fulfill({status,json:data});
  });
  try {

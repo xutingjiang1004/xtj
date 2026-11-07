@@ -6,6 +6,26 @@ const PATH = /^posts\/[a-zA-Z0-9_\u4e00-\u9fff.-]{1,200}$/;
 const POSTER_PATH = /^posters\/[a-zA-Z0-9_\u4e00-\u9fff.-]{1,200}$/;
 const ID = /^[a-zA-Z0-9_-]{8,128}$/;
 function validPath(value) { return typeof value === 'string' && PATH.test(value) && !value.includes('..'); }
+// 发布失败时一并清理的「附属文件」：信息流缩略图（posts/thumb_<32 位十六进制>.jpg）和视频封面（posters/…）。
+// 它们不在上传登记表里（登记表按「原图是否被帖子引用」判断），所以放弃发布时必须由客户端点名、服务端再核实。
+const THUMB_PATH = /^posts\/thumb_[0-9a-f]{32}\.jpg$/;
+const MAX_EXTRA_PATHS = 2;
+function validExtraPath(value) {
+  return typeof value === 'string' && (THUMB_PATH.test(value) || (POSTER_PATH.test(value) && !value.includes('..')));
+}
+// 附属文件只要还被任何帖子的内容元数据（thumbs / poster_url）提到，就一律不删：
+// 防止有人拿自己的待清理上传作掩护，点名删除别人已发布帖子的缩略图。
+// 文件名里的下划线在 LIKE 里是单字符通配，只会让匹配更宽、更保守（宁可少删）。
+async function extraPathReferenced(supabase, path) {
+  const name = path.slice(path.indexOf('/') + 1);
+  const rows = await checked(supabase.from('posts').select('id').ilike('content', '%' + name + '%').limit(1));
+  return Array.isArray(rows) && rows.length > 0;
+}
+// OSS 上的对象不归 Supabase 清理队列管；删除只是尽力而为（未配置 OSS 时什么也不做，404 视为已删）。
+async function removeOssBestEffort(paths) {
+  if (!ossMedia.enabled()) return;
+  for (const path of paths) { try { await ossMedia.deleteObject(path); } catch (_) { /* 孤儿文件无害，不影响本次请求 */ } }
+}
 // ★ 2026-11-02：帖子媒体可能已经直传阿里云 OSS，地址不再来自 Supabase。
 //   这里把识别逻辑集中在一个地方，其余模块（附件校验、删除、分享页）继续
 //   复用 parsePostMediaUrl，不必各自判断域名。
@@ -72,7 +92,7 @@ function installPostMedia(app, { supabase, authenticateUser, rateLimit, userBanE
     } catch (_) { unavailable(res); }
   });
   app.post('/api/post/media/cleanup', authenticateUser, rateLimit(60000, MAX_POST_IMAGES * 4), async (req, res) => {
-    const path = req.body && req.body.storage_path, uploadId = req.body && req.body.upload_id;
+    const path = req.body && req.body.storage_path, uploadId = req.body && req.body.upload_id, extraRaw = req.body && req.body.extra_paths;
     if (!validPath(path) || typeof uploadId !== 'string' || !ID.test(uploadId)) return res.status(400).json({ ok: false, code: 'invalid_media_path' });
     try {
       // The database locks the same registry row as create_post_with_media.
@@ -80,9 +100,17 @@ function installPostMedia(app, { supabase, authenticateUser, rateLimit, userBanE
       const claimed = await checked(supabase.rpc('claim_post_media_cleanup', { p_actor: req.userName, p_path: path, p_upload_id: uploadId }));
       if (!claimed || !claimed.ok) return res.status(403).json({ ok: false, code: claimed && claimed.code || 'media_ownership' });
       if (claimed.referenced) return res.json({ ok: true, referenced: true, cleanup_pending: false });
-      const removed = await removeStorageWithQueue(supabase, { bucket: 'uploads', paths: [path], photoId: 'post-media:' + uploadId });
+      // 原图已确认属于调用者且没被引用；它的缩略图/封面同样没被引用时才一并删除。
+      const extraPaths = [];
+      for (const extra of Array.isArray(extraRaw) ? extraRaw.filter(validExtraPath).slice(0, MAX_EXTRA_PATHS) : []) {
+        if (extra !== path && !extraPaths.includes(extra) && !(await extraPathReferenced(supabase, extra))) extraPaths.push(extra);
+      }
+      const removePaths = [path, ...extraPaths];
+      const removed = await removeStorageWithQueue(supabase, { bucket: 'uploads', paths: removePaths, photoId: 'post-media:' + uploadId });
       if (!removed.ok) return unavailable(res);
       await checked(supabase.from('post_media_uploads').update({ cleaned_at: new Date().toISOString() }).eq('storage_path', path).eq('status', 'cleanup'));
+      // 直传 OSS 的对象不在 Supabase 里；这里再尽力删一遍（没配置 OSS 时直接跳过）。
+      await removeOssBestEffort(removePaths);
       res.json({ ok: true, referenced: false, cleanup_pending: !!removed.cleanup_pending });
     } catch (_) { unavailable(res); }
   });

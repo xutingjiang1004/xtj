@@ -61,9 +61,15 @@ test('real composer appends, removes, rejects mixing; upload/create failures ret
   await page.locator('#fileInp').setInputFiles({name:'video.mp4',mimeType:'video/mp4',buffer:Buffer.from('fake-video')});assert.equal(await page.evaluate(()=>selectedPostMedia.length),4);
   await page.locator('#postInp').fill('发布失败也要保留我的正文');f.setFailUploadAt(2);await page.locator('#pubBtn').click();await page.waitForFunction(()=>!document.getElementById('pubBtn').disabled);
   assert.equal(f.calls.filter(c=>c.path==='/api/post/create').length,0);assert.equal(f.uploads.size,0);assert.equal(await page.evaluate(()=>selectedPostMedia.length),4);assert.equal(await page.locator('#postInp').inputValue(),'发布失败也要保留我的正文');
-  f.setFailUploadAt(0);f.setFailCreate(true);await page.locator('#pubBtn').click();await page.waitForFunction(()=>!document.getElementById('pubBtn').disabled);
-  assert.equal(f.uploads.size,0);assert.equal(await page.evaluate(()=>selectedPostMedia.length),4);assert.ok(f.calls.some(c=>c.path==='/api/post/create'));
+  // 明确的 4xx 业务失败：已上传的原图和它们的缩略图都要清干净，草稿保留。
+  f.setFailUploadAt(0);f.setFailCreate(400);await page.locator('#pubBtn').click();await page.waitForFunction(()=>!document.getElementById('pubBtn').disabled);
+  assert.equal(f.uploads.size,0,'a definite create failure leaves neither originals nor thumbnails behind');assert.equal(await page.evaluate(()=>selectedPostMedia.length),4);assert.ok(f.calls.some(c=>c.path==='/api/post/create'));
+  // 5xx / 无响应属「结果未确认」：服务端可能已经建好帖子，已上传文件原样保留，重试时复用而不是重新上传。
+  f.setFailCreate(true);await page.locator('#pubBtn').click();await page.waitForFunction(()=>!document.getElementById('pubBtn').disabled);
+  assert.equal(f.uploads.size,8,'4 originals + 4 thumbnails are retained for the retry');assert.equal(await page.evaluate(()=>selectedPostMedia.length),4);
+  const retained=[...f.uploads].sort();
   f.setFailCreate(false);await page.locator('#pubBtn').click();await page.waitForFunction(()=>!document.getElementById('pubBtn').disabled&&selectedPostMedia.length===0);
+  assert.deepEqual([...f.uploads].sort(),retained,'the retry reuses the retained uploads instead of uploading again');
   const created=f.getCreated();assert.equal(created.attachments.length,4);assert.deepEqual(created.attachments.map(a=>a.position),[0,1,2,3]);assert.equal(new Set(created.attachments.map(a=>a.upload_id)).size,4);assert.equal(new Set(created.attachments.map(a=>a.storage_path)).size,4);assert.ok(created.attachments.every(a=>a.width===1&&a.height===1));assert.equal(created.media_type,'album');
   assert.equal(await page.locator('#postInp').inputValue(),'');assert.equal(await page.locator(`#feed .post[data-post-id="${created.id}"] .post-media-cell`).count(),4);
   await page.waitForFunction(()=>Array.from(document.querySelectorAll('#feed > .post:first-child .post-media-cell img')).every(img=>img.src.startsWith('blob:')&&img.complete&&img.naturalWidth>0));
