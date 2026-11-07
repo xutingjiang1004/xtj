@@ -73,15 +73,15 @@
          这里加 preload 让浏览器解析到本行就立即高优先级抓取，缩短空窗期。
          注意：href 必须与下方异步 link 完全一致（含 ?v= 指纹），构建脚本会统一刷新。 -->
     <link rel="preload" as="style" href="css/visual-refinements.min.css?v=3fd6a30cd9" />
-    <link rel="preload" as="style" href="css/ui-enhance.min.css?v=843a414644" />
+    <link rel="preload" as="style" href="css/ui-enhance.min.css?v=9fb1764f92" />
     <link rel="stylesheet" href="css/visual-refinements.min.css?v=3fd6a30cd9" media="print" onload="this.media='all'" />
-    <noscript><link rel="stylesheet" href="css/visual-refinements.min.css?v=3fd6a30cd9" /><link rel="stylesheet" href="css/ai-agent.min.css?v=47bcef6987" /><link rel="stylesheet" href="css/ui-enhance.min.css?v=843a414644" /><link rel="stylesheet" href="css/ui-shell.min.css?v=394a92c9e6" /></noscript>
+    <noscript><link rel="stylesheet" href="css/visual-refinements.min.css?v=3fd6a30cd9" /><link rel="stylesheet" href="css/ai-agent.min.css?v=47bcef6987" /><link rel="stylesheet" href="css/ui-enhance.min.css?v=9fb1764f92" /><link rel="stylesheet" href="css/ui-shell.min.css?v=394a92c9e6" /></noscript>
     <!-- ★ 2026-09-22 响应式修复（补完）：desktop.css 自身首条断点就是 @media (min-width: 768px)，
          只按宽度加载会让「横屏手机」（宽 ≥768、高 ≈390）也套上桌面两列栅格，与 ui-shell.css 侧
          已加的 min-height:480px 门禁不一致（会出现"桌面栅格 + 移动外壳"的混合布局）。
          故加载条件补上同一高度门禁，让横屏手机真正落回移动布局。 -->
     <link rel="stylesheet" media="(min-width: 768px) and (min-height: 480px)" href="css/desktop.min.css?v=d872211228" />
-    <link rel="stylesheet" href="css/ui-enhance.min.css?v=843a414644" media="print" onload="this.media='all'">
+    <link rel="stylesheet" href="css/ui-enhance.min.css?v=9fb1764f92" media="print" onload="this.media='all'">
     <link rel="stylesheet" href="css/ui-shell.min.css?v=394a92c9e6">
     <link rel="stylesheet" href="css/post-feed.min.css?v=08feeaf41d">
     <link rel="stylesheet" href="css/profile-settings.min.css?v=5c673b31fb">
@@ -1175,10 +1175,12 @@
                             <div class="report-loading">加载中...</div>
                         </div>
                     </div>
-                    <div class="report-field" id="reportAiScanField" style="display:none;">
-                        <label>AI 检测</label>
+                    <!-- 用 section 而不是 div：表单靠「第几个 div.report-field」决定显示顺序，normalizeReportModalStructure 也按位置改标签文字，
+                         再插一个 div.report-field 会把「举报原因」挤到最上面、还把标签改错。标签放在里面一层，不被「.report-field > label」匹配。 -->
+                    <section class="report-field" id="reportAiScanField" style="display:none;">
+                        <div class="report-ai-scan-heading"><label>AI 检测</label></div>
                         <div class="report-ai-scan" id="reportAiScanBox" role="status" aria-live="polite"></div>
-                    </div>
+                    </section>
                     <div class="report-field">
                         <label>举报原因</label>
                         <div class="report-reason-grid" id="reportReasonGrid">

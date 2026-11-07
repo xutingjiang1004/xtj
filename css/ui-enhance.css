@@ -2005,3 +2005,6 @@ html[data-xtj-motion=off] .ai-tool-round-list-wrap { transition: none !important
 .report-ai-scan.is-loading, .report-ai-scan.is-error { border-left-color: transparent; color: var(--text-muted, #667f87); }
 .report-ai-scan-head { font-weight: 800; margin-bottom: 2px; }
 .report-ai-scan-meta { margin-top: 4px; font-size: 12px; color: var(--text-muted, #667f87); }
+/* 显示在「选择要举报的内容」(order 2) 与「举报原因」(order 4) 之间。表单按 nth-of-type 给字段排序，section 也会匹配 :nth-of-type(1)，
+   所以这里用 id 把顺序钉死，优先级高于那几条规则。 */
+#reportModalFormBody > #reportAiScanField { order: 3; }
