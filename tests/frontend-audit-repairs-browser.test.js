@@ -129,19 +129,24 @@ test('a pending old-photo comment page cannot keep the next-photo button disable
  await f.page.locator('#ppCommentsMore').click();await f.page.waitForFunction(()=>!!window.__releaseMore);await f.page.evaluate(()=>ppNextPhoto());await f.page.waitForFunction(()=>!document.getElementById('ppLikeBtn').disabled);await f.page.locator('#ppCommentBtn').click();await f.page.evaluate(()=>__releaseMore());
  assert.equal(await f.page.locator('#ppCommentsMore').isDisabled(),false);
 }));
-test('detail comment and like pagination has accurate totals and bounded DOM',{timeout:45000},()=>use(async f=>{
- const comments=Array.from({length:5000},(_,i)=>({id:i+1,post_id:f.posts[0].id,user_name:'bob',content:'comment '+i,created_at:'2026-10-12T12:00:00.123456Z'})),likes=Array.from({length:151},(_,i)=>({id:i+1,post_id:f.posts[0].id,user_name:'user'+i,created_at:'2026-10-12T12:00:00.123456Z'}));
- await f.page.route('**/api/post/detail/*',r=>r.fulfill({json:{ok:true,post:{...f.posts[0],comment_count:5000,like_count:151,liked_by_me:false},comments:comments.slice(0,30),likes:likes.slice(0,50),comments_page:{has_more:true,next_cursor:'30'},likes_page:{has_more:true,next_cursor:'50'}}}));
+test('post detail streams every comment and like in behind the first page, with accurate totals through submit and delete',{timeout:45000},()=>use(async f=>{
+ // 产品决定（fd6fe87）：详情页不再分页，后面的页在首屏之后陆续并入，评论/点赞完整列出；总数始终来自服务端计数。
+ // 信息流夹具自带 6 条评论（详情接口的评论里本来就该包含它们，否则提交后合并信息流评论会多出 6 条）。
+ const comments=[...f.comments.map(c=>({...c})),...Array.from({length:89},(_,i)=>({id:i+1,post_id:f.posts[0].id,user_name:'bob',content:'comment '+i,created_at:'2026-10-12T12:00:00.123456Z'}))],likes=Array.from({length:151},(_,i)=>({id:i+1,post_id:f.posts[0].id,user_name:'user'+i,created_at:'2026-10-12T12:00:00.123456Z'}));
+ await f.page.route('**/api/post/detail/*',r=>r.fulfill({json:{ok:true,post:{...f.posts[0],comment_count:95,like_count:151,liked_by_me:false},comments:comments.slice(0,30),likes:likes.slice(0,50),comments_page:{has_more:true,next_cursor:'30'},likes_page:{has_more:true,next_cursor:'50'}}}));
  await f.page.route('**/api/post/detail/*/relations/*?**',r=>{const u=new URL(r.request().url()),kind=u.pathname.split('/').at(-1),start=Number(u.searchParams.get('cursor')),limit=Number(u.searchParams.get('limit')),rows=kind==='comments'?comments:likes;return r.fulfill({json:{ok:true,data:rows.slice(start,start+limit),has_more:start+limit<rows.length,next_cursor:String(start+limit)}});});
- await f.page.evaluate(x=>openPostDetail(x),f.posts[0].id);assert.equal(await f.page.locator('#postDetailBody .comment-item').count(),30);assert.equal(await f.page.locator('#postDetailBody .post-detail-mini-row').count(),50);
- await f.page.locator('.post-detail-comments-panel').getByRole('button',{name:'下一页'}).click();await f.page.waitForFunction(()=>document.querySelector('.post-detail-comments-panel').textContent.includes('31–60'));assert.equal(await f.page.locator('#postDetailBody .comment-item').count(),30);
- await f.page.locator('.post-detail-likes-panel').getByRole('button',{name:'下一页'}).click();await f.page.waitForFunction(()=>document.querySelector('.post-detail-likes-panel').textContent.includes('51–100'));assert.equal(await f.page.locator('#postDetailBody .post-detail-mini-row').count(),50);
- assert.match(await f.page.locator('#postDetailBody .post-stats-text').textContent(),/点赞 151 \| 评论 5000/);
- await f.page.route('**/api/post/comment',r=>r.fulfill({json:{ok:true,data:{id:5001,post_id:f.posts[0].id,user_name:'alice',content:'visible after a paginated submit',created_at:'2026-10-13T12:00:00Z'},comment_count:5001}}));
- await f.page.locator('#postDetailBody').getByRole('button',{name:'评论',exact:true}).click();await f.page.locator('#postDetailBody .inline-comment-inp').fill('visible after a paginated submit');await f.page.locator('#postDetailBody .inline-comment-inp').press('Enter');
- await f.page.waitForFunction(()=>document.querySelector('.post-detail-recent-comments')?.textContent.includes('visible after a paginated submit'));assert.ok(await f.page.locator('#postDetailBody .comment-item').count()<=35);
- await f.page.locator('.post-detail-comments-panel').getByRole('button',{name:'下一页'}).click();await f.page.waitForFunction(()=>document.querySelector('.post-detail-comments-panel').textContent.includes('61–90'));assert.ok(await f.page.locator('#postDetailBody .comment-item').count()<=35);
- await f.page.route('**/api/post/comment/5001',r=>r.fulfill({json:{ok:true,deleted_comment_ids:[5001],comment_count:5000,post_id:f.posts[0].id}}));await f.page.evaluate(()=>{window.confirm=()=>true;window.xtjConfirm=()=>Promise.resolve(true);return deleteFeedComment('5001');});await f.page.waitForFunction(()=>!document.querySelector('#postDetailBody [data-comment-id="5001"]'));assert.match(await f.page.locator('#postDetailBody .post-stats-text').textContent(),/评论 5000/);
+ await f.page.evaluate(x=>openPostDetail(x),f.posts[0].id);
+ await f.page.waitForFunction(()=>document.querySelectorAll('#postDetailBody .comment-item').length===95&&document.querySelectorAll('#postDetailBody .post-detail-mini-row').length===151,null,{timeout:15000});
+ assert.equal(await f.page.locator('#postDetailBody').getByRole('button',{name:'下一页'}).count(),0,'there are no pages to click through any more');
+ assert.match(await f.page.locator('#postDetailBody .post-stats-text').textContent(),/点赞 151 \| 评论 95/);
+ await f.page.route('**/api/post/comment',r=>r.fulfill({json:{ok:true,data:{id:5001,post_id:f.posts[0].id,user_name:'alice',content:'visible after a streamed submit',created_at:'2026-10-13T12:00:00Z'},comment_count:96}}));
+ await f.page.locator('#postDetailBody').getByRole('button',{name:'评论',exact:true}).click();await f.page.locator('#postDetailBody .inline-comment-inp').fill('visible after a streamed submit');await f.page.locator('#postDetailBody .inline-comment-inp').press('Enter');
+ await f.page.waitForFunction(()=>document.querySelector('#postDetailBody').textContent.includes('visible after a streamed submit'));
+ await f.page.waitForFunction(()=>document.querySelectorAll('#postDetailBody .comment-item').length===96);
+ assert.match(await f.page.locator('#postDetailBody .post-stats-text').textContent(),/评论 96/);
+ await f.page.route('**/api/post/comment/5001',r=>r.fulfill({json:{ok:true,deleted_comment_ids:[5001],comment_count:95,post_id:f.posts[0].id}}));await f.page.evaluate(()=>{window.confirm=()=>true;window.xtjConfirm=()=>Promise.resolve(true);return deleteFeedComment('5001');});
+ await f.page.waitForFunction(()=>!document.querySelector('#postDetailBody [data-comment-id="5001"]'));
+ assert.match(await f.page.locator('#postDetailBody .post-stats-text').textContent(),/评论 95/);assert.equal(await f.page.locator('#postDetailBody .comment-item').count(),95);
 }));
 test('photo keyboard activation, modal Tab containment, focus return and inactive panels',{timeout:45000},()=>use(async f=>{
  await wall(f);const card=f.page.locator('#photoGrid .photo-wall-item').first();await f.page.locator('#photoUploadBtn').focus();await f.page.keyboard.press('Tab');assert.equal(await f.page.evaluate(()=>document.activeElement.closest('.photo-wall-item')!==null),true);
