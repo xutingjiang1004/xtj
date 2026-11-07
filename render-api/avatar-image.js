@@ -58,11 +58,18 @@ function registerAvatarImage(app, { supabase, supabaseUrl, sharp, rateLimit, fet
     if (cache.has(key)) return Promise.resolve(cache.get(key));
     if (inflight.has(key)) return inflight.get(key);
     const work = source(mediaUrl)
-      .then(input => {
+      .then(async input => {
         // 大图也裁成正方形：微信会把分享封面按 1:1 裁切，给一张 1080×1059 的原比例图
         // 会被切掉一边，看着很怪。头像本身在站内也是圆形/方形展示，裁切无损观感。
+        // 大图只缩小、不放大：边长取 min(1080, 原图短边)，小原图保持方形但不被拉糊、也不多花字节。
+        let edge = SIZE;
+        if (large) {
+          const meta = await sharp(input, { animated: false, limitInputPixels: 64 * 1024 * 1024 }).metadata();
+          const shortSide = Math.min(Number(meta.width) || LARGE_SIZE, Number(meta.height) || LARGE_SIZE);
+          edge = Math.max(1, Math.min(LARGE_SIZE, shortSide));
+        }
         const resized = sharp(input, { animated: false, limitInputPixels: 64 * 1024 * 1024 }).rotate()
-          .resize({ width: large ? LARGE_SIZE : SIZE, height: large ? LARGE_SIZE : SIZE, fit: 'cover' });
+          .resize({ width: edge, height: edge, fit: 'cover' });
         return (jpeg ? resized.jpeg({ quality: large ? 88 : 84, mozjpeg: true }) : resized.webp({ quality: large ? 86 : 82, effort: 3 }))
           .timeout({ seconds: 10 }).toBuffer();
       })
