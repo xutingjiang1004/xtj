@@ -165,3 +165,18 @@ test('生产的数据库写入带条件：update … where id = ? and 字段 = �
   const broken = m.supabaseStore({ from() { const q = { update() { return q; }, eq() { return q; }, select() { return Promise.resolve({ data: null, error: { message: 'down' } }); } }; return q; } }, SB);
   await assert.rejects(() => broken.swap('posts', 'p1', 'media_url', 'old', 'new'), /db_write_failed/);
 });
+
+test('帖子内容太长、「旧值相同才改」的网址会超限时，明确跳过并报告，引用保持指向 Supabase', async () => {
+  const store = world();
+  const long = '汉'.repeat(1500); // encodes to far more than the request-URL budget
+  const p1 = store.posts.find(p => p.id === 'p1');
+  p1.content = JSON.stringify({ __type: '__xtj_post_v2__', text: long, meta: { poster_url: pub('posters/alice_1_poster.jpg') } });
+  const d = deps(store);
+  const summary = await m.run({ store, deps: d, supabaseUrl: SB, apply: true });
+  const poster = summary.results.find(r => r.path === 'posters/alice_1_poster.jpg');
+  assert.equal(poster.status, 'rewrite_partial');
+  assert.deepEqual(poster.content_too_long_post_ids, ['p1']);
+  assert.ok(JSON.parse(p1.content).meta.poster_url.startsWith(SB), 'the long post still points at Supabase, nothing was half-written');
+  assert.equal(store.writes.filter(w => w[0] === 'posts' && w[1] === 'p1' && w[2] === 'content').length, 0, 'no doomed request was attempted');
+  assert.equal(m.MAX_FILTER_VALUE, 6000);
+});

@@ -3,13 +3,14 @@ const test = require('node:test'), assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path');
 const { readPostViewers, VIEW_SCAN_LIMIT } = require('../render-api/post-viewers');
 
+// Behaves like Supabase's API: whatever range is asked for, one response never holds more than 1000 rows.
 function fakeDb(rows, error) {
-  const calls = { filters: [], limit: null };
+  const calls = { filters: [], ranges: [], orders: [], table: null };
   const query = {
     select() { return query; },
     eq(column, value) { calls.filters.push([column, value]); return query; },
-    order() { return query; },
-    limit(n) { calls.limit = n; return Promise.resolve(error ? { error } : { data: rows }); }
+    order(column, options) { calls.orders.push([column, options && options.ascending]); return query; },
+    range(from, to) { calls.ranges.push([from, to]); return Promise.resolve(error ? { error } : { data: rows.slice(from, Math.min(to + 1, from + 1000)) }); }
   };
   return { calls, from(table) { calls.table = table; return query; } };
 }
@@ -27,7 +28,8 @@ test('viewers are one entry per person, newest visit first, and the total counts
   assert.equal(page.next_cursor, null);
   assert.equal(db.calls.table, 'posts');
   assert.deepEqual(db.calls.filters, [['media_type', '__post_view__'], ['media_url', 'p1']], 'only the view rows of that post');
-  assert.equal(db.calls.limit, VIEW_SCAN_LIMIT);
+  assert.deepEqual(db.calls.ranges, [[0, 999]], 'one page of at most 1000 rows is enough here');
+  assert.deepEqual(db.calls.orders, [['created_at', false], ['id', false]], 'a stable order, so pages never repeat or skip a row');
 });
 
 test('viewer pages continue from the cursor without repeating or skipping anyone', async () => {
@@ -56,4 +58,18 @@ test('the relations route serves views next to likes and comments and reports a 
   assert.match(route, /readPostViewers\(supabase,id,/);
   assert.match(route, /total:/);
   assert.match(route, /visibility==='private'&&lookup\.data\.user_name!==/, 'private posts stay hidden before any viewer is read');
+});
+
+test('a post with more view rows than one API response holds still counts every person (Supabase caps a response at 1000 rows)', async () => {
+  const rows = Array.from({ length: 2300 }, (_, i) => ({ user_name: 'person' + i, created_at: at(0) }));
+  const db = fakeDb(rows);
+  const page = await readPostViewers(db, 'p1', { limit: 50 });
+  assert.equal(page.count, 2300, 'every person is counted, not just the first 1000 rows');
+  assert.deepEqual(db.calls.ranges, [[0, 999], [1000, 1999], [2000, 2999]], 'it reads page after page until a short page');
+  assert.equal(page.truncated, false);
+  assert.equal(page.has_more, true);
+  const huge = fakeDb(Array.from({ length: VIEW_SCAN_LIMIT + 700 }, (_, i) => ({ user_name: 'u' + i, created_at: at(0) })));
+  const capped = await readPostViewers(huge, 'p1', { limit: 50 });
+  assert.equal(capped.count, VIEW_SCAN_LIMIT, 'the scan stops at its overall limit');
+  assert.equal(capped.truncated, true, 'and says so');
 });

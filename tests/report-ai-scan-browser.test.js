@@ -67,3 +67,20 @@ test('a slow answer for an earlier opening cannot overwrite the current one', { 
     assert.doesNotMatch(text, /OLD-RESULT/);
   } finally { await f.close(); }
 });
+
+test('the AI check sits between the content and the reason, and no other label of the form changes', { timeout: 60000 }, async () => {
+  const f = await postBrowserFixture({ counts: [1] });
+  try {
+    const post = f.posts[0];
+    await openReport(f, post, route => route.fulfill({ json: { ok: true, scan: { suspected: false, risk_level: 'low', categories: [], summary: '未发现明确违规内容。', evidence: [] } } }));
+    await f.page.waitForFunction(() => /风险/.test(document.getElementById('reportAiScanBox').textContent), null, { timeout: 15000 });
+    await f.page.waitForTimeout(500);
+    const order = await f.page.evaluate(() => [...document.querySelectorAll('#reportModalFormBody > *')].filter(e => e.getBoundingClientRect().height > 0)
+      .map(e => ({ top: e.getBoundingClientRect().top, id: e.id || '', label: ((e.querySelector('label') || {}).textContent || '').trim() })).sort((a, b) => a.top - b.top).map(e => e.label || e.id));
+    assert.deepEqual(order.slice(0, 4), ['选择举报类型', '选择要举报的内容', 'AI 检测', '举报原因'], 'the fields appear in this order: ' + JSON.stringify(order));
+    const labels = await f.page.evaluate(() => [...document.querySelectorAll('#reportModalFormBody label')].map(l => l.textContent.trim()));
+    assert.equal(labels.filter(x => x === '举报原因').length, 1, 'the reason label is not duplicated: ' + JSON.stringify(labels));
+    assert.ok(labels.includes('AI 检测'), 'and the AI check keeps its own label');
+    assert.equal(await f.page.evaluate(() => document.getElementById('reportSubmitBtn').getBoundingClientRect().top > document.getElementById('reportReasonGrid').getBoundingClientRect().top), true, 'the submit button is still below the reasons');
+  } finally { await f.close(); }
+});

@@ -24,6 +24,9 @@ const NAME_CHARS = /[^a-zA-Z0-9_一-鿿.-]/g;
 const KEY_RE = /^(?:posts|posters)\/[a-zA-Z0-9_一-鿿.-]{1,200}$/;
 const PUBLIC_PREFIX = '/storage/v1/object/public/uploads/';
 const MEDIA_TYPES = ['image', 'video', 'audio', 'photo', 'album'];
+// 「旧值相同才改」把旧值放在请求网址的查询串里。帖子内容较长（尤其汉字，每个编码后占 9 个字符）时网址会超过服务器和代理的上限（常见 8KB），
+// 请求必然失败。超过这个编码后的长度就明确跳过并报告，而不是发一个必失败的请求；该帖子的引用保持指向 Supabase，不影响显示。
+const MAX_FILTER_VALUE = 6000;
 const TYPE_BY_EXT = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', heic: 'image/heic', mp4: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm', m4a: 'audio/mp4', mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg' };
 
 // 旧帖的 media_url 直接挂在 uploads 根目录（没有 posts/ 前缀），OSS 读取侧只认 posts/ 与 posters/，所以统一搬到 posts/legacy_<原名>。
@@ -111,7 +114,7 @@ async function migrateEntry(entry, deps, budget) {
     if (!check || check.size !== buffer.length) return { path: entry.path, key: entry.key, status: 'verify_failed', bytes: buffer.length };
   }
   const rewritten = await deps.rewrite(entry, deps.ossUrl(entry.key));
-  return { path: entry.path, key: entry.key, status: rewritten.failed ? 'rewrite_partial' : (reused ? 'reused' : 'migrated'), bytes: source.size, updated: rewritten.updated, failed: rewritten.failed };
+  return { path: entry.path, key: entry.key, status: rewritten.failed ? 'rewrite_partial' : (reused ? 'reused' : 'migrated'), bytes: source.size, updated: rewritten.updated, failed: rewritten.failed, content_too_long_post_ids: rewritten.tooLong && rewritten.tooLong.length ? rewritten.tooLong : undefined };
 }
 
 async function run({ store, deps, supabaseUrl, apply, maxBytes, limit, log }) {
@@ -174,19 +177,21 @@ function makeRewrite(store) {
   const contentRows = new Map();
   return async function rewrite(entry, newUrl) {
     let updated = 0, failed = 0;
+    const tooLong = [];
     for (const ref of entry.refs) {
       try {
         let ok;
         if (ref.field === 'content') {
           const current = contentRows.has(ref.id) ? contentRows.get(ref.id) : ref.content;
           const next = current.split(ref.url).join(newUrl);
+          if (next !== current && encodeURIComponent(current).length > MAX_FILTER_VALUE) { failed += 1; tooLong.push(ref.id); continue; }
           ok = next === current ? true : await store.swap('posts', ref.id, 'content', current, next);
           if (ok) contentRows.set(ref.id, next);
         } else ok = await store.swap(ref.table, ref.id, ref.field, ref.url, newUrl);
         if (ok) updated += 1; else failed += 1;
       } catch (_) { failed += 1; }
     }
-    return { updated, failed };
+    return { updated, failed, tooLong };
   };
 }
 
@@ -246,5 +251,5 @@ async function main() {
   if (summary.results.some(r => ['error', 'verify_failed', 'download_mismatch', 'rewrite_partial'].includes(r.status))) process.exitCode = 1;
 }
 
-module.exports = { ossKeyFor, publicPathOf, contentMetaUrls, collectPlan, migrateEntry, run, makeRewrite, supabaseStore, parseArgs, guessType, MAX_DEFAULT_BYTES, OBJECT_CACHE_CONTROL };
+module.exports = { MAX_FILTER_VALUE, ossKeyFor, publicPathOf, contentMetaUrls, collectPlan, migrateEntry, run, makeRewrite, supabaseStore, parseArgs, guessType, MAX_DEFAULT_BYTES, OBJECT_CACHE_CONTROL };
 if (require.main === module) main().catch(error => { console.error('迁移失败：', error && error.message || error); process.exit(1); });
