@@ -5340,6 +5340,19 @@
                     var action = e.target && e.target.closest ? e.target.closest('[data-chat-social-action]') : null;
                     if (action) handleDockChatSocialAction(action);
                 });
+                // 与旁边的「会话管理」菜单一致：Esc 关闭，Tab 在面板里循环，不会跑到后面的聊天里。
+                if (_socialSheet) _socialSheet.addEventListener('keydown', function(e) {
+                    if (e.key === 'Escape') { e.preventDefault(); closeDockChatSocialSheet(); return; }
+                    if (e.key !== 'Tab') return;
+                    // 只算 Tab 真正能到的元素：顶部的标签用「只有选中项可达」的写法，其余标签是 tabindex=-1，不能算进首尾。
+                    var focusables = Array.prototype.filter.call(_socialSheet.querySelectorAll('button:not([tabindex="-1"]), input:not([tabindex="-1"]), select:not([tabindex="-1"]), textarea:not([tabindex="-1"]), [href], [tabindex]:not([tabindex="-1"])'), function(node) {
+                        return !node.disabled && !node.hidden && node.offsetParent !== null;
+                    });
+                    if (!focusables.length) return;
+                    var first = focusables[0], last = focusables[focusables.length - 1];
+                    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+                    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+                });
                 var _socialContent = document.getElementById('dockChatSocialContent');
                 if (_socialContent) _socialContent.addEventListener('submit', function(e) {
                     if (!e.target || e.target.id !== 'dockChatSocialSearchForm') return;
@@ -5762,9 +5775,16 @@
                 renderDockChatSocialTab(tab || 'friends');
                 refreshChatSocialBadge(true);
                 setTimeout(function() {
-                    if (!sheet.hidden && !sheet.inert && !sheet.classList.contains('hidden') && _dockChatSocialTab === 'search') {
+                    if (sheet.hidden || sheet.inert || sheet.classList.contains('hidden')) return;
+                    if (_dockChatSocialTab === 'search') {
                         var input = document.querySelector('#dockChatSocialSearchForm input[name="q"]');
                         if (input) input.focus({ preventScroll: true });
+                        return;
+                    }
+                    // 这是个模态对话框：键盘打开后焦点必须进来，否则还停在后面的按钮上，读屏和键盘用户都不知道面板开了。
+                    if (!sheet.contains(document.activeElement)) {
+                        var entry = sheet.querySelector('[data-chat-social-tab][aria-selected="true"], [data-chat-social-tab].active') || document.getElementById('dockChatSocialClose');
+                        if (entry) entry.focus({ preventScroll: true });
                     }
                 }, 30);
             }
