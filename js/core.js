@@ -23682,6 +23682,27 @@ function renderProfileActivityList(kind) {
             });
         }
 
+        // 聊天输入框最长 500 字：粘贴更长的文字时浏览器会悄悄截断，用户发出去才发现少了一截。
+        // 截断本身照旧（上限不变），只是把它告诉用户；showToast 自带去重，连续触发不会堆叠。
+        (function installDockChatLengthNotice() {
+            function limitOf(el) { var n = Number(el && el.getAttribute('maxlength')); return n > 0 ? n : 0; }
+            document.addEventListener('paste', function(event) {
+                var el = event.target;
+                if (!el || el.id !== 'dockChatInput') return;
+                var max = limitOf(el);
+                if (!max) return;
+                var text = (event.clipboardData && event.clipboardData.getData('text')) || '';
+                var selected = Math.max(0, (el.selectionEnd || 0) - (el.selectionStart || 0));
+                if (el.value.length - selected + text.length > max) showToast('消息最多 ' + max + ' 字，超出的部分没有粘贴进来');
+            }, true);
+            document.addEventListener('beforeinput', function(event) {
+                var el = event.target;
+                if (!el || el.id !== 'dockChatInput' || event.inputType !== 'insertText') return;
+                var max = limitOf(el);
+                if (max && el.value.length >= max && el.selectionStart === el.selectionEnd) showToast('消息最多 ' + max + ' 字');
+            }, true);
+        })();
+
         (function installUiTextRepair() {
             // This repair system is superseded by features.js which handles mojibake more accurately.
             // Only expose stop/repair hooks for backward compatibility.
@@ -24224,27 +24245,6 @@ function renderProfileActivityList(kind) {
             };
 
         })();
-
-            // 聊天输入框最长 500 字：粘贴更长的文字时浏览器会悄悄截断，用户发出去才发现少了一截。
-            // 截断本身照旧（上限不变），只是把它告诉用户；showToast 自带去重，连续触发不会堆叠。
-            (function installDockChatLengthNotice() {
-                function limitOf(el) { var n = Number(el && el.getAttribute('maxlength')); return n > 0 ? n : 0; }
-                document.addEventListener('paste', function(event) {
-                    var el = event.target;
-                    if (!el || el.id !== 'dockChatInput') return;
-                    var max = limitOf(el);
-                    if (!max) return;
-                    var text = (event.clipboardData && event.clipboardData.getData('text')) || '';
-                    var selected = Math.max(0, (el.selectionEnd || 0) - (el.selectionStart || 0));
-                    if (el.value.length - selected + text.length > max) showToast('消息最多 ' + max + ' 字，超出的部分没有粘贴进来');
-                }, true);
-                document.addEventListener('beforeinput', function(event) {
-                    var el = event.target;
-                    if (!el || el.id !== 'dockChatInput' || event.inputType !== 'insertText') return;
-                    var max = limitOf(el);
-                    if (max && el.value.length >= max && el.selectionStart === el.selectionEnd) showToast('消息最多 ' + max + ' 字');
-                }, true);
-            })();
 
 /**
  * core-parts/07-final-overrides.js
