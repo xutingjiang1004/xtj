@@ -4965,9 +4965,13 @@
                     var earlyBootUser = '';
                     try { earlyBootUser = String((window.__xtjEarlyFeed && window.__xtjEarlyFeed.bootUser) || ''); } catch (eEarlyUser) { earlyBootUser = ''; }
                     var sameEarlyViewer = knownUser ? earlyBootUser === knownUser : !earlyBootUser;
+                    // 首屏预取只带 cookie、不带 Authorization，服务端把它当访客：只回最新 10 条公开帖并标 guest_limited。
+                    // 已知登录用户不能拿这份访客页当自己的信息流（会少了自己的私密帖，末尾还冒出「登录后可查看更早的帖子」），
+                    // 必须走带令牌的正式请求。
+                    var earlyIsGuestPage = function(data) { return !!(knownUser && data && data.guest_limited); };
                     var mayReuseEarlyFeed = !searchKeyword && sameEarlyViewer;
 
-                    if (page === 0 && mayReuseEarlyFeed && start === 0 && !usedApi && window.__xtjEarlyFeed && window.__xtjEarlyFeed.status === 'ok' && window.__xtjEarlyFeed.data) {
+                    if (page === 0 && mayReuseEarlyFeed && start === 0 && !usedApi && window.__xtjEarlyFeed && window.__xtjEarlyFeed.status === 'ok' && window.__xtjEarlyFeed.data && !earlyIsGuestPage(window.__xtjEarlyFeed.data)) {
                         var early = window.__xtjEarlyFeed.data;
                         posts = normalizePosts(early.posts || []);
                         comments = early.comments || [];
@@ -4983,7 +4987,7 @@
                             var early2 = await (typeof window.xtjWithTimeout === 'function'
                                 ? window.xtjWithTimeout(window.__xtjEarlyFeedPromise, Math.min(FEED_NET_TIMEOUT_MS, 12000), 'early-feed')
                                 : window.__xtjEarlyFeedPromise);
-                            if (early2 && early2.ok) {
+                            if (early2 && early2.ok && !earlyIsGuestPage(early2)) {
                                 posts = normalizePosts(early2.posts || []);
                                 comments = early2.comments || [];
                                 likes = early2.likes || [];

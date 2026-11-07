@@ -45,6 +45,18 @@ test('a confirmed background session failure restores public posts and removes t
  } finally {await f.close();}
 });
 
+test('a returning signed-in account never keeps the guest early page: its own private posts show and there is no login gate', async () => {
+ // 首屏预取只带 cookie、不带 Authorization，服务端按访客处理（最新 10 条公开帖 + guest_limited）。
+ // 已登录账号不能把这份访客页当成自己的信息流，必须再走带令牌的正式请求。
+ const f=await postBrowserFixture({counts:[1,1,1],enforceFeedPrivacy:true});
+ try {
+  await f.page.waitForFunction(()=>window.__xtjCoreFeedReady===true&&document.querySelectorAll('#feed .post:not([data-early])').length===3);
+  assert.equal(await f.page.locator('#feed .feed-guest-gate').count(),0);
+  assert.equal(await f.page.evaluate(()=>window.currentUser),'alice');
+  assert.deepEqual(f.errors,[]);
+ } finally {await f.close();}
+});
+
 test('early feed restores an unexpectedly emptied area without hiding an explicit error', async () => {
  const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',args:['--no-sandbox']});
  try {
