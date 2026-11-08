@@ -1,6 +1,11 @@
 'use strict';
 const {randomUUID}=require('node:crypto');
-const SAFE=new Set(['search_web','tavily_search','search_social','read_web_page','web_extract','get_weather','get_current_time','calculate','convert_units','get_exchange_rate','get_stock_quote','text_stats','diff_text','sort_filter','date_calc','make_chart','make_file','generate_pdf','process_json','extract_links','page_meta','qr_code']);
+const SAFE=new Set(['search_web','tavily_search','search_social','read_web_page','web_extract','get_weather','get_current_time','calculate','convert_units','get_exchange_rate','get_stock_quote','text_stats','diff_text','sort_filter','date_calc','make_chart','make_file','generate_pdf','process_json','extract_links','page_meta','qr_code',
+  // Read-only public data sources and pure formatting: running one again is harmless. Tools that bill extra model use
+  // (parallel_subtasks, self_check), write (workspace_files, memory) or hand out buttons are deliberately not here.
+  'wiki_summary','search_papers','paper_by_doi','cite_format','github_repo','github_issues','npm_pypi_lookup','vuln_check','stackexchange_search','hn_search','wikidata_facts','dictionary','rss_read','news_gdelt','wayback','my_activity_summary','photo_timeline']);
+// Only these draw on the user's search allowance; the other tools with "search" in their name read free public sources.
+const METERED_SEARCH=new Set(['search_web','tavily_search','search_social']);
 const entries=new Map(),TTL=10*60*1000;
 function clean(){const now=Date.now();for(const [id,entry]of entries)if(entry.expires<=now&&!entry.busy)entries.delete(id);}
 const expiryTimer=setInterval(clean,60000);if(expiryTimer.unref)expiryTimer.unref();
@@ -40,7 +45,7 @@ function installToolRetry(app,deps){
    const prepared=await deps.store.inspect(entry.owner,entry.turn,entry.callId,abort.signal);
    if(prepared.step&&prepared.step.tool_name!==entry.call.name)throw Object.assign(Error('原工具步骤已改变，请刷新历史后查看'),{status:409});
    if(!entry.result&&!prepared.completed){
-    const gate=await deps.gate(req.userName,{needSearch:/search/.test(entry.call.name)});if(!gate.allowed)return res.status(429).json({ok:false,error:'当前模型或搜索额度不足，请稍后重试'});
+    const gate=await deps.gate(req.userName,{needSearch:METERED_SEARCH.has(entry.call.name)});if(!gate.allowed)return res.status(429).json({ok:false,error:'当前模型或搜索额度不足，请稍后重试'});
     if(abort.signal.aborted)return;entry.attempts++;
     const context={userName:req.userName,accountId:req.accountId,signal:abort.signal,searchConsumed:0};
     if(entry.owner.freeOnly===true)context.freeOnly=true;

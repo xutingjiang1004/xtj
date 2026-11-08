@@ -377,12 +377,17 @@ function createKnowledgeTools(options) {
       return { tool_name: 'github_repo', url: info.html_url, title: info.full_name, content: lines.join('\n'), cards: [infoCard('GitHub · ' + info.full_name, { subtitle: info.description, url: info.html_url, text: '', facts })] };
     } catch (error) { return failure('github_repo', error, '没有找到这个公开仓库（可能不存在或是私有的）'); }
   }
+  // Free text only: scope qualifiers (repo:, org:, user:, ...) are dropped so the search cannot leave the repository the user named,
+  // which matters when an optional GitHub token is configured and could otherwise reach private repositories.
+  function searchText(value) {
+    return clip(value, 120).replace(/(^|\s)-?(repo|org|user|owner|enterprise|team|team-review-requested|review-requested|reviewed-by|involves|mentions|assignee|author|commenter|interactions|linked|in|is|state|type|archived|draft|no|has|label|language|milestone|project|sort|order)\s*:\s*\S*/gi, ' ').replace(/\s+/g, ' ').trim();
+  }
   async function github_issues(args) {
     const repo = repoOf(args.repo); if (!repo) return plainError('github_issues', '请给出 owner/name 形式的仓库');
     const state = ['open', 'closed', 'all'].includes(args.state) ? args.state : 'open';
     const kind = ['issue', 'pr', 'both'].includes(args.kind) ? args.kind : 'issue';
     const limit = count(args.limit, 6, 1, 10);
-    const q = ['repo:' + repo.owner + '/' + repo.name, kind === 'issue' ? 'is:issue' : kind === 'pr' ? 'is:pr' : '', state === 'all' ? '' : 'is:' + state, clip(args.query, 120).replace(/[\r\n]/g, ' ')].filter(Boolean).join(' ');
+    const q = ['repo:' + repo.owner + '/' + repo.name, kind === 'issue' ? 'is:issue' : kind === 'pr' ? 'is:pr' : '', state === 'all' ? '' : 'is:' + state, searchText(args.query)].filter(Boolean).join(' ');
     try {
       const data = await getJson('github_issues', 'https://api.github.com/search/issues?q=' + enc(q) + '&per_page=' + limit + '&sort=updated&order=desc', { headers: ghHeaders() });
       const items = (data.items || []).map(i => ({ title: i.title, url: i.html_url, snippet: clip(i.body, 160), meta: (i.pull_request ? 'PR' : 'issue') + ' #' + i.number + ' · ' + i.state + ' · ' + (i.user && i.user.login) + ' · ' + i.comments + ' 评论 · 更新 ' + String(i.updated_at || '').slice(0, 10) }));
