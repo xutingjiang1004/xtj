@@ -2802,7 +2802,8 @@ function isAdmin() {
             });
         };
         // Small text-entry dialog replacing window.prompt(); resolves to the text or null when cancelled.
-        window.xtjPrompt = function (title, message, initial, maxLength) {
+        window.xtjPrompt = function (title, message, initial, maxLength, options) {
+            options = options || {};
             return new Promise(function (resolve) {
                 var previous = document.activeElement;
                 var overlay = document.createElement('div');
@@ -2815,10 +2816,11 @@ function isAdmin() {
                 heading.id = 'xtjPromptTitle' + Date.now().toString(36);
                 dialog.setAttribute('aria-labelledby', heading.id);
                 var hint = document.createElement('p'); hint.textContent = message || '';
-                var input = document.createElement('input'); input.type = 'text'; input.value = initial || ''; input.maxLength = maxLength || 200;
+                var input = document.createElement('input'); input.type = options.type === 'password' ? 'password' : 'text'; input.value = initial || ''; input.maxLength = maxLength || 200;
+                if (options.type === 'password') { input.autocomplete = 'current-password'; input.setAttribute('aria-label', title || '请输入'); }
                 var row = document.createElement('div'); row.className = 'xtj-prompt-actions';
                 var cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = '取消';
-                var ok = document.createElement('button'); ok.type = 'button'; ok.textContent = '保存'; ok.className = 'is-primary';
+                var ok = document.createElement('button'); ok.type = 'button'; ok.textContent = options.okText || '保存'; ok.className = 'is-primary';
                 row.append(cancel, ok); dialog.append(heading, hint, input, row); overlay.appendChild(dialog); document.body.appendChild(overlay);
                 function close(value) {
                     document.removeEventListener('keydown', onKey, true); overlay.remove();
@@ -3970,6 +3972,37 @@ function isAdmin() {
             window.doLogoutFromProfile = function() {
                 closeModal('profileDetailModal');
                 doLogout();
+            };
+
+            // 「我的」页面里的注销账号入口：二次确认 + 再输入一次当前密码。
+            // 注销只清账号本身（登录、个人资料、头像、私有 AI 数据），发过的帖子、照片、评论、点赞和聊天消息都会保留。
+            var _isDeactivating = false;
+            window.deactivateMyAccount = async function () {
+                if (_isDeactivating) return;
+                var owner = currentUser || window.currentUser || '';
+                if (!owner) { showToast('请先登录'); return; }
+                _isDeactivating = true;
+                try {
+                    var sure = await window.xtjConfirm('注销账号', '注销后这个账号无法再登录，也无法恢复；头像会变回默认头像，邮箱、设备与位置记录和 AI 私有数据会被清除，昵称不能再被注册。你发过的帖子、照片、视频、评论、点赞和聊天消息都会保留。', '继续注销');
+                    if (!sure) return;
+                    var password = await window.xtjPrompt('确认注销', '请输入当前密码以确认是你本人操作', '', 128, { type: 'password', okText: '注销账号' });
+                    if (password === null) return;
+                    if (!password) { showToast('请输入当前密码'); return; }
+                    var response, data = null;
+                    try {
+                        response = await window.xtjProtectedFetch('/api/user/deactivate', { method: 'POST', body: JSON.stringify({ password: password }) });
+                        try { data = await response.json(); } catch (_) { data = null; }
+                    } catch (_) { showToast('网络异常，请稍后重试'); return; }
+                    if (!response.ok || !data || !data.ok) {
+                        showToast(response && response.status === 401 && data && data.code === 'wrong_password' ? '密码不正确' : ((data && data.error) || '注销失败，请稍后重试'));
+                        return;
+                    }
+                    closeModal('profileDetailModal');
+                    await window.doLogout();
+                    showToast('账号已注销，你发布的内容会继续保留');
+                } finally {
+                    _isDeactivating = false;
+                }
             };
 
             window.switchAccount = function() {

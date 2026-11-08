@@ -5662,6 +5662,23 @@
         .profile-detail-logout-btn:hover {
             background: rgba(255,59,96,0.2);
         }
+        /* 「我的」页面底部的注销账号入口：不抢眼的文字按钮，不与退出登录并排，避免误点。 */
+        .modal-box button.profile-detail-deactivate-btn {
+            display: block;
+            margin: 14px auto 0;
+            padding: 8px 14px;
+            min-height: 36px;
+            border: 0;
+            border-radius: 10px;
+            background: transparent;
+            box-shadow: none;
+            color: var(--danger, #ff3b60);
+            font-size: 13px;
+            font-weight: 500;
+            text-decoration: underline;
+            cursor: pointer;
+        }
+        .modal-box button.profile-detail-deactivate-btn:hover { background: rgba(255,59,96,0.08); }
         [data-theme="dark"] .profile-detail-logout-btn {
             background: rgba(255,59,96,0.15);
         }

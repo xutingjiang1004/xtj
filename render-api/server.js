@@ -11913,6 +11913,7 @@ function shouldSkipWriteRestriction(req) {
   var allow = [
     '/api/user/logout',
     '/api/user/refresh',
+    '/api/user/deactivate',
     '/api/agent/chat/cancel',
     '/api/announcements/read'
   ];
@@ -17025,14 +17026,25 @@ app.put('/admin/blacklist/:id/lift', verifyToken, securityRateLimit(60000, 30), 
 //   不能再收到新私信，已有的聊天记录和内容原样留在原处。重复执行安全，失败可直接重试。
 app.delete('/admin/user/:userName', verifyToken, rateLimit(60000, 5), async (req, res) => {
   try {
-    var userName = String(req.params.userName || '').trim();
-    if (!userName || userName.length > MAX_USERNAME_LEN) return res.status(400).json({ error: '用户名无效' });
-    if (userName === ADMIN_USERNAME) return res.status(403).json({ error: '不能删除管理员账号' });
+    var out = await deactivateAccount(req.params.userName);
+    return res.status(out.status).json(out.body);
+  } catch (e) {
+    console.error('[admin] 注销账号失败:', e && e.message || e);
+    return res.status(500).json({ error: '注销账号失败' });
+  }
+});
+
+async function deactivateAccount(userName, actor) {
+  function reply(status, payload) { return { status: status, body: payload }; }
+  try {
+    userName = String(userName || '').trim();
+    if (!userName || userName.length > MAX_USERNAME_LEN) return reply(400, { error: '用户名无效' });
+    if (userName === ADMIN_USERNAME) return reply(403, { error: '不能删除管理员账号' });
 
     // 账号私有数据：个人资料与遥测、自定义模型（含加密的第三方密钥）、AI 工具的私有表、登录会话。
     // 封禁/禁言/拉黑、邀请兑换、会员与额度记录、审计日志不在注销范围内（保留政策未定义），原样保留。
     var PRIVATE_POST_TYPES = [USER_INFO_MARKER, CUSTOM_AI_MODELS_MARKER];
-    var partialDeleted = { auth_records: 0, user_info: 0, ai_search_results: 0, ai_drafts: 0, ai_action_confirmations: 0 };
+    var partialDeleted = { auth_records: 0, avatars: 0, user_info: 0, ai_search_results: 0, ai_drafts: 0, ai_action_confirmations: 0 };
     function readAccountState() {
       return Promise.all([
         supabase.from('posts').select('id').eq('user_name', userName).eq('media_type', AUTH_MARKER).limit(1),
@@ -17044,26 +17056,27 @@ app.delete('/admin/user/:userName', verifyToken, rateLimit(60000, 5), async (req
         supabase.from('ai_action_confirmations').select('id').eq('owner_name', userName).limit(1),
         supabase.from('bans').select('id').eq('user_name', userName).limit(1),
         supabase.from('mutes').select('id').eq('user_name', userName).limit(1),
-        supabase.from('blacklist').select('id').eq('user_name', userName).limit(1)
+        supabase.from('blacklist').select('id').eq('user_name', userName).limit(1),
+        supabase.from('posts').select('id').eq('user_name', userName).eq('media_type', '__avatar__').limit(1)
       ]);
     }
     var state;
     try { state = await readAccountState(); }
     catch (lookupException) {
       console.error('[admin] 注销账号：状态查询异常:', lookupException && lookupException.message);
-      return res.status(503).json({ error: '暂时无法完整核实用户数据，请重试', code: 'delete_user_lookup_failed' });
+      return reply(503, { error: '暂时无法完整核实用户数据，请重试', code: 'delete_user_lookup_failed' });
     }
     if (state.some(function(r) { return !r || r.error; })) {
       console.error('[admin] 注销账号：状态查询失败:', state.find(function(r) { return !r || r.error; }).error && state.find(function(r) { return !r || r.error; }).error.message);
-      return res.status(503).json({ error: '暂时无法完整核实用户数据，请重试', code: 'delete_user_lookup_failed' });
+      return reply(503, { error: '暂时无法完整核实用户数据，请重试', code: 'delete_user_lookup_failed' });
     }
     var has = function(index) { return !!(state[index].data && state[index].data.length); };
     var retainedPolicyData = { bans: has(7), mutes: has(8), blacklist: has(9) };
     var hasAuth = has(0), hasTombstone = has(1);
-    var hasLeftovers = has(2) || has(3) || has(4) || has(5) || has(6);
-    if (!hasAuth && !hasTombstone && !hasLeftovers) return res.status(404).json({ error: '用户不存在或已被注销' });
+    var hasLeftovers = has(2) || has(3) || has(4) || has(5) || has(6) || has(10);
+    if (!hasAuth && !hasTombstone && !hasLeftovers) return reply(404, { error: '用户不存在或已被注销' });
     if (!hasAuth && hasTombstone && !hasLeftovers) {
-      return res.json({ ok: true, user_name: userName, already_deactivated: true, content_retained: true, deleted: partialDeleted, retained_policy_data: retainedPolicyData });
+      return reply(200, { ok: true, user_name: userName, already_deactivated: true, content_retained: true, deleted: partialDeleted, retained_policy_data: retainedPolicyData });
     }
 
     // 1) 先插入一行墓碑占住昵称，再删除登录记录：登录立刻失败，现有访问令牌立刻失效（身份查询查不到账号）。
@@ -17082,13 +17095,13 @@ app.delete('/admin/user/:userName', verifyToken, rateLimit(60000, 5), async (req
         }]);
         if (!reserve || reserve.error) {
           console.error('[admin] 注销账号：写入昵称墓碑失败:', reserve && reserve.error && reserve.error.message);
-          return res.status(503).json({ error: '注销失败：昵称保留未确认，请重试', code: 'delete_user_deactivate_failed', partial: partialDeleted });
+          return reply(503, { error: '注销失败：昵称保留未确认，请重试', code: 'delete_user_deactivate_failed', partial: partialDeleted });
         }
       }
       var removedAuth = await supabase.from('posts').delete({ count: 'exact' }).eq('user_name', userName).eq('media_type', AUTH_MARKER);
       if (!removedAuth || removedAuth.error) {
         console.error('[admin] 注销账号：删除登录记录失败:', removedAuth && removedAuth.error && removedAuth.error.message);
-        return res.status(503).json({ error: '注销失败：登录记录处理未确认，请重试', code: 'delete_user_deactivate_failed', partial: partialDeleted });
+        return reply(503, { error: '注销失败：登录记录处理未确认，请重试', code: 'delete_user_deactivate_failed', partial: partialDeleted });
       }
       partialDeleted.auth_records = removedAuth.count || 0;
     }
@@ -17100,8 +17113,34 @@ app.delete('/admin/user/:userName', verifyToken, rateLimit(60000, 5), async (req
 
     // 3) 个人资料与遥测、自定义模型密钥。
     var delPrivate = await supabase.from('posts').delete({ count: 'exact' }).eq('user_name', userName).in('media_type', PRIVATE_POST_TYPES);
-    if (!delPrivate || delPrivate.error) return res.status(500).json({ error: '注销部分完成：清理个人资料失败，请重试', code: 'delete_user_partial', partial: partialDeleted });
+    if (!delPrivate || delPrivate.error) return reply(500, { error: '注销部分完成：清理个人资料失败，请重试', code: 'delete_user_partial', partial: partialDeleted });
     partialDeleted.user_info = delPrivate.count || 0;
+
+    // 3b) 头像：注销后显示默认头像，所以头像记录和存储里的头像文件一起清掉（只有头像，不碰任何帖子、照片和聊天文件）。
+    //     先把文件路径写进持久清理队列，再删记录；中途失败重试会再次找到记录，队列写入是幂等的。
+    var avatarRows = await supabase.from('posts').select('id, media_url').eq('user_name', userName).eq('media_type', '__avatar__').limit(500);
+    if (!avatarRows || avatarRows.error) return reply(500, { error: '注销部分完成：读取头像失败，请重试', code: 'delete_user_partial', partial: partialDeleted });
+    var avatarPaths = [];
+    (avatarRows.data || []).forEach(function(row) {
+      var raw = String(row.media_url || '').trim(), candidate = raw;
+      if (/^https?:\/\//i.test(raw)) {
+        try {
+          var match = new URL(raw).pathname.match(/\/storage\/v1\/object\/(?:public|sign)\/uploads\/(.+)$/);
+          candidate = match ? decodeURIComponent(match[1]) : '';
+        } catch (_) { candidate = ''; }
+      }
+      candidate = String(candidate).replace(/^\/+/, '');
+      if (/^avatars\/[^\\]+$/.test(candidate) && candidate.indexOf('..') < 0 && avatarPaths.indexOf(candidate) < 0) avatarPaths.push(candidate);
+    });
+    if (avatarPaths.length) {
+      var avatarCleanup;
+      try { avatarCleanup = await removeStorageWithQueue(supabase, { bucket: 'uploads', paths: avatarPaths, photoId: 'account_avatar_' + userName, lastError: 'account_deactivate_cleanup' }); }
+      catch (_) { avatarCleanup = null; }
+      if (!avatarCleanup || !avatarCleanup.ok) return reply(503, { error: '注销部分完成：头像文件清理未确认，请重试', code: 'delete_user_partial', partial: partialDeleted });
+    }
+    var delAvatars = await supabase.from('posts').delete({ count: 'exact' }).eq('user_name', userName).eq('media_type', '__avatar__');
+    if (!delAvatars || delAvatars.error) return reply(500, { error: '注销部分完成：清理头像记录失败，请重试', code: 'delete_user_partial', partial: partialDeleted });
+    partialDeleted.avatars = delAvatars.count || 0;
 
     // 4) 账号私有的 AI 工具数据与评论请求幂等记录。
     var accountCleanupQueries = [
@@ -17115,7 +17154,7 @@ app.delete('/admin/user/:userName', verifyToken, rateLimit(60000, 5), async (req
       var accountCleanupItem = accountCleanupQueries[accountCleanupIndex];
       var accountCleanupResult = await accountCleanupItem.query;
       if (!accountCleanupResult || accountCleanupResult.error) {
-        return res.status(500).json({ error: '注销部分完成：清理 ' + accountCleanupItem.key + ' 失败，请重试', code: 'delete_user_partial', partial: partialDeleted });
+        return reply(500, { error: '注销部分完成：清理 ' + accountCleanupItem.key + ' 失败，请重试', code: 'delete_user_partial', partial: partialDeleted });
       }
       partialDeleted[accountCleanupItem.key] = accountCleanupResult.count || (accountCleanupItem.key === 'comment_requests' ? Number(accountCleanupResult.data) || 0 : 0);
     }
@@ -17126,30 +17165,32 @@ app.delete('/admin/user/:userName', verifyToken, rateLimit(60000, 5), async (req
     catch (verifyException) { after = null; }
     var verificationFailed = !after || after.some(function(r) { return !r || r.error; });
     var stillHas = function(index) { return !!(after && after[index] && after[index].data && after[index].data.length); };
-    var residual = verificationFailed || stillHas(0) || stillHas(2) || stillHas(4) || stillHas(5) || stillHas(6);
+    var residual = verificationFailed || stillHas(0) || stillHas(2) || stillHas(4) || stillHas(5) || stillHas(6) || stillHas(10);
     if (!revokeOk || residual) {
-      await logAdminAudit('delete_user_partial', ADMIN_USERNAME, 'user:' + userName + ' revoke_ok:' + revokeOk + ' residual_private_data:' + residual);
-      return res.status(500).json({
+      await logAdminAudit('delete_user_partial', actor || ADMIN_USERNAME, 'user:' + userName + ' revoke_ok:' + revokeOk + ' residual_private_data:' + residual);
+      return reply(500, {
         error: !revokeOk ? '注销部分完成：会话撤销失败，请重试（重复执行安全）' : '注销部分完成：仍有残留的私有数据，请重试（重复执行安全）',
         code: 'delete_user_partial', partial: partialDeleted, revoke_ok: revokeOk, content_retained: true, retained_policy_data: retainedPolicyData
       });
     }
 
-    await logAdminAudit('delete_user', ADMIN_USERNAME,
-      'user:' + userName + ' action:deactivate content_retained:true' +
+    await logAdminAudit('delete_user', actor || ADMIN_USERNAME,
+      'user:' + userName + ' action:deactivate' + (actor && actor !== ADMIN_USERNAME ? ' source:self' : '') + ' content_retained:true' +
       ' auth_records:' + partialDeleted.auth_records +
+      ' avatars:' + partialDeleted.avatars +
       ' user_info:' + partialDeleted.user_info +
       ' ai_search_results:' + partialDeleted.ai_search_results +
       ' ai_drafts:' + partialDeleted.ai_drafts +
       ' ai_action_confirmations:' + partialDeleted.ai_action_confirmations
     );
-    return res.json({
+    return reply(200, {
       ok: true,
       user_name: userName,
       account_deactivated: true,
       content_retained: true,
       deleted: {
         auth_records: partialDeleted.auth_records,
+        avatars: partialDeleted.avatars,
         user_info: partialDeleted.user_info,
         ai_search_results: partialDeleted.ai_search_results,
         ai_drafts: partialDeleted.ai_drafts,
@@ -17159,9 +17200,9 @@ app.delete('/admin/user/:userName', verifyToken, rateLimit(60000, 5), async (req
     });
   } catch(e) {
     console.error('[admin] 注销账号失败:', e.message || e);
-    return res.status(500).json({ error: '注销账号失败' });
+    return reply(500, { error: '注销账号失败' });
   }
-});
+}
 
 function firstNonEmptyValue() {
   for (let i = 0; i < arguments.length; i++) {
@@ -17172,6 +17213,37 @@ function firstNonEmptyValue() {
   }
   return '';
 }
+
+// 用户自己注销账号（「我的」页面入口）。必须再输入一次当前密码；清理的范围和管理员「删除用户」完全一样：
+// 只注销账号本身（登录、个人资料、头像、私有 AI 数据、会话），发过的帖子、照片、评论、点赞和聊天消息全部保留。
+app.post('/api/user/deactivate', authenticateUser, securityRateLimit(60000, 5), async (req, res) => {
+  try {
+    var selfName = String(req.userName || '');
+    if (!selfName) return res.status(401).json({ error: '登录凭证无效或已过期', code: 'auth_expired' });
+    if (selfName === ADMIN_USERNAME) return res.status(403).json({ error: '管理员账号不能注销', code: 'admin_protected' });
+    var confirmPassword = req.body && req.body.password;
+    if (typeof confirmPassword !== 'string' || !confirmPassword || confirmPassword.length > 128) return res.status(400).json({ error: '请输入当前密码', code: 'password_required' });
+    var selfRecord;
+    try { selfRecord = await readAuthRecord(supabase, selfName, AUTH_MARKER, 'id,media_url,created_at'); }
+    catch (_) { return res.status(503).json({ error: '暂时无法校验密码，请稍后重试', code: 'auth_unavailable', retryable: true }); }
+    if (!selfRecord || !selfRecord.media_url || !(await verifyAuthPassword(selfRecord.media_url, confirmPassword, selfName))) {
+      return res.status(401).json({ error: '密码不正确', code: 'wrong_password' });
+    }
+    var outcome = await deactivateAccount(selfName, selfName);
+    // 登录记录删除之后账号已经不可用，用户自己没法重试；剩余的清理失败会写进审计日志，由管理员重跑。
+    var accountGone = outcome.status === 200 || (outcome.body && outcome.body.code === 'delete_user_partial');
+    if (!accountGone) return res.status(outcome.status).json({ error: '注销没有完成，请稍后重试', code: (outcome.body && outcome.body.code) || 'deactivate_failed', retryable: true });
+    authCache.invalidate(selfName); // 认证缓存里的身份立刻作废，已发出的访问令牌马上失效
+    res.clearCookie('xtj_user_refresh', { path: '/api/user' });
+    res.clearCookie(PHOTO_COOKIE, { path: '/api/photo' });
+    res.clearCookie(POST_MEDIA_COOKIE, { path: '/api/post' });
+    res.clearCookie(POST_MEDIA_COOKIE, { path: '/api/uploads' });
+    return res.json({ ok: true, account_deactivated: true, content_retained: true, cleanup_pending: outcome.status !== 200 });
+  } catch (e) {
+    console.error('[API] 用户注销账号失败:', e && e.message || e);
+    return res.status(500).json({ error: '注销失败，请稍后重试', code: 'deactivate_failed' });
+  }
+});
 
 function parseReportRecordContent(rawContent) {
   let parsed = {};

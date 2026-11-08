@@ -2796,7 +2796,8 @@ function isAdmin() {
             });
         };
         // Small text-entry dialog replacing window.prompt(); resolves to the text or null when cancelled.
-        window.xtjPrompt = function (title, message, initial, maxLength) {
+        window.xtjPrompt = function (title, message, initial, maxLength, options) {
+            options = options || {};
             return new Promise(function (resolve) {
                 var previous = document.activeElement;
                 var overlay = document.createElement('div');
@@ -2809,10 +2810,11 @@ function isAdmin() {
                 heading.id = 'xtjPromptTitle' + Date.now().toString(36);
                 dialog.setAttribute('aria-labelledby', heading.id);
                 var hint = document.createElement('p'); hint.textContent = message || '';
-                var input = document.createElement('input'); input.type = 'text'; input.value = initial || ''; input.maxLength = maxLength || 200;
+                var input = document.createElement('input'); input.type = options.type === 'password' ? 'password' : 'text'; input.value = initial || ''; input.maxLength = maxLength || 200;
+                if (options.type === 'password') { input.autocomplete = 'current-password'; input.setAttribute('aria-label', title || '请输入'); }
                 var row = document.createElement('div'); row.className = 'xtj-prompt-actions';
                 var cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = '取消';
-                var ok = document.createElement('button'); ok.type = 'button'; ok.textContent = '保存'; ok.className = 'is-primary';
+                var ok = document.createElement('button'); ok.type = 'button'; ok.textContent = options.okText || '保存'; ok.className = 'is-primary';
                 row.append(cancel, ok); dialog.append(heading, hint, input, row); overlay.appendChild(dialog); document.body.appendChild(overlay);
                 function close(value) {
                     document.removeEventListener('keydown', onKey, true); overlay.remove();

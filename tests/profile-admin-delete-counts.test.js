@@ -110,16 +110,17 @@ function world() {
   };
 }
 
-test("注销账号：登录记录变墓碑、个人资料与 AI 私有数据清除；发布过的内容和聊天消息一条不少，存储文件不动", async () => {
+test("注销账号：登录记录变墓碑、个人资料与 AI 私有数据清除；发布过的内容和聊天消息一条不少，聊天与帖子的存储文件不动", async () => {
   const tables = world();
-  const before = tables.posts.filter((r) => ["text", "video", "album", "__photo_wall__", "__avatar__", "__dm__", "__login_event__"].includes(r.media_type)).map((r) => r.id).sort();
+  const KEPT = ["text", "video", "album", "__photo_wall__", "__dm__", "__login_event__"];
+  const before = tables.posts.filter((r) => KEPT.includes(r.media_type)).map((r) => r.id).sort();
   const f = buildApp(tables);
   const res = await request(f.app).delete("/admin/user/bob");
   assert.equal(res.status, 200, JSON.stringify(res.body));
   assert.equal(res.body.account_deactivated, true); assert.equal(res.body.content_retained, true);
-  assert.deepEqual(res.body.deleted, { auth_records: 1, user_info: 2, ai_search_results: 1, ai_drafts: 1, ai_action_confirmations: 0 });
-  // 内容：帖子、视频、相册、照片墙、头像、发出和收到的私信、登录事件、评论、点赞全部还在
-  const after = tables.posts.filter((r) => ["text", "video", "album", "__photo_wall__", "__avatar__", "__dm__", "__login_event__"].includes(r.media_type)).map((r) => r.id).sort();
+  assert.deepEqual(res.body.deleted, { auth_records: 1, avatars: 1, user_info: 2, ai_search_results: 1, ai_drafts: 1, ai_action_confirmations: 0 });
+  // 内容：帖子、视频、相册、照片墙、发出和收到的私信、登录事件、评论、点赞全部还在
+  const after = tables.posts.filter((r) => KEPT.includes(r.media_type)).map((r) => r.id).sort();
   assert.deepEqual(after, before, "no content row is removed");
   assert.equal(tables.likes.length, 2); assert.equal(tables.comments.length, 2);
   // 身份：登录记录被删除（数据库里账号私有的 AI 数据挂在它的删除上），同时留下一行墓碑占住昵称（别人不能再注册同名账号）
@@ -133,11 +134,13 @@ test("注销账号：登录记录变墓碑、个人资料与 AI 私有数据清�
   assert.deepEqual(f.revoked, ["bob"]);
   assert.deepEqual(tables.ai_search_results.map((r) => r.id), ["s2"], "other accounts' data untouched");
   assert.equal(tables.ai_drafts.length, 0);
-  // 存储：既不清理聊天/照片/头像文件，也不清理帖子媒体登记
-  assert.equal(f.storageCalls.length, 0, "no storage cleanup is queued for a deactivated account");
+  // 头像：记录和文件一起清掉（注销后显示默认头像）；存储清理只涉及头像文件，不碰聊天、照片、帖子媒体
+  assert.equal(tables.posts.filter((r) => r.media_type === "__avatar__").length, 0, "avatar becomes the default one");
+  assert.equal(f.storageCalls.length, 1, "exactly one storage cleanup: the avatar file");
+  assert.equal(JSON.stringify([f.storageCalls[0][1].bucket, f.storageCalls[0][1].paths]), JSON.stringify(["uploads", ["avatars/bob.png"]]));
   assert.equal(tables.bans.length, 1, "moderation records are retained");
   assert.equal(res.body.retained_policy_data.bans, true);
-  assert.match(f.audits.at(-1)[2], /action:deactivate content_retained:true auth_records:1 user_info:2/);
+  assert.match(f.audits.at(-1)[2], /action:deactivate content_retained:true auth_records:1 avatars:1 user_info:2/);
 });
 
 test("注销账号：重复执行安全，失败后可重试；不存在的用户 404；管理员账号不能注销", async () => {
@@ -197,7 +200,7 @@ test("注销后的昵称仍被占用：别人注册同名账号被拒绝，账�
   assert.match(report, /in\('media_type', \[AUTH_MARKER, AUTH_DELETED_MARKER\]\)/, "content of a deactivated account can still be reported");
   // 路由本身不再包含任何删除内容、聊天或存储文件的代码
   const route = sliceRoute();
-  for (const forbidden of [/from\('likes'\)\.delete/, /from\('comments'\)\.delete/, /removeStorageWithQueue\(/, /retireAccountPostMediaUploads\(/, /deleteIdsInBatches\(/, /dm_media_uploads'\)\.delete/]) {
+  for (const forbidden of [/from\('likes'\)\.delete/, /from\('comments'\)\.delete/, /retireAccountPostMediaUploads\(/, /deleteIdsInBatches\(/, /dm_media_uploads'\)\.delete/]) {
     assert.doesNotMatch(route, forbidden, String(forbidden));
   }
 });
