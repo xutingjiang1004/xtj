@@ -39,7 +39,11 @@ function loadCallDeepSeek(fetchImpl) {
     'function normalizeDeepSeekUsageModel(model, fallback) { return model || fallback; }',
     'async function executeToolCall() { return { ok: true }; }'
   ].join('\n');
-  vm.runInContext(deps + '\n' + source.slice(start, end) + '\nglobalThis.callDeepSeekForTest = callDeepSeek;', sandbox);
+  // callDeepSeek hands tool results back to the model through modelFacingToolResult, which lives next to the tool executor.
+  const helperStart = source.indexOf('function modelFacingToolResult(');
+  const helperEnd = source.indexOf('// ===================== 长期记忆', helperStart);
+  assert.ok(helperStart >= 0 && helperEnd > helperStart, 'modelFacingToolResult 源码应可提取');
+  vm.runInContext(deps + '\n' + source.slice(helperStart, helperEnd) + '\n' + source.slice(start, end) + '\nglobalThis.callDeepSeekForTest = callDeepSeek;', sandbox);
   return sandbox.callDeepSeekForTest;
 }
 

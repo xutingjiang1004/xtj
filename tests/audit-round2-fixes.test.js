@@ -178,9 +178,11 @@ test('P-18: sessionStorage 缓存清理覆盖 vision_urls（不只 content）', 
 
 test('P-23: navigator.share 失败不再被静默吞掉', () => {
   assert.match(aiAgent, /function handleShareError\(err, text\)/);
-  // 两处调用都要走统一处理
-  const calls = aiAgent.match(/\.catch\(function\(err\) \{ handleShareError\(err, t\); \}\)/g) || [];
-  assert.equal(calls.length, 2, 'share 调用应有两处走统一错误处理，实际 ' + calls.length);
+  // 每一处 navigator.share 调用都要走统一处理（回复菜单改版后只剩一处，所以按「全部」断言，不再写死数量）
+  const shareCalls = (aiAgent.match(/navigator\.share\(/g) || []).length;
+  const handled = aiAgent.match(/\.catch\(function\(err\) \{ handleShareError\(err, \w+\); \}\)/g) || [];
+  assert.ok(shareCalls >= 1, '至少还有一处分享入口');
+  assert.equal(handled.length, shareCalls, 'share 调用 ' + shareCalls + ' 处，走统一错误处理 ' + handled.length + ' 处');
   // 原静默形态应已消失
   assert.doesNotMatch(aiAgent, /navigator\.share\([\s\S]{0,200}?\.catch\(function\(\) \{\}\)/);
   // 用户主动取消不应打扰（AbortError 静默）

@@ -25,7 +25,8 @@ function element(id = '') {
 function imageQueueRepro() {
   let intersection;
   const timers = new Map(); let clockId = 0;
-  const imgs = Array.from({ length: 5 }, () => element());
+  // The queue runs six loads at once, so eight images show the waiting behaviour.
+  const imgs = Array.from({ length: 8 }, () => element());
   imgs.forEach((img, i) => { img.setAttribute('data-post-src', '/api/post/test/media/' + i); img.complete = false; img.naturalWidth = 0; });
   const body = element(); body.querySelectorAll = () => imgs; body.matches = () => false; body.nodeType = 1;
   const context = { document: { body, querySelectorAll: () => [] }, innerHeight: 800, location: { href: 'https://xtj.test/', origin: 'https://xtj.test' }, URL, Map, Event,
@@ -34,14 +35,15 @@ function imageQueueRepro() {
     MutationObserver: class { observe() {} }
   }; context.window = context;
   vm.runInNewContext(read('js/image-load-guard.js'), context);
-  intersection(imgs.slice(0, 4).map(target => ({ target, isIntersecting: true })));
-  assert.equal(imgs.filter(img => img.src).length, 4);
-  // All four network requests remain pending while a new group scrolls into view.
-  intersection(imgs.slice(0, 4).map(target => ({ target, isIntersecting: false })).concat({ target: imgs[4], isIntersecting: true }));
-  assert.equal(imgs[4].src, '');
-  assert.equal(timers.size, 4, 'off-screen requests keep their deadlines');
+  const near = { top: 0, bottom: 100 }; // the guard reads entry.boundingClientRect, as a real IntersectionObserverEntry provides it
+  intersection(imgs.slice(0, 6).map(target => ({ target, isIntersecting: true, boundingClientRect: near })));
+  assert.equal(imgs.filter(img => img.src).length, 6);
+  // All six network requests remain pending while a new group scrolls into view.
+  intersection(imgs.slice(0, 6).map(target => ({ target, isIntersecting: false, boundingClientRect: near })).concat({ target: imgs[6], isIntersecting: true, boundingClientRect: near }));
+  assert.equal(imgs[6].src, '');
+  assert.equal(timers.size, 6, 'off-screen requests keep their deadlines');
   [...timers.values()][0]();
-  assert.ok(imgs[4].src, 'deadline releases a slot for the newly visible original');
+  assert.ok(imgs[6].src, 'deadline releases a slot for the newly visible original');
 
 }
 async function profileOrderRepro() {

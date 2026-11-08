@@ -36,6 +36,8 @@ function serverGuestRuntime(config, options) {
     //   它依赖 openRouter 模块，vm 上下文必须提供，否则整段代码求值即抛 ReferenceError。
     openRouter: require('../render-api/openrouter'),
     console: console,
+    // 2026-11-02：游客 AI 还要求环境变量 XTJ_ALLOW_GUEST_AI=1；测试默认视为已开启，options.env 可覆盖。
+    process: { env: Object.assign({ XTJ_ALLOW_GUEST_AI: '1' }, options.env || {}) },
     Date: Date
   };
   vm.createContext(context);
@@ -110,8 +112,8 @@ test('官方搜索默认开启且游客小时上限放宽', function() {
   assert.match(serverSource, /if \(req\.guestAi\) host\._searchCtx\.guest = true;/);
 });
 
-function guestExpressApp(config) {
-  const runtime = serverGuestRuntime(config);
+function guestExpressApp(config, options) {
+  const runtime = serverGuestRuntime(config, options);
   const app = express();
   app.use(express.json());
   app.post('/api/agent/chat/stream', runtime.context.guestAiAuth, function(req, res) {
@@ -200,7 +202,22 @@ test('后台 AI 设置包含访客开关并随配置保存', function() {
   assert.match(adminSource, /id="guestAiEnabled"/);
   assert.match(adminSource, /访客用户可使用AI/);
   assert.match(adminSource, /allow_guest_ai: cfgChecked\('guestAiEnabled'\)/);
-  assert.match(serverSource, /allow_guest_ai: true,/);
+  // 2026-11-02 起默认关闭：未登录访客不能用 AI，管理员在后台打开后才放行。
+  assert.match(serverSource, /allow_guest_ai: false,/);
+  assert.doesNotMatch(serverSource, /allow_guest_ai: true,/);
+});
+
+test('环境变量 XTJ_ALLOW_GUEST_AI 不是 1 时，即使后台开关打开也不放行访客', async function() {
+  for (const env of [{ XTJ_ALLOW_GUEST_AI: '' }, { XTJ_ALLOW_GUEST_AI: '0' }, { XTJ_ALLOW_GUEST_AI: 'true' }]) {
+    const result = await invokeGuestAuth({ allow_guest_ai: true }, { env: env });
+    assert.equal(result.nextCalled, false, JSON.stringify(env));
+    assert.equal(result.calls.auth, 1, JSON.stringify(env));
+    assert.equal(result.res.statusCode, 401);
+  }
+  const enabled = await invokeGuestAuth({ allow_guest_ai: true }, { env: { XTJ_ALLOW_GUEST_AI: '1' } });
+  assert.equal(enabled.nextCalled, true);
+  assert.equal(enabled.req.guestAi, true);
+  assert.equal(await request(guestExpressApp({ allow_guest_ai: true }, { env: { XTJ_ALLOW_GUEST_AI: '' } })).post('/api/agent/chat/stream').send({}).then(function(r) { return r.status; }), 401);
 });
 
 function frontendGuestModeRuntime() {

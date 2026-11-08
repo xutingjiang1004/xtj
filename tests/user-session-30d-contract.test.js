@@ -189,8 +189,12 @@ test('前端：refresh 对 5xx / 网络异常必须退避重试，不得判定�
 
 test('前端：瞬时失败后不得主动登出（保留本地会话）', () => {
   const start = coreSrc.indexOf('async function refreshUserTokenViaCookie(');
-  const body = coreSrc.slice(start, start + 4800);
-  const tail = body.slice(body.indexOf('if (attempts < 2)'));
+  const body = coreSrc.slice(start, start + 9000);
+  // Only the part after the second failed attempt, up to its empty-token return (the function has grown, so no fixed-size window).
+  const retryAt = body.indexOf('if (attempts < 2)');
+  assert.ok(retryAt > 0, '重试分支必须存在');
+  const tail = body.slice(retryAt, body.indexOf("return { token: '', user_name: '' };", retryAt) + 40);
+  assert.ok(tail.includes("return { token: '', user_name: '' };"), '重试仍失败时返回空 token');
   assert.match(tail, /不主动登出/,
     '重试仍失败时必须保留本地会话，交由下次交互重试');
   // 收尾注释之后就是 return 空 token：不得夹带 clearAllAuthState / 弹登录框

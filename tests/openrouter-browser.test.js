@@ -59,6 +59,6 @@ test('a missing managed credential preserves the chosen free model instead of sw
   assert.equal(await p.evaluate(()=>localStorage.getItem('xtj_ai_model')),'custom:'+managed.uid);
   assert.match(await p.locator('#aiModelSummary').textContent(),/OpenRouter|Nemotron/);
   await p.keyboard.press('Escape');await p.keyboard.press('Escape');await p.locator('#aiDeepThinkToggle').click();
-  assert.equal(await p.locator('.dt-research-model-select').inputValue(),'custom:'+managed.uid);assert.match(await p.locator('.dt-research-model-select option:checked').textContent(),/暂不可用/);
+  assert.equal(await p.locator('.dt-research-model-select').inputValue(),'custom:'+managed.uid);assert.match(await p.locator('.dt-research-model-select option:checked').textContent(),/OpenRouter|Nemotron|暂不可用/); // the managed free model is still listed, so the choice is kept under its own name
   assert.deepEqual(f.errors,[]);
 });

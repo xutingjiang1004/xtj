@@ -36,6 +36,7 @@ test('a confirmed background session failure restores public posts and removes t
  try {
   await f.page.waitForFunction(()=>window.__xtjCoreFeedReady===true&&document.querySelectorAll('#feed .post:not([data-early])').length===2);
   f.posts[0].visibility='public';
+  await f.page.context().clearCookies(); // the server no longer recognises the session
   await f.page.evaluate(()=>window.handleProtectedAuthFailure({background:true}));
   await f.page.waitForFunction(()=>window.currentUser===''&&window.__xtjCoreFeedReady===true&&document.querySelectorAll('#feed .post').length===1);
   assert.equal(await f.page.locator('#feed .post').first().getAttribute('data-post-id'),f.posts[0].id);

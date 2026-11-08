@@ -58,11 +58,22 @@ function registerAvatarImage(app, { supabase, supabaseUrl, sharp, rateLimit, fet
     if (cache.has(key)) return Promise.resolve(cache.get(key));
     if (inflight.has(key)) return inflight.get(key);
     const work = source(mediaUrl)
-      .then(input => {
+      .then(async input => {
         // 大图也裁成正方形：微信会把分享封面按 1:1 裁切，给一张 1080×1059 的原比例图
         // 会被切掉一边，看着很怪。头像本身在站内也是圆形/方形展示，裁切无损观感。
+        // 但大图只往小裁、不往大拉：原图较短边不足 1080 时，边长就取这条短边，
+        // 否则 900px 的图会被硬拉到 1080，既糊又多花流量。小头像档是展示尺寸，仍按 192 出。
+        let side = large ? LARGE_SIZE : SIZE;
+        if (large) {
+          try {
+            const meta = await sharp(input, { animated: false, limitInputPixels: 64 * 1024 * 1024 }).metadata();
+            const turned = Number(meta.orientation) >= 5; // EXIF 5-8 swap width and height once rotated
+            const w = turned ? meta.height : meta.width, h = turned ? meta.width : meta.height;
+            if (w > 0 && h > 0) side = Math.max(1, Math.min(LARGE_SIZE, w, h));
+          } catch (_) { /* unreadable metadata: fall back to the fixed size */ }
+        }
         const resized = sharp(input, { animated: false, limitInputPixels: 64 * 1024 * 1024 }).rotate()
-          .resize({ width: large ? LARGE_SIZE : SIZE, height: large ? LARGE_SIZE : SIZE, fit: 'cover' });
+          .resize({ width: side, height: side, fit: 'cover' });
         return (jpeg ? resized.jpeg({ quality: large ? 88 : 84, mozjpeg: true }) : resized.webp({ quality: large ? 86 : 82, effort: 3 }))
           .timeout({ seconds: 10 }).toBuffer();
       })

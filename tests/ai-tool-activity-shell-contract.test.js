@@ -85,7 +85,8 @@ test('方案A：挂载时必须保留兜底（活动区创建失败也不能丢�
 // ── 3. "整理中"必须归位到活动区（本次核心修复）────────────────────────
 test('已返回的工具不再被虚构的整理步骤保持为运行中', function () {
   assert.doesNotMatch(aiAgent, /'data-organizing': '1'/);
-  assert.match(aiAgent, /processBody\(\)\.appendChild\(activeToolTimeline\)/);
+  // Tools are placed in the process rail, in the order they happened (the old processBody() mount no longer exists).
+  assert.match(aiAgent, /activeRailBeat\.querySelector\('\.ai-rail-tools'\)\.appendChild\(activeToolTimeline\)/);
 });
 
 // ── 4. 总摘要联动刷新 ─────────────────────────────────────────────────
@@ -196,9 +197,9 @@ test('方案A：必须覆盖深色主题与 reduced-motion 降级', function () 
 // ── 6. 不破坏既有约定 ─────────────────────────────────────────────────
 test('方案A：timeline 容器与既有查询路径必须保持可用', function () {
   // timeline 仍是外层容器（外部定位/清理逻辑依赖它）
-  assert.match(aiAgent, /class:\s*'ai-tool-timeline ai-tool-status'/, 'timeline 容器不得被移除');
-  assert.match(aiAgent, /processBody\(\)\.appendChild\(activeToolTimeline\)/,
-    '开启思考时工具必须按顺序插进思考过程');
+  assert.match(aiAgent, /class:\s*'ai-tool-timeline ai-tool-status[^']*'/, 'timeline 容器不得被移除');
+  assert.match(aiAgent, /activeRailBeat\.querySelector\('\.ai-rail-tools'\)\.appendChild\(activeToolTimeline\)/,
+    '开启思考时工具必须按顺序插进过程轨道');
   // 既有以 timeline 为根的轮次查询必须仍然成立（活动区是其子节点）
   assert.match(aiAgent, /timeline\.querySelectorAll\('\.ai-tool-round\.is-running'\)/,
     '轮次查询不得从 timeline 根上移除（活动区在下一层，后代查询仍应生效）');

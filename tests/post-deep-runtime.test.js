@@ -83,15 +83,17 @@ test('closed details cannot be repopulated by a late request', async () => {
   r.json.resolve({ ok: true, post: { id, user_name: 'alice', created_at: '2026-10-01' } }); await pending; assert.deepEqual(r.rendered, []);
 });
 function scrollRuntime() {
-  const appended = [], nodes = [], feed = { children: nodes, insertBefore() {}, appendChild() {} };
+  const appended = [], nodes = [], feed = { children: nodes, insertBefore() {}, appendChild() {} }, notices = [];
   const rows = Array.from({ length: 45 }, (_, i) => ({ id: String(i) }));
   const ctx = { window: {}, feedEndReached: true, feedPageFetchPending: false, feedLoadMoreFailed: false, feedAllPosts: rows,
     feedAllComments: [], feedAllLikes: [], feedPage: 1, FEED_PAGE_SIZE: 20, feedLoadRequestId: 1, _authStateEpoch: 1, currentUser: 'alice', console,
     document: { getElementById: key => key === 'feed' ? feed : null, createElement: () => ({ setAttribute() {}, remove() {}, style: {} }) },
     getFeedRenderedSliceStart: () => 20 + appended.length, getFilteredPosts: p => p, getRenderableComments: () => [],
+    // defined just above loadMoreFeedPosts in the source, so the extracted slice needs its own
+    ensureFeedNoMoreNotice: () => notices.push(true), feedGuestLimited: false, hasActiveFeedFilters: () => false,
     appendMorePosts: p => appended.push(...p), writeFeedCacheSnapshot() {}, ensureFeedCoverageForVisibleSlice: async () => { throw new Error('must not fetch exhausted feed'); } };
   vm.runInNewContext(between(posts, '            loadMoreFeedPosts = async function', '            appendMorePosts = function'), ctx);
-  return { ctx, appended };
+  return { ctx, appended, notices };
 }
 test('cached posts beyond the first visible page remain expandable after the server reaches its end', async () => {
   const r = scrollRuntime(); await r.ctx.loadMoreFeedPosts(); await r.ctx.loadMoreFeedPosts();
@@ -132,7 +134,8 @@ test('late load-more completion after a refresh cannot unlock a new request or a
   r.ctx.feedEndReached = false; r.ctx.feedAllPosts = r.ctx.feedAllPosts.slice(0, 20);
   r.ctx.ensureFeedCoverageForVisibleSlice = () => coverage.promise;
   const old = r.ctx.loadMoreFeedPosts(); await turn();
-  r.ctx.feedLoadRequestId++; r.ctx.feedPageFetchPending = true;
+  // A refresh (loadFeed) takes a new request id AND a new fetch-lock token; only the owner of the current token may unlock.
+  r.ctx.feedLoadRequestId++; r.ctx.window.__xtjFeedFetchLockSeq = (Number(r.ctx.window.__xtjFeedFetchLockSeq) || 0) + 1; r.ctx.feedPageFetchPending = true;
   coverage.resolve(); await old;
   assert.equal(r.ctx.feedPageFetchPending, true); assert.deepEqual(r.appended, []);
 });
@@ -240,6 +243,8 @@ test('a bounded filter scan exposes a continuation when the sentinel remains vis
   r.ctx.feedEndReached = false; r.ctx.feedAllPosts = r.ctx.feedAllPosts.slice(0, 20);
   r.ctx.ensureFeedCoverageForVisibleSlice = async () => true;
   r.ctx.showFeedSearchContinueControl = () => controls.push(true);
+  // The continuation control is only for an active filter (without one, the auto-continue timer takes over).
+  r.ctx.hasActiveFeedFilters = () => true;
   await r.ctx.loadMoreFeedPosts(); assert.deepEqual(controls, [true]); assert.equal(r.ctx.feedPage, 1);
 });
 

@@ -269,7 +269,8 @@ test('Items 契约：后端必须统一 items 出口（不得把整段正文当�
 });
 
 test('Items 契约：前端必须校验 Array.isArray 才渲染结果列表', () => {
-  const replayStart = agentSrc.indexOf('function buildOrderedProcessNode(');
+  // The history replay mounts its tool steps through mountHistoricalTools (split out of buildOrderedProcessNode).
+  const replayStart = agentSrc.indexOf('function mountHistoricalTools(');
   assert.ok(replayStart >= 0, '历史进展渲染入口必须存在');
   const replay = agentSrc.slice(replayStart, agentSrc.indexOf('\n  function ', replayStart + 1));
   // 失败重试也需要一个卡片入口；它不代表允许把非数组 items 当结果列表。

@@ -46,10 +46,12 @@ test('retry completed status returns full cat_ai comment data structure', () => 
   // 统一查询函数本身必须保证 cat_ai 过滤与完整字段
   const fnStart = server.indexOf('async function fetchCatReplyByParent');
   assert.notEqual(fnStart, -1, '必须存在统一查询函数 fetchCatReplyByParent');
-  const fnBlock = server.slice(fnStart, fnStart + 1200);
+  const fnBlock = server.slice(fnStart, server.indexOf('\n}\n', fnStart) + 3);
   assert.match(fnBlock, /\.eq\('user_name', CAT_AI_USERNAME\)/);
   assert.match(fnBlock, /\.eq\('generated_by_ai', true\)/);
-  assert.match(fnBlock, /id(?:::text)?,\s*post_id,\s*user_name,\s*content,\s*created_at[^)]*updated_at[^)]*parent_comment_id[^)]*generated_by_ai/);
+  // The deployed comments table has no updated_at column; asking for it failed every lookup, so it must NOT be selected.
+  assert.match(fnBlock, /id(?:::text)?,\s*post_id,\s*user_name,\s*content,\s*created_at[^)]*parent_comment_id[^)]*generated_by_ai/);
+  assert.doesNotMatch(fnBlock.match(/\.select\([^)]*\)/)[0], /updated_at/);
 });
 
 // 5: failed transient error can retry

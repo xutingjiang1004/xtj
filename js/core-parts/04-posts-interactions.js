@@ -6940,14 +6940,17 @@
                 // Keep a keyboard-accessible continuation after the bounded filter scan.
                 var renderedAfterAppend = getFeedRenderedSliceStart();
                 var appendedThisRound = startIdx < filteredPosts.length;
-                if (!feedEndReached && (appendedThisRound || renderedAfterAppend < filteredPosts.length)) {
-                    if (hasActiveFeedFilters()) showFeedSearchContinueControl();
+                // With an active filter the control is shown whenever the server still has more: a bounded scan can end with
+                // nothing appended and everything in memory already rendered, and then the sentinel emits no second event,
+                // so without the control the user is stuck (the case this branch was originally written for).
+                if (!feedEndReached && hasActiveFeedFilters()) showFeedSearchContinueControl();
+                else if (!feedEndReached && (appendedThisRound || renderedAfterAppend < filteredPosts.length)) {
                     // FIX FEED-STALL-01: 没有筛选时这里以前什么都不做。可一旦本次只追加了
                     //   少量帖子、哨兵仍停在视口里（列表还没铺满一屏），IntersectionObserver
                     //   不会再触发第二次 → 无限滚动就此停住，用户只看到"加载不动"。
                     //   只要这一轮确实追加了帖子（或内存里还有没画出来的帖子）、且哨兵仍
                     //   贴着视口，就主动再走一轮；某一轮追加不到任何新内容时不再排下一次。
-                    else if (!_feedAutoContinueTimer) {
+                    if (!_feedAutoContinueTimer) {
                         var sentinelNode = document.getElementById('feedSentinel');
                         var sentinelNear = false;
                         try {
