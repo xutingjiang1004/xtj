@@ -97,7 +97,7 @@ test('run_code 工具描述提到预装库', () => {
 test('普通聊天共享 prompt 提示沙箱预装库', () => {
   const sharedPrompt = require('../render-api/ai-task-policy').TASK_POLICY;
   assert.match(sharedPrompt, /run_code 沙箱已预装常用库/);
-  assert.match(serverSrc, /aiTaskPolicy\.TASK_POLICY/);
+  assert.match(serverSrc, /aiTaskPolicy\.forRequest\(/); // the shared policy is injected per request; work mode is never routed, so it always gets the full text
 });
 
 // ---------------------------------------------------------------------------

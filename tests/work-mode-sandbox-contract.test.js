@@ -126,7 +126,7 @@ test('沙箱：实现内部保留关键安全护栏', () => {
 test('工作模式：system prompt 注入含工作模式指令与沙箱提示', () => {
   assert.match(taskPolicySrc, /【普通聊天工具能力】/);
   assert.match(taskPolicySrc, /run_code（在强隔离沙箱里跑 JavaScript/);
-  assert.match(serverSrc, /aiTaskPolicy\.TASK_POLICY/);
+  assert.match(serverSrc, /aiTaskPolicy\.forRequest\(/); // the shared policy is injected per request; work mode is never routed, so it always gets the full text
   assert.equal((taskPolicySrc.match(/【普通聊天工具能力】/g) || []).length, 1);
   assert.ok((serverSrc.match(/var corePrompt = buildAiCorePrompt\(config\)/g) || []).length >= 3);
 });
