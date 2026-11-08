@@ -23,6 +23,7 @@ function registerApp() {
     validateString: (v) => (typeof v === "string" ? v.trim() || null : null),
     MAX_USERNAME_LEN: 50,
     AUTH_MARKER: "__auth__",
+    AUTH_DELETED_MARKER: "__auth_deleted__",
     ADMIN_USERNAME: "xxz",
     supabase: {
       from: () => ({

@@ -231,15 +231,15 @@ server.tool("admin_get_users", "获取所有用户列表（隐藏敏感字段）
   return { content: [{ type: "text", text: t }] };
 });
 
-server.tool("admin_delete_user", `彻底删除用户账号。${HIGH_RISK_NOTICE}`, { userName: z.string(), confirm: z.boolean() }, async ({ userName, confirm }) => {
+server.tool("admin_delete_user", `注销用户账号：账号无法再登录，登录信息、个人资料与遥测、自定义模型密钥、AI 私有数据被清除，昵称保留不可再注册；该用户发布的帖子、照片、视频、评论、点赞、聊天消息全部保留。${HIGH_RISK_NOTICE}`, { userName: z.string(), confirm: z.boolean() }, async ({ userName, confirm }) => {
   assertHighRiskWritesEnabled();
-  if (!confirm) return { content: [{ type: "text", text: `⚠️ 高危操作！删除用户 ${userName} 将永久删除其所有数据。请在参数中传入 confirm=true 确认。` }] };
+  if (!confirm) return { content: [{ type: "text", text: `⚠️ 高危操作！删除用户 ${userName} 将注销该账号（不可恢复登录；发布的内容会保留）。请在参数中传入 confirm=true 确认。` }] };
   await ensureLoggedIn();
   const data = await apiRequest("DELETE", `/admin/user/${encodeURIComponent(userName)}`);
-  if (!data.ok) return { content: [{ type: "text", text: `❌ 删除失败: ${data.error||"未知错误"}` }] };
+  if (!data.ok) return { content: [{ type: "text", text: `❌ 注销失败: ${data.error||"未知错误"}` }] };
   const d = data.deleted || {};
   logAudit('delete_user', { userName, deleted: d });
-  return { content: [{ type: "text", text: `✅ 用户 ${userName} 已删除\n帖子: ${d.posts} | 点赞: ${d.likes} | 评论: ${d.comments} | 封禁: ${d.bans} | 禁言: ${d.mutes} | 黑名单: ${d.blacklist} | 文件: ${d.storage_files}` }] };
+  return { content: [{ type: "text", text: `✅ 用户 ${userName} 已注销（发布的内容已保留）\n登录记录: ${d.auth_records} | 个人资料: ${d.user_info} | AI 检索结果: ${d.ai_search_results} | AI 草稿: ${d.ai_drafts} | AI 确认: ${d.ai_action_confirmations}` }] };
 });
 
 // --- 内容管理 ---

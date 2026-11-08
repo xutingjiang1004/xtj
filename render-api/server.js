@@ -49,6 +49,7 @@ const {
   REPORT_MARKER,
   DM_MARKER,
   AUTH_MARKER,
+  AUTH_DELETED_MARKER,
   VISIT_MARKER,
   ATTACK_MARKER,
   ADMIN_AUTH_MARKER,
@@ -12306,10 +12307,15 @@ app.post('/api/user/register', securityRateLimit(60000, 5), async (req, res) => 
     if (emailVal && !isValidEmailAddress(emailVal)) {
       return res.status(400).json({ error: '邮箱格式不正确' });
     }
+    // 已注销账号的昵称（墓碑）同样视为已被占用：他发过的帖子、评论按昵称归属，不能让别人注册同名账号接管。
     var { data: existing, error: lookupError } = await supabase.from('posts')
       .select('id').eq('user_name', userNameVal).eq('media_type', AUTH_MARKER).maybeSingle();
     if (lookupError) return res.status(503).json({ error: '注册服务暂不可用' });
     if (existing) return res.status(409).json({ error: '该昵称已被注册' });
+    var { data: reservedName, error: reservedError } = await supabase.from('posts')
+      .select('id').eq('user_name', userNameVal).eq('media_type', AUTH_DELETED_MARKER).maybeSingle();
+    if (reservedError) return res.status(503).json({ error: '注册服务暂不可用' });
+    if (reservedName) return res.status(409).json({ error: '该昵称已被注册' });
     var verifier = await deriveAuthVerifier(password);
     var registrationId = crypto.randomUUID();
     var { error: insertError } = await supabase.from('posts').insert([{
@@ -17011,264 +17017,95 @@ app.put('/admin/blacklist/:id/lift', verifyToken, securityRateLimit(60000, 30), 
 });
 
 // ===================== 管理员删除用户账号 =====================
+// ★ 2026-11-08 用户要求：删除账号 = 注销账号。
+//   注销的是「这个人」——登录凭证、个人资料与遥测、自定义模型密钥、账号私有的 AI 数据、登录会话；
+//   他发布过的内容（帖子、照片、视频、评论、点赞、聊天消息、头像、存储里的文件）一律保留，不删、不改、不清理存储。
+//   登录记录删除后留下一行「墓碑」（__auth_deleted__）：昵称继续被占用，别人不能注册同名账号去接管他留下的内容
+//   （帖子、评论的归属都是按昵称判断的）；任何地方都不再把墓碑当成存在的账号，所以他无法登录、旧令牌立刻失效、
+//   不能再收到新私信，已有的聊天记录和内容原样留在原处。重复执行安全，失败可直接重试。
 app.delete('/admin/user/:userName', verifyToken, rateLimit(60000, 5), async (req, res) => {
   try {
     var userName = String(req.params.userName || '').trim();
     if (!userName || userName.length > MAX_USERNAME_LEN) return res.status(400).json({ error: '用户名无效' });
     if (userName === ADMIN_USERNAME) return res.status(403).json({ error: '不能删除管理员账号' });
 
-    // 检查所有代码中明确存在的用户关联表；查询失败不可伪装成账号不存在。
-    // Moderation / invite / quota ledgers are intentionally retained below as
-    // their retention and billing/audit policy is not defined in this service.
-    var existsChecks;
-    try {
-      existsChecks = await Promise.all([
-      supabase.from('posts').select('id').eq('user_name', userName).limit(1),
-      supabase.from('posts').select('id').eq('media_type', DM_MARKER).eq('media_url', userName).limit(1),
-      supabase.from('likes').select('id::text').eq('user_name', userName).limit(1),
-      supabase.from('comments').select('id::text').eq('user_name', userName).limit(1),
-      supabase.from('bans').select('id').eq('user_name', userName).limit(1),
-      supabase.from('mutes').select('id').eq('user_name', userName).limit(1),
-      supabase.from('blacklist').select('id').eq('user_name', userName).limit(1),
-      supabase.from('dm_media_uploads').select('id').eq('uploader', userName).limit(1),
-      supabase.from('ai_search_results').select('id').eq('owner_name', userName).limit(1),
-      supabase.from('ai_drafts').select('id').eq('owner_name', userName).limit(1),
-      supabase.from('ai_action_confirmations').select('id').eq('owner_name', userName).limit(1)
+    // 账号私有数据：个人资料与遥测、自定义模型（含加密的第三方密钥）、AI 工具的私有表、登录会话。
+    // 封禁/禁言/拉黑、邀请兑换、会员与额度记录、审计日志不在注销范围内（保留政策未定义），原样保留。
+    var PRIVATE_POST_TYPES = [USER_INFO_MARKER, CUSTOM_AI_MODELS_MARKER];
+    var partialDeleted = { auth_records: 0, user_info: 0, ai_search_results: 0, ai_drafts: 0, ai_action_confirmations: 0 };
+    function readAccountState() {
+      return Promise.all([
+        supabase.from('posts').select('id').eq('user_name', userName).eq('media_type', AUTH_MARKER).limit(1),
+        supabase.from('posts').select('id').eq('user_name', userName).eq('media_type', AUTH_DELETED_MARKER).limit(1),
+        supabase.from('posts').select('id').eq('user_name', userName).in('media_type', PRIVATE_POST_TYPES).limit(1),
+        supabase.from('posts').select('id').eq('user_name', userName).eq('media_type', REFRESH_TOKEN_MARKER).limit(1),
+        supabase.from('ai_search_results').select('id').eq('owner_name', userName).limit(1),
+        supabase.from('ai_drafts').select('id').eq('owner_name', userName).limit(1),
+        supabase.from('ai_action_confirmations').select('id').eq('owner_name', userName).limit(1),
+        supabase.from('bans').select('id').eq('user_name', userName).limit(1),
+        supabase.from('mutes').select('id').eq('user_name', userName).limit(1),
+        supabase.from('blacklist').select('id').eq('user_name', userName).limit(1)
       ]);
-    } catch (lookupException) {
-      console.error('[admin] 用户关联数据存在性查询异常:', lookupException && lookupException.message);
+    }
+    var state;
+    try { state = await readAccountState(); }
+    catch (lookupException) {
+      console.error('[admin] 注销账号：状态查询异常:', lookupException && lookupException.message);
       return res.status(503).json({ error: '暂时无法完整核实用户数据，请重试', code: 'delete_user_lookup_failed' });
     }
-    var existsError = existsChecks.find(function(r) { return !r || r.error; });
-    if (existsError) {
-      console.error('[admin] 用户关联数据存在性查询失败:', existsError && existsError.error && existsError.error.message);
+    if (state.some(function(r) { return !r || r.error; })) {
+      console.error('[admin] 注销账号：状态查询失败:', state.find(function(r) { return !r || r.error; }).error && state.find(function(r) { return !r || r.error; }).error.message);
       return res.status(503).json({ error: '暂时无法完整核实用户数据，请重试', code: 'delete_user_lookup_failed' });
     }
-    var exists = existsChecks.some(function(r) { return r.data && r.data.length > 0; });
-    if (!exists) return res.status(404).json({ error: '用户不存在或已被删除' });
-    // ★ 2026-09-24 修复（off-by-one）：existsChecks 顺序为 [0]posts [1]posts(DM) [2]likes
-    //   [3]comments [4]bans [5]mutes [6]blacklist [7]dm_media_uploads；原索引 5/6/7
-    //   分别读到 mutes/blacklist/dm_media_uploads，三字段全部错位。
-    var retainedPolicyData = {
-      bans: !!(existsChecks[4].data && existsChecks[4].data.length),
-      mutes: !!(existsChecks[5].data && existsChecks[5].data.length),
-      blacklist: !!(existsChecks[6].data && existsChecks[6].data.length)
-    };
-
-    // 只清理本服务能证明为账号私有/用户内容的数据；法律、审计、封禁/拉黑、
-    // 邀请兑换、会员及额度记录不在删除范围内，待保留政策明确后再处理。
-    var deletableTypes = new Set(['text', 'image', 'video', 'audio', 'photo', 'album', '__auth__', '__user_info__', '__avatar__', '__photo_wall__', '__custom_ai_models__']);
-    var partialDeleted = { posts: 0, likes: 0, comments: 0, dm_media: 0, ai_search_results: 0, ai_drafts: 0, ai_action_confirmations: 0, storage_files: 0, storage_cleanup_queued: 0 };
-
-    // 先查询该用户发布的帖子 ID，用于级联删除点赞和评论（fail-fast）
-    var userPostRows = [];
-    var userPostOffset = 0;
-    var userPostPageSize = 500;
-    try {
-      while (true) {
-        var userPostPage = await supabase.from('posts').select('id, media_type')
-          .eq('user_name', userName).range(userPostOffset, userPostOffset + userPostPageSize - 1);
-        if (!userPostPage || userPostPage.error) throw (userPostPage && userPostPage.error) || new Error('Post lookup not confirmed');
-        userPostRows = userPostRows.concat(userPostPage.data || []);
-        if ((userPostPage.data || []).length < userPostPageSize) break;
-        userPostOffset += userPostPageSize;
-      }
-    } catch (userPostsErr) {
-      console.error('[admin] 查询用户帖子ID失败:', userPostsErr && userPostsErr.message);
-      return res.status(503).json({ error: '删除失败：查询用户帖子失败', partial: partialDeleted });
-    }
-    // 删除用户可见内容和身份/媒体记录；未知系统 marker 可能是审计、法定或
-    // 运营留存数据，默认保留而不猜测其政策。
-    var userPostIds = userPostRows.filter(function(row) {
-      return row && row.id && (row.media_type === null || row.media_type === '' || deletableTypes.has(String(row.media_type)));
-    }).map(function(row) { return row.id; });
-    var retainedSystemPostCount = userPostRows.length - userPostIds.length;
-
-    // 先发现发件人或接收人为该用户的 DM。收件人消息不属于该用户 posts.user_name，
-    // 必须按 recipient 字段单独遍历；分页直到空页，避免默认 1000 行上限漏删。
-    var dmMessages = [];
-    async function readDmPages(column) {
-      var offset = 0;
-      var pageSize = 500;
-      while (true) {
-        var page = await supabase.from('posts')
-          .select('id, user_name, media_url, content, actor_key')
-          .eq('media_type', DM_MARKER).eq(column, userName)
-          .range(offset, offset + pageSize - 1);
-        if (!page || page.error) throw (page && page.error) || new Error('DM lookup not confirmed');
-        var records = page.data || [];
-        dmMessages = dmMessages.concat(records);
-        if (records.length < pageSize) break;
-        offset += pageSize;
-      }
-    }
-    try {
-      await Promise.all([readDmPages('user_name'), readDmPages('media_url')]);
-    } catch (dmLookupError) {
-      console.error('[admin] 查询 DM 关联失败:', dmLookupError && dmLookupError.message);
-      return res.status(503).json({ error: '删除失败：查询私信关联失败', code: 'delete_user_dm_lookup_failed', partial: partialDeleted });
-    }
-    var dmById = new Map();
-    dmMessages.forEach(function(message) { if (message && message.id) dmById.set(String(message.id), message); });
-    dmMessages = Array.from(dmById.values());
-    var dmMessageIds = dmMessages.map(function(message) { return message.id; });
-
-    // 收集照片、头像以及关联 DM 的对象路径。接纳自有媒体 bucket 对象 URL
-    // 或已校验的 chat/注册路径；查询/解码异常不能被吞掉，否则会丢失清理目标。
-    var storagePaths = [];
-    function addAccountStoragePath(value) {
-      var raw = String(value || '').trim();
-      if (!raw) return;
-      var storagePath = raw;
-      if (/^https?:\/\//i.test(raw)) {
-        try {
-          var parsed = new URL(raw);
-          var match = parsed.pathname.match(/\/storage\/v1\/object\/(?:public|sign)\/(?:uploads|photo-wall)\/(.+)$/);
-          if (!match) return;
-          storagePath = decodeURIComponent(match[1]);
-        } catch (_) { return; }
-      }
-      storagePath = String(storagePath).replace(/^\/+/, '');
-      if (!/^(?:photos|thumbs|avatars|chat)\//i.test(storagePath) || storagePath.indexOf('..') >= 0 || storagePath.indexOf('\\') >= 0) return;
-      if (storagePaths.indexOf(storagePath) < 0) storagePaths.push(storagePath);
-    }
-    var ownedMediaRecords = [];
-    try {
-      var ownedMediaOffset = 0;
-      var ownedMediaPageSize = 500;
-      while (true) {
-        var ownedMediaPage = await supabase.from('posts')
-          .select('id, media_url, media_type, content').eq('user_name', userName)
-          .in('media_type', ['__photo_wall__', '__avatar__'])
-          .range(ownedMediaOffset, ownedMediaOffset + ownedMediaPageSize - 1);
-        if (!ownedMediaPage || ownedMediaPage.error) throw (ownedMediaPage && ownedMediaPage.error) || new Error('Photo/avatar lookup not confirmed');
-        ownedMediaRecords = ownedMediaRecords.concat(ownedMediaPage.data || []);
-        if ((ownedMediaPage.data || []).length < ownedMediaPageSize) break;
-        ownedMediaOffset += ownedMediaPageSize;
-      }
-    } catch (ownedMediaLookupError) {
-      return res.status(503).json({ error: '删除失败：查询照片/头像路径失败', code: 'delete_user_media_lookup_failed', partial: partialDeleted });
-    }
-    ownedMediaRecords.forEach(function(record) {
-      addAccountStoragePath(record.media_url);
-      try {
-        var body = JSON.parse(record.content || '{}');
-        ['storagePath', 'storage_path', 'thumb', 'thumbnailPath', 'thumbnail_path', 'rotatedPath', 'rotated_path'].forEach(function(key) { addAccountStoragePath(body[key]); });
-      } catch (_) {}
-    });
-    dmMessages.forEach(function(message) {
-      addAccountStoragePath(message.media_url);
-      try {
-        var body = JSON.parse(message.content || '{}');
-        var media = body && body.media;
-        if (media && typeof media === 'object') addAccountStoragePath(media.url || media.storage_path || media.storagePath);
-      } catch (_) {}
-    });
-    var dmRegistryRows = [];
-    async function readDmRegistryPages(column, values) {
-      var offset = 0;
-      var pageSize = 500;
-      while (true) {
-        var query = supabase.from('dm_media_uploads').select('id, storage_path, message_id, uploader, status');
-        if (column === 'uploader') query = query.eq(column, userName);
-        else query = query.in(column, values);
-        var page = await query.range(offset, offset + pageSize - 1);
-        if (!page || page.error) throw (page && page.error) || new Error('DM media registry lookup not confirmed');
-        dmRegistryRows = dmRegistryRows.concat(page.data || []);
-        if ((page.data || []).length < pageSize) break;
-        offset += pageSize;
-      }
-    }
-    try {
-      await readDmRegistryPages('uploader', [userName]);
-      for (var messageChunkStart = 0; messageChunkStart < dmMessageIds.length; messageChunkStart += 100) {
-        await readDmRegistryPages('message_id', dmMessageIds.slice(messageChunkStart, messageChunkStart + 100));
-      }
-    } catch (dmRegistryLookupError) {
-      return res.status(503).json({ error: '删除失败：查询私信媒体注册失败', code: 'delete_user_dm_media_lookup_failed', partial: partialDeleted });
-    }
-    var dmRegistryById = new Map();
-    dmRegistryRows.forEach(function(row) { if (row && row.id) dmRegistryById.set(String(row.id), row); });
-    dmRegistryRows = Array.from(dmRegistryById.values());
-    dmRegistryRows.forEach(function(row) { addAccountStoragePath(row.storage_path); });
-
-    try {
-      var registeredPostPaths = await retireAccountPostMediaUploads(supabase, userName);
-      registeredPostPaths.forEach(addAccountStoragePath);
-    } catch (postMediaCleanupError) {
-      return res.status(503).json({ error: '删除失败：待发布媒体清理未确认，请重试', code: 'delete_user_post_media_failed', partial: partialDeleted });
-    }
-    // Storage delete is idempotent. Partial failures must be durably queued; a failed
-    // queue write halts account deletion so the remaining paths are not orphaned.
-    var storagePending = 0;
-    if (storagePaths.length) {
-      var cleanup;
-      try {
-        var privatePhotoPaths = storagePaths.filter(safePhotoPath), publicPaths = storagePaths.filter(function(path) { return !safePhotoPath(path); });
-        var mediaCleanups = [];
-        if (privatePhotoPaths.length) mediaCleanups.push(await removeStorageWithQueue(supabase, { bucket:PHOTO_BUCKET, paths:privatePhotoPaths, photoId:'account_photos_' + userName, lastError:'account_delete_cleanup' }));
-        if (publicPaths.length) mediaCleanups.push(await removeStorageWithQueue(supabase, { bucket:'uploads', paths:publicPaths, photoId:'account_' + userName, lastError:'account_delete_cleanup' }));
-        cleanup = { ok:mediaCleanups.every(function(r) { return r.ok; }), removed:mediaCleanups.every(function(r) { return r.removed; }),
-          cleanup_pending:mediaCleanups.some(function(r) { return r.cleanup_pending; }), paths:mediaCleanups.filter(function(r) { return !r.removed; }).flatMap(function(r) { return r.paths || []; }) };
-      } catch (storageCleanupError) {
-        console.error('[admin] Storage cleanup exception:', storageCleanupError && storageCleanupError.message);
-        return res.status(503).json({ error: '删除失败：文件清理未确认，请重试', code: 'delete_user_storage_cleanup_failed', partial: partialDeleted });
-      }
-      if (!cleanup || !cleanup.ok) {
-        console.error('[admin] Storage cleanup not confirmed:', cleanup && cleanup.error && cleanup.error.message);
-        return res.status(503).json({ error: '删除失败：文件清理未确认，队列写入失败，请重试', code: 'delete_user_storage_cleanup_failed', partial: partialDeleted });
-      }
-      partialDeleted.storage_files = cleanup.removed ? storagePaths.length : Math.max(0, storagePaths.length - (cleanup.paths || []).length);
-      if (cleanup.cleanup_pending) {
-        storagePending = (cleanup.paths || []).length;
-        partialDeleted.storage_cleanup_queued = storagePending;
-      }
+    var has = function(index) { return !!(state[index].data && state[index].data.length); };
+    var retainedPolicyData = { bans: has(7), mutes: has(8), blacklist: has(9) };
+    var hasAuth = has(0), hasTombstone = has(1);
+    var hasLeftovers = has(2) || has(3) || has(4) || has(5) || has(6);
+    if (!hasAuth && !hasTombstone && !hasLeftovers) return res.status(404).json({ error: '用户不存在或已被注销' });
+    if (!hasAuth && hasTombstone && !hasLeftovers) {
+      return res.json({ ok: true, user_name: userName, already_deactivated: true, content_retained: true, deleted: partialDeleted, retained_policy_data: retainedPolicyData });
     }
 
-    // Delete received/sent DM posts by exact IDs so deleting a recipient account also
-    // removes messages authored by others, without touching unrelated conversation data.
-    var postIdsToDelete = userPostIds.concat(dmMessageIds).map(String);
-    postIdsToDelete = Array.from(new Set(postIdsToDelete));
-    async function deleteIdsInBatches(table, column, ids, marker) {
-      var deletedCount = 0;
-      for (var batchStart = 0; batchStart < ids.length; batchStart += 100) {
-        var query = supabase.from(table).delete({ count: 'exact' }).in(column, ids.slice(batchStart, batchStart + 100));
-        if (marker) query = query.eq('media_type', marker);
-        var deletion = await query;
-        if (!deletion || deletion.error) return { ok: false, count: deletedCount, error: deletion && deletion.error };
-        deletedCount += deletion.count || 0;
+    // 1) 先插入一行墓碑占住昵称，再删除登录记录：登录立刻失败，现有访问令牌立刻失效（身份查询查不到账号）。
+    //    必须是「删除」登录记录而不是改它的类型：数据库里账号私有的 AI 数据（长期记忆、工作台成果、研究进度、会话偏好）
+    //    和聊天账号投影都挂在登录记录的删除上，删除才会把它们一并清掉。
+    //    先做这一步，后面任何一步失败都不会留下「还能登录、数据只清了一半」的状态；失败时登录记录和墓碑可能同时存在，
+    //    重试会跳过已有的墓碑、继续删登录记录和剩余的私有数据。
+    if (hasAuth) {
+      if (!hasTombstone) {
+        var reserve = await supabase.from('posts').insert([{
+          user_name: userName,
+          media_type: AUTH_DELETED_MARKER,
+          media_url: 'deleted',
+          actor_key: AUTH_DELETED_MARKER,
+          content: JSON.stringify({ deleted_at: new Date().toISOString(), deleted_by: ADMIN_USERNAME })
+        }]);
+        if (!reserve || reserve.error) {
+          console.error('[admin] 注销账号：写入昵称墓碑失败:', reserve && reserve.error && reserve.error.message);
+          return res.status(503).json({ error: '注销失败：昵称保留未确认，请重试', code: 'delete_user_deactivate_failed', partial: partialDeleted });
+        }
       }
-      return { ok: true, count: deletedCount };
+      var removedAuth = await supabase.from('posts').delete({ count: 'exact' }).eq('user_name', userName).eq('media_type', AUTH_MARKER);
+      if (!removedAuth || removedAuth.error) {
+        console.error('[admin] 注销账号：删除登录记录失败:', removedAuth && removedAuth.error && removedAuth.error.message);
+        return res.status(503).json({ error: '注销失败：登录记录处理未确认，请重试', code: 'delete_user_deactivate_failed', partial: partialDeleted });
+      }
+      partialDeleted.auth_records = removedAuth.count || 0;
     }
-    if (postIdsToDelete.length) {
-      var cascadeLikeRes = await deleteIdsInBatches('likes', 'post_id', postIdsToDelete);
-      if (!cascadeLikeRes.ok) return res.status(500).json({ error: '删除失败：级联删除点赞失败', partial: partialDeleted });
-      partialDeleted.likes += cascadeLikeRes.count;
-      var cascadeCommentRes = await deleteIdsInBatches('comments', 'post_id', postIdsToDelete);
-      if (!cascadeCommentRes.ok) return res.status(500).json({ error: '删除失败：级联删除评论失败', partial: partialDeleted });
-      partialDeleted.comments += cascadeCommentRes.count;
-    }
-    if (userPostIds.length) {
-      var delPostsRes = await deleteIdsInBatches('posts', 'id', userPostIds);
-      if (!delPostsRes.ok) return res.status(500).json({ error: '删除失败：删除用户内容失败', partial: partialDeleted });
-      partialDeleted.posts = delPostsRes.count;
-    }
-    if (dmMessageIds.length) {
-      var deletedDm = await deleteIdsInBatches('posts', 'id', dmMessageIds, DM_MARKER);
-      if (!deletedDm.ok) return res.status(500).json({ error: '删除失败：删除私信失败', partial: partialDeleted });
-      partialDeleted.dm_messages = deletedDm.count;
-    }
-    var delLikesRes = await supabase.from('likes').delete({ count: 'exact' }).eq('user_name', userName);
-    if (delLikesRes.error) return res.status(500).json({ error: '删除失败：删除点赞失败', partial: partialDeleted });
-    partialDeleted.likes += delLikesRes.count || 0;
-    var delCommentsRes = await supabase.from('comments').delete({ count: 'exact' }).eq('user_name', userName);
-    if (delCommentsRes.error) return res.status(500).json({ error: '删除失败：删除评论失败', partial: partialDeleted });
-    partialDeleted.comments += delCommentsRes.count || 0;
 
-    // 清除账号私有 AI 工具数据和媒体注册行；不碰审计/邀请/会员/额度表。
+    // 2) 撤销所有登录会话（失败要报告，不能假装成功；重复执行安全）。
+    var revokeOk = true;
+    try { revokeOk = await revokeAllUserRefreshTokens(userName); }
+    catch (eRevoke) { revokeOk = false; console.error('[admin] 注销账号：撤销 refresh token 失败:', eRevoke && eRevoke.message); }
+
+    // 3) 个人资料与遥测、自定义模型密钥。
+    var delPrivate = await supabase.from('posts').delete({ count: 'exact' }).eq('user_name', userName).in('media_type', PRIVATE_POST_TYPES);
+    if (!delPrivate || delPrivate.error) return res.status(500).json({ error: '注销部分完成：清理个人资料失败，请重试', code: 'delete_user_partial', partial: partialDeleted });
+    partialDeleted.user_info = delPrivate.count || 0;
+
+    // 4) 账号私有的 AI 工具数据与评论请求幂等记录。
     var accountCleanupQueries = [
       { key: 'comment_requests', query: supabase.rpc('xtj_forget_comment_requests', { p_owner: userName }) },
-      { key: 'post_media_uploads', query: deleteQueuedAccountPostMediaUploads(supabase, userName, registeredPostPaths) },
       { key: 'ai_search_credit_claims', query: supabase.from('ai_search_credit_claims').delete().eq('user_name', String(userName).trim().toLowerCase()) },
       { key: 'ai_search_results', query: supabase.from('ai_search_results').delete({ count: 'exact' }).eq('owner_name', userName) },
       { key: 'ai_drafts', query: supabase.from('ai_drafts').delete({ count: 'exact' }).eq('owner_name', userName) },
@@ -17278,136 +17115,51 @@ app.delete('/admin/user/:userName', verifyToken, rateLimit(60000, 5), async (req
       var accountCleanupItem = accountCleanupQueries[accountCleanupIndex];
       var accountCleanupResult = await accountCleanupItem.query;
       if (!accountCleanupResult || accountCleanupResult.error) {
-        return res.status(500).json({ error: '删除部分完成：清理 ' + accountCleanupItem.key + ' 失败', code: 'delete_user_partial', partial: partialDeleted });
+        return res.status(500).json({ error: '注销部分完成：清理 ' + accountCleanupItem.key + ' 失败，请重试', code: 'delete_user_partial', partial: partialDeleted });
       }
       partialDeleted[accountCleanupItem.key] = accountCleanupResult.count || (accountCleanupItem.key === 'comment_requests' ? Number(accountCleanupResult.data) || 0 : 0);
     }
 
-    // 清理所有已发现的 DM 媒体注册记录，包括对方发送到该用户 DM 的媒体。
-    var dmRegistryIds = dmRegistryRows.map(function(row) { return row.id; }).filter(Boolean);
-    if (dmRegistryIds.length) {
-      var delLinkedDmMediaRes = await supabase.from('dm_media_uploads').delete({ count: 'exact' }).in('id', dmRegistryIds);
-      if (!delLinkedDmMediaRes || delLinkedDmMediaRes.error) {
-        return res.status(500).json({ error: '删除部分完成：清理关联私信媒体注册失败', code: 'delete_user_partial', partial: partialDeleted });
-      }
-      partialDeleted.dm_media = delLinkedDmMediaRes.count || 0;
-    }
-
-    // 撤销被删除用户的所有 refresh token
-    // ★ 加固：撤销期间任意 Supabase 查询/删除错误均向上报告，不能假装成功。
-    //   失败时返回 500 + partial，让管理员能感知并重试（幂等，可安全重跑）。
-    var revokeOk = true;
-    try {
-      revokeOk = await revokeAllUserRefreshTokens(userName);
-    } catch (eRevoke) {
-      revokeOk = false;
-      console.error('[admin] 撤销用户 refresh token 失败:', eRevoke && eRevoke.message);
-    }
-
-    // ★ 加固：删后校验——确认核心身份/内容行确实清空，避免"部分删除"被当成成功。
-    var verifyRes = { data: [], error: null };
-    if (userPostIds.length) {
-      verifyRes = await supabase.from('posts').select('id').in('id', userPostIds).limit(1);
-    }
-    var verifyDeleteFailed = !verifyRes || !!verifyRes.error;
-    var residualPosts = !!(verifyRes && verifyRes.data && verifyRes.data.length);
-    var retainedDmCheck = { data: [], error: null };
-    if (dmMessageIds.length) {
-      retainedDmCheck = await supabase.from('posts').select('id').eq('media_type', DM_MARKER)
-        .in('id', dmMessageIds.slice(0, 100)).limit(1);
-      for (var dmVerifyStart = 100; dmVerifyStart < dmMessageIds.length && !retainedDmCheck.error && !(retainedDmCheck.data || []).length; dmVerifyStart += 100) {
-        retainedDmCheck = await supabase.from('posts').select('id').eq('media_type', DM_MARKER)
-          .in('id', dmMessageIds.slice(dmVerifyStart, dmVerifyStart + 100)).limit(1);
-      }
-    }
-    var residualDm = !retainedDmCheck || !!retainedDmCheck.error || !!(retainedDmCheck.data && retainedDmCheck.data.length);
-    var registryVerify = { data: [], error: null };
-    var registryVerifyFailed = false;
-    for (var registryVerifyStart = 0; registryVerifyStart < dmRegistryIds.length; registryVerifyStart += 100) {
-      registryVerify = await supabase.from('dm_media_uploads').select('id')
-        .in('id', dmRegistryIds.slice(registryVerifyStart, registryVerifyStart + 100)).limit(1);
-      registryVerifyFailed = !registryVerify || !!registryVerify.error;
-      if (registryVerifyFailed || (registryVerify.data || []).length) break;
-    }
-    var residualRegistry = !!(registryVerify && registryVerify.data && registryVerify.data.length);
-    var remainingOwnedCheck = await supabase.from('posts').select('id').eq('user_name', userName)
-      .in('media_type', Array.from(deletableTypes)).limit(1);
-    var nullTypeCheck = await supabase.from('posts').select('id').eq('user_name', userName).is('media_type', null).limit(1);
-    var emptyTypeCheck = await supabase.from('posts').select('id').eq('user_name', userName).eq('media_type', '').limit(1);
-    var residualNullType = !nullTypeCheck || !!nullTypeCheck.error || !!(nullTypeCheck.data && nullTypeCheck.data.length);
-    var residualEmptyType = !emptyTypeCheck || !!emptyTypeCheck.error || !!(emptyTypeCheck.data && emptyTypeCheck.data.length);
-    var residualOwned = !remainingOwnedCheck || !!remainingOwnedCheck.error || !!(remainingOwnedCheck.data && remainingOwnedCheck.data.length);
-    var aiResidualChecks = await Promise.all([
-      supabase.from('ai_search_results').select('id').eq('owner_name', userName).limit(1),
-      supabase.from('ai_drafts').select('id').eq('owner_name', userName).limit(1),
-      supabase.from('ai_action_confirmations').select('id').eq('owner_name', userName).limit(1)
-    ]);
-    var residualAi = aiResidualChecks.some(function(result) { return !result || result.error || (result.data && result.data.length); });
-    // ★ 2026-09-24 修复（P1）：residual 只覆盖「本应删除却仍然存在」的数据。
-    //   retainedSystemPostCount（__login_event__/__user_visit__ 等按上注有意保留）
-    //   与 retainedPolicyData（封禁/禁言/拉黑，注释明确"不在删除范围内"）此前被
-    //   计入 residual 失败判定 —— 而每个登录/访问过的用户都必然有这类行，
-    //   导致删除接口对任何真实用户恒返回 500"仍有残留，请重试"，与"重复执行安全"
-    //   的设计自相矛盾。保留项仍照常写入响应与审计日志，供管理员核对。
-    var residual = residualPosts || residualOwned || residualNullType || residualEmptyType || residualDm || residualRegistry || residualAi || storagePending > 0;
-    var verificationFailed = verifyDeleteFailed || !retainedDmCheck || !!retainedDmCheck.error || registryVerifyFailed || !remainingOwnedCheck || !!remainingOwnedCheck.error || !nullTypeCheck || !!nullTypeCheck.error || !emptyTypeCheck || !!emptyTypeCheck.error || aiResidualChecks.some(function(result) { return !result || result.error; });
-
-    if (!revokeOk || verificationFailed || residual) {
-      await logAdminAudit('delete_user_partial', ADMIN_USERNAME,
-        'user:' + userName + ' revoke_ok:' + revokeOk + ' residual_posts:' + residualPosts + ' residual_dm:' + residualDm + ' residual_registry:' + residualRegistry + ' storage_pending:' + storagePending + ' retained_system_posts:' + retainedSystemPostCount
-      );
+    // 5) 注销后校验：不能还有可登录的账号记录，也不能还有应清掉的私有数据。内容不在校验范围内（本来就要保留）。
+    var after;
+    try { after = await readAccountState(); }
+    catch (verifyException) { after = null; }
+    var verificationFailed = !after || after.some(function(r) { return !r || r.error; });
+    var stillHas = function(index) { return !!(after && after[index] && after[index].data && after[index].data.length); };
+    var residual = verificationFailed || stillHas(0) || stillHas(2) || stillHas(4) || stillHas(5) || stillHas(6);
+    if (!revokeOk || residual) {
+      await logAdminAudit('delete_user_partial', ADMIN_USERNAME, 'user:' + userName + ' revoke_ok:' + revokeOk + ' residual_private_data:' + residual);
       return res.status(500).json({
-        error: !revokeOk
-          ? '删除部分完成：会话撤销失败，请重试（重复执行安全）'
-          : '删除部分完成：仍有残留或保留数据，请重试（重复执行安全）',
-        code: 'delete_user_partial',
-        partial: partialDeleted,
-        revoke_ok: revokeOk,
-        residual_posts: residualPosts,
-        residual_dm: residualDm,
-        residual_media_registry: residualRegistry,
-        storage_cleanup_pending: storagePending > 0,
-        retained_system_posts: retainedSystemPostCount,
-        retained_policy_data: retainedPolicyData
+        error: !revokeOk ? '注销部分完成：会话撤销失败，请重试（重复执行安全）' : '注销部分完成：仍有残留的私有数据，请重试（重复执行安全）',
+        code: 'delete_user_partial', partial: partialDeleted, revoke_ok: revokeOk, content_retained: true, retained_policy_data: retainedPolicyData
       });
     }
 
-    // 写入审计日志
     await logAdminAudit('delete_user', ADMIN_USERNAME,
-      'user:' + userName +
-      ' posts:' + partialDeleted.posts +
-      ' likes:' + partialDeleted.likes +
-      ' comments:' + partialDeleted.comments +
-      ' dm_messages:' + (partialDeleted.dm_messages || 0) +
-      ' dm_media:' + partialDeleted.dm_media +
+      'user:' + userName + ' action:deactivate content_retained:true' +
+      ' auth_records:' + partialDeleted.auth_records +
+      ' user_info:' + partialDeleted.user_info +
       ' ai_search_results:' + partialDeleted.ai_search_results +
       ' ai_drafts:' + partialDeleted.ai_drafts +
-      ' ai_action_confirmations:' + partialDeleted.ai_action_confirmations +
-      ' storage_files:' + partialDeleted.storage_files +
-      ' storage_cleanup_queued:' + partialDeleted.storage_cleanup_queued
+      ' ai_action_confirmations:' + partialDeleted.ai_action_confirmations
     );
-
     return res.json({
       ok: true,
       user_name: userName,
+      account_deactivated: true,
+      content_retained: true,
       deleted: {
-        posts: partialDeleted.posts,
-        likes: partialDeleted.likes,
-        comments: partialDeleted.comments,
-        dm_messages: partialDeleted.dm_messages || 0,
-        dm_media: partialDeleted.dm_media,
+        auth_records: partialDeleted.auth_records,
+        user_info: partialDeleted.user_info,
         ai_search_results: partialDeleted.ai_search_results,
         ai_drafts: partialDeleted.ai_drafts,
-        ai_action_confirmations: partialDeleted.ai_action_confirmations,
-        storage_files: partialDeleted.storage_files,
-        storage_cleanup_queued: partialDeleted.storage_cleanup_queued,
-        retained_system_posts: retainedSystemPostCount,
-        retained_policy_data: retainedPolicyData
-      }
+        ai_action_confirmations: partialDeleted.ai_action_confirmations
+      },
+      retained_policy_data: retainedPolicyData
     });
   } catch(e) {
-    console.error('[admin] 删除用户失败:', e.message || e);
-    return res.status(500).json({ error: '删除用户失败' });
+    console.error('[admin] 注销账号失败:', e.message || e);
+    return res.status(500).json({ error: '注销账号失败' });
   }
 });
 
@@ -17724,8 +17476,9 @@ app.post('/api/report', rateLimit(60000, 5), authenticateUser, async (req, res) 
     return res.status(400).json({ error: '无效的举报对象' });
   }
   if (targetUserVal) {
+    // 已注销账号留下的内容仍然可以被举报，所以墓碑也算「存在」。
     var { data: targetExistsRec, error: tgtCheckErr } = await supabase.from('posts')
-      .select('id').eq('user_name', String(targetUserVal)).eq('media_type', AUTH_MARKER).limit(1).maybeSingle();
+      .select('id').eq('user_name', String(targetUserVal)).in('media_type', [AUTH_MARKER, AUTH_DELETED_MARKER]).limit(1).maybeSingle();
     if (tgtCheckErr) return res.status(503).json({ error: '举报校验暂不可用' });
     if (!targetExistsRec) return res.status(400).json({ error: '被举报用户不存在' });
   }

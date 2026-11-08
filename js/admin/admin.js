@@ -1885,7 +1885,7 @@
 
     window.confirmDeleteUser = function(userName) {
         if (userName === ADMIN) { showToast('不能对管理员执行此操作', 'error'); return; }
-        showConfirm('删除用户账号', '确认删除用户「' + userName + '」吗？此操作不可恢复，会删除账号登录信息、帖子、照片、点赞、评论等用户数据。', '确认删除', function() {
+        showConfirm('注销用户账号', '确认注销用户「' + userName + '」吗？账号将无法再登录，登录信息、邮箱、设备与位置记录、自定义模型密钥和 AI 私有数据会被清除，昵称也不能再被别人注册。他发过的帖子、照片、视频、评论、点赞和聊天消息都会保留。', '确认注销', function() {
             window.deleteUserAccount(userName);
         });
     };
@@ -1897,7 +1897,7 @@
         if (String(userName || '') === String(ADMIN)) { showToast('不能对管理员执行此操作', 'error'); return; }
         try {
             await apiCall('DELETE', '/admin/user/' + encodeURIComponent(userName));
-            showToast('用户账号已删除', 'success');
+            showToast('用户账号已注销（发布的内容已保留）', 'success');
             await loadAllData(true);
             renderTab('users');
         } catch(e) {
@@ -3754,7 +3754,7 @@
                 'cleanup_logs': '清理日志',
                 'update_security_settings': '修改安全设置',
                 'review_security_alert': '审查安全提醒',
-                'delete_user': '删除用户账号',
+                'delete_user': '注销用户账号',
                 'configure_flash_limits': '修改闪图额度',
                 'view_user_gps_history': '查看授权 GPS 历史'
             };

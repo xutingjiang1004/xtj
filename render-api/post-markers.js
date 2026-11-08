@@ -7,6 +7,8 @@
 const REPORT_MARKER = '__report__';
 const DM_MARKER = '__dm__';
 const AUTH_MARKER = '__auth__';
+// 账号注销后的墓碑：登录记录改成这个类型。保留昵称（别人不能再注册同名账号去接管他留下的内容），且任何地方都不再把它当成可登录的账号。
+const AUTH_DELETED_MARKER = '__auth_deleted__';
 const VISIT_MARKER = '__visit__';
 const ATTACK_MARKER = '__attack__';
 const ADMIN_AUTH_MARKER = '__admin_auth__';
@@ -51,6 +53,7 @@ module.exports = {
   REPORT_MARKER,
   DM_MARKER,
   AUTH_MARKER,
+  AUTH_DELETED_MARKER,
   VISIT_MARKER,
   ATTACK_MARKER,
   ADMIN_AUTH_MARKER,
