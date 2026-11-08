@@ -39,7 +39,7 @@ function routeFixture(options={}) {
   const events=[],calls=[],rows=[],toolContexts=[],usage=[],timers=[]; let handler;
   const req=new EventEmitter(),res=new EventEmitter(); req.userName=options.userName===undefined?'xxz':options.userName; req.body={...body(),...options.body};
   Object.assign(res,{writableEnded:false,headers:{},setHeader(k,v){this.headers[k]=v;},flushHeaders(){},end(){this.writableEnded=true;}});
-  const c={app:{post(_path,...handlers){handler=handlers.at(-1);}},express:{json(){}},authenticateUser(){},aiChatConcurrencyGate(){},aiRequestMiddleware(){},resolveAiModelReference(){},rateLimit(){},
+  const c={app:{post(_path,...handlers){handler=handlers.at(-1);}},express:{json(){}},aiLargeJson(){},authenticateUser(){},aiChatConcurrencyGate(){},aiRequestMiddleware(){},resolveAiModelReference(){},rateLimit(){},
     openRouter,ADMIN_USERNAME:'xxz',
     guestOpenRouterAuth:openRouter.createGuestOpenRouterAuth({authenticateUser(){},now:()=>Date.now()}),
     guestOpenRouterCatalogAuth:openRouter.createGuestOpenRouterAuth({authenticateUser(){},now:()=>Date.now(),allowAnonymous:true}),

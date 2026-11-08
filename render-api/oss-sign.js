@@ -31,7 +31,68 @@ function validMediaPath(value) {
   return typeof value === 'string' && PATH_RE.test(value) && !value.includes('..');
 }
 
-function installOssSign(app, { authenticateUser, rateLimit, banError } = {}) {
+// 每用户每小时可申请签名的总字节数（按申报大小计）。OSS V1 预签名没法把长度写进签名，
+// 申报值只是自觉；这里给「一个账号能往公共读桶里塞多少」加一道上限。0 表示不限制。
+const SIGN_WINDOW_MS = 60 * 60 * 1000;
+function hourlySignBytes(env) {
+  const raw = Number((env || process.env).OSS_SIGN_HOURLY_MB);
+  const mb = Number.isFinite(raw) && raw >= 0 ? raw : 1024;
+  return Math.floor(mb * 1024 * 1024);
+}
+function createSignQuota(options) {
+  const opts = options || {};
+  const now = opts.now || Date.now;
+  const limit = typeof opts.limit === 'function' ? opts.limit : hourlySignBytes;
+  const rows = new Map();
+  function prune(at) { if (rows.size > 5000) for (const [key, row] of rows) if (row.resetAt <= at) rows.delete(key); }
+  return {
+    // 申请 bytes 字节：够就扣并返回 true，超出返回 false。
+    take(user, bytes) {
+      const max = limit();
+      if (!max) return true;
+      const at = now();
+      prune(at);
+      let row = rows.get(user);
+      if (!row || row.resetAt <= at) { row = { used: 0, resetAt: at + SIGN_WINDOW_MS }; rows.set(user, row); }
+      if (row.used + bytes > max) return false;
+      row.used += bytes;
+      return true;
+    },
+    used(user) { const row = rows.get(user); return row && row.resetAt > now() ? row.used : 0; }
+  };
+}
+
+// 发帖前核对 OSS 上的对象：真实存在、大小不超过上限（附件还要与申报大小一致）、类型是允许的媒体。
+// 数据库函数对 OSS 附件跳过了存在性与大小校验，这里补上。
+// items: [{ path, size?, kind }]，kind 为 'image'（附件，不收 svg）或 'image'|'video'|'audio'（单个媒体，须与帖子类型一致）。
+// 返回 { ok:true } 或 { ok:false, status, code, error }。这里只判断、不删除：调用时路径还没核对过归属，
+// 违规对象由上传登记表的清理流程（只处理登记人自己的路径）负责回收，避免用别人的路径诱导误删。
+async function verifyPostOssMedia(items, options) {
+  const opts = options || {};
+  const head = opts.headObject || ossMedia.headObject;
+  const list = Array.isArray(items) ? items : [];
+  const results = await Promise.all(list.map(async item => {
+    try { return { item, meta: await head(item.path, opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : undefined) }; }
+    catch (error) { return { item, error }; }
+  }));
+  const transient = results.find(row => row.error);
+  for (const { item, meta } of results) {
+    if (!meta) continue;
+    if (!meta.exists) return { ok: false, status: 400, code: 'media_not_uploaded', error: '图片还没有上传完成，请重新发布' };
+    const family = String(meta.contentType || '').split('/')[0];
+    const svg = /^image\/svg/.test(meta.contentType);
+    const typeOk = svg ? false : (item.kind === 'image' ? family === 'image' : family === item.kind);
+    const sizeKnown = meta.size >= 0;
+    const tooBig = sizeKnown && meta.size > MAX_MEDIA_BYTES;
+    const mismatch = Number.isSafeInteger(item.size) && sizeKnown && meta.size !== item.size;
+    if (!typeOk) { return { ok: false, status: 400, code: 'invalid_media_type', error: '媒体类型无效' }; }
+    if (tooBig || mismatch) { return { ok: false, status: 400, code: 'invalid_attachment_size', error: '文件大小与申报不一致或超过50MB' }; }
+  }
+  if (transient) return { ok: false, status: 503, code: 'media_verify_unavailable', error: '媒体校验暂不可用，请重试', retryable: true };
+  return { ok: true };
+}
+
+function installOssSign(app, { authenticateUser, rateLimit, banError, signQuota = createSignQuota() } = {}) {
   // 启动自检：只报「有没有」，绝不输出密钥。排查直传失败时先看这四行。
   try {
     const c = ossMedia.config();
@@ -57,6 +118,11 @@ function installOssSign(app, { authenticateUser, rateLimit, banError } = {}) {
     const size = req.body && req.body.size;
     if (!Number.isSafeInteger(size) || size <= 0) return res.status(400).json({ ok: false, code: 'invalid_media_size' });
     if (size > MAX_MEDIA_BYTES) return res.status(413).json({ ok: false, code: 'file_too_large', error: '每个文件不能超过50MB' });
+    // 单账号每小时的签名总量上限：超出时前端会按「签名失败」回退到 Supabase 老链路，不会让发帖失败。
+    if (!signQuota.take(String(req.userName || ''), size)) {
+      res.set('Retry-After', '600');
+      return res.status(429).json({ ok: false, code: 'oss_quota_exceeded', error: '上传量较大，请稍后再试', retryable: true });
+    }
     try {
       const signed = ossMedia.presignedPutUrl(path, {
         contentType,
@@ -71,4 +137,4 @@ function installOssSign(app, { authenticateUser, rateLimit, banError } = {}) {
   });
 }
 
-module.exports = { installOssSign, validMediaPath, OBJECT_CACHE_CONTROL, SIGN_TTL_SECONDS, MAX_MEDIA_BYTES };
+module.exports = { installOssSign, createSignQuota, hourlySignBytes, verifyPostOssMedia, validMediaPath, OBJECT_CACHE_CONTROL, SIGN_TTL_SECONDS, MAX_MEDIA_BYTES };

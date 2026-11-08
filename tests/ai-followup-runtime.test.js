@@ -84,7 +84,7 @@ function cachedResearchRoute(rows, cache = true, persistId = 'saved-current-id',
   const db = { from() { const filters = []; let q = { select() { return q; }, eq(k,v) { filters.push(r => r[k] === v); queries.push([k,v]); return q; },
     filter(k,_op,p) { const literal = p.replace(/\\_/g, '_').replace(/%$/, ''); filters.push(r => r[k].startsWith(literal)); return q; },
     order() { return q; }, limit() { return q; }, then(resolve, reject) { return Promise.resolve({ data: rows.filter(r => filters.every(f => f(r))), error: null }).then(resolve, reject); } }; return q; } };
-  const c = { ...history, AI_CHAT_HOURLY_IP_LIMIT:200, openRouter:require('../render-api/openrouter'),ADMIN_USERNAME:'alice', AbortController, Date, require: name => require('../render-api/' + name.slice(2)), parseDocumentBuffer: async () => ({}), ocrImageBuffer: async () => ({}), sharp: {}, supabase: db, app: { post(...args) { handler = args.at(-1); } }, express:{json:()=>null},fetchSafeWebPage:async()=>null, authenticateUser() {}, aiChatConcurrencyGate() {}, aiRequestMiddleware() {}, resolveAiModelReference() {}, rateLimit() {},
+  const c = { ...history, aiLargeJson() {}, AI_CHAT_HOURLY_IP_LIMIT:200, openRouter:require('../render-api/openrouter'),ADMIN_USERNAME:'alice', AbortController, Date, require: name => require('../render-api/' + name.slice(2)), parseDocumentBuffer: async () => ({}), ocrImageBuffer: async () => ({}), sharp: {}, supabase: db, app: { post(...args) { handler = args.at(-1); } }, express:{json:()=>null},fetchSafeWebPage:async()=>null, authenticateUser() {}, aiChatConcurrencyGate() {}, aiRequestMiddleware() {}, resolveAiModelReference() {}, rateLimit() {},
     AI_AGENT_MESSAGE_MARKER: '__ai_agent_msg__', tryAcquireDeepResearch: () => () => {}, enforceAiChatAccess: async () => ({ allowed: true }), measureSearchQuota: async () => ({ allowed: true }),
     validateString: s => s, genConvId: () => 'GENERATED1', researchCacheKey: () => 'fixture', researchCache: new Map(), researchCacheGet: () => cache ? { answer: 'REPORT', sources: [] } : null,
     researchCacheSet() {}, getAiConfig: async () => ({}), runSelfResearchFlow: async opts => { if (cancelFlow) opts.cancelToken.cancelled = true; return { answer: 'REPORT', sources: [] }; },
@@ -227,7 +227,7 @@ function customResearchRoute({ saveError = null, incomplete = false, cancelled =
     // ★ 2026-10-27 限时公开：路由片段内引用了 OpenRouter 公开期鉴权中间件，vm 上下文必须提供。
     guestOpenRouterAuth: require('../render-api/openrouter').createGuestOpenRouterAuth({ authenticateUser() {}, now: () => Date.now() }),
     rateLimit() {}, AI_CHAT_HOURLY_IP_LIMIT: 10, AI_CHAT_MESSAGE_MAX_LEN: 50000, ADMIN_USERNAME: 'admin',
-    express: { json() {} }, AbortController, URL, TextDecoder, setTimeout, clearTimeout, setInterval, clearInterval,
+    express: { json() {} }, aiLargeJson() {}, AbortController, URL, TextDecoder, setTimeout, clearTimeout, setInterval, clearInterval,
     validateString: value => value, genConvId: () => 'GENERATED1', extractVisionImageUrls: () => [],
     assertSafeWebUrl: async url => ({ parsed: new URL(url), addresses: [{ address: '203.0.113.20', family: 4 }] }),
     enforceAiChatAccess: async () => ({ allowed: true }), recordAiTurnUsage: async () => {},

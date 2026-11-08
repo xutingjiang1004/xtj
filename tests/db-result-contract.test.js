@@ -144,8 +144,9 @@ test('cleanupOldLogs 查询失败不再返回 { deleted: 0 }', () => {
   const src = sliceFn('cleanupOldLogs');
   // 旧版: if (error || !data || !data.length) return { deleted: 0 };
   assert.doesNotMatch(src, /return \{ deleted: 0 \}/);
-  // 新版: 查询错误时返回带 retryable/error 的 _dbResult
-  assert.match(src, /if \(selectRes\.error\) \{[\s\S]*return _dbResult\(operation, 0, 0, 0, \{ retryable: cls1\.retryable, error: cls1\.error \}\);/);
+  // 新版: 查询错误时返回带 retryable/error 的 _dbResult。
+  // 2026-11-08 起按页循环，后面几页出错时要带上前面已经处理的计数，所以不再写死 0,0,0。
+  assert.match(src, /if \(selectRes\.error\) \{[\s\S]*return _dbResult\(operation, attempted, succeeded, failed, \{ retryable: cls1\.retryable, error: cls1\.error \}\);/);
 });
 
 test('cleanupOldLogs 删除批次使用 .select(id) 接收实际删除行数', () => {
@@ -161,8 +162,10 @@ test('cleanupOldLogs 用 delRes.data.length 而非 batch.length 计数成功', (
 
 test('cleanupOldLogs 真正空数据返回 ok=true 不是伪装', () => {
   const src = sliceFn('cleanupOldLogs');
-  // if (!data.length) { return _dbResult(operation, 0, 0, 0); }
-  assert.match(src, /if \(!data\.length\) \{[\s\S]*return _dbResult\(operation, 0, 0, 0\);/);
+  // 没有可清理的行：循环直接结束，最终结果是 attempted=0、failed=0、没有 error（_dbResult 据此给 ok=true），而不是伪装成失败。
+  assert.match(src, /if \(!data\.length\) break;/);
+  assert.match(src, /return _dbResult\(operation, attempted, succeeded, failed, \{\s*retryable: anyRetryable,\s*error: lastError\s*\}\);/);
+  assert.equal(require('../render-api/db-result').dbResult('cleanup_old_logs:login', 0, 0, 0, { retryable: false, error: null }).ok, true);
 });
 
 test('cleanupOldLogs 未知类型返回 INVALID_TYPE 错误', () => {

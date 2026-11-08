@@ -81,7 +81,8 @@ test('stored auth credentials use scrypt and legacy records upgrade atomically',
   assert.match(source, /crypto\.scrypt/);
   const login = routeBlock("app.post('/api/user/login'", '// 刷新用户 access token');
   assert.match(login, /verifyAuthPassword/);
-  assert.match(login, /var \{ user_name, password \} = req\.body/);
+  // 请求体缺失或不是 JSON 时按缺少参数处理（400），不能直接解构 undefined；仍然只读 user_name / password。
+  assert.match(login, /var \{ user_name, password \} = \(req\.body && typeof req\.body === 'object'\) \? req\.body : \{\}/);
   assert.doesNotMatch(login, /password_hash/);
   assert.match(login, /update\(\{ media_url: verifier \}\)/);
   assert.match(login, /eq\('media_url', authRec\.media_url\)/);

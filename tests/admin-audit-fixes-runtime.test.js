@@ -199,6 +199,10 @@ test('AB-02 administrator cookie gateway enforces validation/revocation before r
  await request(app).get('/api/uploads/media').query({path}).set('Cookie','xtj_admin_token=invalid').expect(401);
  await request(app).get('/api/uploads/media').query({path}).set('Cookie','xtj_admin_token=revoked').expect(401);
  assert.equal(bytesRead,0);
+ // 2026-11-05 产品决定：管理员读帖子媒体和普通用户一样，看不到他人的私密帖（只有自己的）。已验证的管理员 Cookie 也是 404、不读字节。
+ await request(app).get('/api/uploads/media').query({path}).set('Cookie','xtj_admin_token=verified-admin').expect(404);
+ assert.equal(bytesRead,0);
+ rows[0].visibility='public';
  const result=await request(app).get('/api/uploads/media').query({path}).set('Cookie','xtj_admin_token=verified-admin').expect(200);assert.equal(result.body.toString(),'unchanged-original');assert.equal(bytesRead,1);
  rows[0].is_deleted=true;await request(app).get('/api/uploads/media').query({path}).set('Cookie','xtj_admin_token=verified-admin').expect(404);assert.equal(bytesRead,1);
 });

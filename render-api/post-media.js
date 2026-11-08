@@ -49,6 +49,16 @@ function isLocalUploadUrl(value, origin) {
   try { const url = new URL(value); return url.origin === new URL(origin).origin && /^\/storage\/v1\/object\/(public|sign)\/uploads\//.test(url.pathname); }
   catch (_) { return false; }
 }
+// 直传 OSS 的原图不在 Supabase 存储里：登记人放弃上传（或登记已被判定为不再使用）时，
+// 也要把 OSS 上的对象回收。调用方必须已经通过 claim_post_media_cleanup（归属已核对、未被帖子引用）。
+// 对象不存在（404）视为已删除；OSS 未配置时什么都不做；其他失败向上抛，让登记行保留、稍后重试。
+async function removeOssUpload(path, options) {
+  const opts = options || {};
+  const enabled = opts.enabled || ossMedia.enabled;
+  if (!enabled() || !validPath(path)) return false;
+  await (opts.deleteObject || ossMedia.deleteObject)(path);
+  return true;
+}
 async function checked(query) { const result = await query; if (!result || result.error) throw result && result.error || Error('post_media_unavailable'); return result.data; }
 function installPostMedia(app, { supabase, authenticateUser, rateLimit, userBanError }) {
   let timer, busy = false, cursor = '';
@@ -82,6 +92,7 @@ function installPostMedia(app, { supabase, authenticateUser, rateLimit, userBanE
       if (claimed.referenced) return res.json({ ok: true, referenced: true, cleanup_pending: false });
       const removed = await removeStorageWithQueue(supabase, { bucket: 'uploads', paths: [path], photoId: 'post-media:' + uploadId });
       if (!removed.ok) return unavailable(res);
+      await removeOssUpload(path);
       await checked(supabase.from('post_media_uploads').update({ cleaned_at: new Date().toISOString() }).eq('storage_path', path).eq('status', 'cleanup'));
       res.json({ ok: true, referenced: false, cleanup_pending: !!removed.cleanup_pending });
     } catch (_) { unavailable(res); }
@@ -114,6 +125,7 @@ async function sweepPostMediaUploads(supabase, { cursor = '', now = Date.now(), 
       if (!claim || !claim.ok || claim.referenced) continue;
       const result = await removeStorageWithQueue(supabase, { bucket: 'uploads', paths: [row.storage_path], photoId: 'post-media:' + row.upload_id });
       if (!result.ok) throw Error('cleanup_queue_failed');
+      await removeOssUpload(row.storage_path);
       const account = await checked(supabase.from('posts').select('id').eq('user_name', row.user_name).eq('media_type', '__auth__').limit(1).maybeSingle());
       if (!account) {
         await checked(supabase.from('post_media_uploads').delete().eq('storage_path', row.storage_path).eq('status', 'cleanup'));
@@ -158,4 +170,4 @@ async function createPostWithMedia(supabase, actor, path, uploadId, payload) {
   if (!data || !data.ok || !data.post) return { error: { code: data && data.code || 'media_ownership', message: '媒体登记已失效，请重新选择附件' } };
   return { data: data.post, error: null, duplicate: data.duplicate === true };
 }
-module.exports = { installPostMedia, createPostWithMedia, parsePostMediaUrl, parseOssMediaUrl, isOssMediaUrl, ossOrigin, isLocalUploadUrl, validPath, sweepPostMediaUploads, retireAccountPostMediaUploads, deleteQueuedAccountPostMediaUploads };
+module.exports = { removeOssUpload, installPostMedia, createPostWithMedia, parsePostMediaUrl, parseOssMediaUrl, isOssMediaUrl, ossOrigin, isLocalUploadUrl, validPath, sweepPostMediaUploads, retireAccountPostMediaUploads, deleteQueuedAccountPostMediaUploads };

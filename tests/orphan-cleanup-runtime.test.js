@@ -24,15 +24,18 @@ const oss = file => 'https://test-bucket.oss-cn-hangzhou.aliyuncs.com/' + file;
 
 test('删帖后要清的 OSS 对象：原图、附件、缩略图、封面；别的来源一概不碰', () => withOssEnv(() => {
   const { collectPostOssPaths } = require('../render-api/oss-cleanup');
+  // 缩略图名字与前端一致：posts/thumb_<32 位十六进制>.jpg；封面以作者名开头。
+  const thumb = 'posts/thumb_0123456789abcdef0123456789abcdef.jpg';
   const post = {
+    user_name: 'alice',
     media_url: oss('posts/alice_1_a_video.mp4'),
     content: JSON.stringify({ __type: '__xtj_post_v2__', text: 'hi', meta: {
-      thumbs: [oss('posts/thumb_alice_1_a.jpg'), 'https://project.supabase.co/storage/v1/object/public/uploads/posts/other.jpg', 'https://evil.example/posts/x.jpg'],
+      thumbs: [oss(thumb), 'https://project.supabase.co/storage/v1/object/public/uploads/posts/other.jpg', 'https://evil.example/posts/x.jpg'],
       poster_url: oss('posters/alice_1_a.jpg') } })
   };
   const attachments = [{ media_url: oss('posts/alice_1_b.png') }, { media_url: 'https://project.supabase.co/storage/v1/object/public/uploads/posts/c.png' }, { media_url: null }];
   assert.deepEqual(collectPostOssPaths(post, attachments).sort(), [
-    'posters/alice_1_a.jpg', 'posts/alice_1_a_video.mp4', 'posts/alice_1_b.png', 'posts/thumb_alice_1_a.jpg'
+    'posters/alice_1_a.jpg', 'posts/alice_1_a_video.mp4', 'posts/alice_1_b.png', thumb
   ]);
   assert.deepEqual(collectPostOssPaths({ media_url: 'https://project.supabase.co/x', content: 'plain text' }, []), []);
   assert.deepEqual(collectPostOssPaths({ media_url: oss('posts/../../dm-private/secret') }, []), [], 'path tricks are not accepted');

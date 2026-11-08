@@ -9,6 +9,8 @@ const { aiConversationActorPattern, parseAiHistoryCursor, queryAiHistoryPage } =
 const { createComment, readRelationPage, readFeedEngagement } = require('./post-interactions');
 const { readPostViewers } = require('./post-viewers');
 const { readPostOssPaths, deleteOssObjects } = require('./oss-cleanup');
+const { sanitizePostContent } = require('./post-meta');
+const { verifyPostOssMedia } = require('./oss-sign');
 const { readPhotoWallPage } = require('./photo-wall-page');
 const { createAdaptivePoller } = require('./adaptive-poller');
 const { createMediaPreviews } = require('./media-previews');
@@ -4715,11 +4717,11 @@ app.use(function(req, res, next) {
   // rather than letting /./ or repeated slashes skip directory restrictions.
   if (p.includes('//') || p.split('/').some(function(segment) { return segment === '.'; })) return res.status(404).end();
   // 精确文件匹配（2026-09-22：Vercel 已弃用，/vercel.json 条目随文件删除一并移除）
-  var exact = ['/package.json', '/package-lock.json', '/render.yaml', '/README.md', '/CHANGELOG.md', '/CODE_INDEX.md', '/bug_audit_report.md', '/security_best_practices_report.md', '/.gitignore', '/.gitattributes', '/playwright.config.js', '/playwright.config.ts'];
+  var exact = ['/package.json', '/package-lock.json', '/render.yaml', '/README.md', '/CHANGELOG.md', '/CODE_INDEX.md', '/bug_audit_report.md', '/security_best_practices_report.md', '/.gitignore', '/.gitattributes', '/playwright.config.js', '/playwright.config.ts', '/wrangler.jsonc', '/wrangler.json', '/wrangler.toml', '/project.config.json'];
   if (exact.indexOf(p) >= 0) return res.status(404).end();
   // 目录前缀匹配（★ M10 增补：audit-reports/ 等此前未覆盖的敏感目录）
   // ★ 2026-09-26（审计 P2-33）：补 /downloads/、/miniprogram/、/.commandcode/ 等此前遗漏的目录。
-  var dirs = ['/render-api/', '/scripts/', '/tests/', '/supabase/', '/mcp-servers/', '/node_modules/', '/docs/', '/audit-reports/', '/downloads/', '/miniprogram/', '/.commandcode/', '/backups/', '/.git/', '/.github/', '/.codex/', '/.cursor/', '/.agents/', '/.trae/', '/.trae-html-share-packages/', '/.workbuddy/', '/.playwright-cli/', '/output/', '/playwright-report/', '/test-results/', '/.playwright/'];
+  var dirs = ['/render-api/', '/scripts/', '/tests/', '/supabase/', '/mcp-servers/', '/node_modules/', '/docs/', '/audit-reports/', '/downloads/', '/miniprogram/', '/.commandcode/', '/backups/', '/.git/', '/.github/', '/.codex/', '/.cursor/', '/.agents/', '/.trae/', '/.trae-html-share-packages/', '/.workbuddy/', '/.playwright-cli/', '/output/', '/playwright-report/', '/test-results/', '/.playwright/', '/cloudflare/'];
   for (var i = 0; i < dirs.length; i++) { if (p.indexOf(dirs[i]) === 0) return res.status(404).end(); }
   // 后缀匹配（★ M10 增补：*.sql 为数据库迁移/修复脚本，禁止对外）
   // ★ 2026-09-26（审计 P2-33）：补 .txt/.ps1/.cmd/.exe/.zip/.yml 等——一次性探测输出、
@@ -5825,45 +5827,56 @@ async function cleanupOldLogs(type) {
       error: { code: 'INVALID_TYPE', message: '未知的日志类型: ' + String(type) }
     });
 
-    // Phase 5-P0-3: 查询失败必须返回真实错误，不得伪装成 { deleted: 0 }
-    var selectRes = await supabase.from('posts')
-      .select('id')
-      .eq('media_type', mediaType)
-      .lt('created_at', cutoff);
-    if (selectRes.error) {
-      var cls1 = _classifySupabaseError(selectRes.error);
-      console.warn('[Cleanup] 清理 ' + type + ' 查询失败:', selectRes.error.message);
-      return _dbResult(operation, 0, 0, 0, { retryable: cls1.retryable, error: cls1.error });
-    }
-    var data = selectRes.data || [];
-    if (!data.length) {
-      // 真正的"无可清理"，不是 DB 错误
-      return _dbResult(operation, 0, 0, 0);
-    }
-
-    var ids = data.map(function(r) { return r.id; });
-    var attempted = ids.length;
+    // ★ 2026-11-08：此前一次 select 不分页，Supabase 默认单次最多返回 1000 行，积压超过 1000 行时
+    //   每天只清一千行，永远追不上。现在按页（500 行）循环，每次最多 20 页；某一页删除有失败就停下，
+    //   避免重复读到同一批删不掉的行而空转。
+    var attempted = 0;
     var succeeded = 0;
     var failed = 0;
     var lastError = null;
     var anyRetryable = false;
-
-    // Delete in batches of 100 — chain .select() to receive deleted rows so we can count real successes
-    for (var i = 0; i < ids.length; i += 100) {
-      var batch = ids.slice(i, i + 100);
-      var delRes = await supabase.from('posts').delete().in('id', batch).select('id');
-      if (delRes.error) {
-        var cls2 = _classifySupabaseError(delRes.error);
-        failed += batch.length;
-        lastError = cls2.error;
-        if (cls2.retryable) anyRetryable = true;
-        console.warn('[Cleanup] 清理 ' + type + ' 删除批次失败:', delRes.error.message);
-      } else {
-        // Use actual returned rows count (safer than batch.length which assumes all succeeded)
-        var actuallyDeleted = Array.isArray(delRes.data) ? delRes.data.length : 0;
-        succeeded += actuallyDeleted;
-        failed += (batch.length - actuallyDeleted);
+    var CLEANUP_PAGE = 500;
+    var CLEANUP_MAX_PAGES = 20;
+    for (var cleanupPage = 0; cleanupPage < CLEANUP_MAX_PAGES; cleanupPage++) {
+      // Phase 5-P0-3: 查询失败必须返回真实错误，不得伪装成 { deleted: 0 }
+      var selectRes = await supabase.from('posts')
+        .select('id')
+        .eq('media_type', mediaType)
+        .lt('created_at', cutoff)
+        .order('created_at', { ascending: true })
+        .limit(CLEANUP_PAGE);
+      if (selectRes.error) {
+        var cls1 = _classifySupabaseError(selectRes.error);
+        console.warn('[Cleanup] 清理 ' + type + ' 查询失败:', selectRes.error.message);
+        return _dbResult(operation, attempted, succeeded, failed, { retryable: cls1.retryable, error: cls1.error });
       }
+      var data = selectRes.data || [];
+      // 真正的"无可清理"，不是 DB 错误
+      if (!data.length) break;
+
+      var ids = data.map(function(r) { return r.id; });
+      attempted += ids.length;
+      var pageFailed = 0;
+      // Delete in batches of 100 — chain .select() to receive deleted rows so we can count real successes
+      for (var i = 0; i < ids.length; i += 100) {
+        var batch = ids.slice(i, i + 100);
+        var delRes = await supabase.from('posts').delete().in('id', batch).select('id');
+        if (delRes.error) {
+          var cls2 = _classifySupabaseError(delRes.error);
+          failed += batch.length;
+          pageFailed += batch.length;
+          lastError = cls2.error;
+          if (cls2.retryable) anyRetryable = true;
+          console.warn('[Cleanup] 清理 ' + type + ' 删除批次失败:', delRes.error.message);
+        } else {
+          // Use actual returned rows count (safer than batch.length which assumes all succeeded)
+          var actuallyDeleted = Array.isArray(delRes.data) ? delRes.data.length : 0;
+          succeeded += actuallyDeleted;
+          failed += (batch.length - actuallyDeleted);
+          pageFailed += (batch.length - actuallyDeleted);
+        }
+      }
+      if (pageFailed > 0 || ids.length < CLEANUP_PAGE) break;
     }
     return _dbResult(operation, attempted, succeeded, failed, {
       retryable: anyRetryable,
@@ -6375,11 +6388,15 @@ async function checkPersistentRateLimit(key, windowMs, maxRequests) {
     // 同时保证长度恒定（配合迁移 036 的 ^rl_[a-zA-Z0-9_-]{1,128}$ 唯一索引）。
     var keyDigest = crypto.createHash('sha256').update(String(key)).digest('hex').slice(0, 32);
     var actorKey = 'rl_' + keyDigest;
-    var { data: existing } = await supabase.from('posts')
+    var { data: existing, error: existingError } = await supabase.from('posts')
       .select('id, content, created_at')
       .eq('media_type', DB_RATE_LIMIT_MARKER)
       .eq('media_url', actorKey)
       .maybeSingle();
+    // 数据库不可用（含 Supabase 额度用完的 402）：这是服务不可用，不是「请求过于频繁」。
+    // 带上 unavailable，调用方才会回 503，由 supabase-availability 转成明确的额度提示，
+    // 而不是误导用户去重试一个并不存在的限流。
+    if (existingError) return { limited: true, retryAfter: 30, degraded: true, failClosed: true, unavailable: true };
 
     var count = 0;
     var resetAt = now + windowMs;
@@ -6421,14 +6438,14 @@ async function checkPersistentRateLimit(key, windowMs, maxRequests) {
         }
         // 唯一索引冲突（并发方已插入）→ 重读该行；其他错误 fail-closed
         if (ins.error && !isDuplicateKeyError(ins.error)) {
-          return { limited: true, retryAfter: Math.ceil(windowMs / 1000), degraded: true, failClosed: true };
+          return { limited: true, retryAfter: 30, degraded: true, failClosed: true, unavailable: true };
         }
         var reread = await supabase.from('posts')
           .select('id, content, created_at')
           .eq('media_type', DB_RATE_LIMIT_MARKER)
           .eq('media_url', actorKey)
           .maybeSingle();
-        if (reread.error) return { limited: true, retryAfter: Math.ceil(windowMs / 1000), degraded: true, failClosed: true };
+        if (reread.error) return { limited: true, retryAfter: 30, degraded: true, failClosed: true, unavailable: true };
         rowToUpdate = reread.data;
         if (!rowToUpdate) continue; // 行被并发清理，重试插入
       }
@@ -6461,6 +6478,7 @@ async function checkPersistentRateLimit(key, windowMs, maxRequests) {
     }
     // 重试耗尽：安全敏感路径 fail-closed，避免并发冲突被当成"未限流"。
     // 优先尝试迁移 039 的 atomic RPC；失败则按超限处理（带短 retry）。
+    var rpcUnavailable = false;
     try {
       var keyDigest2 = crypto.createHash('sha256').update(String(key)).digest('hex').slice(0, 32);
       var actorKey2 = 'rl_' + keyDigest2;
@@ -6477,7 +6495,10 @@ async function checkPersistentRateLimit(key, windowMs, maxRequests) {
         }
         return { limited: false };
       }
-    } catch (_rpcErr) { /* fall through to fail-closed */ }
+      // RPC 本身报错说明数据库不可用；只有「乐观锁并发冲突且 RPC 正常返回但未确认」才算真正的拥挤。
+      if (rpc.error) rpcUnavailable = true;
+    } catch (_rpcErr) { rpcUnavailable = true; /* fall through to fail-closed */ }
+    if (rpcUnavailable) return { limited: true, retryAfter: 30, degraded: true, failClosed: true, unavailable: true };
     return { limited: true, retryAfter: Math.ceil(windowMs / 1000), degraded: true, failClosed: true };
   } catch(e) {
     // DB 不可用：安全路径 fail-closed（调用方 securityRateLimit 会 503/429）
@@ -11743,6 +11764,10 @@ app.post('/admin/login', securityRateLimit(60000, 10), async (req, res) => {
     if (!username || !password) {
       return res.status(400).json({ error: '请输入账号和密码' });
     }
+    // 账号和密码必须是字符串：数字、对象会让下面的哈希计算抛错变成 500。
+    if (typeof username !== 'string' || typeof password !== 'string') {
+      return res.status(400).json({ error: '账号或密码格式不正确' });
+    }
     
     // 输入长度校验
     if (username.length > MAX_USERNAME_LEN) {
@@ -12182,7 +12207,8 @@ async function issueUserSession(res, userName, deviceId, opts) {
 // 口令端点：双层限流（内存 + DB 持久化），防多实例/换 IP 撞库。
 app.post('/api/user/login', securityRateLimit(60000, 10), async (req, res) => {
   try {
-    var { user_name, password } = req.body;
+    // 无请求体或非 JSON 时 req.body 为 undefined：按缺少参数返回 400，而不是解构失败变成 500。
+    var { user_name, password } = (req.body && typeof req.body === 'object') ? req.body : {};
     var userNameVal = validateString(user_name, MAX_USERNAME_LEN, '用户名');
     if (userNameVal && userNameVal.error) return res.status(400).json({ error: userNameVal.error });
     if (!userNameVal || typeof password !== 'string' || password.length < 1 || password.length > 128) {
@@ -13875,6 +13901,8 @@ app.post('/api/post/create', authenticateUser, rateLimit(60000, 20), async (req,
     }
     if (!content.trim() && !mediaUrl) return res.status(400).json({ error: '请输入帖子内容', code: 'empty_post' });
     if (content.length > 50000) return res.status(400).json({ error: '内容长度超过限制', code: 'content_too_long' });
+    // 帖子元数据里的缩略图/封面地址由客户端自填，只保留本站自己的几种地址形态。
+    content = sanitizePostContent(content, { supabaseUrl: SUPABASE_URL, hosts: [SERVER_HOSTNAME, req.headers.host] }).content;
     if (['public', 'private'].indexOf(visibility) < 0) return res.status(400).json({ error: '可见范围无效', code: 'invalid_visibility' });
     if (mediaUrl && !/^https:\/\//i.test(mediaUrl)) return res.status(400).json({ error: '媒体地址无效', code: 'invalid_media_url' });
     // ★ 2026-09-26（审计 P2-7）：media_url 此前只校验 https 前缀，配合全局 12MB
@@ -13914,6 +13942,14 @@ app.post('/api/post/create', authenticateUser, rateLimit(60000, 20), async (req,
       }
     }
     if (mediaType && ['image', 'video', 'audio'].indexOf(mediaType) < 0 && !(attachments.length && mediaType === 'album')) return res.status(400).json({ error: '媒体类型无效', code: 'invalid_media_type' });
+    // 直传 OSS 的媒体：数据库函数不再核对对象本身，这里补上存在性、真实大小与类型（上传登记仍由数据库函数校验）。
+    var ossToVerify = attachments.filter(function(item) { return isOssMediaUrl(item.media_url); })
+      .map(function(item) { return { path: item.storage_path, size: item.file_size, kind: 'image' }; });
+    if (!attachments.length && postMediaPath && isOssMediaUrl(mediaUrl)) ossToVerify.push({ path: postMediaPath, kind: mediaType || 'image' });
+    if (ossToVerify.length) {
+      var ossCheck = await verifyPostOssMedia(ossToVerify);
+      if (!ossCheck.ok) return res.status(ossCheck.status || 400).json({ error: ossCheck.error, code: ossCheck.code, retryable: ossCheck.retryable || undefined });
+    }
 
     // ── 位置字段（可选，用户主动选择） ──
     var location = req.body && req.body.location;
@@ -14232,7 +14268,7 @@ app.post('/api/post/update', authenticateUser, rateLimit(60000, 30), async (req,
       var contentStr = String(req.body.content);
       if (contentStr.length > 50000) return res.status(400).json({ error: '内容长度超过限制（50000字符）' });
       if (!contentStr.trim() && !post.media_url) return res.status(400).json({ error: '请输入帖子内容', code: 'empty_post' });
-      updates.content = contentStr;
+      updates.content = sanitizePostContent(contentStr, { supabaseUrl: SUPABASE_URL, hosts: [SERVER_HOSTNAME, req.headers.host] }).content;
     }
     // 服务端生成 updated_at（不允许客户端传入）
     if (Object.keys(updates).length === 0) return res.status(400).json({ error: '没有要更新的字段' });
@@ -17512,7 +17548,7 @@ app.post('/admin/report/:id/delete-post', verifyToken, securityRateLimit(60000, 
       const normalizedTargetId = normalizePostId(targetId);
       if (!normalizedTargetId) return res.status(400).json({ error: '被举报内容参数无效', code: 'invalid_target_id' });
       const { data: post, error: fetchPostErr } = await supabase.from('posts')
-        .select('id, actor_key, media_type, media_url, content').eq('id', normalizedTargetId).maybeSingle();
+        .select('id, user_name, actor_key, media_type, media_url, content').eq('id', normalizedTargetId).maybeSingle();
       if (fetchPostErr) return sendAdminDbFailure(res,fetchPostErr);
       if (post) {
         const expectPhoto = targetType === 'photo' || post.media_type === '__photo_wall__';
@@ -21896,7 +21932,9 @@ async function handleDeepThinkChat(req, res) {
 
 // POST /api/agent/chat/cancel - 取消正在进行的深度思考
 require('./ai-conversation-features').install(app,{db:supabase,authenticateUser,rateLimit});
-const aiRequestMiddleware = aiRequestFeatures.install(app,{ authenticateUser, rateLimit, writeSse, getAiConfig, jsonMiddleware:express.json({limit:'80mb'}) });
+// AI 接口的大请求体解析（附件走 base64，上限 80MB）：先过全局内存预算，避免多账号并发把实例内存打满。
+const aiLargeJson = require('./body-budget').withBodyBudget(express.json({ limit: '80mb' }));
+const aiRequestMiddleware = aiRequestFeatures.install(app,{ authenticateUser, rateLimit, writeSse, getAiConfig, jsonMiddleware:aiLargeJson });
 
 app.post('/api/agent/chat/cancel', authenticateUser, async (req, res) => {
   try {
@@ -21924,7 +21962,7 @@ app.post('/api/agent/chat/cancel', authenticateUser, async (req, res) => {
 });
 
 // POST /api/agent/chat
-app.post('/api/agent/chat', authenticateUser, aiChatConcurrencyGate, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), express.json({ limit: '80mb' }), aiRequestMiddleware, async (req, res) => {
+app.post('/api/agent/chat', authenticateUser, aiChatConcurrencyGate, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), aiLargeJson, aiRequestMiddleware, async (req, res) => {
   var aborted = false;
   // 客户端断开时 abort 底层 DeepSeek 调用，避免请求结束后仍占用 3-5 分钟资源
   var requestAbortCtrl = new AbortController();
@@ -22367,7 +22405,7 @@ app.post('/api/agent/chat', authenticateUser, aiChatConcurrencyGate, rateLimit(3
 //     后服务端执行并把结果回喂模型继续推理（多轮，最多 CUSTOM_TOOL_MAX_ROUNDS 轮），
 //     同时推送 tool_calls/tool_pending/tool_result/tool_error SSE 供前端展示时间线。
 //     上游不支持 function calling（400/404/422）时自动回退为不带工具重试。
-app.post('/api/agent/custom-chat/stream', guestOpenRouterAuth, aiChatConcurrencyGate, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), express.json({ limit: '80mb' }), aiRequestMiddleware, resolveAiModelReference, async (req, res) => {
+app.post('/api/agent/custom-chat/stream', guestOpenRouterAuth, aiChatConcurrencyGate, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), aiLargeJson, aiRequestMiddleware, resolveAiModelReference, async (req, res) => {
   var customStartedAt = Date.now(), customTurnFinished = false;
   var aborted = false;
   var _heartbeatTimer = null;
@@ -23027,7 +23065,7 @@ app.post('/api/agent/custom-chat/stream', guestOpenRouterAuth, aiChatConcurrency
 //   meta / deep_think_init / deep_think_stage / deep_think_planned / deep_think_tool /
 //   thinking_chunk{agent_role} / answer_chunk / content / done{agent_count,sources,search_count} / error
 // ─────────────────────────────────────────────────────────────
-app.post('/api/agent/custom-chat/deep-stream', guestOpenRouterAuth, aiChatConcurrencyGate, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), express.json({ limit: '80mb' }), aiRequestMiddleware, resolveAiModelReference, async (req, res) => {
+app.post('/api/agent/custom-chat/deep-stream', guestOpenRouterAuth, aiChatConcurrencyGate, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), aiLargeJson, aiRequestMiddleware, resolveAiModelReference, async (req, res) => {
   var aborted = false;
   var _heartbeatTimer = null;
   function clearHeartbeat() { if (_heartbeatTimer) { try { clearInterval(_heartbeatTimer); } catch (_) {} _heartbeatTimer = null; } }
@@ -23709,7 +23747,7 @@ app.get('/api/agent/image', authenticateUser, securityRateLimit(3600000, 40), as
 
 
 // POST /api/agent/chat/stream - 流式 SSE 输出
-app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), guestAiAdmission, express.json({ limit: '80mb' }), aiRequestMiddleware, async (req, res) => {
+app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), guestAiAdmission, aiLargeJson, aiRequestMiddleware, async (req, res) => {
   res._aiRetryOwner={userName:req.userName,accountId:String(req.accountId||'')};
   res._aiFollowupEnabled = !!(req.body && req.body.followup_suggestions === true);
   res._aiFollowupQuestion = String(req.body && req.body.message || '').slice(0,1000);
@@ -26813,7 +26851,7 @@ require('./ai-workbench').registerWorkbenchRoutes(app,{authenticateUser:authenti
 //   4) 24h LRU 缓存（key=sha256(query+model+mode)，命中直接回放）
 //   5) 最终报告持久化到 posts（type=tavily_research 以兼容历史读取），research_done 携带 message_id
 // 事件：research_stage / research_step / research_content / research_sources / research_done / heartbeat / error
-app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), express.json({limit:'80mb'}), aiRequestMiddleware, async (req, res) => {
+app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), aiLargeJson, aiRequestMiddleware, async (req, res) => {
   var aborted = false;
   var _researchAbort = new AbortController();
   var cancelToken = { cancelled: false };
@@ -28349,16 +28387,21 @@ async function cleanupExpiredRateLimitRows() {
   }
 }
 
-// 自动清理旧日志（每24小时执行一次）
-setInterval(function() {
-  cleanupOldLogs('login').catch(function(e) { console.warn('[Cleanup] Auto-cleanup login failed:', e && e.message); });
-  cleanupOldLogs('security').catch(function(e) { console.warn('[Cleanup] Auto-cleanup security failed:', e && e.message); });
-  cleanupOldLogs('error').catch(function(e) { console.warn('[Cleanup] Auto-cleanup error failed:', e && e.message); });
-  cleanupOldLogs('behavior').catch(function(e) { console.warn('[Cleanup] Auto-cleanup behavior failed:', e && e.message); });
-  cleanupOldLogs('visit').catch(function(e) { console.warn('[Cleanup] Auto-cleanup visit failed:', e && e.message); });
-  cleanupOldLogs('attack').catch(function(e) { console.warn('[Cleanup] Auto-cleanup attack failed:', e && e.message); });
-  cleanupExpiredRateLimitRows().catch(function(e) { console.warn('[Cleanup] rate-limit rows sweep failed:', e && e.message); });
-}, 24 * 60 * 60 * 1000).unref(); // ★ 审计修复：日志清理不应阻止进程退出
+// 自动清理旧日志与过期限流行。
+// ★ 2026-11-08：以前只挂在 24 小时的 setInterval 上、启动时不跑——每次部署都会重启进程，
+//   进程活不满 24 小时就一次都不会清，日志、攻击记录和限流行在 posts 大表里只增不减。
+//   现在启动 2 分钟后先清一次（让出启动高峰），之后每 24 小时一次；各类型依次执行，不并发打库。
+async function runScheduledLogCleanup() {
+  var types = ['login', 'security', 'error', 'behavior', 'visit', 'attack'];
+  for (var ti = 0; ti < types.length; ti++) {
+    try { await cleanupOldLogs(types[ti]); }
+    catch (e) { console.warn('[Cleanup] Auto-cleanup ' + types[ti] + ' failed:', e && e.message); }
+  }
+  try { await cleanupExpiredRateLimitRows(); }
+  catch (e) { console.warn('[Cleanup] rate-limit rows sweep failed:', e && e.message); }
+}
+setInterval(function() { runScheduledLogCleanup().catch(function() {}); }, 24 * 60 * 60 * 1000).unref(); // ★ 审计修复：日志清理不应阻止进程退出
+setTimeout(function() { runScheduledLogCleanup().catch(function() {}); }, 2 * 60 * 1000).unref();
 
 // 自动清理 AI 聊天记录 (每天一次)
 var _aiCleanupLock = false;

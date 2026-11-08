@@ -157,6 +157,26 @@ async function deleteObject(path, options) {
   return { deleted: res.status !== 404, path: clean };
 }
 
+// 读对象的元数据（桶是公共读，HEAD 不需要签名，也不产生下行流量）。
+// 返回 { exists, size, contentType }；404 表示对象不存在；其余非 2xx 与网络错误一律抛错，由调用方决定是否重试。
+async function headObject(path, options) {
+  const opts = options || {};
+  if (!enabled()) throw new Error('oss_not_configured');
+  const clean = cleanPath(path);
+  if (!clean) throw new Error('oss_empty_path');
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), Number(opts.timeoutMs) || 8000) : null;
+  try {
+    const res = await (opts.fetchImpl || fetch)(publicUrl(clean), { method: 'HEAD', signal: controller ? controller.signal : undefined });
+    if (res.status === 404) return { exists: false, size: 0, contentType: '' };
+    if (!res.ok) throw new Error('oss_head_failed ' + res.status);
+    const length = Number(res.headers.get('content-length'));
+    return { exists: true, size: Number.isFinite(length) && length >= 0 ? length : -1, contentType: String(res.headers.get('content-type') || '').toLowerCase() };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 // 判断某个媒体路径该不该走 OSS。
 // dm-private / dm-flash 是私聊内容，桶是私有桶，绝不能放进公共读的 OSS 桶——
 // 一旦放进去，任何拿到 URL 的人都能看。这两个桶永远留在 Supabase。
@@ -179,6 +199,7 @@ module.exports = {
   presignedPutUrl,
   putObject,
   deleteObject,
+  headObject,
   bucketRouted,
   isPrivateBucket,
   PRIVATE_BUCKETS,
