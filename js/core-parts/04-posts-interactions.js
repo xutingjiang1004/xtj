@@ -6366,8 +6366,29 @@
                                 //   地址写进帖子 metadata 的 thumbs 数组（按 position 对齐）。
                                 var thumbUrl = '';
                                 var thumbFile = window.XtjPostComposerMedia && typeof window.XtjPostComposerMedia.thumbFile === 'function' ? window.XtjPostComposerMedia.thumbFile(selectedFile) : null;
+                                // 缩略图和原图一样先登记（prepare）：发布失败、重复提交或帖子被删后，服务端才认得这个对象并清理它。
+                                // 登记失败就不要缩略图——它只是加速用的，不能拖累发帖。
+                                var thumbPath = 'posts/thumb_' + crypto.randomUUID().replace(/-/g, '') + '.jpg', thumbUploadId = crypto.randomUUID(), thumbPending = { storage_path: thumbPath, upload_id: thumbUploadId };
                                 if (thumbFile) {
-                                    var thumbPath = 'posts/thumb_' + crypto.randomUUID().replace(/-/g, '') + '.jpg';
+                                    uploadedMedia.push(thumbPending);
+                                    rememberPendingPostMedia(flight.owner, thumbPath, thumbUploadId);
+                                    var thumbPrepared = false;
+                                    try {
+                                        var thumbPrepareResponse = await window.xtjProtectedFetch('/api/post/media/prepare', { method: 'POST', authOwner: flight.owner, authEpoch: flight.epoch, body: JSON.stringify(thumbPending) });
+                                        var thumbPrepare = await thumbPrepareResponse.json();
+                                        thumbPrepared = !!(thumbPrepareResponse.ok && thumbPrepare && thumbPrepare.ok && thumbPrepare.storage_path === thumbPath);
+                                        assertPostPublishIdentity(flight);
+                                    } catch (thumbPrepareError) {
+                                        assertPostPublishIdentity(flight);
+                                        thumbPrepared = false;
+                                    }
+                                    if (!thumbPrepared) {
+                                        var thumbAt = uploadedMedia.indexOf(thumbPending); if (thumbAt >= 0) uploadedMedia.splice(thumbAt, 1);
+                                        forgetPendingPostMedia(flight.owner, thumbPath);
+                                        thumbFile = null;
+                                    }
+                                }
+                                if (thumbFile) {
                                     var thumbViaOss = await uploadPostObjectToOss(thumbPath, thumbFile, 'image/jpeg', { owner: flight.owner, epoch: flight.epoch, progress: flight.progress });
                                     if (thumbViaOss.ok) thumbUrl = thumbViaOss.url;
                                     else {

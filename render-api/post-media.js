@@ -50,6 +50,14 @@ function isLocalUploadUrl(value, origin) {
   catch (_) { return false; }
 }
 async function checked(query) { const result = await query; if (!result || result.error) throw result && result.error || Error('post_media_unavailable'); return result.data; }
+// 直传 OSS 的对象不在 Supabase 存储里，removeStorageWithQueue 删不到它；已确认「无人引用且已标记清理」之后，
+// 再尽力删一次 OSS 上同名对象（不存在也不算错，失败只记日志，不影响发帖，也不影响线上图片）。
+async function removeOssObjectBestEffort(path) {
+  try {
+    if (!ossMedia.enabled()) return;
+    await ossMedia.deleteObject(path);
+  } catch (error) { console.warn('[post-media] OSS 孤儿对象删除失败（忽略）:', path, error && error.message || error); }
+}
 function installPostMedia(app, { supabase, authenticateUser, rateLimit, userBanError }) {
   let timer, busy = false, cursor = '';
   function unavailable(res) { return res.status(503).json({ ok: false, error: '媒体操作暂不可用，请重试', retryable: true }); }
@@ -82,6 +90,7 @@ function installPostMedia(app, { supabase, authenticateUser, rateLimit, userBanE
       if (claimed.referenced) return res.json({ ok: true, referenced: true, cleanup_pending: false });
       const removed = await removeStorageWithQueue(supabase, { bucket: 'uploads', paths: [path], photoId: 'post-media:' + uploadId });
       if (!removed.ok) return unavailable(res);
+      await removeOssObjectBestEffort(path);
       await checked(supabase.from('post_media_uploads').update({ cleaned_at: new Date().toISOString() }).eq('storage_path', path).eq('status', 'cleanup'));
       res.json({ ok: true, referenced: false, cleanup_pending: !!removed.cleanup_pending });
     } catch (_) { unavailable(res); }
@@ -114,6 +123,7 @@ async function sweepPostMediaUploads(supabase, { cursor = '', now = Date.now(), 
       if (!claim || !claim.ok || claim.referenced) continue;
       const result = await removeStorageWithQueue(supabase, { bucket: 'uploads', paths: [row.storage_path], photoId: 'post-media:' + row.upload_id });
       if (!result.ok) throw Error('cleanup_queue_failed');
+      await removeOssObjectBestEffort(row.storage_path);
       const account = await checked(supabase.from('posts').select('id').eq('user_name', row.user_name).eq('media_type', '__auth__').limit(1).maybeSingle());
       if (!account) {
         await checked(supabase.from('post_media_uploads').delete().eq('storage_path', row.storage_path).eq('status', 'cleanup'));

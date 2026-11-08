@@ -3,6 +3,7 @@ const test=require('node:test'),assert=require('node:assert/strict'),fs=require(
 const {MAX_POST_IMAGES}=require('../js/post-media');
 const dbUrl=process.env.XTJ_TEST_DATABASE_URL;
 const migration=fs.readFileSync('supabase/migrations/20261003063955_post_attachments.sql','utf8');
+const thumbMigration=fs.readFileSync('supabase/migrations/20261108000000_post_thumb_cleanup.sql','utf8');
 test('PostgreSQL: atomic attachments, cleanup races, deletion rollback and privileges', {skip:!dbUrl,timeout:30000}, async t=>{
   const base=new URL(dbUrl);assert.ok(['127.0.0.1','localhost','::1','[::1]'].includes(base.hostname),'Database tests must use a local disposable database');
   const dbName='xtj_attachments_'+randomUUID().replaceAll('-','');const admin=new Client({connectionString:dbUrl});await admin.connect();await admin.query('CREATE DATABASE '+dbName);
@@ -12,7 +13,7 @@ test('PostgreSQL: atomic attachments, cleanup races, deletion rollback and privi
     await db.query(fs.readFileSync('tests/helpers/post-attachments-db-fixture.sql','utf8'));
     const atomic=fs.readFileSync('supabase/migrations/20261002012142_atomic_audit_operations.sql','utf8');
     let a=atomic.indexOf('CREATE OR REPLACE FUNCTION public.enqueue_storage_cleanup');if(a<0)a=atomic.indexOf('CREATE FUNCTION public.enqueue_storage_cleanup');
-    await db.query(atomic.slice(a,atomic.indexOf('-- Deny remains',a)));await db.query(migration);
+    await db.query(atomic.slice(a,atomic.indexOf('-- Deny remains',a)));await db.query(migration);await db.query(thumbMigration);
     async function seed(count,actor='alice') {
       const prefix=randomUUID();const items=Array.from({length:count},(_,n)=>({position:n,media_type:'image',storage_path:`posts/${prefix}-${n}.png`,upload_id:randomUUID(),media_url:`https://project.supabase.co/storage/v1/object/public/uploads/posts/${prefix}-${n}.png`,width:400,height:300,file_size:100}));
       for(const x of items){await db.query('INSERT INTO post_media_uploads(storage_path,user_name,upload_id) VALUES($1,$2,$3)',[x.storage_path,actor,x.upload_id]);await db.query("INSERT INTO storage.objects(bucket_id,name,metadata) VALUES('uploads',$1,$2)",[x.storage_path,{size:100,mimetype:'image/png'}]);}return items;
@@ -53,6 +54,24 @@ test('PostgreSQL: atomic attachments, cleanup races, deletion rollback and privi
     await t.test('concurrent attach and cleanup serialize on each registration; committed media cannot be cleaned',async()=>{
       const items=await seed(3),other=await connect();try{await db.query('BEGIN');const saved=await create(items);let resolved=false;const cleanup=other.query('SELECT claim_post_media_cleanup($1,$2,$3) result',['alice',items[1].storage_path,items[1].upload_id]).then(r=>{resolved=true;return r.rows[0].result});await new Promise(r=>setTimeout(r,40));assert.equal(resolved,false);await db.query('COMMIT');assert.equal((await cleanup).referenced,true);assert.equal(saved.ok,true);}finally{await db.query('ROLLBACK');await other.end();}
       const pending=await seed(2);assert.equal((await db.query('SELECT claim_post_media_cleanup($1,$2,$3) result',['alice',pending[1].storage_path,pending[1].upload_id])).rows[0].result.referenced,false);assert.equal((await create(pending)).code,'media_cleanup');
+    });
+    await t.test('registered thumbnails: an abandoned one is cleaned, one referenced by a live post is kept and queued when that post is deleted, other users and look-alike paths never match',async()=>{
+      const hex=()=>randomUUID().replaceAll('-',''),reg=async(path,actor='alice')=>{const id=randomUUID();await db.query('INSERT INTO post_media_uploads(storage_path,user_name,upload_id) VALUES($1,$2,$3)',[path,actor,id]);return id;};
+      const claim=(path,id,actor='alice')=>db.query('SELECT claim_post_media_cleanup($1,$2,$3) result',[actor,path,id]).then(r=>r.rows[0].result);
+      const abandoned='posts/thumb_'+hex()+'.jpg',abandonedId=await reg(abandoned);
+      assert.equal((await claim(abandoned,abandonedId)).referenced,false);assert.equal((await db.query('SELECT status FROM post_media_uploads WHERE storage_path=$1',[abandoned])).rows[0].status,'cleanup');
+      const live='posts/thumb_'+hex()+'.jpg',liveId=await reg(live);
+      const post=(await db.query("INSERT INTO posts(user_name,media_type,media_url,content) VALUES('alice','image','https://example.invalid/o.png',$1) RETURNING id",[JSON.stringify({__type:'__xtj_post_v2__',meta:{thumbs:['https://oss.example/'+live]}})])).rows[0];
+      assert.equal((await claim(live,liveId)).referenced,true);const row=(await db.query('SELECT status,attached_post_id FROM post_media_uploads WHERE storage_path=$1',[live])).rows[0];assert.equal(row.status,'attached');assert.equal(row.attached_post_id,post.id);
+      await db.query('DELETE FROM posts WHERE id=$1',[post.id]);assert.deepEqual((await db.query('SELECT paths FROM storage_cleanup_jobs WHERE photo_id=$1',[post.id])).rows[0].paths,[live],'deleting the post queues its registered thumbnail');
+      const proxied='posts/thumb_'+hex()+'.jpg',proxiedId=await reg(proxied);await db.query("INSERT INTO posts(user_name,media_type,media_url,content) VALUES('alice','image','https://example.invalid/p.png',$1)",[JSON.stringify({meta:{thumbs:['/api/uploads/media?path='+encodeURIComponent(proxied)]}})]);
+      assert.equal((await claim(proxied,proxiedId)).referenced,true,'the same-origin proxy address (encoded path) still contains the file name');
+      const theirs='posts/thumb_'+hex()+'.jpg',theirsId=await reg(theirs,'bob');await db.query("INSERT INTO posts(user_name,media_type,media_url,content) VALUES('alice','image','https://example.invalid/q.png',$1)",['x '+theirs]);
+      assert.equal((await claim(theirs,theirsId,'bob')).referenced,false,'another user\'s post cannot keep a thumbnail alive');
+      const deleted='posts/thumb_'+hex()+'.jpg',deletedId=await reg(deleted);await db.query("INSERT INTO posts(user_name,media_type,media_url,content,is_deleted) VALUES('alice','image','https://example.invalid/r.png',$1,true)",['x '+deleted]);
+      assert.equal((await claim(deleted,deletedId)).referenced,false,'a deleted post does not keep it alive');
+      const lookalike='posts/'+hex()+'-thumb.jpg',lookalikeId=await reg(lookalike);await db.query("INSERT INTO posts(user_name,media_type,media_url,content) VALUES('alice','image','https://example.invalid/s.png',$1)",['x '+lookalike]);
+      assert.equal((await claim(lookalike,lookalikeId)).referenced,false,'only posts/thumb_<hex>.jpg paths use content references');
     });
     await t.test('anonymous and browser authenticated roles cannot read private attachments or write/invoke the service RPC',async()=>{
       for(const role of ['anon','authenticated']){await db.query('SET ROLE '+role);for(const query of ['SELECT * FROM post_attachments','INSERT INTO post_attachments(post_id,position,media_type,media_url,storage_path,file_size) VALUES(gen_random_uuid(),0,\'image\',\'https://x\',\'posts/a.png\',1)',"SELECT create_post_with_attachments('alice','{}','[]',18)"])await assert.rejects(db.query(query),e=>e.code==='42501');await db.query('RESET ROLE');}

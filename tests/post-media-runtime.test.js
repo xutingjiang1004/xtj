@@ -53,6 +53,19 @@ test('lost create response reconciliation preserves referenced media; cleanup to
   assert.equal(f.files.has(path), false); assert.equal((await createPostWithMedia(f.supabase, 'A', path, upload, post)).error.code, 'media_cleanup');
 });
 
+test('an unreferenced cleanup also deletes the OSS object; a referenced one and an OSS failure leave the result untouched', async () => {
+  const oss = require('../render-api/oss-media'), realEnabled = oss.enabled, realDelete = oss.deleteObject, deleted = [];
+  oss.enabled = () => true; oss.deleteObject = async p => { deleted.push(p); if (process.env.__OSS_FAIL) throw new Error('oss down'); };
+  const warn = console.warn; console.warn = () => {};
+  try {
+    const f = fixture(); await request(f.app).post('/api/post/media/prepare').set('authorization', 'A').send(body).expect(200); f.files.add(path);
+    await createPostWithMedia(f.supabase, 'A', path, upload, post);
+    await request(f.app).post('/api/post/media/cleanup').set('authorization', 'A').send(body).expect(200); assert.deepEqual(deleted, [], 'a referenced object is never deleted');
+    f.posts.length = 0; process.env.__OSS_FAIL = '1';
+    const result = await request(f.app).post('/api/post/media/cleanup').set('authorization', 'A').send(body).expect(200); assert.equal(result.body.ok, true); assert.deepEqual(deleted, [path], 'the OSS copy is removed once nothing references it, and an OSS error does not fail the request');
+  } finally { delete process.env.__OSS_FAIL; console.warn = warn; oss.enabled = realEnabled; oss.deleteObject = realDelete; }
+});
+
 test('cleanup failures use the durable queue and RPC outages never delete', async () => {
   const f = fixture(); await request(f.app).post('/api/post/media/prepare').set('authorization', 'A').send(body).expect(200); f.files.add(path);
   f.setFailRpc(true); await request(f.app).post('/api/post/media/cleanup').set('authorization', 'A').send(body).expect(503); assert.equal(f.removals.length, 0);

@@ -60,9 +60,9 @@ test('real composer appends, removes, rejects mixing; upload/create failures ret
   await page.locator('#postMediaPreviewGrid .post-media-remove').nth(1).click();assert.deepEqual(await page.evaluate(()=>selectedPostMedia.map(f=>f.name)),['original-0.png','original-2.png','original-3.png','original-4.png']);
   await page.locator('#fileInp').setInputFiles({name:'video.mp4',mimeType:'video/mp4',buffer:Buffer.from('fake-video')});assert.equal(await page.evaluate(()=>selectedPostMedia.length),4);
   await page.locator('#postInp').fill('发布失败也要保留我的正文');f.setFailUploadAt(2);await page.locator('#pubBtn').click();await page.waitForFunction(()=>!document.getElementById('pubBtn').disabled);
-  assert.equal(f.calls.filter(c=>c.path==='/api/post/create').length,0);assert.deepEqual([...f.uploads].filter(path=>!path.startsWith('posts/thumb_')),[],'every original is cleaned') /* KNOWN GAP: 480px thumbnails (posts/thumb_*) are not in the upload registry, so a failed publish leaves them behind; registering them needs a database change (claim_post_media_cleanup must understand thumb_url) */;assert.equal(await page.evaluate(()=>selectedPostMedia.length),4);assert.equal(await page.locator('#postInp').inputValue(),'发布失败也要保留我的正文');
+  assert.equal(f.calls.filter(c=>c.path==='/api/post/create').length,0);assert.deepEqual([...f.uploads],[],'every original and every 480px thumbnail is cleaned');assert.ok(f.calls.some(c=>c.path==='/api/post/media/prepare'&&/^posts\/thumb_[0-9a-f]{32}\.jpg$/.test(c.body&&c.body.storage_path||'')),'thumbnails are registered before they are uploaded');assert.equal(await page.evaluate(()=>selectedPostMedia.length),4);assert.equal(await page.locator('#postInp').inputValue(),'发布失败也要保留我的正文');
   f.setFailUploadAt(0);f.setFailCreate(true);await page.locator('#pubBtn').click();await page.waitForFunction(()=>!document.getElementById('pubBtn').disabled);
-  assert.equal([...f.uploads].filter(path=>!path.startsWith('posts/thumb_')).length,4,'a failed create keeps the uploaded originals for the retry (keep_for_retry)');assert.equal(await page.evaluate(()=>selectedPostMedia.length),4);assert.ok(f.calls.some(c=>c.path==='/api/post/create'));
+  assert.equal([...f.uploads].filter(path=>!path.startsWith('posts/thumb_')).length,4,'a failed create keeps the uploaded originals for the retry (keep_for_retry)');assert.equal([...f.uploads].filter(path=>path.startsWith('posts/thumb_')).length,4,'and their thumbnails');assert.equal(await page.evaluate(()=>selectedPostMedia.length),4);assert.ok(f.calls.some(c=>c.path==='/api/post/create'));
   f.setFailCreate(false);await page.locator('#pubBtn').click();await page.waitForFunction(()=>!document.getElementById('pubBtn').disabled&&selectedPostMedia.length===0);
   const created=f.getCreated();assert.equal(created.attachments.length,4);assert.deepEqual(created.attachments.map(a=>a.position),[0,1,2,3]);assert.equal(new Set(created.attachments.map(a=>a.upload_id)).size,4);assert.equal(new Set(created.attachments.map(a=>a.storage_path)).size,4);assert.ok(created.attachments.every(a=>a.width===1&&a.height===1));assert.equal(created.media_type,'album');
   assert.equal(await page.locator('#postInp').inputValue(),'');assert.equal(await page.locator(`#feed .post[data-post-id="${created.id}"] .post-media-cell`).count(),4);
@@ -70,6 +70,16 @@ test('real composer appends, removes, rejects mixing; upload/create failures ret
   await page.evaluate(()=>XtjPostOriginals.clear());
   await page.waitForFunction(()=>createdPostUrls.length>=5&&createdPostUrls.every(url=>revokedPostUrls.includes(url)));
   assert.deepEqual(f.errors,[]);
+ }finally{await f.close();}
+});
+
+test('a thumbnail the server will not register is skipped: the post still publishes and nothing is left behind',{timeout:60000},async()=>{
+ const f=await postBrowserFixture({counts:[2]});try{
+  const {page}=f;await page.route('**/api/post/media/prepare',route=>{let b={};try{b=route.request().postDataJSON()||{}}catch(_){}if(/^posts\/thumb_/.test(b.storage_path||''))return route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({ok:false,error:'x'})});return route.fallback();});
+  await page.locator('#fileInp').setInputFiles([0,1].map(n=>({name:`o-${n}.png`,mimeType:'image/png',buffer:f.png})));
+  await page.locator('#postInp').fill('缩略图登记不了也要能发');await page.locator('#pubBtn').click();await page.waitForFunction(()=>!document.getElementById('pubBtn').disabled&&selectedPostMedia.length===0,null,{timeout:30000});
+  const created=f.getCreated();assert.equal(created.attachments.length,2);assert.deepEqual([...f.uploads].filter(path=>path.startsWith('posts/thumb_')),[],'no thumbnail object was uploaded without a registry row');
+  assert.equal(await page.evaluate(()=>{try{return JSON.parse(localStorage.getItem(Object.keys(localStorage).find(k=>/pending.*post.*media/i.test(k))||'')||'[]').length}catch(_){return 0}}),0,'no pending registry entry is left in the browser');
  }finally{await f.close();}
 });
 
