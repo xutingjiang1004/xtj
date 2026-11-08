@@ -8,7 +8,7 @@ const assistantOutput = require('./ai-assistant-output');
 const { aiConversationActorPattern, parseAiHistoryCursor, queryAiHistoryPage } = require('./ai-history');
 const { createComment, readRelationPage, readFeedEngagement } = require('./post-interactions');
 const { readPostViewers } = require('./post-viewers');
-const { readPostOssPaths, deleteOssObjects } = require('./oss-cleanup');
+const { readPostCleanupPaths, deleteOssObjects } = require('./oss-cleanup');
 const { readPhotoWallPage } = require('./photo-wall-page');
 const { createAdaptivePoller } = require('./adaptive-poller');
 const { createMediaPreviews } = require('./media-previews');
@@ -14432,7 +14432,8 @@ app.post('/api/post/delete', authenticateUser, rateLimit(60000, 20), async (req,
     if (!isAdmin && post.user_name !== req.userName) return res.status(403).json({ error: '无权删除' });
     var actorKey = post.actor_key || 'post_' + postId + '_' + Date.now();
     // 附件行会随帖子一起删，所以删之前先把这条帖子在 OSS 上的对象路径读出来。
-    var ossPathsToClean = await readPostOssPaths(supabase, post, postId);
+    var postCleanupPaths = await readPostCleanupPaths(supabase, post, postId, { supabaseUrl: SUPABASE_URL });
+    var ossPathsToClean = postCleanupPaths.oss;
     var hardDelete = await hardDeleteContent({
       postId: postId,
       actorUser: req.userName,
@@ -14441,7 +14442,8 @@ app.post('/api/post/delete', authenticateUser, rateLimit(60000, 20), async (req,
       actorKey: actorKey,
       // ★ 2026-11-02：直传 OSS 的媒体不在 Supabase 存储里，不能塞进 storagePaths，
       //   否则删除会去打一个不存在的对象。OSS 侧的孤儿文件留待后续清理任务处理。
-      storagePaths: (function () { var p = parsePostMediaUrl(post.media_url, SUPABASE_URL); return p && !isOssMediaUrl(post.media_url) ? [p] : []; })()
+      //   留在 Supabase 的缩略图/封面（没回退到 OSS 的那部分）一并排进删帖事务里的持久清理队列。
+      storagePaths: (function () { var p = parsePostMediaUrl(post.media_url, SUPABASE_URL); return (p && !isOssMediaUrl(post.media_url) ? [p] : []).concat(postCleanupPaths.storage); })()
     });
     if (hardDelete.error) return res.status(500).json({ error: sanitizeError(hardDelete.error), code: 'delete_failed' });
     var result = hardDelete.result || {};
@@ -17599,14 +17601,15 @@ app.post('/admin/report/:id/delete-post', verifyToken, securityRateLimit(60000, 
       if (fetchPostErr) return sendAdminDbFailure(res,fetchPostErr);
       if (post) {
         const expectPhoto = targetType === 'photo' || post.media_type === '__photo_wall__';
-        const ossPathsToClean = expectPhoto ? [] : await readPostOssPaths(supabase, post, normalizedTargetId);
+        const postCleanupPaths = expectPhoto ? { oss: [], storage: [] } : await readPostCleanupPaths(supabase, post, normalizedTargetId, { supabaseUrl: SUPABASE_URL });
+        const ossPathsToClean = postCleanupPaths.oss;
         const deletion = await hardDeleteContent({
           postId: normalizedTargetId,
           actorUser: ADMIN_USERNAME,
           isAdmin: true,
           expectPhoto: expectPhoto,
           actorKey: post.actor_key || ('admin_' + Date.now()),
-          storagePaths: expectPhoto ? collectPhotoStoragePaths(post) : []
+          storagePaths: expectPhoto ? collectPhotoStoragePaths(post) : postCleanupPaths.storage
         });
         if (deletion.error) return res.status(500).json({ error: sanitizeError(deletion.error), code: 'delete_failed' });
         if (!deletion.result || !deletion.result.ok) {

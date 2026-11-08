@@ -174,3 +174,23 @@ for (const surface of ['post', 'preview']) {
     } finally { release(); await f.close(); }
   });
 }
+
+test('a failing image that is not an auth failure never rotates the login session', async t => {
+  const f = await postBrowserFixture({ counts: [1] });t.after(() => f.close());
+  const { page } = f;
+  await page.waitForFunction(() => document.querySelector('#feed .post-media-cell img').naturalWidth > 0);
+  const original = f.origin + '/api/post/8c1cb02d-74d0-4e45-9e15-000000000001/media/0';
+  let requests = 0;
+  await page.route(original + '*', async route => { requests++; await route.fulfill({ status: 503, json: { ok: false, retryable: true } }); });
+  await page.evaluate(original => {
+    window.testMediaRefreshes = 0;
+    window.refreshUserToken = async () => { window.testMediaRefreshes++; return 'test-access'; };
+    const img = document.querySelector('#feed .post-media-cell img');
+    img.setAttribute('data-media-url', original);img.src = original + '?preview=1';
+  }, original);
+  await page.locator('#feed .post-media-cell.post-image-failed').first().waitFor({ state: 'visible', timeout: 5000 });
+  const stopped = requests;
+  await page.waitForTimeout(300);
+  assert.equal(requests, stopped, 'it stops by itself');assert.ok(requests <= 4);
+  assert.equal(await page.evaluate(() => testMediaRefreshes), 0, 'a 503 is not an expired session, so the session is left alone');
+});

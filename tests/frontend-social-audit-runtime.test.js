@@ -67,6 +67,13 @@ test('failed media publish uses authenticated cleanup and retains retry metadata
   assert.equal(r.calls.filter(x=>x.url==='/api/post/media/cleanup').length,1);assert.equal(r.calls.filter(x=>x.url==='/api/post/media/prepare').length,1);
   const rows=JSON.parse(r.storage.get('xtj_post_media_pending_A'));assert.equal(rows.length,1);assert.equal(rows[0].storage_path,'posts/a.jpg');assert.deepEqual(r.resets,[]);
 });
+test('an unconfirmed create result (5xx) keeps the uploaded media for the retry instead of deleting what the post may already use',async()=>{
+  for(const createStatus of [500,503]){
+    const upload=deferred(),json=deferred(),r=publishRuntime({upload,createJson:json,createStatus});const task=r.ctx.window.doPublish();upload.resolve({});await new Promise(resolve=>setImmediate(resolve));json.resolve({ok:false,error:'DB unavailable'});await task;
+    assert.equal(r.calls.filter(x=>x.url==='/api/post/media/cleanup').length,0,'status '+createStatus);
+    const rows=JSON.parse(r.storage.get('xtj_post_media_pending_A'));assert.equal(rows.length,1);assert.equal(rows[0].keep_for_retry,true);assert.deepEqual(r.resets,[]);
+  }
+});
 test('actual protected-auth validation rejects epoch changes before handling expiration for the new session',async()=>{
   const token=deferred(),r=authRuntime();r.ctx.ensureUserToken=()=>token.promise;r.ctx._lastRefreshUser='';r.ctx._refreshCooldownUntil=0;r.ctx._lastRefreshAuthResult={reason:'expired'};r.ctx.handleProtectedAuthFailure=()=>r.failures.push(true);
   const start=source.indexOf('            window.ensureProtectedOperationAuth = async function'),end=source.indexOf('            window.ensureRealUserAuth',start);vm.runInNewContext(source.slice(start,end),r.ctx);
