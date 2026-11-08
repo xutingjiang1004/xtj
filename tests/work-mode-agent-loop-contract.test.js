@@ -194,7 +194,7 @@ test('体验：工具结果回执携带成功/失败与计数', () => {
 
 test('工作模式 prompt 覆盖 A 档可视化工具说明', () => {
   const sharedPrompt = require('../render-api/ai-task-policy').TASK_POLICY;
-  assert.match(serverSrc, /aiTaskPolicy\.TASK_POLICY/);
+  assert.match(serverSrc, /aiTaskPolicy\.forRequest\(/); // the shared policy is injected per request; work mode is never routed, so it always gets the full text
   // 注：page_meta 与 extract_links 在 prompt 中合并为一条说明（"· page_meta / extract_links —— "），
   //     因此按「条目」而非「单个工具名」断言，避免把正常合并写法误判为缺失。
   const promptEntries = [

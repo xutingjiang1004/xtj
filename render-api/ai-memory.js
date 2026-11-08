@@ -100,6 +100,33 @@ function createAiMemory({ supabase, crypto, logger = console }) {
     if (removed.error) throw new Error('delete_failed');
     return ids.length;
   }
+  // Rewrites one memory in place (by id prefix or a keyword), keeping its kind unless a new one is given.
+  // Same validation as add(): sensitive text is refused, and rewriting into an existing memory merges the two.
+  async function update(who, selector, contentInput, kindInput) {
+    const content = clean(contentInput);
+    if (!content) return { ok: false, status: 400, error: '新的记忆内容为空' };
+    if (looksSensitive(content)) return { ok: false, status: 400, error: '内容疑似包含密码、密钥或证件/银行卡号，出于安全不保存。' };
+    const idPart = String(selector && selector.id || '').trim().toLowerCase().replace(/[^0-9a-f-]/g, '').slice(0, 36);
+    const queryPart = clean(selector && selector.query).slice(0, 60).toLowerCase();
+    if (!idPart && !queryPart) return { ok: false, status: 400, error: '请提供要修改的记忆编号（id）或关键词（query）' };
+    const current = await load(who.accountId, MAX_ITEMS + 1);
+    if (current === null) return { ok: false, status: 503, error: '长期记忆暂时不可用，请稍后再试' };
+    const matches = current.filter(row => idPart ? String(row.id).toLowerCase().indexOf(idPart) === 0 : clean(row.content).toLowerCase().indexOf(queryPart) >= 0);
+    if (!matches.length) return { ok: false, status: 404, error: '没有找到对应的记忆，没有修改任何内容。' };
+    if (matches.length > 1) return { ok: false, status: 409, error: '有 ' + matches.length + ' 条记忆匹配：' + matches.slice(0, 5).map(row => '[' + String(row.id).slice(0, 8) + '] ' + clean(row.content).slice(0, 30)).join('；') + '。请用编号（id）指定要改哪一条。' };
+    const target = matches[0];
+    const digest = hash(content);
+    const kind = KINDS.indexOf(kindInput) >= 0 ? kindInput : (target.kind || 'fact');
+    const duplicate = current.find(row => row.id !== target.id && hash(clean(row.content)) === digest);
+    if (duplicate) {
+      // The new text already exists as another memory: keep that one and drop the old one instead of failing on the unique key.
+      await removeByIds(who, [target.id]);
+      return { ok: true, item: { content, kind: duplicate.kind || kind }, merged: true, previous: clean(target.content) };
+    }
+    const saved = await supabase.from('ai_user_memories').update({ content, kind, content_hash: digest, updated_at: new Date().toISOString() }).eq('account_id', who.accountId).eq('id', target.id);
+    if (saved.error) return { ok: false, status: 503, error: '修改记忆失败，请稍后再试' };
+    return { ok: true, item: { content, kind }, previous: clean(target.content) };
+  }
   async function executeTool(name, args, context) {
     const who = account(context);
     if (!who) return { tool_name: name, error: '长期记忆需要登录后使用，游客模式不支持' };
@@ -121,6 +148,12 @@ function createAiMemory({ supabase, crypto, logger = console }) {
         await removeByIds(who, targets.map(row => row.id));
         return { tool_name: name, content: '已忘掉 ' + targets.length + ' 条记忆：' + targets.map(row => clean(row.content).slice(0, 40)).join('；') };
       }
+      if (name === 'memory_update') {
+        if (!(await enabled(who))) return { tool_name: name, error: '用户在「我的 → AI 记忆」里关闭了记忆功能，现在不能修改记忆。' };
+        const changed = await update(who, { id: args.id, query: args.query }, args.content, args.kind);
+        if (!changed.ok) return { tool_name: name, error: changed.error };
+        return { tool_name: name, content: (changed.merged ? '新内容已经存在，已合并并删掉旧的：' : '已把「' + changed.previous.slice(0, 40) + '」改为：') + changed.item.content };
+      }
       if (!(await enabled(who))) return { tool_name: name, error: '用户在「我的 → AI 记忆」里关闭了记忆功能，现在不能保存新的记忆。' };
       const result = await add(who, args.content, args.kind);
       if (!result.ok) return { tool_name: name, error: result.error };
@@ -130,7 +163,7 @@ function createAiMemory({ supabase, crypto, logger = console }) {
       return { tool_name: name, error: '长期记忆暂时不可用，请稍后再试' };
     }
   }
-  return { MAX_ITEMS, clean, hash, looksSensitive, account, load, enabled, contextMessage, add, removeByIds, executeTool };
+  return { MAX_ITEMS, clean, hash, looksSensitive, account, load, enabled, contextMessage, add, update, removeByIds, executeTool };
 }
 
 // "My page" API: list, add, delete one, clear all. The on/off switch is a normal account setting

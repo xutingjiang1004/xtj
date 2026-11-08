@@ -12,7 +12,7 @@ function fakeSupabase(options={}){
     const api={
       select(){state.op='select';return api;},eq(col,val){state.filters.push([col,val]);return api;},order(col,opts){state.order=[col,opts];return api;},limit(n){state.limit=n;return api;},
       in(col,list){state.inList=[col,list];return api;},
-      upsert(row){state.op='upsert';state.payload=row;return api;},delete(){state.op='delete';return api;},maybeSingle(){state.single=true;return api;},
+      upsert(row){state.op='upsert';state.payload=row;return api;},update(row){state.op='update';state.payload=row;return api;},delete(){state.op='delete';return api;},maybeSingle(){state.single=true;return api;},
       then(resolve,reject){return Promise.resolve(run()).then(resolve,reject);}
     };
     function run(){
@@ -20,6 +20,7 @@ function fakeSupabase(options={}){
       if(missing)return {error:{message:'relation "public.ai_user_memories" does not exist',code:'42P01'},data:null};
       const match=r=>state.filters.every(([c,v])=>r[c]===v)&&(!state.inList||state.inList[1].includes(r[state.inList[0]]));
       if(state.op==='upsert'){const i=rows.findIndex(r=>r.account_id===state.payload.account_id&&r.content_hash===state.payload.content_hash);if(i>=0)Object.assign(rows[i],state.payload);else rows.push({id:crypto.randomUUID(),created_at:new Date().toISOString(),...state.payload});return {error:null,data:null};}
+      if(state.op==='update'){rows.filter(match).forEach(r=>Object.assign(r,state.payload));return {error:null};}
       if(state.op==='delete'){for(let i=rows.length-1;i>=0;i--)if(match(rows[i]))rows.splice(i,1);return {error:null};}
       let out=rows.filter(match).sort((a,b)=>String(b.updated_at).localeCompare(String(a.updated_at)));if(state.limit)out=out.slice(0,state.limit);return {error:null,data:out.map(r=>({...r}))};
     }
@@ -140,4 +141,37 @@ test('the on/off switch is an account setting accepted only as a boolean',()=>{
   assert.equal(settings.DEFAULTS.ai_memory_enabled,true);
   assert.match(fs.readFileSync('render-api/profile-settings.js','utf8'),/"ai_memory_enabled",\n\s*\]\.includes\(key\)/);
   assert.match(server,/app\.use\('\/api\/user\/ai-memory', require\('\.\/ai-memory'\)\.createAiMemoryRouter/);
+});
+
+test('memory_update rewrites one memory in place, keeps its kind, merges duplicates and refuses ambiguous or unsafe edits',async()=>{
+  const db=fakeSupabase(),m=load(db);
+  await m.executeAiMemoryTool('save_memory',{content:'用户住在上海',kind:'fact'},user);
+  await m.executeAiMemoryTool('save_memory',{content:'用户喜欢喝美式咖啡',kind:'preference'},user);
+  await m.executeAiMemoryTool('save_memory',{content:'用户喜欢喝茶',kind:'preference'},user);
+  const r=await m.executeAiMemoryTool('memory_update',{query:'上海',content:'用户住在杭州'},user);
+  assert.match(r.content,/已把「用户住在上海」改为：用户住在杭州/);
+  const row=db.rows.find(x=>x.content==='用户住在杭州');assert.ok(row);assert.equal(row.kind,'fact');assert.equal(row.content_hash,m.memory.hash('用户住在杭州'));assert.equal(db.rows.length,3);
+  // two matches: the tool names them and asks for an id instead of guessing
+  const ambiguous=await m.executeAiMemoryTool('memory_update',{query:'用户喜欢',content:'用户喜欢红茶'},user);
+  assert.match(ambiguous.error,/有 2 条记忆匹配/);assert.match(ambiguous.error,/请用编号（id）/);assert.equal(db.rows.length,3);
+  // by id, with a new kind
+  const id=String(db.rows.find(x=>x.content==='用户喜欢喝茶').id).slice(0,8);
+  assert.match((await m.executeAiMemoryTool('memory_update',{id,content:'以后推荐饮品时优先茶',kind:'instruction'},user)).content,/已把「用户喜欢喝茶」改为/);
+  assert.equal(db.rows.find(x=>x.content==='以后推荐饮品时优先茶').kind,'instruction');
+  // rewriting into text that already exists merges instead of creating a duplicate
+  const merged=await m.executeAiMemoryTool('memory_update',{query:'杭州',content:'用户喜欢喝美式咖啡'},user);
+  assert.match(merged.content,/已经存在，已合并/);assert.equal(db.rows.filter(x=>x.content==='用户喜欢喝美式咖啡').length,1);assert.equal(db.rows.length,2);
+  assert.match((await m.executeAiMemoryTool('memory_update',{query:'美式',content:'我的密码是 hunter2abc'},user)).error,/不保存/);
+  assert.match((await m.executeAiMemoryTool('memory_update',{query:'没有的东西',content:'新的内容'},user)).error,/没有找到对应的记忆/);
+  assert.match((await m.executeAiMemoryTool('memory_update',{content:'新的内容'},user)).error,/编号|关键词/);
+  assert.match((await m.executeAiMemoryTool('memory_update',{query:'美式',content:'  '},user)).error,/为空/);
+  assert.match((await m.executeAiMemoryTool('memory_update',{query:'美式',content:'x'},{guest:true,accountId:'g'})).error,/登录/);
+  // other accounts' memories are never touched
+  const other={accountId:'22222222-2222-2222-2222-222222222222'};
+  await m.executeAiMemoryTool('save_memory',{content:'用户喜欢喝美式咖啡'},other);
+  await m.executeAiMemoryTool('memory_update',{query:'美式',content:'用户改喝拿铁'},user);
+  assert.ok(db.rows.some(x=>x.account_id===other.accountId&&x.content==='用户喜欢喝美式咖啡'));
+});
+test('memory_update is a defined tool and is routed to the memory module',()=>{
+  assert.match(server,/name: 'memory_update'/);assert.match(server,/case 'memory_update':\n    case 'forget_memory':/);
 });

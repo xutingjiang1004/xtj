@@ -3179,7 +3179,15 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     qr_code: '生成二维码', image_info: '查看图片信息', image_process: '处理图片',
     diff_text: '对比文本', url_parse: '解析网址', password_tool: '生成密码',
     task_plan: '规划任务',
-    save_memory: '记住这件事', list_memories: '回忆已记住的内容', forget_memory: '忘掉这件事', ask_user: '向你确认'
+    save_memory: '记住这件事', list_memories: '回忆已记住的内容', forget_memory: '忘掉这件事', ask_user: '向你确认',
+    memory_update: '更新记忆',
+    // 公开知识与智能体工具
+    wiki_summary: '查询维基百科', search_papers: '搜索论文', paper_by_doi: '查询论文', cite_format: '生成引用格式',
+    github_repo: '查看 GitHub 仓库', github_issues: '搜索 GitHub issue', npm_pypi_lookup: '查询软件包', vuln_check: '检查漏洞',
+    stackexchange_search: '搜索问答', hn_search: '搜索 Hacker News', wikidata_facts: '查询维基数据', dictionary: '查词典',
+    rss_read: '读取订阅', news_gdelt: '搜索新闻', wayback: '查看网页快照',
+    my_activity_summary: '汇总我的动态', photo_timeline: '浏览照片时间线', site_navigate: '准备跳转', deep_research: '建议深入研究',
+    parallel_subtasks: '并行处理子任务', verify_claims: '核对事实', self_check: '自查回答', workspace_files: '使用笔记空间', render_card: '生成卡片'
   };
   function inProcessRail(node) {
     return !!(node && node.closest && node.closest('.ai-process-rail'));
@@ -3190,7 +3198,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   }
   function toolRunningLabel(name) {
     if (/search/.test(name || '')) return '搜索中';
-    if (/read_web|web_extract|page_meta/.test(name || '')) return '读取中';
+    if (/read_web|web_extract|page_meta|rss_read|wayback|wiki_summary|workspace_files/.test(name || '')) return '读取中';
     if (/get_weather|get_stock|get_exchange|get_current/.test(name || '')) return '查询中';
     return '处理中';
   }
@@ -3227,7 +3235,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     qr_code: '二维码工具', image_info: '图片分析', image_process: '图片处理',
     diff_text: '文本对比', url_parse: '网址解析', password_tool: '密码工具',
     task_plan: '任务规划',
-    save_memory: '长期记忆', list_memories: '长期记忆', forget_memory: '长期记忆', ask_user: '确认选项'
+    save_memory: '长期记忆', list_memories: '长期记忆', forget_memory: '长期记忆', ask_user: '确认选项',
+    memory_update: '长期记忆',
+    wiki_summary: '维基百科', search_papers: '论文检索', paper_by_doi: '论文信息', cite_format: '引用格式',
+    github_repo: 'GitHub', github_issues: 'GitHub', npm_pypi_lookup: '软件包信息', vuln_check: '漏洞检查',
+    stackexchange_search: '问答检索', hn_search: 'Hacker News', wikidata_facts: '维基数据', dictionary: '词典',
+    rss_read: '订阅内容', news_gdelt: '新闻检索', wayback: '网页快照',
+    my_activity_summary: '我的动态', photo_timeline: '照片时间线', site_navigate: '跳转按钮', deep_research: '研究建议',
+    parallel_subtasks: '并行子任务', verify_claims: '事实核对', self_check: '回答自查', workspace_files: '笔记空间', render_card: '卡片'
   };
   // 检索类工具：命中则走"已搜索 N 个网页"句式（用户点名要的形态）
   var TOOL_SEARCH_KINDS = {
@@ -9920,6 +9935,21 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }
   }
 
+  // 小猫给的「跳转」按钮：只在用户点击后执行，目标全部在白名单里，参数再校验一遍。
+  function runAiNavigate(data) {
+    var page = String(data && data.page || ''), target = String(data && data.target || '');
+    var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    var tabs = { home: 'posts', photos: 'ai', chat: 'chat', profile: 'profile' };
+    try {
+      if (tabs[page] && typeof window.switchDockTab === 'function') { closeAiChat(); window.switchDockTab(tabs[page]); return true; }
+      if (page === 'post' && UUID_RE.test(target) && typeof window.openPostDetail === 'function') { closeAiChat(); window.openPostDetail(target); return true; }
+      if (page === 'user' && target && target.length <= 40 && typeof window.openUserProfile === 'function') { closeAiChat(); window.openUserProfile(target); return true; }
+      if (page === 'dm' && target && target.length <= 40 && typeof window.openChat === 'function') { closeAiChat(); window.openChat(target); return true; }
+    } catch (eNav) { console.warn('[AI] navigate failed', eNav); }
+    notify('这个跳转暂时无法使用');
+    return false;
+  }
+
   function openAiSearchTarget(item) {
     var target = item && item.jump_target || {};
     var closeSecondary = function() {
@@ -10192,6 +10222,92 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         cqGroup.appendChild(optionButton);
       });
       shell.appendChild(cqGroup);
+    } else if (type === 'link_list') {
+      // 公开知识类工具的列表：标题是外链（只放行 http/https），摘要和元信息只当文字。
+      var llList = el('div', { class: 'ai-tool-card-list' });
+      (Array.isArray(data.results) ? data.results : []).slice(0, 12).forEach(function(item) {
+        var llRow = el('div', { class: 'ai-tool-result ai-tool-result--link' });
+        var llHref = '';
+        try { var llu = new URL(String(item && item.url || '')); if (llu.protocol === 'https:' || llu.protocol === 'http:') llHref = llu.toString(); } catch (eLl) {}
+        var llTitle = String(item && item.title || '结果').slice(0, 140);
+        if (llHref) llRow.appendChild(el('a', { class: 'ai-tool-result-title-link', href: llHref, target: '_blank', rel: 'noopener noreferrer', text: llTitle }));
+        else llRow.appendChild(el('b', { text: llTitle }));
+        if (item && item.snippet) llRow.appendChild(el('span', { text: String(item.snippet).slice(0, 200) }));
+        if (item && item.meta) llRow.appendChild(el('small', { class: 'ai-tool-result-meta', text: String(item.meta).slice(0, 120) }));
+        llList.appendChild(llRow);
+      });
+      shell.appendChild(llList);
+    } else if (type === 'info_card') {
+      if (data.subtitle) shell.appendChild(el('div', { class: 'ai-tool-card-page-title', text: String(data.subtitle).slice(0, 160) }));
+      var icUrl = '';
+      try { var icu = new URL(String(data.url || '')); if (icu.protocol === 'https:' || icu.protocol === 'http:') icUrl = icu.toString(); } catch (eIc) {}
+      if (data.text) { var icText = el('div', { class: 'ai-tool-card-summary' }); icText.style.whiteSpace = 'pre-wrap'; icText.textContent = String(data.text).slice(0, 3000); shell.appendChild(icText); }
+      appendKvGrid((Array.isArray(data.facts) ? data.facts : []).slice(0, 14).map(function(pair) { return [String(pair && pair[0] || ''), String(pair && pair[1] || '')]; }));
+      if (icUrl) shell.appendChild(el('a', { class: 'ai-tool-card-link', href: icUrl, target: '_blank', rel: 'noopener noreferrer', text: icUrl.length > 72 ? icUrl.slice(0, 72) + '…' : icUrl }));
+    } else if (type === 'navigate' || type === 'research_offer') {
+      // 小猫建议的下一步：只有点了按钮才会执行（跳转页面 / 开始深入研究）。
+      shell.classList.add('ai-clarify-card');
+      var navGroup = el('div', { class: 'ai-clarify-options', role: 'group' });
+      var isOffer = type === 'research_offer';
+      if (isOffer) {
+        shell.appendChild(el('div', { class: 'ai-clarify-question', text: String(data.topic || '').slice(0, 200) }));
+        if (data.note) shell.appendChild(el('div', { class: 'ai-tool-card-meta', text: String(data.note).slice(0, 120) }));
+      }
+      var navButton = el('button', { type: 'button', class: 'ai-clarify-option', text: isOffer ? '开始深入研究' : String(data.label || '打开').slice(0, 24) });
+      navButton.addEventListener('click', function() {
+        if (shell.getAttribute('data-answered') === '1') return;
+        if (!isOffer) { runAiNavigate(data); return; }
+        var topic = String(data.topic || '').slice(0, 300);
+        if (topic.length < 6) { notify('研究主题太短'); return; }
+        if (S._dtSending) { notify('正在进行另一项研究，请稍候'); return; }
+        shell.setAttribute('data-answered', '1');
+        navButton.disabled = true; navButton.classList.add('is-chosen'); navButton.textContent = '已开始研究';
+        Promise.resolve(openDeepThinkPage()).then(function() { return handleDeepThinkPageSend(topic); }).catch(function(eStart) {
+          console.warn('[AI] start research failed', eStart);
+          shell.removeAttribute('data-answered'); navButton.disabled = false; navButton.classList.remove('is-chosen'); navButton.textContent = '开始深入研究';
+          notify('没能开始研究，请重试');
+        });
+      });
+      navGroup.appendChild(navButton);
+      shell.appendChild(navGroup);
+    } else if (type === 'rich_card') {
+      var rcVariant = String(data.variant || '');
+      if (rcVariant === 'compare') {
+        var rcCols = (Array.isArray(data.columns) ? data.columns : []).slice(0, 6), rcTable = el('table', { class: 'ai-rich-table' });
+        var rcHead = el('tr'); rcCols.forEach(function(col) { rcHead.appendChild(el('th', { text: String(col).slice(0, 30) })); });
+        rcTable.appendChild(el('thead')).appendChild(rcHead);
+        var rcBody = el('tbody');
+        (Array.isArray(data.rows) ? data.rows : []).slice(0, 12).forEach(function(row) { var tr = el('tr'); rcCols.forEach(function(col, ci) { tr.appendChild(el('td', { text: String(Array.isArray(row) && row[ci] != null ? row[ci] : '').slice(0, 80) })); }); rcBody.appendChild(tr); });
+        rcTable.appendChild(rcBody);
+        var rcScroll = el('div', { class: 'ai-rich-scroll' }); rcScroll.appendChild(rcTable); shell.appendChild(rcScroll);
+      } else if (rcVariant === 'timeline') {
+        var rcTl = el('ol', { class: 'ai-rich-timeline' });
+        (Array.isArray(data.items) ? data.items : []).slice(0, 20).forEach(function(item) {
+          var li = el('li'); li.appendChild(el('span', { class: 'ai-rich-time', text: String(item && item.time || '').slice(0, 30) }));
+          var box = el('div', { class: 'ai-rich-body' }); box.appendChild(el('b', { text: String(item && item.title || '').slice(0, 80) }));
+          if (item && item.detail) box.appendChild(el('span', { text: String(item.detail).slice(0, 160) }));
+          li.appendChild(box); rcTl.appendChild(li);
+        });
+        shell.appendChild(rcTl);
+      } else if (rcVariant === 'checklist') {
+        var rcCk = el('ul', { class: 'ai-rich-checklist' });
+        (Array.isArray(data.items) ? data.items : []).slice(0, 20).forEach(function(item) {
+          var li = el('li', { class: item && item.done ? 'is-done' : '' });
+          li.appendChild(el('span', { class: 'ai-rich-check', 'aria-hidden': 'true', text: item && item.done ? '✓' : '' }));
+          li.appendChild(el('span', { text: String(item && item.text || '').slice(0, 120) })); rcCk.appendChild(li);
+        });
+        shell.appendChild(rcCk);
+      } else if (rcVariant === 'stats') {
+        var rcSt = el('div', { class: 'ai-rich-stats' });
+        (Array.isArray(data.items) ? data.items : []).slice(0, 8).forEach(function(item) {
+          var tile = el('div', { class: 'ai-rich-stat' });
+          tile.appendChild(el('b', { text: String(item && item.value || '').slice(0, 40) }));
+          tile.appendChild(el('span', { text: String(item && item.label || '').slice(0, 30) }));
+          if (item && item.note) tile.appendChild(el('small', { text: String(item.note).slice(0, 60) }));
+          rcSt.appendChild(tile);
+        });
+        shell.appendChild(rcSt);
+      }
     } else if (type === 'task_plan') {
       if (data.goal) {
         shell.appendChild(el('div', { class: 'ai-tool-card-page-title', text: String(data.goal).slice(0, 200) }));
