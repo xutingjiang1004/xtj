@@ -3022,7 +3022,9 @@
                 //   旧判定只看 dockChatSending，批量发图时打字回车会落到下面
                 //   「上一条消息正在发送」的提示里被丢掉，用户以为发出去了。
                 //   队列 drain 本身已同时等待 dockChatSending 与 _chatBatchSending。
-                if (dockChatSending || _chatBatchSending) {
+                // The batch loop raises _chatBatchSending itself before sending each of its own files, so that call must not be
+                // mistaken for "another message is still sending" (that made every attachment send stop with a toast).
+                if (dockChatSending || (_chatBatchSending && !(retryOptions && retryOptions.batchOwned))) {
                     if (forwarding) { showToast('上一条消息正在发送，请稍候再转发'); return; }
                     if (queuedSend) {
                         _dockChatSendQueue.unshift({ content: content, peer: dockChatActiveUser, owner: currentUser, epoch: _authStateEpoch, replyDraft: replyDraft,
@@ -4777,7 +4779,7 @@
                 try {for(var i=0;i<files.length;i++){
                     if(batch.cancelled || owner!==window.currentUser || epoch!==_authStateEpoch || peer!==dockChatActiveUser) {if(owner===window.currentUser && epoch===_authStateEpoch)showToast('剩余附件已保留，返回会话后可继续发送');break;}
                     if(i+1<files.length)_chatAttachmentDrafts.set(peer,{owner:owner,epoch:epoch,files:files.slice(i+1)});else _chatAttachmentDrafts.delete(peer);
-                    await sendDockChatMessageSingle(files[i],i===0?text:'');
+                    await sendDockChatMessageSingle(files[i],i===0?text:'',{batchOwned:true});
                 }} finally {if(_chatBatchFlight===batch){_chatBatchFlight=null;_chatBatchSending=false;
                     // 批次结束是另一个发送锁释放点，同样要触发队列回放，
                     // 否则批次期间排队的文本会一直挂到用户下次手动发送。
