@@ -50,6 +50,12 @@ const CASES = [
   // agent behaviour
   ['把这些存到笔记里', ['workspace_files']], ['三个方案分头调研一下', ['parallel_subtasks']], ['刚才记错了，改成杭州', ['memory_update']], ['对比 A B C 三款手机做个表', ['render_card', 'make_chart']],
   ['搜一下最新的 iPhone 发布会', ['search_web', 'tavily_search']], ['这个网页能帮我提取一下正文吗', ['web_extract']],
+  // the same needs, said differently
+  ['做个图看看趋势', ['make_chart']], ['把数据可视化一下', ['make_chart']], ['发我一个 csv', ['make_file']], ['把这个 JSON 格式化', ['process_json']], ['美金兑人民币现在多少', ['get_exchange_rate']],
+  ['后天出门要带伞吗', ['get_weather']], ['明天穿什么合适', ['get_weather']], ['谁给我点赞了', ['search_everything']], ['打开我的主页', ['site_navigate']], ['有没有 arxiv 上讲扩散模型的文章', ['search_papers']],
+  ['查一下 React 最新版本', ['npm_pypi_lookup']], ['这个库安全吗 axios', ['vuln_check']], ['爱因斯坦哪年出生的', ['wikidata_facts']], ['ephemeral 怎么读', ['dictionary']],
+  ['我发过哪些帖子', ['search_posts']], ['我的照片里有海边的吗', ['search_photos']], ['找找我和小明的聊天记录', ['search_dm_messages']], ['把刚才的内容记成笔记', ['workspace_files']],
+  ['帮我分头查三个城市的天气', ['parallel_subtasks', 'get_weather']], ['这个说法有没有来源', ['verify_claims']], ['空气质量怎么样', ['get_weather']],
   // follow-ups keep the previous turn's group through the recent user text
   ['再来一份', ['make_chart'], '帮我画个折线图'], ['换成柱状图', ['make_chart'], '画个本月支出的饼图'], ['那明天呢', ['get_weather'], '今天上海天气怎么样'], ['继续', ['search_papers'], '找几篇关于 RAG 的论文'],
   // long messages, links and attachments always keep every definition
@@ -147,4 +153,10 @@ test('through the request middleware a conversation id makes the route sticky, a
   assert.equal(await run('1', cid, '谢谢'), 'core+data');
   assert.equal(await run('2', cid, '谢谢'), 'core');
   assert.equal(await run('1', '', '谢谢'), 'core');
+});
+
+test('widening the keywords does not pull small talk out of the core group', () => {
+  const smallTalk = ['你好呀', '谢谢你', '你是谁', '讲个笑话', '今天心情不太好', '晚安', '哈哈哈', '早上好', '在吗', '你觉得我适合学什么', '给我讲讲你自己', '我今天有点累', '推荐一首歌', '你喜欢猫还是狗'];
+  const wrong = smallTalk.filter(message => { const r = router.routeBody({ message }); return !r || Array.from(r).join() !== 'core'; });
+  assert.deepEqual(wrong, [], 'small talk that pulled in other groups: ' + wrong.join(' | '));
 });

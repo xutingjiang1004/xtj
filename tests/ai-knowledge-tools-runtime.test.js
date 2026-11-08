@@ -278,3 +278,14 @@ test('the default transport uses the pinned, https-only fetchers with limits, an
   const post = seen.find(x => x[0] === 'post'); assert.equal(post[1], 'https://api.osv.dev/v1/query'); assert.equal(post[2], '203.0.113.9'); assert.equal(post[3], 'POST'); assert.equal(post[5], 'application/json'); assert.deepEqual(JSON.parse(post[4]).package, { name: 'safe', ecosystem: 'npm' });
   assert.ok(seen.some(x => x[0] === 'assert' && x[1] === 'https://api.osv.dev/v1/query'), 'the POST target is validated before connecting');
 });
+
+test('github_issues cannot be steered to another repository, organization or state through the search text', async () => {
+  const run = async query => { const x = tools([[/search\/issues/, json({ items: [] })]], { githubToken: 'TESTTOKEN' }); await x.t.execute('github_issues', { repo: 'a/b', query, state: 'open', kind: 'issue' }); return decodeURIComponent(x.calls[0].url.split('q=')[1].split('&')[0]); };
+  assert.equal(await run('crash on start'), 'repo:a/b is:issue is:open crash on start');
+  assert.equal(await run('crash repo:evil/private'), 'repo:a/b is:issue is:open crash');
+  assert.equal(await run('org:evil user:victim bug'), 'repo:a/b is:issue is:open bug');
+  assert.equal(await run('-repo:a/b is:closed in:comments panic'), 'repo:a/b is:issue is:open panic');
+  assert.equal(await run('REPO : evil/x\nBug'), 'repo:a/b is:issue is:open Bug');
+  assert.equal(await run('repo:evil/private'), 'repo:a/b is:issue is:open');
+  assert.equal(await run('error: cannot find module'), 'repo:a/b is:issue is:open error: cannot find module', 'only scope and state qualifiers are removed; an error message keeps its words');
+});
