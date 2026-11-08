@@ -1941,32 +1941,35 @@ html[data-xtj-motion=off] .ai-tool-round-list-wrap { transition: none !important
 .post-stats-text .post-stat-link:focus-visible { outline: 2px solid var(--primary, #2f9e8f); outline-offset: 2px; border-radius: 4px; }
 .post-stats-line { display: inline; }
 #postStatsModal { z-index: 2200; }
-#postStatsModal { align-items: flex-end; }
-/* 底部半屏：只占网站下半部分，上半部分的页面保持可见、不被盖住。 */
+/* 2026-11-08：改成居中的二级窗口（和「个人动态」同一类窗口，小一点），打开/关闭由共享元素转场接管：
+   从被点的「浏览 N」「点赞 N」长出来，关闭时回到那里。窗口底色必须是实色（转场用同色遮罩盖住内容）。 */
 #postStatsModal .post-stats-panel {
-  position: fixed; left: 0; right: 0; bottom: 0; top: auto; width: 100%; max-width: none; margin: 0;
-  height: 50vh; height: 50dvh; max-height: 50vh; max-height: 50dvh;
-  padding: 52px 0 env(safe-area-inset-bottom, 0px);
-  border-radius: 20px 20px 0 0; display: flex; flex-direction: column; overflow: hidden;
-  background: #f8fcf9 !important; border: 0 !important; border-top: 1px solid rgba(120, 160, 140, 0.28) !important;
-  box-shadow: 0 -10px 36px rgba(40, 80, 60, 0.16) !important;
+  display: flex; flex-direction: column; width: min(92vw, 520px) !important; max-width: 520px;
+  height: min(72dvh, 560px); max-height: calc(100dvh - 32px); min-height: 0; margin: 0; padding: 0 !important;
+  border-radius: 22px; overflow: hidden;
+  background: var(--bg-color, #effaf7) !important; border: 1px solid rgba(120, 160, 140, 0.28) !important;
+  box-shadow: 0 18px 50px rgba(40, 80, 60, 0.22) !important;
   -webkit-backdrop-filter: none !important; backdrop-filter: none !important; color: var(--text-main, #17313a);
 }
-[data-theme="dark"] #postStatsModal .post-stats-panel { background: #0e1d21 !important; box-shadow: 0 -10px 36px rgba(0, 0, 0, 0.5) !important; border-top-color: rgba(255, 255, 255, 0.1) !important; }
-#postStatsModal .post-stats-close {
-  position: absolute; top: 4px; right: 8px; width: 44px; height: 44px;
-  display: grid; place-items: center; border: 0; border-radius: 50%; background: transparent;
-  color: var(--text-muted, #667f87); font-size: 18px; cursor: pointer; touch-action: manipulation;
+[data-theme="dark"] #postStatsModal .post-stats-panel { box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55) !important; border-color: rgba(255, 255, 255, 0.1) !important; }
+#postStatsModal .post-stats-header {
+  flex: none; display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 8px 6px 20px; border-bottom: 1px solid var(--border, rgba(120, 160, 140, 0.22));
 }
+#postStatsModal .post-stats-header h2 { margin: 0; font-size: 17px; font-weight: 800; color: var(--text-main, #17313a); }
+#postStatsModal .post-stats-close {
+  width: 44px; height: 44px; padding: 0; display: grid; place-items: center; border: 0; border-radius: 50%;
+  background: transparent; box-shadow: none; color: var(--text-muted, #667f87); cursor: pointer; touch-action: manipulation;
+}
+#postStatsModal .post-stats-close svg { width: 18px; height: 18px; }
 #postStatsModal .post-stats-close:focus-visible { outline: 2px solid var(--primary, #2f9e8f); }
 #postStatsModal .post-stats-columns {
-  flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  width: 100%; max-width: 1100px; margin: 0 auto;
+  flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); width: 100%;
 }
 #postStatsModal .post-stats-col { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 #postStatsModal .post-stats-col + .post-stats-col { border-left: 1px solid rgba(120, 160, 140, 0.22); }
 #postStatsModal .post-stats-head {
-  margin: 0; padding: 4px 16px 12px; font-size: 16px; font-weight: 800; color: var(--text-main, #17313a);
+  margin: 0; padding: 14px 16px 10px; font-size: 16px; font-weight: 800; color: var(--text-main, #17313a);
   display: flex; align-items: center; gap: 8px;
 }
 #postStatsModal .post-stats-head span {

@@ -7123,9 +7123,9 @@ function renderProfileActivityList(kind) {
             //   * 关闭结束时窗口在同一个任务里直接隐藏，页面自带的关闭过渡不再把窗口再显示一遍（以前会闪一下）。
             // 只用 transform / opacity（合成层），动画期间暂停窗口里的模糊。
             (function() {
-                var ORIGIN_PRIORITY = ['.post-media-cell', '.author-post-entry', '.author-post-row', '.comment-item', '[data-user-name]', '.avatar-wrap', '.avatar.clickable', '.photo-wall-item', '.pp-info-btn', '.ai-plus-btn', 'button', '[role="button"]', 'a[href]', '.post'];
+                var ORIGIN_PRIORITY = ['.post-stat-link', '.post-media-cell', '.author-post-entry', '.author-post-row', '.comment-item', '[data-user-name]', '.avatar-wrap', '.avatar.clickable', '.photo-wall-item', '.pp-info-btn', '.ai-plus-btn', 'button', '[role="button"]', 'a[href]', '.post'];
                 var INNER_VISUAL = 'img, .avatar, .avatar-wrap, canvas, video, svg, .post-media-cell, .upc-avatar';
-                var ANIMATED = { userProfileModal: 1, postDetailModal: 1, profileActivityModal: 1, profileDetailModal: 1, statModal: 1 };
+                var ANIMATED = { userProfileModal: 1, postDetailModal: 1, profileActivityModal: 1, profileDetailModal: 1, statModal: 1, postStatsModal: 1 };
                 // 窗口里和「被点的图」对应的那个元素：图飞到它那里。
                 // 每项是按顺序尝试的选择器：先找图片本身，找不到才退回外框（外框带 3px 边框，图要落在边框里面）。
                 var HERO_TARGET = { userProfileModal: ['#upcAvatar img', '#upcAvatar'], postDetailModal: ['.post-detail-media img', '.post-detail-media-card img'] };
@@ -12944,7 +12944,7 @@ function renderProfileActivityList(kind) {
             // 统计预加载（使用后端快照接口，避免全量读取）
 
             // ===================== 浏览 / 点赞用户统计面板 =====================
-            // 点帖子里的「浏览 N」「点赞 N」打开同一块满屏面板：左栏浏览用户，右栏点赞用户，每人头像 + 名字。
+            // 点帖子里的「浏览 N」「点赞 N」打开同一个居中的二级窗口（共享元素转场：从被点的按钮长出来，关闭回到那里）：左栏浏览用户，右栏点赞用户，每人头像 + 名字。
             (function installPostStatsPanel() {
                 var MODAL_ID = 'postStatsModal', PAGE_SIZE = 50, MAX_PAGES = 40;
                 var session = 0;

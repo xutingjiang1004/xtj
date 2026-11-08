@@ -13,7 +13,7 @@ async function routeRelations(f, post, { views, likes, viewsTotal, likesTotal })
   await f.page.route('**/api/post/detail/' + post.id + '/relations/likes**', route => route.fulfill({ json: { ok: true, data: likes, has_more: false, next_cursor: null, total: likesTotal } }));
 }
 
-test('clicking 浏览 or 点赞 opens one bottom half-screen panel: viewers on the left, likers on the right, each with avatar and name', { timeout: 60000 }, async () => {
+test('clicking 浏览 or 点赞 opens one centered secondary window: viewers on the left, likers on the right, each with avatar and name', { timeout: 60000 }, async () => {
   const f = await postBrowserFixture({ counts: [1] });
   try {
     const post = f.posts[0];
@@ -31,12 +31,15 @@ test('clicking 浏览 or 点赞 opens one bottom half-screen panel: viewers on t
     assert.deepEqual(await modal.locator('#postStatsViewsList .post-stats-name').allTextContents(), ['viewer00', 'viewer01', 'viewer02']);
     assert.deepEqual(await modal.locator('#postStatsLikesList .post-stats-name').allTextContents(), ['fan00', 'fan01']);
     assert.equal(await modal.locator('.post-stats-row .avatar').count(), 5, 'every user shows an avatar (or initial)');
-    // The panel slides in for 0.18s: measure it once it has settled at the bottom, not mid-transition.
-    await f.page.waitForFunction(() => { const r = document.querySelector('#postStatsModal .post-stats-panel').getBoundingClientRect(); return Math.abs(r.bottom - innerHeight) <= 1; }, null, { timeout: 5000 });
+    // The window grows out of the tapped button (~0.4s): measure it once it has settled, not mid-animation.
+    await f.page.waitForFunction(() => { const b = document.querySelector('#postStatsModal .post-stats-panel'); return b.getAnimations().length === 0 && b.getBoundingClientRect().width > 200; }, null, { timeout: 5000 });
     const box = await modal.locator('.post-stats-panel').boundingBox(), viewport = f.page.viewportSize();
-    assert.ok(box.width >= viewport.width - 1, 'the panel spans the width of the site');
-    assert.ok(Math.abs(box.height - viewport.height / 2) <= 2, 'the panel takes half of the site height');
-    assert.ok(Math.abs(box.y + box.height - viewport.height) <= 1, 'the panel sits at the bottom, so the top half is left uncovered');
+    assert.ok(box.width <= 520 + 1 && box.width <= viewport.width * 0.92 + 1 && box.width >= 280, 'a small window, not the full width: ' + box.width);
+    assert.ok(box.height <= viewport.height - 31 && box.height <= 560 + 1, 'a window, not a full-height page: ' + box.height);
+    assert.ok(Math.abs((box.x + box.width / 2) - viewport.width / 2) <= 2, 'centered horizontally');
+    assert.ok(Math.abs((box.y + box.height / 2) - viewport.height / 2) <= 2, 'centered vertically');
+    assert.ok(box.y > 8 && box.y + box.height < viewport.height - 8, 'floats above the page with a margin on every side');
+    assert.equal(await modal.locator('.post-stats-header h2').textContent(), '浏览与点赞');
     const left = await modal.locator('#postStatsViewsHead').boundingBox(), right = await modal.locator('#postStatsLikesHead').boundingBox();
     assert.ok(left.x < right.x, 'viewers are on the left, likers on the right');
     await modal.locator('.post-stats-close').click();
@@ -98,5 +101,48 @@ test('a login that expires while the panel is open also ends with the sign-in hi
     await f.page.evaluate(id => window.openPostStatsPanel(id), post.id);
     await f.page.waitForFunction(() => /登录后可以查看浏览用户/.test(document.getElementById('postStatsViewsList').textContent), null, { timeout: 15000 });
     assert.equal(await f.page.locator('#postStatsViewsList .post-stats-retry').count(), 0);
+  } finally { await f.close(); }
+});
+
+test('the window opens from the tapped button and closes back to it with the shared-element motion; no stacked fade, nothing left behind', { timeout: 60000 }, async () => {
+  const f = await postBrowserFixture({ counts: [1] });
+  try {
+    const post = f.posts[0];
+    await routeRelations(f, post, { views: [person('viewer', 0, post.id)], likes: [person('fan', 0, post.id)], viewsTotal: 1, likesTotal: 1 });
+    const result = await f.page.evaluate(async id => {
+      const link = document.querySelector('.post[data-post-id="' + id + '"] .post-stat-link[data-stat-kind="likes"]');
+      const modal = document.getElementById('postStatsModal'), box = modal.querySelector('.modal-box');
+      const r = link.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2;
+      link.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: x, clientY: y, pointerType: 'touch' }));
+      link.click();
+      const open = box.getAnimations().filter(a => a.__xtjOrigin).length;
+      const claimed = window.xtjMorph.claims('postStatsModal', 'open');
+      const first = box.getBoundingClientRect();   // the first frame: still at the button, not at the final place
+      const startsAtButton = Math.abs(first.left + first.width / 2 - x) < 60 && Math.abs(first.top + first.height / 2 - y) < 60 && first.width < 120;
+      return { open, claimed, startsAtButton, hasGsap: !!window.gsap };
+    }, post.id);
+    assert.ok(result.open >= 1, 'the shared-element motion owns the opening');
+    assert.equal(result.claimed, true, 'the page-level GSAP fade steps aside');
+    assert.equal(result.startsAtButton, true, 'the window starts from the tapped button');
+    await f.page.waitForFunction(() => { const b = document.querySelector('#postStatsModal .modal-box'); return b.getAnimations().length === 0 && b.getBoundingClientRect().width > 200; }, null, { timeout: 5000 });
+    const opened = await f.page.evaluate(() => { const b = document.querySelector('#postStatsModal .modal-box'), cs = getComputedStyle(b); return { opacity: cs.opacity, transform: cs.transform, backdrop: cs.backdropFilter }; });
+    assert.equal(opened.opacity, '1'); assert.ok(opened.transform === 'none' || /matrix\(1, 0, 0, 1, 0, 0\)/.test(opened.transform), 'settles with no leftover transform: ' + opened.transform);
+    // 关闭：回到按钮，结束时窗口立刻隐藏，没有残留的压暗层、飞行图或内联样式。
+    const closing = await f.page.evaluate(() => { document.querySelector('#postStatsModal .post-stats-close').click(); const b = document.querySelector('#postStatsModal .modal-box'); return { anims: b.getAnimations().filter(a => a.__xtjOrigin).length, stillActive: document.getElementById('postStatsModal').classList.contains('active') }; });
+    assert.ok(closing.anims >= 1, 'closing is animated back to the button'); assert.equal(closing.stillActive, true, 'stays visible while it shrinks');
+    await closed(f);
+    await f.page.waitForTimeout(400);
+    const after = await f.page.evaluate(() => { const m = document.getElementById('postStatsModal'), b = m.querySelector('.modal-box'); return { anims: b.getAnimations().length, transform: b.style.transform, will: b.style.willChange, strays: document.querySelectorAll('body > img[aria-hidden="true"], #postStatsModal ~ div[aria-hidden="true"][style*="fixed"]').length, hidden: getComputedStyle(m).opacity }; });
+    assert.equal(after.anims, 0); assert.equal(after.transform, ''); assert.equal(after.will, ''); assert.equal(after.strays, 0); assert.equal(after.hidden, '0');
+    // 再开一次、中途关掉：沿原路退回，不会卡在半开。
+    const reopened = await f.page.evaluate(async id => {
+      const link = document.querySelector('.post[data-post-id="' + id + '"] .post-stat-link[data-stat-kind="views"]');
+      link.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: 40, clientY: 40, pointerType: 'touch' })); link.click();
+      await new Promise(r => setTimeout(r, 120)); window.closeModal('postStatsModal');
+      await new Promise(r => setTimeout(r, 900));
+      const m = document.getElementById('postStatsModal'); return { active: m.classList.contains('active'), anims: m.querySelector('.modal-box').getAnimations().length };
+    }, post.id);
+    assert.deepEqual(reopened, { active: false, anims: 0 });
+    assert.deepEqual(f.errors, []);
   } finally { await f.close(); }
 });
