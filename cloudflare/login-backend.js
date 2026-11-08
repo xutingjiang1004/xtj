@@ -48,6 +48,19 @@ function createLoginBackend(expectedUrl, revokedMarker, cryptoApi, BufferApi, op
         || !Number.isInteger(r) || r < 1 || r > 32 || !Number.isInteger(p) || p < 1 || p > 8) throw Error('invalid_verifier');
       return equal(fields[6], (await scrypt(password, fields[5], N, r)).toString('base64url'));
     }
+    // render-api/password-verifier.js 的加盐封装：scrypt(旧 SHA-256 十六进制串)。旧值可能是 SHA-256(密码) 或 SHA-256(用户名:密码)，两种候选都算。
+    if (stored.startsWith('scrypt:v1w:')) {
+      const fields = stored.split(':');
+      if (fields.length !== 7 || !fields[5] || !fields[6]) throw Error('invalid_verifier');
+      const N = Number(fields[2]), r = Number(fields[3]), p = Number(fields[4]);
+      if (!Number.isInteger(N) || N < 16384 || N > 1048576 || (N & (N - 1))
+        || !Number.isInteger(r) || r < 1 || r > 32 || !Number.isInteger(p) || p < 1 || p > 8) throw Error('invalid_verifier');
+      let matched = false;
+      for (const candidate of [hash(password), hash(user + ':' + password)]) {
+        if (equal(fields[6], (await scrypt(candidate, fields[5], N, r)).toString('base64url'))) matched = true;
+      }
+      return matched;
+    }
     if (/^[a-f0-9]{32}:[a-f0-9]{64}$/i.test(stored)) {
       const [salt, expected] = stored.split(':');
       const key = await new Promise((resolve, reject) => cryptoApi.pbkdf2(password, salt, 100000, 32, 'sha256', (e, k) => e ? reject(e) : resolve(k)));

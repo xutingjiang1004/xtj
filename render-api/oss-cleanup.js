@@ -14,7 +14,7 @@ const ossMedia = require('./oss-media');
 const { parseOssMediaUrl } = require('./post-media');
 
 const MAX_OBJECTS = 60;
-const THUMB_PATH = /^posts\/thumb_[0-9a-f]{32}\.jpg$/;
+const { THUMB_PATH } = require('./aux-media');
 
 // 与前端 buildStorageUploadPath 同一规则：作者名里非字母数字下划线汉字的字符换成 _，最多 32 位，再加 _。
 function ownerPrefix(userName) {

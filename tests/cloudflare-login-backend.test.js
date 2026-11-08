@@ -143,14 +143,16 @@ test('password login upgrades legacy verifier, commits real authentication event
   assert.equal(f.calls.some(c => c.url.hostname.includes('render')), false);
 });
 
-test('all retained password formats agree with the original Render verifier, including historical scrypt parameters', async () => {
+test('all retained password formats agree with the original Render verifier, including historical scrypt parameters and the wrapped legacy SHA-256', async () => {
   const server = fs.readFileSync(require.resolve('../render-api/server.js'), 'utf8');
-  const original = vm.runInNewContext(server.slice(server.indexOf("const AUTH_VERIFIER_PREFIX ="), server.indexOf('// ★ M23：refresh token 持久化失败时返回 null')) + '\nverifyAuthPassword;', { crypto, Buffer });
+  const original = vm.runInNewContext(server.slice(server.indexOf("const AUTH_VERIFIER_PREFIX ="), server.indexOf('// ★ M23：refresh token 持久化失败时返回 null')) + '\nverifyAuthPassword;', { crypto, Buffer, passwordVerifier: require('../render-api/password-verifier') });
   const salt = 'fixture-salt', legacySalt = 'a'.repeat(32);
   const verifiers = [
     'scrypt:v1:32768:4:1:' + salt + ':' + crypto.scryptSync(PASSWORD, salt, 32, { N: 32768, r: 4, p: 1 }).toString('base64url'),
     'scrypt:v1:' + salt + ':' + crypto.scryptSync(PASSWORD, salt, 32, { N: 16384, r: 8, p: 1 }).toString('base64url'),
-    legacySalt + ':' + crypto.pbkdf2Sync(PASSWORD, legacySalt, 100000, 32, 'sha256').toString('hex'), sha(PASSWORD), sha('alice:' + PASSWORD)
+    legacySalt + ':' + crypto.pbkdf2Sync(PASSWORD, legacySalt, 100000, 32, 'sha256').toString('hex'), sha(PASSWORD), sha('alice:' + PASSWORD),
+    // scripts/wrap-legacy-password-hashes.js 封装后的两种旧值：Render 与边缘登录后端必须给出同样的结论。
+    await require('../render-api/password-verifier').wrapLegacyVerifier(sha(PASSWORD)), await require('../render-api/password-verifier').wrapLegacyVerifier(sha('alice:' + PASSWORD))
   ];
   for (const verifier of verifiers) {
     assert.equal(await original(verifier, PASSWORD, 'alice'), true);

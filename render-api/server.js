@@ -10,6 +10,8 @@ const { createComment, readRelationPage, readFeedEngagement } = require('./post-
 const { readPostViewers } = require('./post-viewers');
 const { readPostOssPaths, deleteOssObjects } = require('./oss-cleanup');
 const { sanitizePostContent } = require('./post-meta');
+const passwordVerifier = require('./password-verifier');
+const { markAuxAttached } = require('./aux-media');
 const { verifyPostOssMedia } = require('./oss-sign');
 const { readPhotoWallPage } = require('./photo-wall-page');
 const { createAdaptivePoller } = require('./adaptive-poller');
@@ -268,6 +270,8 @@ const supabase = require('./ai-private-data').bindPrivateAiData(createClient(
   SUPABASE_SERVICE_KEY,
   { global: { fetch: supabaseAvailability.transport } }
 ));
+// 已登录请求的认证缓存（身份 + 封禁状态，15 秒，管理员写操作时整体清空），见 auth-cache.js。
+const authCache = require('./auth-cache').createAuthCache();
 // Token 额度 + Pro 会员（Stripe 接入点预留）
 const aiQuota = createAiQuota(supabase);
 const claimDurableSearchCredit = require('./search-credit').createSearchCredit({
@@ -11736,6 +11740,24 @@ app.get('/api/config/public', rateLimit(60000, 30), (req, res) => {
 
 // 邮件配置健康检查（需管理员鉴权）
 const adminAuditTrail = createAdminAuditTrail({ supabase, marker: AUDIT_LOG_MARKER });
+// 管理员的任何写操作（封禁、禁言、拉黑、解除、删用户、处理举报……）结束后清空认证缓存，
+// 保证后台操作之后封禁/禁言立刻对所有请求生效，而不是等缓存过期。
+// 清空发生在响应结束时：此前发起、结束后才返回的缓存读取会被缓存的「代际」机制丢弃，不会把旧状态写回。
+// 没通过认证/限流的请求（401/403/429）什么都没改，不清空——否则任何人狂发 POST /admin/xxx 都能让缓存形同虚设。
+function clearAuthCacheAroundAdminWrite(req, res, next) {
+  if (req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS' && req.path !== '/login' && req.path !== '/login/') {
+    var done = function() {
+      var code = res.statusCode;
+      if (code === 401 || code === 403 || code === 429) return;
+      authCache.clear();
+    };
+    res.once('finish', done);
+    res.once('close', done);
+  }
+  return next();
+}
+app.use('/admin', clearAuthCacheAroundAdminWrite);
+app.use('/api/admin', clearAuthCacheAroundAdminWrite);
 app.use('/admin', (req, res, next) => {
   if (req.path === '/login' || req.path === '/login/') return next();
   return verifyToken(req, res, () => adminAuditTrail.middleware(req, res, next));
@@ -11924,7 +11946,7 @@ async function authenticateUser(req, res, next) {
     var payload = verifyUserAccessToken(token);
     if (payload && payload.user_name && !isTokenRevoked(token)) {
       try {
-        var userExists = await readAccountIdentity(supabase, payload.user_name, ADMIN_USERNAME);
+        var userExists = await authCache.identity(payload.user_name, function() { return readAccountIdentity(supabase, payload.user_name, ADMIN_USERNAME); });
         if (!matchesAccount(payload, userExists, USER_ACCESS_TOKEN_EXPIRY_MS)) {
           return res.status(401).json({ error: '用户不存在或已注销', code: 'auth_expired' });
         }
@@ -11935,7 +11957,8 @@ async function authenticateUser(req, res, next) {
       req.userName = payload.user_name;
       req.accountId = String(userExists.id);
       try {
-        req.userRestrictions = await loadUserRestrictions(req.userName);
+        // 返回副本：缓存里的对象被多个请求共用，不能让某个请求改到它。
+        req.userRestrictions = Object.assign({}, await authCache.restrictions(req.userName, function() { return loadUserRestrictions(req.userName); }));
       } catch (_) {
         req.userRestrictions = { is_banned: false, is_blacklisted: false, is_muted: false, unavailable: true };
       }
@@ -12053,7 +12076,7 @@ async function optionalAuth(req, res, next) {
     if (!token) return next();
     var payload = verifyUserAccessToken(token);
     if (!payload || !payload.user_name || isTokenRevoked(token)) return next();
-    var userExists = await readAccountIdentity(supabase, payload.user_name, ADMIN_USERNAME);
+    var userExists = await authCache.identity(payload.user_name, function() { return readAccountIdentity(supabase, payload.user_name, ADMIN_USERNAME); });
     if (!matchesAccount(payload, userExists, USER_ACCESS_TOKEN_EXPIRY_MS)) return next();
     req.accountId = String(userExists.id);
     req.userName = payload.user_name;
@@ -12117,6 +12140,9 @@ async function verifyAuthPassword(stored, password, userName) {
     var legacyKey = await scryptAsync(password, fields[2], SCRYPT_DEFAULT_N, 8);
     return safeTextEqual(fields[3], legacyKey.toString('base64url'));
   }
+  // 旧的无盐 SHA-256 被 scripts/wrap-legacy-password-hashes.js 加盐封装成 scrypt:v1w: 之后走这里；
+  // 成功登录时照旧升级成标准 scrypt（见登录路由里的 AUTH_VERIFIER_PREFIX 判断）。
+  if (passwordVerifier.isWrappedLegacyVerifier(value)) return passwordVerifier.verifyWrappedLegacy(value, password, userName);
   // Legacy browser records: PBKDF2 salt:hash, SHA-256(password), or
   // SHA-256(username:password). They are accepted only here and upgraded.
   if (/^[a-f0-9]{32}:[a-f0-9]{64}$/i.test(value)) {
@@ -13882,7 +13908,7 @@ function normalizeFallbackIpLocation(value) {
 installPostMedia(app, { supabase, authenticateUser, rateLimit, userBanError }).start();
 // ★ 2026-11-02：帖子媒体改为浏览器直传阿里云 OSS（签名由服务端下发）。
 //   未配置 OSS 环境变量时接口返回 oss_disabled，前端自动回退 Supabase 老链路。
-require('./oss-sign').installOssSign(app, { authenticateUser, rateLimit, banError: userBanError });
+require('./oss-sign').installOssSign(app, { authenticateUser, rateLimit, banError: userBanError, supabase });
 app.post('/api/post/create', authenticateUser, rateLimit(60000, 20), async (req, res) => {
   try {
     // ★ 封禁强制：服务端写端点必须校验限制状态，防止绕过前端本地禁点
@@ -14096,6 +14122,9 @@ app.post('/api/post/create', authenticateUser, rateLimit(60000, 20), async (req,
         });
       });
     }
+
+    // 这条帖子用到的缩略图/封面标记为已使用，清理任务才不会把它们当成放弃的上传。不阻塞响应。
+    markAuxAttached(supabase, req.userName, inserted.data && inserted.data.id, payload.content).catch(function() {});
 
     return res.status(201).json({
       ok: true,

@@ -256,7 +256,7 @@ test('actual post creation ignores submitted IP/city and keeps optional GPS sepa
   const lookedUp = [], queued = [];
   const scope = vm.createContext({
     app:{post(_path,...handlers){handler=handlers.at(-1);}},authenticateUser(){},rateLimit:()=>()=>{},userBanError:()=>null,
-    SUPABASE_URL:'https://db.invalid',validatePostAttachments:()=>[],parsePostMediaUrl:()=>null,isLocalUploadUrl:()=>false,isOssMediaUrl:()=>false,verifyPostOssMedia:async()=>({ok:true}),sanitizePostContent:require('../render-api/post-meta').sanitizePostContent,SERVER_HOSTNAME:'',
+    SUPABASE_URL:'https://db.invalid',validatePostAttachments:()=>[],parsePostMediaUrl:()=>null,isLocalUploadUrl:()=>false,isOssMediaUrl:()=>false,verifyPostOssMedia:async()=>({ok:true}),markAuxAttached:async()=>0,sanitizePostContent:require('../render-api/post-meta').sanitizePostContent,SERVER_HOSTNAME:'',
     getClientIp:req=>req.ip,isPrivateOrReservedIp:isPrivate,
     resolveIpRegion:async value=>{lookedUp.push(value);return unavailable?{province:'',city:'',text:'',status:'failed'}:{province:'浙江',city:'杭州',text:'浙江 杭州',status:'resolved'};},
     supabase:{from:()=>({insert(rows){payload=rows[0];return{select:()=>({single:async()=>({data:{id:'saved-post',...payload},error:null})})};}})},
@@ -280,7 +280,7 @@ test('idempotent image and video retries from a different IP cannot requeue hist
     const scope = vm.createContext({
       app:{post(_path,...handlers){handler=handlers.at(-1);}},authenticateUser(){},rateLimit:()=>()=>{},userBanError:()=>null,
       SUPABASE_URL:'https://db.invalid',validatePostAttachments:()=>album?[{media_url:'https://db.invalid/media.jpg'}]:[],parsePostMediaUrl:()=>'posts/original.mp4',isLocalUploadUrl:()=>true,
-      isOssMediaUrl:()=>false,verifyPostOssMedia:async()=>({ok:true}),sanitizePostContent:require('../render-api/post-meta').sanitizePostContent,SERVER_HOSTNAME:'',
+      isOssMediaUrl:()=>false,verifyPostOssMedia:async()=>({ok:true}),markAuxAttached:async()=>0,sanitizePostContent:require('../render-api/post-meta').sanitizePostContent,SERVER_HOSTNAME:'',
       getClientIp:req=>req.ip,isPrivateOrReservedIp:isPrivate,resolveIpRegion:async()=>({province:'',city:'',status:'failed'}),
       createPostWithAttachments:require('../render-api/post-attachments').createPostWithAttachments,
       createPostWithMedia:require('../render-api/post-media').createPostWithMedia,supabase:db,

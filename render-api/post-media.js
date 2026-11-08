@@ -2,6 +2,7 @@
 const { MAX_POST_IMAGES } = require('../js/post-media');
 const { removeStorageWithQueue, enqueueStorageCleanupJob } = require('./storage-cleanup');
 const ossMedia = require('./oss-media');
+const auxMedia = require('./aux-media');
 const PATH = /^posts\/[a-zA-Z0-9_\u4e00-\u9fff.-]{1,200}$/;
 const POSTER_PATH = /^posters\/[a-zA-Z0-9_\u4e00-\u9fff.-]{1,200}$/;
 const ID = /^[a-zA-Z0-9_-]{8,128}$/;
@@ -108,12 +109,17 @@ function installPostMedia(app, { supabase, authenticateUser, rateLimit, userBanE
 async function sweepPostMediaUploads(supabase, { cursor = '', now = Date.now(), limit = 50 } = {}) {
   // A full day of grace keeps ordinary slow uploads/retries safe. Attached
   // objects are protected again by the transactional cleanup check.
-  let query = supabase.from('post_media_uploads').select('storage_path,user_name,upload_id,cleaned_at')
+  let query = supabase.from('post_media_uploads').select('storage_path,user_name,upload_id,cleaned_at,created_at')
     .in('status', ['pending', 'cleanup']).lt('created_at', new Date(now - 86400000).toISOString())
     .order('storage_path', { ascending: true }).limit(limit);
   if (cursor) query = query.gt('storage_path', cursor);
   const rows = await checked(query) || [];
   for (const row of rows) {
+    // 缩略图/封面的登记行（upload_id 以 aux_ 开头）走自己的回收流程：多等一会儿，并且删之前先核对没有任何引用。
+    if (auxMedia.isAuxUploadId(row.upload_id)) {
+      try { await auxMedia.reclaimAuxUpload(supabase, row, { now }); } catch (_) { /* 登记行保留，下一轮重试 */ }
+      continue;
+    }
     if (!validPath(row.storage_path)) continue;
     try {
       if (row.cleaned_at) {
@@ -139,17 +145,20 @@ async function sweepPostMediaUploads(supabase, { cursor = '', now = Date.now(), 
 async function retireAccountPostMediaUploads(supabase, actor) {
   const paths = []; let cursor = '';
   while (true) {
-    let query = supabase.from('post_media_uploads').select('storage_path').eq('user_name', actor).order('storage_path', { ascending: true }).limit(500);
+    let query = supabase.from('post_media_uploads').select('storage_path,upload_id').eq('user_name', actor).order('storage_path', { ascending: true }).limit(500);
     if (cursor) query = query.gt('storage_path', cursor);
     const rows = await checked(query) || [];
-    const batch = rows.map(row => row.storage_path);
+    // 缩略图/封面的登记行（aux_）不在这里处理：它们不是 posts/ 路径，也不走 Supabase 存储清理；
+    // 账号删除后它们没有引用，由清理任务的 aux 流程回收对应的 OSS 对象。
+    const batch = rows.filter(row => !auxMedia.isAuxUploadId(row.upload_id)).map(row => row.storage_path);
     if (batch.some(path => !validPath(path))) throw Error('unsafe_account_media_path');
     if (batch.length) {
       await checked(supabase.from('post_media_uploads').update({ status: 'cleanup' }).eq('user_name', actor).in('storage_path', batch));
       const queue = await enqueueStorageCleanupJob(supabase, { bucket: 'uploads', paths: batch, photoId: 'account-post-media:' + actor });
       if (!queue.ok) throw Error('account_media_queue_failed');
-      paths.push(...batch); cursor = batch[batch.length - 1];
+      paths.push(...batch);
     }
+    if (rows.length) cursor = rows[rows.length - 1].storage_path;
     if (rows.length < 500) break;
   }
   return paths;

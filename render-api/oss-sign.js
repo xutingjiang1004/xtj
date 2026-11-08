@@ -14,6 +14,7 @@
 //     浏览器拿到的是「一次性写入这个确切路径」的地址，不是 AccessKey。
 
 const ossMedia = require('./oss-media');
+const auxMedia = require('./aux-media');
 const { MAX_POST_FILE_BYTES } = require('../js/post-media');
 
 // 与 render-api/post-media.js 的 PATH 保持同样的字符集，避免两边对同一路径
@@ -92,7 +93,7 @@ async function verifyPostOssMedia(items, options) {
   return { ok: true };
 }
 
-function installOssSign(app, { authenticateUser, rateLimit, banError, signQuota = createSignQuota() } = {}) {
+function installOssSign(app, { authenticateUser, rateLimit, banError, signQuota = createSignQuota(), supabase } = {}) {
   // 启动自检：只报「有没有」，绝不输出密钥。排查直传失败时先看这四行。
   try {
     const c = ossMedia.config();
@@ -122,6 +123,15 @@ function installOssSign(app, { authenticateUser, rateLimit, banError, signQuota 
     if (!signQuota.take(String(req.userName || ''), size)) {
       res.set('Retry-After', '600');
       return res.status(429).json({ ok: false, code: 'oss_quota_exceeded', error: '上传量较大，请稍后再试', retryable: true });
+    }
+    // 缩略图/封面没有 prepare 登记：签名前记一笔（谁、哪个路径），发帖成功会标记已使用，
+    // 放弃发布留下的会被清理任务回收（aux-media.js）。登记失败不挡上传——最坏情况只是留下一个孤儿文件。
+    if (supabase && auxMedia.isAuxPath(path)) {
+      try {
+        const registered = await auxMedia.registerAuxUpload(supabase, String(req.userName || ''), path);
+        if (registered.conflict) return res.status(409).json({ ok: false, code: 'media_path_exists' });
+        if (registered.error) console.warn('[OSS] 缩略图/封面登记失败，仍然签名:', registered.error && registered.error.message || registered.error);
+      } catch (error) { console.warn('[OSS] 缩略图/封面登记异常，仍然签名:', error && error.message || error); }
     }
     try {
       const signed = ossMedia.presignedPutUrl(path, {

@@ -9,6 +9,13 @@
 - 直传 OSS 的媒体在发帖前由服务端 HEAD 核对（存在、大小、类型）；`/api/oss/sign` 有每账号每小时的签名总量上限（`OSS_SIGN_HOURLY_MB`，默认 1024，0 为不限）；AI 大请求体有全局内存预算（`AI_BODY_BUDGET_MB`，默认 160）。这三处是防滥用与保内存，不要为了「上传更顺」去掉。
 - 限流存储不可用时返回 503，不是 429；额度用完（402）期间由 `supabase-availability` 转成明确提示。
 
+## 2026-11-08（二）认证缓存、旧口令封装、缩略图/封面回收（用户要求）
+
+- **认证缓存只能缓存成功结果**：查不到的账号、查询失败、限制状态 `unavailable` 都不能缓存；管理员写操作结束后必须整体清空（`clearAuthCacheAroundAdminWrite`）。以后新增会改动封禁/禁言/拉黑/账号的后台接口，必须挂在 `/admin` 或 `/api/admin` 下，或自己调用 `authCache.clear()`，否则封禁最多晚 15 秒生效。
+- **口令校验值格式**：`scrypt:v1:`（标准）、`scrypt:v1w:`（旧无盐 SHA-256 的加盐封装，`scripts/wrap-legacy-password-hashes.js` 产生）、旧 PBKDF2、旧无盐 SHA-256（只在封装脚本跑完之前存在）。服务端（`verifyAuthPassword`）和 Cloudflare 边缘登录后端（`cloudflare/login-backend.js`）必须同时认这些格式，`tests/cloudflare-login-backend.test.js` 里有两边一致性测试。**新注册永远只生成标准 scrypt**。
+- **缩略图/封面登记**：aux 行（`upload_id` 以 `aux_` 开头）在 `post_media_uploads` 里与原图的登记行共存，清理任务按 `upload_id` 区分；任何新增的清理逻辑不得把 aux 行当原图处理（路径不在 `posts/` 下，也不走 Supabase 存储）。回收前必须核对引用，核对失败就不删。
+- 登录只按 IP 限流、没有按账号限流：这是已知取舍，**不要在没有用户决定的情况下加账号锁定**（会让人能故意把别人锁在外面）。
+
 ## 2026-11-07 存量帖子媒体迁到 OSS（用户要求，脚本已写、尚未执行）
 
 - 迁移脚本 `scripts/migrate-post-media-to-oss.js`，默认演练，`--apply` 才真迁，不删 Supabase 源文件。要迁约 39 个对象、约 101MB。必须等 Supabase 出站额度恢复后再执行（迁移要先从 Supabase 下载）。用法与顺序见 `CHANGELOG.md` 2026-11-07 条目。
