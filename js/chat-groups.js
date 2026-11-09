@@ -235,7 +235,8 @@
   function renderGroupList() {
     var section = ensureListSection(); if (!section) return;
     var list = $('dockGroupList');
-    section.hidden = !me();
+    section.hidden = !me() || state.unavailable;
+    var headerButton = $('chatGroupCreateButton'); if (headerButton) headerButton.hidden = !me() || state.unavailable;
     var count = $('dockGroupCount'); if (count) count.textContent = state.groups.length ? String(state.groups.length) : '';
     if (!state.groups.length) {
       list.innerHTML = state.groupsLoaded ? '<button type="button" class="grp-empty-cta" data-group-create><span>和好友一起聊</span><small>最多 1000 人，群主可管理成员、公告和二维码</small></button>' : '';
@@ -272,7 +273,7 @@
       if (seq !== state.listSeq || !same(owner, ep)) return;
       var previous = state.lastUnread;
       state.groups = Array.isArray(data.groups) ? data.groups : [];
-      state.groupsLoaded = true;
+      state.groupsLoaded = true; state.unavailable = false;
       state.lastUnread = Object.create(null);
       state.groups.forEach(function (g) {
         state.lastUnread[g.id] = g.unread || 0;
@@ -287,7 +288,9 @@
       if (state.active) syncActiveFromList();
     } catch (error) {
       if (error.code === 'identity_changed') return;
-      if (seq === state.listSeq) { state.groupsLoaded = true; renderGroupList(); }
+      // Server without the group tables yet (or the API missing): hide the entry
+      // instead of offering a feature that cannot work; a later refresh brings it back.
+      if (seq === state.listSeq) { state.groupsLoaded = true; state.unavailable = error.code === 'group_unavailable' || error.status === 404; renderGroupList(); }
     }
   }
   function scheduleListRefresh(delay, notify) {
