@@ -5,15 +5,16 @@ const { postBrowserFixture } = require('./helpers/post-browser-fixture');
 
 test('the post image queue waits while its panel is hidden and resumes on return', async t => {
   const f = await postBrowserFixture({ counts: [9], holdImages: true });t.after(() => f.close());const { page } = f;
-  await page.waitForFunction(() => document.querySelectorAll('#feed .post-media-cell img[src]').length === 4);
+  // 图片加载并发上限现为 6（image-load-guard.js 的 pump）。
+  await page.waitForFunction(() => document.querySelectorAll('#feed .post-media-cell img[src]').length === 6);
   await page.locator('[data-tab="chat"]').filter({ visible: true }).click();
   await page.waitForFunction(() => !document.getElementById('panelPosts').classList.contains('active'));
   f.releaseImages();
   await page.waitForFunction(() => [...document.querySelectorAll('#feed .post-media-cell img[src]')].every(img => img.naturalWidth > 0));
   await page.waitForTimeout(150);
-  assert.equal(await page.locator('#feed .post-media-cell img[src]').count(), 4);
+  assert.equal(await page.locator('#feed .post-media-cell img[src]').count(), 6);
   await page.locator('[data-tab="posts"]').filter({ visible: true }).click();
-  await page.waitForFunction(() => document.querySelectorAll('#feed .post-media-cell img[src]').length > 4);
+  await page.waitForFunction(() => document.querySelectorAll('#feed .post-media-cell img[src]').length > 6);
   assert.deepEqual(f.errors, []);
 });
 
@@ -22,12 +23,15 @@ test('repeated preview errors stop automatically and a manual retry keeps the pr
   const { page } = f;
   await page.waitForFunction(() => document.querySelector('#feed .post-media-cell img').naturalWidth > 0);
   const original = f.origin + '/api/post/8c1cb02d-74d0-4e45-9e15-000000000001/media/0';
-  let requests = 0, recovered = false;
+  let requests = 0, probes = 0, recovered = false;
   await page.route(original + '*', async route => {
-    requests++;
+    if (route.request().method() === 'HEAD') probes++; else requests++;
     assert.equal(new URL(route.request().url()).searchParams.get('preview'), '1');
     await new Promise(resolve => setTimeout(resolve, 15));
-    if (recovered) await route.fulfill({ contentType: 'image/png', body: f.png });
+    // 图片出错后先发 HEAD 探测：只有 401/403 才证明登录态过期、才刷新一次会话
+    // （404/5xx 只是图片本身的问题，不该白白轮换会话）。这里让探测返回 401，GET 持续 503。
+    if (route.request().method() === 'HEAD') await route.fulfill({ status: recovered ? 200 : 401 });
+    else if (recovered) await route.fulfill({ contentType: 'image/png', body: f.png });
     else await route.fulfill({ status: 503, json: { ok: false, retryable: true } });
   });
   await page.evaluate(original => {
@@ -40,7 +44,7 @@ test('repeated preview errors stop automatically and a manual retry keeps the pr
   await retry.waitFor({ state: 'visible', timeout: 5000 });
   const stopped = requests;
   await page.waitForTimeout(200);
-  assert.equal(requests, stopped);assert.ok(requests <= 3, 'one failed tile cannot keep fetching');
+  assert.equal(requests, stopped);assert.ok(requests <= 3, 'one failed tile cannot keep fetching');assert.equal(probes, 1, 'the auth probe runs once, not per retry');
   assert.equal(await page.evaluate(() => testMediaRefreshes), 1);
   recovered = true;await retry.click();
   await page.waitForFunction(() => {
@@ -170,3 +174,23 @@ for (const surface of ['post', 'preview']) {
     } finally { release(); await f.close(); }
   });
 }
+
+test('a failing image that is not an auth failure never rotates the login session', async t => {
+  const f = await postBrowserFixture({ counts: [1] });t.after(() => f.close());
+  const { page } = f;
+  await page.waitForFunction(() => document.querySelector('#feed .post-media-cell img').naturalWidth > 0);
+  const original = f.origin + '/api/post/8c1cb02d-74d0-4e45-9e15-000000000001/media/0';
+  let requests = 0;
+  await page.route(original + '*', async route => { requests++; await route.fulfill({ status: 503, json: { ok: false, retryable: true } }); });
+  await page.evaluate(original => {
+    window.testMediaRefreshes = 0;
+    window.refreshUserToken = async () => { window.testMediaRefreshes++; return 'test-access'; };
+    const img = document.querySelector('#feed .post-media-cell img');
+    img.setAttribute('data-media-url', original);img.src = original + '?preview=1';
+  }, original);
+  await page.locator('#feed .post-media-cell.post-image-failed').first().waitFor({ state: 'visible', timeout: 5000 });
+  const stopped = requests;
+  await page.waitForTimeout(300);
+  assert.equal(requests, stopped, 'it stops by itself');assert.ok(requests <= 4);
+  assert.equal(await page.evaluate(() => testMediaRefreshes), 0, 'a 503 is not an expired session, so the session is left alone');
+});

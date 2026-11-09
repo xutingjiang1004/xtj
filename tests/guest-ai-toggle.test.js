@@ -35,6 +35,8 @@ function serverGuestRuntime(config, options) {
     // ★ 2026-10-27 限时公开：访客 AI 开关代码段内还定义了 OpenRouter 公开期鉴权中间件，
     //   它依赖 openRouter 模块，vm 上下文必须提供，否则整段代码求值即抛 ReferenceError。
     openRouter: require('../render-api/openrouter'),
+    // 访客 AI 现在要两个条件同时成立：环境变量 XTJ_ALLOW_GUEST_AI=1 且后台开关打开（见 server.js 注释）。
+    process: { env: { XTJ_ALLOW_GUEST_AI: options.envFlag === undefined ? '1' : options.envFlag } },
     console: console,
     Date: Date
   };
@@ -87,6 +89,15 @@ test('访客开关开启但请求携带凭证时仍走真实认证，不降级�
   assert.equal(result.nextCalled, false);
   assert.equal(result.calls.auth, 1);
   assert.equal(result.req.guestAi, undefined);
+});
+
+test('只有后台开关、没有环境变量时访客仍不放行（两个条件缺一不可）', async function() {
+  for (const envFlag of ['', '0', 'true']) {
+    const result = await invokeGuestAuth({ allow_guest_ai: true }, { envFlag: envFlag });
+    assert.equal(result.nextCalled, false, 'XTJ_ALLOW_GUEST_AI=' + JSON.stringify(envFlag));
+    assert.equal(result.calls.auth, 1);
+    assert.equal(result.req.guestAi, undefined);
+  }
 });
 
 test('读取配置失败时访客开关按关闭处理', async function() {
@@ -200,7 +211,8 @@ test('后台 AI 设置包含访客开关并随配置保存', function() {
   assert.match(adminSource, /id="guestAiEnabled"/);
   assert.match(adminSource, /访客用户可使用AI/);
   assert.match(adminSource, /allow_guest_ai: cfgChecked\('guestAiEnabled'\)/);
-  assert.match(serverSource, /allow_guest_ai: true,/);
+  // 2026-11-02 起默认关闭（硬开关）：后台开关默认 false，且还需要环境变量 XTJ_ALLOW_GUEST_AI=1。
+  assert.match(serverSource, /allow_guest_ai: false,/);
 });
 
 function frontendGuestModeRuntime() {

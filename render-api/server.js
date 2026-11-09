@@ -8,7 +8,7 @@ const assistantOutput = require('./ai-assistant-output');
 const { aiConversationActorPattern, parseAiHistoryCursor, queryAiHistoryPage } = require('./ai-history');
 const { createComment, readRelationPage, readFeedEngagement } = require('./post-interactions');
 const { readPostViewers } = require('./post-viewers');
-const { readPostOssPaths, deleteOssObjects } = require('./oss-cleanup');
+const { readPostCleanupPaths, deleteOssObjects } = require('./oss-cleanup');
 const { sanitizePostContent } = require('./post-meta');
 const passwordVerifier = require('./password-verifier');
 const { markAuxAttached } = require('./aux-media');
@@ -1202,6 +1202,23 @@ const AI_TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'memory_update',
+      description: '修改一条已有的长期记忆（用户纠正或补充时用，比先忘掉再重存更干净）。传编号（id）或关键词（query）指定哪一条，content 是新的完整内容。',
+      parameters: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: '记忆编号（list_memories 返回的前 8 位即可）' },
+          query: { type: 'string', description: '关键词；只有唯一匹配时才会修改' },
+          content: { type: 'string', description: '新的完整记忆内容，第三人称短句' },
+          kind: { type: 'string', enum: ['preference', 'fact', 'instruction'] }
+        },
+        required: ['content']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
       name: 'ask_user',
       description: '当用户的需求有多种合理理解、且选哪个会明显改变结果时，用它给用户展示一个选项卡片让用户点选。提供 2~4 个互相排斥的简短选项。调用后本轮只用一句话说明为什么需要确认，然后结束，等用户选择；不要继续调用其他工具或直接给出答案。信息足够时不要用它。',
       parameters: {
@@ -1610,13 +1627,16 @@ function toResponsesFunctionTool(openaiTool) {
 //   功能重复、且受第三方配额约束的那一个），search_web 恒可见。
 //   与内置 web_search 的潜在重复由 executeToolCall 的配额 gate 与
 //   模型自主选择处理，不会造成双份网络开销。
-function aiToolsForSearch(includeTavily) {
+// 研究、深度思考的 worker 不需要「给用户的卡片/按钮」「并行子任务」「笔记空间」这类只属于用户自己聊天的工具。
+var AI_WORKER_EXCLUDED_TOOLS = new Set(['deep_research', 'parallel_subtasks', 'self_check', 'workspace_files', 'site_navigate', 'render_card', 'memory_update']);
+function aiToolsForSearch(includeTavily, forWorker) {
   var filtered = [];
   for (var i = 0; i < AI_TOOLS.length; i++) {
     var fn = AI_TOOLS[i] && AI_TOOLS[i].function ? AI_TOOLS[i].function : {};
     var name = fn.name || '';
     if (!name) continue;
     if (name === 'tavily_search' && !includeTavily) continue;
+    if (forWorker && AI_WORKER_EXCLUDED_TOOLS.has(name)) continue;
     filtered.push(AI_TOOLS[i]);
   }
   return typeof aiRequestFeatures === 'undefined' ? filtered : aiRequestFeatures.tools(filtered);
@@ -1819,6 +1839,10 @@ async function executeToolCall(toolCall, context) {
   var guardName = toolCall && toolCall.function && toolCall.function.name ? String(toolCall.function.name) : '';
   var guardLimit = 30000;
   if (/^(search_web|tavily_search|search_social|web_extract|read_web_page|page_meta|extract_links)$/.test(guardName)) guardLimit = 45000;
+  else if (/^(wiki_summary|search_papers|paper_by_doi|github_repo|github_issues|npm_pypi_lookup|vuln_check|stackexchange_search|hn_search|wikidata_facts|dictionary|rss_read|news_gdelt|wayback)$/.test(guardName)) guardLimit = 45000;
+  else if (guardName === 'verify_claims') guardLimit = 60000;
+  else if (guardName === 'self_check') guardLimit = 40000;
+  else if (guardName === 'parallel_subtasks') guardLimit = 75000;
   else if (/^(read_document|read_zip|search_document|read_document_section|generate_pdf|make_chart|make_file|image_process)$/.test(guardName)) guardLimit = 60000;
   else if (guardName === 'run_code') guardLimit = 75000;
   if (typeof setTimeout !== 'function' || typeof clearTimeout !== 'function') return executeToolCallInner(toolCall, context);
@@ -1833,7 +1857,7 @@ async function executeToolCall(toolCall, context) {
   });
   // 请求内结果缓存：同一轮对话里相同的「读网页 / 天气 / 汇率 / 行情 / 文档」调用只真正执行一次
   // （并行重复的共用同一次请求）；只缓存成功结果，不缓存搜索（搜索要计配额，不能凭缓存省略）。
-  var cacheable = context && typeof context === 'object' && /^(read_web_page|web_extract|page_meta|extract_links|read_document|read_zip|get_weather|get_exchange_rate|get_stock_quote|image_info)$/.test(guardName);
+  var cacheable = context && typeof context === 'object' && /^(read_web_page|web_extract|page_meta|extract_links|read_document|read_zip|get_weather|get_exchange_rate|get_stock_quote|image_info|wiki_summary|paper_by_doi|github_repo|npm_pypi_lookup|wikidata_facts|dictionary|wayback)$/.test(guardName);
   var cacheKey = '';
   if (cacheable) {
     var rawCacheArgs = toolCall.function && toolCall.function.arguments ? String(toolCall.function.arguments) : '{}';
@@ -1891,6 +1915,9 @@ async function executeToolCallInner(toolCall, context) {
   if (AI_SITE_TOOL_REGISTRY[name]) {
     return executeAiSiteTool(name, args, context || {});
   }
+
+  if (typeof aiKnowledgeTools !== 'undefined' && aiKnowledgeTools.has(name)) return aiKnowledgeTools.execute(name, args);
+  if (typeof aiAgentTools !== 'undefined' && aiAgentTools.has(name)) return aiAgentTools.execute(name, args, context || {});
 
   switch (name) {
     case 'search_web': {
@@ -2456,6 +2483,7 @@ async function executeToolCallInner(toolCall, context) {
     }
     case 'save_memory':
     case 'list_memories':
+    case 'memory_update':
     case 'forget_memory':
       return executeAiMemoryTool(name, args, context);
     case 'ask_user': {
@@ -4942,6 +4970,61 @@ Object.keys(AI_SITE_TOOL_REGISTRY).forEach(function(name) {
     }
   });
 });
+
+// ===================== 公开知识类工具 + 智能体工具（2026-11） =====================
+// 实现分别在 ai-knowledge-tools.js（维基/论文/GitHub/包/漏洞/问答/HN/维基数据/词典/RSS/新闻/快照）
+// 和 ai-agent-tools.js（站内动态、照片时间线、跳转卡、深入研究卡、并行子任务、事实核对、笔记空间、结果卡片）。
+const aiKnowledgeTools = require('./ai-knowledge-tools').createKnowledgeTools({ makeCard: function(type, title, data) { return aiSiteCard(type, title, data); } });
+const aiAgentTools = require('./ai-agent-tools').createAgentTools({
+  supabase: supabase,
+  assets: require('./ai-workbench-assets').createWorkbenchAssets(supabase),
+  makeCard: function(type, title, data) { return aiSiteCard(type, title, data); },
+  siteText: function(value, max) { return aiSiteText(value, max); },
+  siteResult: function(source, id, title, snippet, createdAt, target) { return aiSiteResult(source, id, title, snippet, createdAt, target); },
+  normalPostAllowlist: function(query) { return applyNormalPostAllowlist(query); },
+  isNormalPost: function(row) { return isNormalPost(row); },
+  photoUrl: function(id) { return photoMediaUrl(id); },
+  executeToolCall: function(toolCall, context) { return executeToolCall(toolCall, context); },
+  runSubtask: function(task, context) { return runAiSubtask(task, context); },
+  runCritic: function(input, context) { return runAiCritic(input, context); },
+  recordUsage: function(userName, usage, meta) {
+    var model = normalizeDeepSeekUsageModel(meta.model || DEEPSEEK_MODEL_FLASH, DEEPSEEK_MODEL_FLASH);
+    return recordAiTurnUsage(userName, usage, { conversation_id: meta.conversationId || null, model: model, source: meta.source, message: '', content: '', reasoning: '', search_count: 0, did_search: false });
+  }
+});
+AI_TOOLS.push.apply(AI_TOOLS, require('./ai-knowledge-tools').TOOL_DEFS);
+AI_TOOLS.push.apply(AI_TOOLS, require('./ai-agent-tools').TOOL_DEFS);
+
+// 并行子任务里每个子任务的执行：快速模型、只读工具、最多 3 轮、55 秒；用量由 parallel_subtasks 汇总后单独计费。
+var AI_SUBTASK_TOOLS = new Set(['search_web', 'read_web_page', 'web_extract', 'calculate', 'run_code', 'get_current_time', 'wiki_summary', 'search_papers', 'news_gdelt', 'github_repo', 'npm_pypi_lookup', 'hn_search']);
+async function runAiSubtask(task, context) {
+  var tools = AI_TOOLS.filter(function(t) { return t && t.function && AI_SUBTASK_TOOLS.has(t.function.name); });
+  var text = '';
+  var result = await callDeepSeekViaResponses([
+    { role: 'system', content: '你是并行子任务执行者，只完成用户给你的这一件事，不要问问题，不要扩展范围。需要事实时用工具查证，不能凭记忆编造。用中文输出，不超过 450 字，结构：结论 → 依据（带来源链接）→ 不确定点。' },
+    { role: 'user', content: String(task.instruction || '') }
+  ], {
+    thinking_mode: 'off', model: DEEPSEEK_MODEL_FLASH, tools: tools, _userName: context.userName || '',
+    max_tokens: 1800, max_tool_rounds: 3, total_timeout_ms: 55000, signal: context.signal || undefined,
+    tool_executor: function(toolCall) { return executeToolCall(toolCall, context); },
+    onContentChunk: function(chunk) { text += chunk; }
+  });
+  return { text: text || (result && result.content) || '', usage: result && result.usage || null, model: result && result.model_used || DEEPSEEK_MODEL_FLASH };
+}
+
+// 回答自查：快速模型当严格的审稿人，只指出问题、不重写。无工具，25 秒；用量由 self_check 单独计费。
+async function runAiCritic(input, context) {
+  var text = '';
+  var result = await callDeepSeekViaResponses([
+    { role: 'system', content: '你是严格的审稿人，审的是另一个助手准备发给用户的回答草稿。只指出问题，不重写答案，不客套，不超过 5 条，每条一行，格式「[类型] 具体问题 → 建议」。类型只能是：未回答（用户问的某件事没答）、无来源数字（给了数字、日期、人名但没有依据）、可能矛盾（草稿内部或与依据冲突）、口径不一致（时间、单位、范围不统一）、过度确定（证据只有一个来源却写成定论）、缺证据（关键结论没有出处）。没有问题就只回复「未发现明显问题」。' },
+    { role: 'user', content: '用户的问题：\n' + input.question + '\n\n回答草稿：\n' + input.draft + (input.evidence ? '\n\n助手用到的来源和事实：\n' + input.evidence : '') }
+  ], {
+    thinking_mode: 'off', model: DEEPSEEK_MODEL_FLASH, _userName: context.userName || '',
+    max_tokens: 600, total_timeout_ms: 25000, signal: context.signal || undefined,
+    onContentChunk: function(chunk) { text += chunk; }
+  });
+  return { text: text || (result && result.content) || '', usage: result && result.usage || null, model: result && result.model_used || DEEPSEEK_MODEL_FLASH };
+}
 
 function extractPostPlainText(content) {
   if (!content) return '';
@@ -10631,7 +10714,7 @@ async function runDeepThinkAgent(opts) {
       //   此处保留 canUseThirdPartySearch 仅为日志可观测性，不影响工具集合。
       var thirdPartyOk = await canUseThirdPartySearch(userName || '');
       if (!thirdPartyOk) { try { console.warn('[TOOLS] 第三方搜索配额受限，工具仍全量可见，调用时由 gate 返回可读提示'); } catch (e) {} }
-      deepSeekOpts.tools = aiToolsForSearch(true);
+      deepSeekOpts.tools = aiToolsForSearch(true, true);
       deepSeekOpts.tool_choice = 'auto';
       deepSeekOpts.tool_executor = buildToolExecutor(sseSend, 'AI 智能体', sources, searchQueries, searchCountAccum, userName, mainSearchCtx);
     }
@@ -10848,7 +10931,7 @@ async function runDeepThinkWorker(opts) {
       };
       if (needSearch) {
         // ★ 2026-09-13：同主链路，工具可见性不因配额裁剪。
-        callOpts.tools = aiToolsForSearch(true);
+        callOpts.tools = aiToolsForSearch(true, true);
         callOpts.tool_choice = 'auto';
         callOpts.tool_executor = buildToolExecutor(sseSend, agent.role, sources, queries, searchCountAccum, userName, searchCtx);
       }
@@ -14421,7 +14504,8 @@ app.post('/api/post/delete', authenticateUser, rateLimit(60000, 20), async (req,
     if (!isAdmin && post.user_name !== req.userName) return res.status(403).json({ error: '无权删除' });
     var actorKey = post.actor_key || 'post_' + postId + '_' + Date.now();
     // 附件行会随帖子一起删，所以删之前先把这条帖子在 OSS 上的对象路径读出来。
-    var ossPathsToClean = await readPostOssPaths(supabase, post, postId);
+    var postCleanupPaths = await readPostCleanupPaths(supabase, post, postId, { supabaseUrl: SUPABASE_URL });
+    var ossPathsToClean = postCleanupPaths.oss;
     var hardDelete = await hardDeleteContent({
       postId: postId,
       actorUser: req.userName,
@@ -14430,7 +14514,8 @@ app.post('/api/post/delete', authenticateUser, rateLimit(60000, 20), async (req,
       actorKey: actorKey,
       // ★ 2026-11-02：直传 OSS 的媒体不在 Supabase 存储里，不能塞进 storagePaths，
       //   否则删除会去打一个不存在的对象。OSS 侧的孤儿文件留待后续清理任务处理。
-      storagePaths: (function () { var p = parsePostMediaUrl(post.media_url, SUPABASE_URL); return p && !isOssMediaUrl(post.media_url) ? [p] : []; })()
+      //   留在 Supabase 的缩略图/封面（没回退到 OSS 的那部分）一并排进删帖事务里的持久清理队列。
+      storagePaths: (function () { var p = parsePostMediaUrl(post.media_url, SUPABASE_URL); return (p && !isOssMediaUrl(post.media_url) ? [p] : []).concat(postCleanupPaths.storage); })()
     });
     if (hardDelete.error) return res.status(500).json({ error: sanitizeError(hardDelete.error), code: 'delete_failed' });
     var result = hardDelete.result || {};
@@ -17405,14 +17490,15 @@ app.post('/admin/report/:id/delete-post', verifyToken, securityRateLimit(60000, 
       if (fetchPostErr) return sendAdminDbFailure(res,fetchPostErr);
       if (post) {
         const expectPhoto = targetType === 'photo' || post.media_type === '__photo_wall__';
-        const ossPathsToClean = expectPhoto ? [] : await readPostOssPaths(supabase, post, normalizedTargetId);
+        const postCleanupPaths = expectPhoto ? { oss: [], storage: [] } : await readPostCleanupPaths(supabase, post, normalizedTargetId, { supabaseUrl: SUPABASE_URL });
+        const ossPathsToClean = postCleanupPaths.oss;
         const deletion = await hardDeleteContent({
           postId: normalizedTargetId,
           actorUser: ADMIN_USERNAME,
           isAdmin: true,
           expectPhoto: expectPhoto,
           actorKey: post.actor_key || ('admin_' + Date.now()),
-          storagePaths: expectPhoto ? collectPhotoStoragePaths(post) : []
+          storagePaths: expectPhoto ? collectPhotoStoragePaths(post) : postCleanupPaths.storage
         });
         if (deletion.error) return res.status(500).json({ error: sanitizeError(deletion.error), code: 'delete_failed' });
         if (!deletion.result || !deletion.result.ok) {
@@ -20786,7 +20872,8 @@ function buildAiCorePrompt(config) {
     //   3) 本轮已实测过：模型在工具报错后常直接编造天气/汇率数据，或以"换个城市名"敷衍过去。
     '工具使用规范：① 查天气时 location 只传规范城市名（如“成都”“大阪”“Los Angeles”），不要传省市区全称、不要带“市/区/县”后缀；② 查汇率/行情只传标准代码（如 USD、CNY、AAPL）；③ 工具返回中若含 recoverable=true，可修正参数重试一次；若 recoverable=false，说明是服务侧故障，直接如实告诉用户“该服务暂时不可用”，绝不编造数据、不反复重试同一工具；④ 绝不要把工具返回里的英文错误码或 JSON 原文念给用户，要用自然中文转述；⑤ 工具失败时告知真实原因（参数问题 vs 服务问题），不要笼统地说“换个城市名试试”来敷衍。',
     '回复规则：优先直接回答，按内容使用段落、列表或表格；不写“作为一个 AI”开场白，不用括号动作描写；图片消息只依据其中文字回答业务问题，不讨论 OCR/识别引擎；只答对话内容，不编造已执行操作，不查他人记录。中文回复。',
-    aiTaskPolicy.TASK_POLICY,
+    // 普通聊天按这句话涉及的工具组拼装能力说明（见 ai-tool-router）；研究、深度思考等没有路由的请求用完整版。
+    aiTaskPolicy.forRequest(typeof aiRequestFeatures === 'undefined' || !aiRequestFeatures.current() ? null : aiRequestFeatures.current().toolRoute || null),
     typeof aiRequestFeatures==='undefined'?'':aiRequestFeatures.instructions()
   ];
 
@@ -25958,7 +26045,7 @@ async function runResearchSubAgent(opts) {
       thinking_mode: 'off', model:subModel,
       // The search phase is explicitly instructed to search; without tools the
       // model could only answer from memory and onSearchStatus never fired.
-      tools: aiToolsForSearch(true),
+      tools: aiToolsForSearch(true, true),
       _userName: opts.userName || '',
       max_tokens: 6000,
       max_tool_rounds: 8,

@@ -63,3 +63,14 @@ test('a large rendition is served on request, never enlarged, and cached separat
   const again=await request(f.app).get('/api/avatar/image/bob?v='+v+'&size=large').set('If-None-Match',large.headers.etag).expect(304);
   assert.equal(again.status,304);
 });
+
+test('a large rendition stays square for any original: shrunk to 1080 when bigger, cropped to the short side when smaller',async()=>{
+  const f=await fixture();
+  const parse=(r,cb)=>{const c=[];r.on('data',d=>c.push(d));r.on('end',()=>cb(null,Buffer.concat(c)));};
+  const wide=await request(f.app).get('/api/avatar/image/alice?v='+version(f.dataUrl)+'&size=large').buffer(true).parse(parse).expect(200);
+  const wm=await sharp(wide.body).metadata();assert.deepEqual([wm.width,wm.height],[1080,1080],'a 1600x1200 original is cropped to a 1080 square');
+  const small=await jpeg(400,300,{r:10,g:200,b:90});
+  const tiny='data:image/jpeg;base64,'+small.toString('base64');f.rows.alice=[{media_url:tiny}];
+  const res=await request(f.app).get('/api/avatar/image/alice?v='+version(tiny)+'&size=large').buffer(true).parse(parse).expect(200);
+  const tm=await sharp(res.body).metadata();assert.deepEqual([tm.width,tm.height],[300,300],'a 400x300 original is squared to its short side, never enlarged');
+});

@@ -10625,9 +10625,13 @@ function renderProfileActivityList(kind) {
                     var earlyBootUser = '';
                     try { earlyBootUser = String((window.__xtjEarlyFeed && window.__xtjEarlyFeed.bootUser) || ''); } catch (eEarlyUser) { earlyBootUser = ''; }
                     var sameEarlyViewer = knownUser ? earlyBootUser === knownUser : !earlyBootUser;
+                    // 首屏预取只带 cookie、不带 Authorization，服务端把它当访客：只回最新 10 条公开帖并标 guest_limited。
+                    // 已知登录用户不能拿这份访客页当自己的信息流（会少了自己的私密帖，末尾还冒出「登录后可查看更早的帖子」），
+                    // 必须走带令牌的正式请求。
+                    var earlyIsGuestPage = function(data) { return !!(knownUser && data && data.guest_limited); };
                     var mayReuseEarlyFeed = !searchKeyword && sameEarlyViewer;
 
-                    if (page === 0 && mayReuseEarlyFeed && start === 0 && !usedApi && window.__xtjEarlyFeed && window.__xtjEarlyFeed.status === 'ok' && window.__xtjEarlyFeed.data) {
+                    if (page === 0 && mayReuseEarlyFeed && start === 0 && !usedApi && window.__xtjEarlyFeed && window.__xtjEarlyFeed.status === 'ok' && window.__xtjEarlyFeed.data && !earlyIsGuestPage(window.__xtjEarlyFeed.data)) {
                         var early = window.__xtjEarlyFeed.data;
                         posts = normalizePosts(early.posts || []);
                         comments = early.comments || [];
@@ -10643,7 +10647,7 @@ function renderProfileActivityList(kind) {
                             var early2 = await (typeof window.xtjWithTimeout === 'function'
                                 ? window.xtjWithTimeout(window.__xtjEarlyFeedPromise, Math.min(FEED_NET_TIMEOUT_MS, 12000), 'early-feed')
                                 : window.__xtjEarlyFeedPromise);
-                            if (early2 && early2.ok) {
+                            if (early2 && early2.ok && !earlyIsGuestPage(early2)) {
                                 posts = normalizePosts(early2.posts || []);
                                 comments = early2.comments || [];
                                 likes = early2.likes || [];
@@ -11874,19 +11878,22 @@ function renderProfileActivityList(kind) {
             function readPendingPostMedia(owner) {
                 try { var rows = JSON.parse(window.safeStorage.get(pendingPostMediaKey(owner)) || '[]'); return Array.isArray(rows) ? rows : []; } catch (_) { return []; }
             }
-            function rememberPendingPostMedia(owner, path, uploadId, keepForRetry) {
+            function rememberPendingPostMedia(owner, path, uploadId, keepForRetry, extraPaths) {
                 var rows = readPendingPostMedia(owner).filter(function(row) { return row.storage_path !== path; });
-                rows.push({ storage_path: path, upload_id: uploadId, keep_for_retry: !!keepForRetry });
+                var entry = { storage_path: path, upload_id: uploadId, keep_for_retry: !!keepForRetry };
+                // 缩略图/视频封面不在上传登记表里：把它们的路径跟原图记在一起，放弃发布时才清得掉。
+                if (Array.isArray(extraPaths) && extraPaths.length) entry.extra_paths = extraPaths.slice(0, 2);
+                rows.push(entry);
                 try { window.safeStorage.set(pendingPostMediaKey(owner), JSON.stringify(rows)); } catch (_) {}
             }
             function forgetPendingPostMedia(owner, path) {
                 try { window.safeStorage.set(pendingPostMediaKey(owner), JSON.stringify(readPendingPostMedia(owner).filter(function(row) { return row.storage_path !== path; }))); } catch (_) {}
             }
-            async function cleanupPendingPostMedia(identity, path, uploadId) {
+            async function cleanupPendingPostMedia(identity, path, uploadId, extraPaths) {
                 // Never use a new account to clean an old upload; the server's registry handles abandoned sessions.
                 if (identity.owner !== currentUser || identity.epoch !== _authStateEpoch) return;
                 try {
-                    var response = await window.xtjProtectedFetch('/api/post/media/cleanup', { method: 'POST', authOwner: identity.owner, authEpoch: identity.epoch, body: JSON.stringify({ storage_path: path, upload_id: uploadId }) });
+                    var response = await window.xtjProtectedFetch('/api/post/media/cleanup', { method: 'POST', authOwner: identity.owner, authEpoch: identity.epoch, body: JSON.stringify(Array.isArray(extraPaths) && extraPaths.length ? { storage_path: path, upload_id: uploadId, extra_paths: extraPaths.slice(0, 2) } : { storage_path: path, upload_id: uploadId }) });
                     var result = await response.json();
                     if (identity.owner !== currentUser || identity.epoch !== _authStateEpoch) return;
                     if (response.ok && result.ok) forgetPendingPostMedia(identity.owner, path);
@@ -11902,7 +11909,7 @@ function renderProfileActivityList(kind) {
                 readPendingPostMedia(identity.owner).forEach(function(row) {
                     if (row && row.keep_for_retry) return;
                     if (Array.from(activePostUploadFlights).some(function(flight) { return flight.owner === identity.owner; })) return;
-                    cleanupPendingPostMedia(identity, row.storage_path, row.upload_id);
+                    cleanupPendingPostMedia(identity, row.storage_path, row.upload_id, row.extra_paths);
                 });
             }
             window.addEventListener('auth-ready', function() {
@@ -12028,6 +12035,9 @@ function renderProfileActivityList(kind) {
                                 var thumbFile = window.XtjPostComposerMedia && typeof window.XtjPostComposerMedia.thumbFile === 'function' ? window.XtjPostComposerMedia.thumbFile(selectedFile) : null;
                                 if (thumbFile) {
                                     var thumbPath = 'posts/thumb_' + crypto.randomUUID().replace(/-/g, '') + '.jpg';
+                                    // 先登记再上传：上传途中失败/关页，清理也能带上这张缩略图。
+                                    pending.extra_paths = [thumbPath];
+                                    rememberPendingPostMedia(flight.owner, path, uploadId, false, pending.extra_paths);
                                     var thumbViaOss = await uploadPostObjectToOss(thumbPath, thumbFile, 'image/jpeg', { owner: flight.owner, epoch: flight.epoch, progress: flight.progress });
                                     if (thumbViaOss.ok) thumbUrl = thumbViaOss.url;
                                     else {
@@ -12039,8 +12049,11 @@ function renderProfileActivityList(kind) {
                                     }
                                 }
                                 thumbUrls[position] = thumbUrl || null;
-                                return Object.assign({}, pending, dimensions, { position: position, media_type: String(selectedType || '').split('/')[0],
+                                var uploadedItem = Object.assign({}, pending, dimensions, { position: position, media_type: String(selectedType || '').split('/')[0],
                                     media_url: viaOss.ok ? viaOss.url : sb.storage.from('uploads').getPublicUrl(path).data.publicUrl, thumb_url: thumbUrl, file_size: selectedFile.size });
+                                // extra_paths 只用于放弃发布时的清理，不属于要提交给服务端的附件字段。
+                                delete uploadedItem.extra_paths;
+                                return uploadedItem;
                             }, 3);
                             media_url = uploaded[0].media_url;
                             media_type = uploaded.length > 1 ? 'album' : uploaded[0].media_type;
@@ -12056,6 +12069,10 @@ function renderProfileActivityList(kind) {
                                 if (posterFile && posterFile.size > 0 && posterFile.size <= window.XtjPostMedia.MAX_POST_FILE_BYTES) {
                                     // 封面单独放 posters/：这个前缀按公开缩略图处理，不用回表匹配帖子。
                                     var posterPath = buildStorageUploadPath('posters', posterFile.name);
+                                    if (uploadedMedia[0]) {
+                                        uploadedMedia[0].extra_paths = (uploadedMedia[0].extra_paths || []).concat(posterPath).slice(0, 2);
+                                        rememberPendingPostMedia(flight.owner, uploadedMedia[0].storage_path, uploadedMedia[0].upload_id, false, uploadedMedia[0].extra_paths);
+                                    }
                                     // ★ 2026-11-02：封面同样优先直传 OSS，失败再回退 Supabase。
                                     var posterViaOss = await uploadPostObjectToOss(posterPath, posterFile, posterFile.type || 'image/jpeg', { owner: flight.owner, epoch: flight.epoch, progress: flight.progress });
                                     assertPostPublishIdentity(flight);
@@ -12109,19 +12126,19 @@ function renderProfileActivityList(kind) {
                     if (!insertRes.ok) {
                         var ambiguousFailure = !insertRes.status || insertRes.status >= 500;
                         if (ambiguousFailure) {
-                            uploadedMedia.forEach(function(item) { rememberPendingPostMedia(flight.owner, item.storage_path, item.upload_id, true); });
+                            uploadedMedia.forEach(function(item) { rememberPendingPostMedia(flight.owner, item.storage_path, item.upload_id, true, item.extra_paths); });
                             assertPostPublishIdentity(flight);
                             showToast("发布结果未确认，请重试；不会重复发布");
                             return;
                         }
                         postUploadCache.delete(requestKey);
-                        await Promise.all(uploadedMedia.map(function(item) { return cleanupPendingPostMedia(flight, item.storage_path, item.upload_id); }));
+                        await Promise.all(uploadedMedia.map(function(item) { return cleanupPendingPostMedia(flight, item.storage_path, item.upload_id, item.extra_paths); }));
                         assertPostPublishIdentity(flight);
                         showToast("发布失败: " + ((insertRes.error && insertRes.error.message) || "未知错误"));
                         return;
                     }
                     if (insertRes.duplicate && !reusedUpload && uploadedMedia.length) {
-                        await Promise.all(uploadedMedia.map(function(item) { return cleanupPendingPostMedia(flight, item.storage_path, item.upload_id); }));
+                        await Promise.all(uploadedMedia.map(function(item) { return cleanupPendingPostMedia(flight, item.storage_path, item.upload_id, item.extra_paths); }));
                         uploadedMedia = [];
                     }
                     postUploadCache.delete(requestKey);
@@ -12167,7 +12184,7 @@ function renderProfileActivityList(kind) {
                         try { window.XtjPostPublishMotion.stop(publishMotion); } catch (_) {}
                     }
                     postUploadCache.delete(requestKey);
-                    await Promise.all(uploadedMedia.map(function(item) { return cleanupPendingPostMedia(flight, item.storage_path, item.upload_id); }));
+                    await Promise.all(uploadedMedia.map(function(item) { return cleanupPendingPostMedia(flight, item.storage_path, item.upload_id, item.extra_paths); }));
                     if (postPublishIdentityCurrent(flight)) showToast("发布失败: " + (e.message || "网络错误"));
                 } finally {
                     activePostUploadFlights.delete(flight);
@@ -12600,14 +12617,18 @@ function renderProfileActivityList(kind) {
                 // Keep a keyboard-accessible continuation after the bounded filter scan.
                 var renderedAfterAppend = getFeedRenderedSliceStart();
                 var appendedThisRound = startIdx < filteredPosts.length;
-                if (!feedEndReached && (appendedThisRound || renderedAfterAppend < filteredPosts.length)) {
-                    if (hasActiveFeedFilters()) showFeedSearchContinueControl();
+                // 有筛选时，一轮有界扫描可能一条都没匹配到、服务端也还没到末尾：此时既没有追加也没有
+                //   未渲染的内存帖子，哨兵却一直贴着视口（不会再有第二次相交事件）。必须无条件给出
+                //   「继续查找帖子」入口，否则列表停住且没有任何出路；只有自动续翻才需要「本轮有进展」。
+                if (!feedEndReached && hasActiveFeedFilters()) {
+                    showFeedSearchContinueControl();
+                } else if (!feedEndReached && (appendedThisRound || renderedAfterAppend < filteredPosts.length)) {
                     // FIX FEED-STALL-01: 没有筛选时这里以前什么都不做。可一旦本次只追加了
                     //   少量帖子、哨兵仍停在视口里（列表还没铺满一屏），IntersectionObserver
                     //   不会再触发第二次 → 无限滚动就此停住，用户只看到"加载不动"。
                     //   只要这一轮确实追加了帖子（或内存里还有没画出来的帖子）、且哨兵仍
                     //   贴着视口，就主动再走一轮；某一轮追加不到任何新内容时不再排下一次。
-                    else if (!_feedAutoContinueTimer) {
+                    if (!_feedAutoContinueTimer) {
                         var sentinelNode = document.getElementById('feedSentinel');
                         var sentinelNear = false;
                         try {
@@ -17762,7 +17783,9 @@ function renderProfileActivityList(kind) {
                 //   旧判定只看 dockChatSending，批量发图时打字回车会落到下面
                 //   「上一条消息正在发送」的提示里被丢掉，用户以为发出去了。
                 //   队列 drain 本身已同时等待 dockChatSending 与 _chatBatchSending。
-                if (dockChatSending || _chatBatchSending) {
+                // The batch loop raises _chatBatchSending itself before sending each of its own files, so that call must not be
+                // mistaken for "another message is still sending" (that made every attachment send stop with a toast).
+                if (dockChatSending || (_chatBatchSending && !(retryOptions && retryOptions.batchOwned))) {
                     if (forwarding) { showToast('上一条消息正在发送，请稍候再转发'); return; }
                     if (queuedSend) {
                         _dockChatSendQueue.unshift({ content: content, peer: dockChatActiveUser, owner: currentUser, epoch: _authStateEpoch, replyDraft: replyDraft,
@@ -19517,7 +19540,7 @@ function renderProfileActivityList(kind) {
                 try {for(var i=0;i<files.length;i++){
                     if(batch.cancelled || owner!==window.currentUser || epoch!==_authStateEpoch || peer!==dockChatActiveUser) {if(owner===window.currentUser && epoch===_authStateEpoch)showToast('剩余附件已保留，返回会话后可继续发送');break;}
                     if(i+1<files.length)_chatAttachmentDrafts.set(peer,{owner:owner,epoch:epoch,files:files.slice(i+1)});else _chatAttachmentDrafts.delete(peer);
-                    await sendDockChatMessageSingle(files[i],i===0?text:'');
+                    await sendDockChatMessageSingle(files[i],i===0?text:'',{batchOwned:true});
                 }} finally {if(_chatBatchFlight===batch){_chatBatchFlight=null;_chatBatchSending=false;
                     // 批次结束是另一个发送锁释放点，同样要触发队列回放，
                     // 否则批次期间排队的文本会一直挂到用户下次手动发送。

@@ -49,7 +49,11 @@ test('GPS worker reaches pending fixes beyond 150 completed rows and emits valid
  const db={from(){let cursor='',excluded=[],limit=50,update=null;const q={select(){return q;},eq(){return q;},not(k,op,value){assert.equal(typeof value,'string');assert.match(value,/^\([a-f0-9,-]+\)$/);excluded=value.slice(1,-1).split(',');return q;},or(value){cursor=value.match(/id\.gt\.([a-f0-9-]+)/)[1];return q;},order(){return q;},limit(n){limit=n;return q;},update(value){update=value;return q;},then(resolve){if(update){updates.push(update);return Promise.resolve({error:null}).then(resolve);}return Promise.resolve({data:limit===200?[]:rows.filter(r=>(!cursor||r.id>cursor)&&!excluded.includes(r.id)).slice(0,limit)}).then(resolve);}};return q;}};
  const ctx=vm.createContext({supabase:db,LOCATION_TASK_MARKER:'__location_task__',locationTaskRunning:false,locationTaskScanCursor:null,console:{error(){},warn(){}},require(){return{async resolvePendingHistory(){}};},async resolveLatLngToAddress(){resolved++;return{address:'saved address'};},async mergeResolvedPreciseLocation(){},deobfuscateCoord(){return null;}});
  vm.runInContext(source.slice(source.indexOf('async function processLocationTasks()'),source.indexOf('var locationTaskRunning = false;')),ctx);
- await ctx.processLocationTasks();assert.equal(resolved,0);await ctx.processLocationTasks();assert.equal(resolved,1);assert(updates.some(u=>JSON.parse(u.content).status==='completed'));
+ // 每轮只扫 25 行（为节省 Supabase 出站，见 processLocationTasks）：游标逐轮向前推进，
+ // 201 行里排在最后的 pending 必须在有限轮内被轮到，而不是每轮重复拉同一批最旧的终态行。
+ await ctx.processLocationTasks();assert.equal(resolved,0,'the first window holds only completed rows');
+ let rounds=1;while(resolved===0&&rounds<12){await ctx.processLocationTasks();rounds++;}
+ assert.equal(resolved,1);assert.equal(rounds,9,'pending row 200 is reached on the 9th 25-row window');assert(updates.some(u=>JSON.parse(u.content).status==='completed'));
 });
 test('admin GPS retry resolves the specified owned record, rejects mismatched user and does not trust client coordinates',async()=>{
  const fs=require('node:fs'),vm=require('node:vm'),source=fs.readFileSync(require.resolve('../render-api/server'),'utf8'),savedId='123e4567-e89b-42d3-a456-000000000222';let actor='',lookupId='',update;

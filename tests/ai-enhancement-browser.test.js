@@ -73,14 +73,14 @@ async function capture(page,name,scope){
   if(fs.existsSync(localAxe)){if(!await page.evaluate(()=>typeof window.axe!=='undefined'))await page.addScriptTag({path:localAxe});axe=await page.evaluate(async scope=>(await window.axe.run(scope,{runOnly:{type:'tag',values:['wcag2a','wcag2aa','wcag21aa']}})).violations.map(v=>({id:v.id,impact:v.impact,nodes:v.nodes.map(n=>({target:n.target,summary:n.failureSummary}))})),scope);}
   const evidence={screenshot:filename,scope,axe};fs.writeFileSync(path.join(ARTIFACTS,name+'.json'),JSON.stringify(evidence,null,2));return evidence;
 }
-test('one followup from a legacy array sends the selected question while retaining the next draft and its original attachment',{timeout:60000},async t=>{
+test('follow-up suggestions are retired: a done event that still carries them renders none, and requests never ask for them',{timeout:60000},async t=>{
   const f=await fixture(t),p=f.page;await send(p,'如何比较这两种方案？');
-  await finish(p,0,'这两种方案的主要差异如下。',{followups:['可以列一个对照表吗？','有哪些限制？','我应该怎样选择？']});await p.locator('.ai-followup').waitFor();assert.equal(await p.locator('.ai-followup').count(),1);
-  await p.locator('#aiChatMsgInput').fill('下一条真实草稿');await p.locator('#aiChatFileInp').setInputFiles({name:'草稿资料.txt',mimeType:'text/plain',buffer:Buffer.from('留给下一轮的完整资料')});await p.locator('#aiChatFilePreview .ai-file-info').waitFor();
-  const before=await p.evaluate(()=>aiPolish.streams.length);await p.locator('.ai-followup').filter({hasText:'可以列一个对照表吗？'}).click();await p.waitForFunction(before=>aiPolish.streams.length===before+1,before);
-  const request=await p.evaluate(()=>aiPolish.streams.at(-1).body);assert.equal(request.message,'可以列一个对照表吗？');assert.ok(!request.attachments||request.attachments.length===0);assert.equal(await p.locator('#aiChatMsgInput').inputValue(),'下一条真实草稿');assert.match(await p.locator('#aiChatFilePreview').textContent(),/草稿资料.txt/);
-  await finish(p,1,'下面给出对照表。',{followups:['还需要补充哪些条件？','能结合预算选择吗？','怎样验证这个结论？']});await p.waitForFunction(()=>document.querySelectorAll('.ai-followup').length===2);
-  const evidence=await capture(p,'phone-followups-draft','#aiChatRoot');assert.deepEqual(evidence.axe||[],[]);assert.deepEqual(f.errors,[]);
+  await finish(p,0,'这两种方案的主要差异如下。',{followups:['可以列一个对照表吗？','有哪些限制？','我应该怎样选择？']});
+  await p.waitForFunction(()=>!document.querySelector('.ai-msg.generating'));
+  assert.equal(await p.locator('.ai-followup').count(),0,'retired feature: the legacy array is ignored');
+  const request=await p.evaluate(()=>aiPolish.streams[0].body);assert.equal(request.followup_suggestions,false);
+  // the composer, its draft and attachments are untouched by the (absent) suggestions
+  await p.locator('#aiChatMsgInput').fill('下一条真实草稿');assert.equal(await p.locator('#aiChatMsgInput').inputValue(),'下一条真实草稿');assert.deepEqual(f.errors,[]);
 });
 test('normal chat keeps tool invocation with the model and exposes no manual workbench',{timeout:60000},async t=>{
   const f=await fixture(t,{viewport:{width:1440,height:960}}),p=f.page;
@@ -269,11 +269,12 @@ test('terminal reasoning after tools and its real duration survive completion an
 });
 
 for(const theme of ['light','dark'])test('glass bars and new-content pill expose the scrolling conversation in '+theme,{timeout:60000},async t=>{
- const f=await fixture(t,{theme}),p=f.page;await send(p,'阅读长回复');await finish(p,0,Array.from({length:100},(_,i)=>'第'+i+'段。上下滚动时，文字应从玻璃背后透出。').join('\n\n'),{followups:['怎样核对这些内容的来源？']});await p.locator('.ai-followup').waitFor();
+ const f=await fixture(t,{theme}),p=f.page;await send(p,'阅读长回复');await finish(p,0,Array.from({length:100},(_,i)=>'第'+i+'段。上下滚动时，文字应从玻璃背后透出。').join('\n\n'));await p.waitForFunction(()=>!document.querySelector('.ai-msg.generating'));
  await p.waitForFunction(()=>{var n=document.querySelector('#aiChatMessagesArea');return n.scrollHeight-n.clientHeight-n.scrollTop<100;});await scrollUpToRead(p,p.locator('#aiChatMessagesArea'));await p.locator('#aiChatRoot .ai-new-content').evaluate(n=>n.hidden=false);await p.waitForFunction(()=>getComputedStyle(document.querySelector('#aiChatRoot .ai-new-content')).opacity==='1');
  const geometry=await p.evaluate(()=>{const root=document.querySelector('#aiChatRoot'),area=document.querySelector('#aiChatMessagesArea'),header=root.querySelector('.ai-chat-header'),bar=root.querySelector('.ai-chat-input-bar');return {area:area.getBoundingClientRect().toJSON(),header:header.getBoundingClientRect().toJSON(),bar:bar.getBoundingClientRect().toJSON(),styles:[header,bar,root.querySelector('.ai-new-content')].map(n=>({background:getComputedStyle(n).backgroundColor,filter:getComputedStyle(n).backdropFilter,opacity:getComputedStyle(n).opacity})),paddingTop:parseFloat(getComputedStyle(area).paddingTop),paddingBottom:parseFloat(getComputedStyle(area).paddingBottom)};});
  assert.ok(geometry.area.top<=geometry.header.top+1);assert.ok(geometry.area.bottom>=geometry.bar.bottom-1);assert.ok(geometry.paddingTop>=geometry.header.height);assert.ok(geometry.paddingBottom>=geometry.bar.height);
- for(const [index,style] of geometry.styles.entries()){assert.match(style.background,index<2?/, 0\.12\)$/:/, 0\.2\)$/);assert.match(style.filter,index<2?/blur\(5px\)/:/blur\(/);assert.equal(style.opacity,'1');}
+ for(const [index,style] of geometry.styles.entries()){// The two bars use a near-opaque fill with no live blur (a blur re-renders the streaming text behind it every frame); the pill keeps its glass.
+ assert.match(style.background,index<2?/, 0\.94\)$/:/, 0\.2\)$/);if(index<2)assert.match(style.filter,/^(none|)$/);else assert.match(style.filter,/blur\(/);assert.equal(style.opacity,'1');}
  await capture(p,'phone-glass-'+theme,'#aiChatRoot');assert.deepEqual(f.errors,[]);
 });
 

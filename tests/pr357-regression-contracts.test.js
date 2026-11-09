@@ -46,11 +46,12 @@ test('retry completed status returns full cat_ai comment data structure', () => 
   // 统一查询函数本身必须保证 cat_ai 过滤与完整字段
   const fnStart = server.indexOf('async function fetchCatReplyByParent');
   assert.notEqual(fnStart, -1, '必须存在统一查询函数 fetchCatReplyByParent');
-  const fnBlock = server.slice(fnStart, server.indexOf('\nasync function ', fnStart + 10));
+  const fnBlock = server.slice(fnStart, fnStart + 1200);
   assert.match(fnBlock, /\.eq\('user_name', CAT_AI_USERNAME\)/);
   assert.match(fnBlock, /\.eq\('generated_by_ai', true\)/);
-  // 线上 comments 表没有 updated_at 列（带上它会让每次查找失败），完整列 = 不含 updated_at 的这一组。
-  assert.match(fnBlock, /id(?:::text)?,\s*post_id,\s*user_name,\s*content,\s*created_at[^)]*parent_comment_id[^)]*generated_by_ai/);
+  // comments 表没有 updated_at 列：select 完整字段但不得带它（带上会让每次查询失败）。
+  assert.match(fnBlock, /id(?:::text)?,\s*post_id,\s*user_name,\s*content,\s*created_at,\s*parent_comment_id(?:::text)?,\s*generated_by_ai/);
+  assert.doesNotMatch(fnBlock, /select\([^)]*updated_at/);
 });
 
 // 5: failed transient error can retry

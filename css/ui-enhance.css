@@ -1933,6 +1933,8 @@ html[data-xtj-motion=off] .ai-tool-round-list-wrap { transition: none !important
      上下各 9px 落在统计行与上下内容之间的空白里（到点赞按钮约 19px），不会盖住它。 */
   margin: -9px -5px !important; padding: 9px 5px !important; border: 0 !important; border-radius: 0 !important;
   background: none !important; box-shadow: none !important; transform: none !important; transition: none !important;
+  /* 全站按钮规则带 blur(22px) saturate(1.6) 的毛玻璃：点击范围放大后，按钮那一块会把后面的内容糊成一个有颜色的方块。统计行要和纯文字一样，不要毛玻璃。 */
+  -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
   color: inherit !important; font: inherit !important; letter-spacing: inherit; line-height: inherit !important; text-align: inherit;
   cursor: pointer; -webkit-appearance: none; appearance: none; position: relative;
   -webkit-tap-highlight-color: transparent; touch-action: manipulation;

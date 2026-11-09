@@ -88,7 +88,7 @@ function scrollRuntime() {
   const ctx = { window: {}, feedEndReached: true, feedPageFetchPending: false, feedLoadMoreFailed: false, feedAllPosts: rows,
     feedAllComments: [], feedAllLikes: [], feedPage: 1, FEED_PAGE_SIZE: 20, feedLoadRequestId: 1, _authStateEpoch: 1, currentUser: 'alice', console,
     document: { getElementById: key => key === 'feed' ? feed : null, createElement: () => ({ setAttribute() {}, remove() {}, style: {} }) },
-    getFeedRenderedSliceStart: () => 20 + appended.length, getFilteredPosts: p => p, getRenderableComments: () => [],
+    getFeedRenderedSliceStart: () => 20 + appended.length, getFilteredPosts: p => p, getRenderableComments: () => [], ensureFeedNoMoreNotice() {},
     appendMorePosts: p => appended.push(...p), writeFeedCacheSnapshot() {}, ensureFeedCoverageForVisibleSlice: async () => { throw new Error('must not fetch exhausted feed'); } };
   vm.runInNewContext(between(posts, '            loadMoreFeedPosts = async function', '            appendMorePosts = function'), ctx);
   return { ctx, appended };
@@ -132,7 +132,8 @@ test('late load-more completion after a refresh cannot unlock a new request or a
   r.ctx.feedEndReached = false; r.ctx.feedAllPosts = r.ctx.feedAllPosts.slice(0, 20);
   r.ctx.ensureFeedCoverageForVisibleSlice = () => coverage.promise;
   const old = r.ctx.loadMoreFeedPosts(); await turn();
-  r.ctx.feedLoadRequestId++; r.ctx.feedPageFetchPending = true;
+  // 刷新（loadFeed）接手时会领走拉取令牌：新请求持有最新令牌，旧请求完成后无权解锁。
+  r.ctx.feedLoadRequestId++; r.ctx.feedPageFetchPending = true; r.ctx.window.__xtjFeedFetchLockSeq++;
   coverage.resolve(); await old;
   assert.equal(r.ctx.feedPageFetchPending, true); assert.deepEqual(r.appended, []);
 });
@@ -239,6 +240,7 @@ test('a bounded filter scan exposes a continuation when the sentinel remains vis
   const r = scrollRuntime(), controls = [];
   r.ctx.feedEndReached = false; r.ctx.feedAllPosts = r.ctx.feedAllPosts.slice(0, 20);
   r.ctx.ensureFeedCoverageForVisibleSlice = async () => true;
+  r.ctx.hasActiveFeedFilters = () => true;
   r.ctx.showFeedSearchContinueControl = () => controls.push(true);
   await r.ctx.loadMoreFeedPosts(); assert.deepEqual(controls, [true]); assert.equal(r.ctx.feedPage, 1);
 });

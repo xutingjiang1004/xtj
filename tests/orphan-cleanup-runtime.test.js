@@ -41,6 +41,53 @@ test('删帖后要清的 OSS 对象：原图、附件、缩略图、封面；别
   assert.deepEqual(collectPostOssPaths({ media_url: oss('posts/../../dm-private/secret') }, []), [], 'path tricks are not accepted');
 }));
 
+const hex = n => String(n).repeat(32).slice(0, 32);
+function metaPost(meta, extra) { return Object.assign({ media_url: 'https://project.supabase.co/storage/v1/object/public/uploads/posts/a.png', content: JSON.stringify({ __type: '__xtj_post_v2__', text: 'hi', meta }) }, extra); }
+// 只模拟 posts 表的「别的帖子内容里是否提到某个文件名」查询。
+function fakeSupabase(others, fail) {
+  return { from(table) {
+    let notId = null, like = null;
+    const q = { select() { return q; }, neq(_c, v) { notId = v; return q; }, ilike(_c, v) { like = v.slice(1, -1); return q; }, eq() { return q; }, limit() { return q; },
+      then(resolve) {
+        if (fail) return resolve({ data: null, error: { message: 'down' } });
+        if (table === 'post_attachments') return resolve({ data: [], error: null });
+        resolve({ data: others.filter(o => o.id !== notId && o.content.includes(like)).map(o => ({ id: o.id })), error: null });
+      } };
+    return q;
+  } };
+}
+
+test('删帖要清的 Supabase 侧缩略图与封面：只认固定格式，别的一律不碰', () => {
+  const { collectPostMetaStoragePaths } = require('../render-api/oss-cleanup');
+  const origin = 'https://project.supabase.co';
+  const proxied = 'https://api.example.com/api/uploads/media?path=' + encodeURIComponent('posts/thumb_' + hex('a') + '.jpg');
+  const post = metaPost({ thumbs: [proxied, 'https://api.example.com/api/uploads/media?path=' + encodeURIComponent('posts/thumb_x.jpg'), 'https://api.example.com/api/uploads/media?path=' + encodeURIComponent('dm-private/x.jpg'), null],
+    poster_url: origin + '/storage/v1/object/public/uploads/posters/p_1.jpg' });
+  assert.deepEqual(collectPostMetaStoragePaths(post, origin).sort(), ['posters/p_1.jpg', 'posts/thumb_' + hex('a') + '.jpg']);
+  assert.deepEqual(collectPostMetaStoragePaths(metaPost({ poster_url: 'https://evil.example/storage/v1/object/public/uploads/posters/p_1.jpg' }), origin), [], 'another host is not our bucket');
+  assert.deepEqual(collectPostMetaStoragePaths(metaPost({ poster_url: origin + '/storage/v1/object/public/uploads/posters/..%2F..%2Fphotos%2Fx.jpg' }), origin), [], 'path tricks are not accepted');
+  assert.deepEqual(collectPostMetaStoragePaths({ content: 'plain text' }, origin), []);
+});
+
+test('删帖前读清理路径：别的帖子还提到的缩略图不删，查询失败就不删，帖子自己的媒体照旧', async () => {
+  const { readPostCleanupPaths } = require('../render-api/oss-cleanup');
+  const origin = 'https://project.supabase.co', mine = 'https://api.example.com/api/uploads/media?path=' + encodeURIComponent('posts/thumb_' + hex('b') + '.jpg');
+  const stolen = 'https://api.example.com/api/uploads/media?path=' + encodeURIComponent('posts/thumb_' + hex('c') + '.jpg');
+  const post = metaPost({ thumbs: [mine, stolen], poster_url: origin + '/storage/v1/object/public/uploads/posters/p_2.jpg' });
+  const others = [{ id: 'other', content: JSON.stringify({ meta: { thumbs: [stolen] } }) }, { id: 'me', content: post.content }];
+  const result = await readPostCleanupPaths(fakeSupabase(others), post, 'me', { supabaseUrl: origin });
+  assert.deepEqual(result.storage.sort(), ['posters/p_2.jpg', 'posts/thumb_' + hex('b') + '.jpg'], 'the thumbnail another post also names is left alone; the post itself does not count as another post');
+  const down = await readPostCleanupPaths(fakeSupabase(others, true), post, 'me', { supabaseUrl: origin });
+  assert.deepEqual(down.storage, [], 'a lookup failure deletes nothing');
+  const withOss = metaPost({ thumbs: [oss('posts/thumb_' + hex('d') + '.jpg')] }, { media_url: oss('posts/own.png') });
+  await withOssEnv(async () => {
+    const kept = await readPostCleanupPaths(fakeSupabase([{ id: 'x', content: 'posts/thumb_' + hex('d') + '.jpg' }]), withOss, 'me', { supabaseUrl: origin });
+    assert.deepEqual(withOss && kept.oss, ['posts/own.png'], 'an OSS thumbnail that another post names is not deleted, the post own media still is');
+    const all = await readPostCleanupPaths(fakeSupabase([]), withOss, 'me', { supabaseUrl: origin });
+    assert.deepEqual(all.oss.sort(), ['posts/own.png', 'posts/thumb_' + hex('d') + '.jpg']);
+  });
+});
+
 test('OSS 对象清理是尽力而为：一个失败不挡住其余，未配置 OSS 时什么都不做', async () => {
   const { deleteOssObjects } = require('../render-api/oss-cleanup');
   const calls = [], quiet = { warn() {} };
@@ -101,11 +148,13 @@ test('放弃的照片上传：超过 14 天仍 pending 的登记行才清理，�
 
 test('接线：删帖成功后清 OSS（用户删帖与举报删帖两处），清理任务里每小时扫一次放弃的照片上传', () => {
   const del = SERVER.slice(SERVER.indexOf("app.post('/api/post/delete'"), SERVER.indexOf('// ===================== 点赞接口'));
-  assert.ok(del.indexOf('readPostOssPaths(') > 0 && del.indexOf('readPostOssPaths(') < del.indexOf('hardDeleteContent('), 'paths are read before the rows disappear');
+  assert.ok(del.indexOf('readPostCleanupPaths(') > 0 && del.indexOf('readPostCleanupPaths(') < del.indexOf('hardDeleteContent('), 'paths are read before the rows disappear');
+  assert.match(del, /concat\(postCleanupPaths\.storage\)/, 'Supabase-hosted thumbnails and posters join the durable queue of the delete transaction');
   assert.match(del, /result\.deleted === true && ossPathsToClean\.length\) deleteOssObjects\(ossPathsToClean\)\.catch/);
   const report = SERVER.slice(SERVER.indexOf("app.post('/admin/report/:id/delete-post'"));
-  assert.match(report.slice(0, 4500), /readPostOssPaths\(supabase, post, normalizedTargetId\)/);
-  assert.match(report.slice(0, 5200), /deleteOssObjects\(ossPathsToClean\)\.catch/);
+  assert.match(report.slice(0, 4800), /readPostCleanupPaths\(supabase, post, normalizedTargetId/);
+  assert.match(report.slice(0, 5400), /storagePaths: expectPhoto \? collectPhotoStoragePaths\(post\) : postCleanupPaths\.storage/);
+  assert.match(report.slice(0, 5800), /deleteOssObjects\(ossPathsToClean\)\.catch/);
   const jobs = SERVER.slice(SERVER.indexOf('async function processStorageCleanupJobs()'), SERVER.indexOf('async function processStorageCleanupJobs()') + 1800);
   assert.match(jobs, /_abandonedPhotoSweepAt > 60 \* 60 \* 1000/);
   assert.match(jobs, /sweepAbandonedPhotoUploads\(supabase\)/);

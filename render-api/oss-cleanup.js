@@ -3,57 +3,128 @@
 // 这里在帖子删除成功之后做「尽力而为」的清理：失败只记日志，绝不影响删帖结果和线上运行。
 // 只删本站 OSS 桶里、属于这条帖子自己引用的对象；私聊桶永远不在 OSS，也不会出现在这里。
 //
-// 2026-11-08 安全修复：帖子 content 是客户端自己写的 JSON，meta.thumbs / meta.poster_url
-// 可以填成别人的 OSS 地址（信息流接口把地址公开返回），以前删帖会把这些地址当成「本帖自己的对象」
-// 一并删掉 —— 任何登录用户都能删别人的媒体。现在有三道闸：
-//   1. 原图和附件地址来自上传登记表校验过的 media_url / post_attachments，照旧信任；
-//   2. 缩略图、封面来自客户端自填的元数据，只认「格式像自己产物」的路径：缩略图必须是
-//      posts/thumb_<32 位十六进制>.jpg，封面必须以 <本帖作者>_ 开头（客户端用作者名生成）；
-//   3. 所有候选路径删除前再查一次：还有别的帖子、附件或内容引用它就不删；查询失败也不删。
+// 2026-11-08 安全修复：帖子 content 里的 meta.thumbs / meta.poster_url 是客户端自己写的，可以填成别人的 OSS 地址
+// （信息流接口把地址公开返回），以前删帖会把它们当成「本帖自己的对象」一并删掉——任何登录用户都能删别人的媒体。
+// 来自元数据的路径现在有两道闸：格式（缩略图必须是 posts/thumb_<32 位十六进制>.jpg，封面必须以本帖作者名开头，
+// 所以别人的原图、视频永远进不了删除列表），以及删除前确认没有别的帖子的内容还在引用它。
+// 原图和附件地址来自上传登记表校验过的 media_url / post_attachments，照旧信任。
 const ossMedia = require('./oss-media');
 const { parseOssMediaUrl } = require('./post-media');
+const { THUMB_PATH, POSTER_PATH } = require('./aux-media');
 
 const MAX_OBJECTS = 60;
-const { THUMB_PATH } = require('./aux-media');
-
-// 与前端 buildStorageUploadPath 同一规则：作者名里非字母数字下划线汉字的字符换成 _，最多 32 位，再加 _。
-function ownerPrefix(userName) {
-  const base = String(userName || '').trim().replace(/[^a-zA-Z0-9_一-鿿]/g, '_').slice(0, 32);
-  return base ? base + '_' : '';
-}
-
-function posterPathOwnedBy(path, userName) {
-  const prefix = ownerPrefix(userName);
-  if (!prefix) return false;
-  return path.startsWith('posters/' + prefix) || (path.startsWith('posts/' + prefix) && /poster-/.test(path));
-}
 
 function pushPath(set, url, accept) {
   const path = typeof url === 'string' ? parseOssMediaUrl(url) : null;
   if (path && (!accept || accept(path))) set.add(path);
 }
 
-// 收集一条帖子引用的全部 OSS 对象路径：media_url、附件、内容元数据里的缩略图与封面。
+// 与前端 buildStorageUploadPath 同一规则：作者名里非字母数字下划线汉字的字符换成 _，最多 32 位，再加 _。
+function ownerPrefix(userName) {
+  const base = String(userName || '').trim().replace(/[^a-zA-Z0-9_\u4e00-\u9fff]/g, '_').slice(0, 32);
+  return base ? base + '_' : '';
+}
+function posterPathOwnedBy(path, userName) {
+  const prefix = ownerPrefix(userName);
+  if (!prefix) return false;
+  return path.startsWith('posters/' + prefix) || (path.startsWith('posts/' + prefix) && /poster-/.test(path));
+}
+
+function postMeta(post) {
+  let parsed = null;
+  try { parsed = JSON.parse(String(post && post.content || '')); } catch (_) { parsed = null; }
+  return parsed && parsed.__type === '__xtj_post_v2__' && parsed.meta && typeof parsed.meta === 'object' ? parsed.meta : null;
+}
+function metaUrls(post) {
+  const meta = postMeta(post);
+  if (!meta) return [];
+  return (Array.isArray(meta.thumbs) ? meta.thumbs : []).concat([meta.poster_url]).filter(url => typeof url === 'string' && url);
+}
+
+// 元数据里的 OSS 缩略图/封面：只认「像本帖作者自己产物」的格式（见文件头说明）。
+function metaOssPaths(post) {
+  const paths = new Set();
+  const meta = postMeta(post);
+  if (!meta) return paths;
+  if (Array.isArray(meta.thumbs)) meta.thumbs.forEach(url => pushPath(paths, url, path => THUMB_PATH.test(path)));
+  pushPath(paths, meta.poster_url, path => posterPathOwnedBy(path, post && post.user_name));
+  return paths;
+}
+
+// 收集一条帖子引用的全部 OSS 对象路径：media_url、附件（登记表校验过）、内容元数据里格式合法的缩略图与封面。
 function collectPostOssPaths(post, attachmentRows) {
   const paths = new Set();
   if (!post) return [];
   pushPath(paths, post.media_url);
   for (const row of Array.isArray(attachmentRows) ? attachmentRows : []) pushPath(paths, row && row.media_url);
-  let parsed = null;
-  try { parsed = JSON.parse(String(post.content || '')); } catch (_) { parsed = null; }
-  const meta = parsed && parsed.__type === '__xtj_post_v2__' && parsed.meta && typeof parsed.meta === 'object' ? parsed.meta : null;
-  if (meta) {
-    if (Array.isArray(meta.thumbs)) meta.thumbs.forEach(url => pushPath(paths, url, path => THUMB_PATH.test(path)));
-    pushPath(paths, meta.poster_url, path => posterPathOwnedBy(path, post.user_name));
-  }
+  metaOssPaths(post).forEach(path => paths.add(path));
   return Array.from(paths).slice(0, MAX_OBJECTS);
 }
+
+// 缩略图、封面没有回退到 OSS 时存在 Supabase 的 uploads 桶里：缩略图走同源代理地址
+// （/api/uploads/media?path=posts/thumb_<32 位十六进制>.jpg），封面是桶的公开地址（posters/…）。
+// 路径格式固定，别的一律不认；这些路径要进删帖事务里的持久清理队列。
+function storagePathOfMetaUrl(value, supabaseOrigin) {
+  let url;
+  try { url = new URL(value); } catch (_) { return null; }
+  if (url.protocol !== 'https:' || url.username || url.password) return null;
+  if (url.pathname === '/api/uploads/media') {
+    const path = url.searchParams.get('path') || '';
+    return THUMB_PATH.test(path) ? path : null;
+  }
+  const prefix = '/storage/v1/object/public/uploads/';
+  if (!supabaseOrigin || url.origin !== supabaseOrigin || !url.pathname.startsWith(prefix)) return null;
+  let path; try { path = decodeURIComponent(url.pathname.slice(prefix.length)); } catch (_) { return null; }
+  return (POSTER_PATH.test(path) || THUMB_PATH.test(path)) && !path.includes('..') ? path : null;
+}
+function collectPostMetaStoragePaths(post, supabaseOrigin) {
+  const paths = new Set();
+  metaUrls(post).forEach(url => { const path = storagePathOfMetaUrl(url, supabaseOrigin); if (path) paths.add(path); });
+  return Array.from(paths).slice(0, MAX_OBJECTS);
+}
+
+// 缩略图和封面的地址写在帖子内容里，内容是发帖人自己提交的：不能因为某条帖子「提到」了一个文件就删它。
+// 只要还有别的帖子的内容提到同一个文件名，就一律不删（宁可少删，下划线在 LIKE 里是通配符，只会更保守）；查询失败也按「不删」处理。
+async function unreferencedElsewhere(supabase, postId, paths) {
+  const keep = [];
+  for (const path of paths) {
+    try {
+      const name = path.slice(path.indexOf('/') + 1);
+      const result = await supabase.from('posts').select('id').neq('id', postId).ilike('content', '%' + name + '%').limit(1);
+      if (result && !result.error && Array.isArray(result.data) && result.data.length === 0) keep.push(path);
+    } catch (_) { /* 查不清就不删 */ }
+  }
+  return keep;
+}
+
+// 删帖之前读出要清的对象路径（附件行会随帖子一起删）。返回 { oss, storage }：
+//   oss      直传 OSS 的对象，帖子删除成功后尽力删除；
+//   storage  留在 Supabase 的缩略图/封面，交给删帖事务排进持久清理队列。
+// 读附件失败就只用帖子本身带的地址。
+async function readPostCleanupPaths(supabase, post, postId, options) {
+  let supabaseOrigin = '';
+  try { supabaseOrigin = options && options.supabaseUrl ? new URL(options.supabaseUrl).origin : ''; } catch (_) { supabaseOrigin = ''; }
+  let rows = [];
+  try {
+    const result = await supabase.from('post_attachments').select('media_url').eq('post_id', postId);
+    if (result && !result.error && Array.isArray(result.data)) rows = result.data;
+  } catch (_) { rows = []; }
+  const all = collectPostOssPaths(post, rows);
+  const metaOss = metaOssPaths(post);
+  const own = all.filter(path => !metaOss.has(path));
+  // 同一路径既是媒体本身又出现在元数据里，仍按媒体本身处理（它不是靠元数据才被引用的）。
+  const ownSet = new Set(own); const guardedOss = await unreferencedElsewhere(supabase, postId, Array.from(metaOss).filter(path => !ownSet.has(path)));
+  const storage = await unreferencedElsewhere(supabase, postId, collectPostMetaStoragePaths(post, supabaseOrigin));
+  return { oss: own.concat(guardedOss).slice(0, MAX_OBJECTS), storage };
+}
+async function readPostOssPaths(supabase, post, postId, options) { return (await readPostCleanupPaths(supabase, post, postId, options)).oss; }
 
 function quote(value) {
   return '"' + String(value).replace(/[\u0000-\u001f\u007f]/g, '').replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
 }
 
-// 候选路径里，哪些还被「这条帖子以外」的记录引用。返回被引用的路径集合；任何一步失败都抛错，由调用方放弃删除。
+// 候选路径里，哪些还被「这条帖子以外」的记录引用（media_url、附件、帖子内容）。返回被引用的路径集合；任何一步失败都抛错，由调用方放弃删除。
+// 放弃上传的缩略图/封面回收（aux-media.js）用它：postId 传全 0 的 UUID 表示「不排除任何帖子」。
 async function referencedElsewhere(supabase, paths, postId) {
   const referenced = new Set();
   if (!paths.length) return referenced;
@@ -65,11 +136,10 @@ async function referencedElsewhere(supabase, paths, postId) {
   const attached = await supabase.from('post_attachments').select('post_id,media_url').in('media_url', urls).neq('post_id', postId).limit(50);
   if (!attached || attached.error) throw (attached && attached.error) || new Error('reference_lookup_failed');
   for (const row of attached.data || []) if (byUrl.has(row.media_url)) referenced.add(byUrl.get(row.media_url));
-  // 缩略图和封面只存在别人帖子的 content 里：按路径模糊匹配，再在本地精确确认。
   const pending = paths.filter(path => !referenced.has(path));
   if (pending.length) {
     // 内容里的地址是 URL 编码过的（作者名可能含中文），两种写法都要查。
-    const forms = path => Array.from(new Set([path, path.split('/').map(encodeURIComponent).join('/')]));
+    const forms = path => Array.from(new Set([path, path.split('/').map(encodeURIComponent).join('/'), encodeURIComponent(path)]));
     const filter = pending.flatMap(path => forms(path).map(form => 'content.ilike.' + quote('%' + form + '%'))).join(',');
     const content = await supabase.from('posts').select('id,content').neq('id', postId).or(filter).limit(50);
     if (!content || content.error) throw (content && content.error) || new Error('reference_lookup_failed');
@@ -79,26 +149,6 @@ async function referencedElsewhere(supabase, paths, postId) {
     }
   }
   return referenced;
-}
-
-// 删帖之前读出附件地址（附件行会随帖子一起删掉）。读失败就只用帖子本身带的地址。
-// 返回的都是「可以安全删除」的路径：格式合法，且没有被别的帖子引用。
-async function readPostOssPaths(supabase, post, postId) {
-  let rows = [];
-  try {
-    const result = await supabase.from('post_attachments').select('media_url').eq('post_id', postId);
-    if (result && !result.error && Array.isArray(result.data)) rows = result.data;
-  } catch (_) { rows = []; }
-  const candidates = collectPostOssPaths(post, rows);
-  if (!candidates.length || !ossMedia.enabled()) return [];
-  try {
-    const shared = await referencedElsewhere(supabase, candidates, postId);
-    return candidates.filter(path => !shared.has(path));
-  } catch (error) {
-    // 查不清楚就宁可留下孤儿文件，也不冒险删掉别人的媒体。
-    console.warn('[oss-cleanup] 引用检查失败，本次不删除 OSS 对象:', error && error.message || error);
-    return [];
-  }
 }
 
 async function deleteOssObjects(paths, options) {
@@ -115,4 +165,4 @@ async function deleteOssObjects(paths, options) {
   return { deleted, failed };
 }
 
-module.exports = { collectPostOssPaths, readPostOssPaths, referencedElsewhere, deleteOssObjects, ownerPrefix, MAX_OBJECTS, THUMB_PATH };
+module.exports = { collectPostOssPaths, collectPostMetaStoragePaths, readPostOssPaths, readPostCleanupPaths, referencedElsewhere, deleteOssObjects, ownerPrefix, MAX_OBJECTS, THUMB_PATH };

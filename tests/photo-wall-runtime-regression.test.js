@@ -292,7 +292,8 @@ test('post and photo uploads clean storage records and preserve audio type', () 
   const upload = fs.readFileSync(path.join(ROOT, 'js/photo-wall/upload-ui.js'), 'utf8');
   const server = fs.readFileSync(path.join(ROOT, 'render-api/server.js'), 'utf8');
   // Type selection now runs for every file in the bounded upload worker.
-  assert.match(core, /media_type: selectedFile\.type\.split\('\/'\)\[0\]/);
+  // 类型取自 XtjPostMedia.effectiveType（浏览器给空类型时按扩展名推断），再取斜杠前的大类。
+  assert.match(core, /media_type: String\(selectedType \|\| ''\)\.split\('\/'\)\[0\]/);
   assert.equal(require('../js/post-media').validateSelection([{type:'audio/mpeg',name:'recording.mp3',size:100}])[0].type, 'audio/mpeg');
   assert.match(core, /\[post-publish\] orphan cleanup failed/);
   assert.match(core, /<audio src=/);

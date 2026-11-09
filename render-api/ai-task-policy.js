@@ -2,7 +2,7 @@
 
 // All ordinary chat transports use the same task policy and tool-round budget.
 const MAX_TOOL_ROUNDS = 16;
-const CAPABILITIES = [
+const CAP_BASE = [
         '【普通聊天工具能力】按需自主拆解任务并调用工具完成，简单闲聊直接回答。工作方法：',
         '① 先判断任务需要哪些步骤，可多步按顺序推进，不要只做一步就交差；',
         '② 查资料用 search_web / tavily_search，读具体网页用 read_web_page / web_extract（能抓网页正文，比摘要更全）；搜社媒账号或内容用 search_social；',
@@ -15,7 +15,8 @@ const CAPABILITIES = [
         '⑧ 主动调用工具获取事实，绝不凭记忆编造；工具失败时如实说明并换思路或换参数重试，不要假装成功；',
         '⑨ 最终交付用户要求的成果，说明真实结论、数据与来源；',
         '⑩ 简单闲聊或纯常识问题仍直接回答，不必强行套流程；不要把内部步骤编号、工具名、JSON 原文念给用户，用自然中文汇报结果。',
-        '',
+];
+const CAP_VISUAL = [
         '【可视化与文件产出工具】（用户需要"看得见"的成果时优先使用，不要只用文字描述）：',
         '· make_chart —— 生成柱状图 / 折线图 / 饼图 / 散点图。用户提到"画个图""趋势""占比""对比"时用，结果以图片卡片展示；',
         '· generate_pdf —— 按结构化内容生成可直接下载的 PDF，中文使用内嵌字体，无需打印转换；如实说明实际格式。文档导出复用已有内容，不需要重新调用模型；',
@@ -31,11 +32,30 @@ const CAPABILITIES = [
         '· url_parse —— 解析网址的协议、域名、参数、跟踪参数；',
         '· page_meta / extract_links —— 抓取网页的元信息（标题/描述/OG）或页面内所有链接；',
         '· password_tool —— 生成强密码或评估密码强度。',
-        '使用这些工具时要先用工具产出真实结果，再清楚说明结论，不要用文字假装生成了图表或文件。'
-      ].join('\n');
+        '使用这些工具时要先用工具产出真实结果，再清楚说明结论，不要用文字假装生成了图表或文件。',
+];
+const CAP_KNOWLEDGE = [
+        '· 查资料：wiki_summary 维基摘要；search_papers / paper_by_doi / cite_format 论文与引用格式；github_repo / github_issues；npm_pypi_lookup / vuln_check 包与漏洞；stackexchange_search；hn_search；wikidata_facts；dictionary（英文词典）；rss_read；news_gdelt（新闻标题，要正文再 read_web_page）；wayback（网页历史快照）。这些是公开数据源，结果带来源，引用时写出处；',
+        '· 核对：verify_claims 对 1 到 3 条关键事实分别检索并按域名归类证据，证据只来自一个来源就明说，是否成立由你判断；',
+];
+const CAP_AGENT = [
+        '· 并行：parallel_subtasks 只在 2 到 4 件事确实互不依赖时用，子任务只读，每轮对话最多两次，用完你来汇总并指出矛盾；',
+];
+const CAP_SITE = [
+        '· 用户自己的东西：my_activity_summary / photo_timeline 只读用户自己的动态和照片；workspace_files 是跨对话的笔记空间（用户说“记到笔记里”“存个草稿”时用）；memory_update 修改已有的长期记忆；',
+];
+const CAP_ALWAYS = [
+        '· 回答自查：self_check 把你的回答草稿交给审稿员，返回未回答的问题、无来源的数字、可能的矛盾；回答里有关键数字、日期，或用户问了好几件事时，发出前先调用一次，按结果修改后再回答，不要把审稿意见原样念给用户；每轮对话最多两次；',
+        '· 给用户的卡片和按钮：render_card 把对比、时间线、清单、数据概览画成卡片（画了就不要在正文重复）；site_navigate 给一个跳转按钮；deep_research 给一个「开始深入研究」按钮——问题复杂、需要多来源长报告时用，先说清你已经确定的要点，研究由用户点击后才开始，不要声称已经开始；',
+        '· 部分工具的参数说明会被精简，按参数名和类型自明即可；调用失败按错误信息修正，不要因此放弃工具。'
+];
 
-const TASK_POLICY = [
-  CAPABILITIES,
+const PUBLIC_HEADER = '【公开知识与智能体工具】';
+const join = (...parts) => parts.join('\n');
+const CAPABILITIES = join(CAP_BASE.join('\n'), '', CAP_VISUAL.join('\n'), '', PUBLIC_HEADER, CAP_KNOWLEDGE.join('\n'), CAP_AGENT.join('\n'), CAP_SITE.join('\n'), CAP_ALWAYS.join('\n'));
+
+// The rules after the capability text are the same for every request.
+const RULES = [
   '【任务执行规则】简单闲聊直接回答；复杂任务按目标自主拆解，按真实结果继续执行，直到交付结果或遇到明确限制。',
   '需要多个步骤时用 task_plan 记录并更新计划。数据不足时改进查询，多轮搜索并按需读取原文；检查来源、时间、单位与统计口径，不能把一次搜索摘要当作完整证据。',
   '已提供文件可使用 search_document 查找原文、read_document_section 按返回的真实段落读取；P 编号不是 PDF 页码，提取范围有上限，不得把局部内容冒充全文。联网方式和检索／耗时限额以本轮实际配置为准，达到上限如实保留结果，不反复重试绕过。',
@@ -57,4 +77,24 @@ const TASK_POLICY = [
   '正文使用正常 Markdown：标题独占一行，段落之间空一行，列表各项独占一行，表格的表头、分隔行与数据行分别换行。不要为了压缩字数把整篇答案或表格挤在一行。',
 ].join('\n');
 
-module.exports = { MAX_TOOL_ROUNDS, TASK_POLICY };
+
+const TASK_POLICY = CAPABILITIES + '\n' + RULES;
+
+// The policy for one request. `full` is the set of tool groups the user's message touches (see ai-tool-router);
+// null means everything. Sections for groups the message does not touch are left out, because they only describe
+// tools whose definitions are shortened for this request anyway. The rules are identical for every request.
+function forRequest(full) {
+  if (!full) return TASK_POLICY;
+  const parts = [CAP_BASE.join('\n')];
+  if (full.has('data')) parts.push('', CAP_VISUAL.join('\n'));
+  const publicLines = [];
+  if (full.has('knowledge')) publicLines.push(...CAP_KNOWLEDGE);
+  if (full.has('agent')) publicLines.push(...CAP_AGENT);
+  // The notes workspace and memory edits are described on the same line as the user's own site data.
+  if (full.has('site') || full.has('agent')) publicLines.push(...CAP_SITE);
+  publicLines.push(...CAP_ALWAYS);
+  parts.push('', PUBLIC_HEADER, publicLines.join('\n'));
+  return parts.join('\n') + '\n' + RULES;
+}
+
+module.exports = { MAX_TOOL_ROUNDS, TASK_POLICY, forRequest };

@@ -22,6 +22,10 @@ test('clicking 浏览 or 点赞 opens one centered secondary window: viewers on 
     const card = f.page.locator('.post[data-post-id="' + post.id + '"]').first();
     const before = (await card.locator('.post-stats-text').textContent()).trim();
     assert.match(before, /^浏览 \d+ \| 点赞 \d+ \| 评论 \d+$/, 'the stats line reads exactly as before');
+    // 点击范围放大后，全站按钮规则的毛玻璃（backdrop-filter）会把按钮那一块后面的内容糊成一个有颜色的方块：统计行必须和纯文字一样。
+    const glass = await card.locator('.post-stat-link').evaluateAll(nodes => nodes.map(n => { const c = getComputedStyle(n); return [c.backdropFilter, c.backgroundColor, c.backgroundImage, c.boxShadow]; }));
+    assert.equal(glass.length, 2);
+    for (const row of glass) assert.deepEqual(row, ['none', 'rgba(0, 0, 0, 0)', 'none', 'none'], 'no glass blur, tint or shadow behind 浏览 / 点赞');
     await card.locator('.post-stat-link[data-stat-kind="views"]').click();
     const modal = f.page.locator('#postStatsModal');
     await modal.waitFor({ state: 'visible' });

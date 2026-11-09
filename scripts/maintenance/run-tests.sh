@@ -12,6 +12,8 @@ mkdir -p "$2"
 OUT=$(cd "$2" && pwd)
 FILTER=${3:-}
 cd "$TREE"
+# Chinese file names in browser downloads need a UTF-8 locale; under the POSIX default Chromium names every such download "download".
+export LC_ALL=${LC_ALL:-C.UTF-8} LANG=${LANG:-C.UTF-8}
 # Database tests skip silently (and count as passed) without a local PostgreSQL: start the disposable one when no URL is set.
 if [ -z "${XTJ_TEST_DATABASE_URL:-}" ] && [ -x "$HERE/pg.sh" ]; then eval "$("$HERE/pg.sh" 2>/dev/null)" || true; fi
 if [ -z "${CHROMIUM_PATH:-}" ] && [ ! -e /usr/bin/chromium ] && [ -e /opt/pw-browsers/chromium ]; then

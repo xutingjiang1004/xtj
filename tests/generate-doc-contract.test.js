@@ -207,11 +207,13 @@ test('动态清单在 AI_TOOLS 定义之后求值（保证拿到完整名单）'
     '清单常量应在站内工具注册之后（否则漏掉 7 个 search_* 工具）');
 });
 
-test('AI_TOOLS 保留 39 基础（含记忆与确认工具）、7 站内工具，并添加 2 个已提供文档工具', function() {
+test('AI_TOOLS 保留 40 基础（含记忆、memory_update 与确认工具）、7 站内工具，并添加 2 个已提供文档工具、15 个公开知识工具和 8 个智能体工具', function() {
   var m = SERVER_SRC.match(/const AI_TOOLS = \[([\s\S]*?)\n\];/);
   assert.ok(m, '应能匹配 AI_TOOLS 定义');
   var base = (m[1].match(/name: '[a-z_0-9]+'/g) || []).length;
-  assert.strictEqual(base, 39, '基础工具数量应与定义一致（35 个原有 + save_memory / list_memories / forget_memory / ask_user）');
+  assert.strictEqual(base, 40, '基础工具数量应与定义一致（35 个原有 + save_memory / list_memories / memory_update / forget_memory / ask_user）');
+  assert.ok(SERVER_SRC.includes("AI_TOOLS.push.apply(AI_TOOLS, require('./ai-knowledge-tools').TOOL_DEFS)"));
+  assert.ok(SERVER_SRC.includes("AI_TOOLS.push.apply(AI_TOOLS, require('./ai-agent-tools').TOOL_DEFS)"));
   assert.equal(require('../render-api/ai-request-features').DOCUMENT_TOOLS.length,2);
   assert.ok(SERVER_SRC.includes('AI_TOOLS.push(...aiRequestFeatures.DOCUMENT_TOOLS)'));
 

@@ -24,3 +24,11 @@ test('a failed free-model tool retains its server-owned zero-cost search policy 
  const calls=[],value=token({userName:'alice',accountId:'alice-account',freeOnly:true},'search_web',{query:'免费重试'}),f=await fixture(async(call,context)=>{calls.push({call,context});return{tool_name:'search_web',content:'真实模拟搜索结果'};});
  try{const result=await f.call(value);assert.equal(result.status,200);assert.equal(calls.length,1);assert.equal(calls[0].context.freeOnly,true);assert.equal(calls[0].context.deepseekKey,undefined);assert.equal(calls[0].context.api_key,undefined);}finally{await f.close();}
 });
+
+test('read-only knowledge tools can be retried, tools that bill extra model use or write cannot, and only metered searches check the search allowance',()=>{
+ const fs=require('node:fs'),source=fs.readFileSync(require('node:path').join(__dirname,'..','render-api','ai-tool-retry.js'),'utf8');
+ for(const name of ['wiki_summary','search_papers','paper_by_doi','cite_format','github_repo','github_issues','npm_pypi_lookup','vuln_check','stackexchange_search','hn_search','wikidata_facts','dictionary','rss_read','news_gdelt','wayback','my_activity_summary','photo_timeline'])assert.ok(retry.SAFE.has(name),name+' should be retryable');
+ for(const name of ['parallel_subtasks','self_check','verify_claims','workspace_files','memory_update','save_memory','forget_memory','deep_research','site_navigate','ask_user'])assert.ok(!retry.SAFE.has(name),name+' must not be retryable');
+ assert.match(source,/needSearch:METERED_SEARCH\.has\(entry\.call\.name\)/);assert.ok(!/needSearch:\/search\//.test(source),'a name containing "search" must not decide whether the allowance is checked');
+ assert.match(source,/const METERED_SEARCH=new Set\(\['search_web','tavily_search','search_social'\]\)/);
+});
