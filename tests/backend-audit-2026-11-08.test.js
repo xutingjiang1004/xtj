@@ -46,53 +46,42 @@ test('H1 伪造的 meta 不能让删帖带走别人的原图、视频和缩略�
   assert.deepEqual(collectPostOssPaths(attacker, []), []);
 }));
 
-test('H1 缩略图格式合法也不能删：别人的帖子还在引用它时一律保留', async () => withOssEnv(async () => {
-  const { readPostOssPaths } = require('../render-api/oss-cleanup');
-  const victimContent = JSON.stringify({ __type: '__xtj_post_v2__', text: 'v', meta: { thumbs: [oss(OTHER_THUMB)] } });
-  const calls = [];
-  const db = { from(table) {
-    const q = { _table: table, select() { return q; }, eq() { return q; }, neq() { return q; }, limit() { return q; }, in() { return q; },
-      or() { q._or = true; return q; },
+// 只模拟 posts 表「别的帖子内容里是否提到某个文件名」的查询（与 main 的 unreferencedElsewhere 一致）。
+function contentDb(others, fail) {
+  return { from(table) {
+    let notId = null, like = null;
+    const q = { select() { return q; }, neq(_c, v) { notId = v; return q; }, ilike(_c, v) { like = v.slice(1, -1); return q; }, eq() { return q; }, limit() { return q; },
       then(resolve, reject) {
-        calls.push(table + (q._or ? ':content' : ''));
-        let data = [];
-        // 受害者的帖子 content 里引用了这张缩略图
-        if (table === 'posts' && q._or) data = [{ id: 'victim-post', content: victimContent }];
-        return Promise.resolve({ data, error: null }).then(resolve, reject);
+        if (fail) return Promise.resolve({ data: null, error: new Error('offline') }).then(resolve, reject);
+        if (table === 'post_attachments') return Promise.resolve({ data: [], error: null }).then(resolve, reject);
+        return Promise.resolve({ data: others.filter(o => o.id !== notId && o.content.includes(like)).map(o => ({ id: o.id })), error: null }).then(resolve, reject);
       } };
     return q;
   } };
+}
+
+test('H1 缩略图格式合法也不能删：别人的帖子还在引用它时一律保留', async () => withOssEnv(async () => {
+  const { readPostCleanupPaths } = require('../render-api/oss-cleanup');
+  const victim = [{ id: 'victim-post', content: JSON.stringify({ __type: '__xtj_post_v2__', text: 'v', meta: { thumbs: [oss(OTHER_THUMB)] } }) }];
   const attacker = { user_name: 'mallory', media_url: '', content: JSON.stringify({ __type: '__xtj_post_v2__', meta: { thumbs: [oss(OTHER_THUMB), oss(THUMB)] } }) };
-  const paths = await readPostOssPaths(db, attacker, 'attacker-post');
-  assert.deepEqual(paths, [THUMB], 'only the object nobody else references may be deleted');
-  assert.ok(calls.includes('posts:content'), 'content references must be checked');
+  const result = await readPostCleanupPaths(contentDb(victim), attacker, 'attacker-post', {});
+  assert.deepEqual(result.oss, [THUMB], 'only the object nobody else references may be deleted');
 }));
 
-test('H1 引用检查失败时一个对象都不删（宁可留孤儿，也不冒险误删）', async () => withOssEnv(async () => {
-  const { readPostOssPaths } = require('../render-api/oss-cleanup');
-  const warnings = [];
-  const originalWarn = console.warn; console.warn = (...args) => warnings.push(args.join(' '));
-  try {
-    const db = { from() { const q = { select() { return q; }, eq() { return q; }, neq() { return q; }, limit() { return q; }, in() { return q; }, or() { return q; },
-      then(resolve, reject) { return Promise.resolve({ data: null, error: new Error('offline') }).then(resolve, reject); } }; return q; } };
-    const own = { user_name: 'alice', media_url: oss('posts/alice_1_a.jpg'), content: JSON.stringify({ __type: '__xtj_post_v2__', meta: { thumbs: [oss(THUMB)] } }) };
-    assert.deepEqual(await readPostOssPaths(db, own, 'post-1'), []);
-  } finally { console.warn = originalWarn; }
-  assert.ok(warnings.some(line => /引用检查失败/.test(line)));
+test('H1 引用检查失败时元数据里的对象一个都不删（宁可留孤儿，也不冒险误删），帖子自己的媒体照旧', async () => withOssEnv(async () => {
+  const { readPostCleanupPaths } = require('../render-api/oss-cleanup');
+  const own = { user_name: 'alice', media_url: oss('posts/alice_1_a.jpg'), content: JSON.stringify({ __type: '__xtj_post_v2__', meta: { thumbs: [oss(THUMB)] } }) };
+  const result = await readPostCleanupPaths(contentDb([], true), own, 'post-1', {});
+  assert.deepEqual(result.oss, ['posts/alice_1_a.jpg']);
 }));
 
-test('H1 自己的原图、附件、缩略图、封面在没人引用时仍会被清理', async () => withOssEnv(async () => {
-  const { readPostOssPaths } = require('../render-api/oss-cleanup');
-  const db = { from(table) {
-    const q = { select() { return q; }, eq() { return q; }, neq() { return q; }, limit() { return q; }, in() { return q; }, or() { return q; },
-      then(resolve, reject) { return Promise.resolve({ data: table === 'post_attachments' ? [] : [], error: null }).then(resolve, reject); } };
-    return q;
-  } };
+test('H1 自己的原图、缩略图、封面在没人引用时仍会被清理', async () => withOssEnv(async () => {
+  const { readPostCleanupPaths } = require('../render-api/oss-cleanup');
   const own = { user_name: '小明 alice', media_url: oss('posts/x_1_v.mp4'), content: JSON.stringify({ __type: '__xtj_post_v2__', meta: {
     thumbs: [oss(THUMB)], poster_url: oss('posters/' + encodeURIComponent('小明_alice') + '_1_a_poster-1.jpg') } }) };
-  const paths = await readPostOssPaths(db, own, 'post-1');
-  assert.equal(paths.length, 3, JSON.stringify(paths));
-  assert.ok(paths.includes(THUMB) && paths.includes('posts/x_1_v.mp4'));
+  const result = await readPostCleanupPaths(contentDb([]), own, 'post-1', {});
+  assert.equal(result.oss.length, 3, JSON.stringify(result.oss));
+  assert.ok(result.oss.includes(THUMB) && result.oss.includes('posts/x_1_v.mp4'));
 }));
 
 test('H1 管理员按举报删帖时同样带着作者名，封面归属才能核对', () => {
