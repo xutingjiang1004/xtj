@@ -1003,6 +1003,10 @@
                             if (myEpoch !== dmBroadcast.epoch) return;
                             if (typeof window.__xtjApplyChatTyping === 'function') window.__xtjApplyChatTyping(payload && payload.payload);
                         })
+                        .on("broadcast", { event: "chat-group" }, function(payload) {
+                            if (myEpoch !== dmBroadcast.epoch) return;
+                            if (typeof window.__xtjApplyGroupEvent === 'function') window.__xtjApplyGroupEvent(payload && payload.payload);
+                        })
                         .on("broadcast", { event: "presence" }, function(payload) {
                             if (myEpoch !== dmBroadcast.epoch) return;
                             if (typeof window.__xtjRefreshChatPresence === 'function') window.__xtjRefreshChatPresence(payload && payload.payload && payload.payload.peer);
@@ -1318,9 +1322,17 @@
                 if (dmpollTimer) { clearInterval(dmpollTimer); dmpollTimer = null; dmpollInterval = null; }
             }
 
+            // Group chat unread counts (js/chat-groups.js) are added to the same
+            // badge; the direct-message part keeps its own last value.
+            var _dmBadgeCount = 0, _groupBadgeCount = 0;
+            window.__xtjSetGroupUnread = function(n) {
+                _groupBadgeCount = Math.max(0, Number(n) || 0);
+                setUnreadBadgeCount(_dmBadgeCount);
+            };
             function setUnreadBadgeCount(cnt) {
                 var badge = document.getElementById('navChatBadge');
-                var count = Number(cnt) || 0;
+                _dmBadgeCount = Math.max(0, Number(cnt) || 0);
+                var count = window.currentUser ? _dmBadgeCount + _groupBadgeCount : 0;
                 if (!badge) return;
                 if (count > 0) {
                     badge.textContent = count > 99 ? '99+' : String(count);

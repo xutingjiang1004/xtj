@@ -478,6 +478,7 @@
             //   叠加 renderDockChatDesktopEmptyState 的归属判断，导致桌面分屏在登出后
             //   仍显示上一个账号的私聊内容。由 doLogout 显式调用。
             window.__xtjResetChatPanels = function() {
+                try { if (typeof window.__xtjResetChatGroups === 'function') window.__xtjResetChatGroups(); } catch (_) {}
                 if (_dockChatDraftTimer) clearTimeout(_dockChatDraftTimer);
                 _dockChatDraftTimer=null;_dockChatDraftLoadSeq++;
                 _dockChatLocalDrafts={};_dockChatDraftWrites={};_dockChatDraftConflicts={};
@@ -733,14 +734,17 @@
                 ghost.removeAttribute('data-message-id');
                 var styles = getComputedStyle(bubble);
                 ['background','border','borderRadius','boxShadow','padding','color','font','lineHeight'].forEach(function(key) { ghost.style[key]=styles[key]; });
-                Object.assign(ghost.style,{position:'fixed',left:destination.left+'px',top:destination.top+'px',width:destination.width+'px',height:destination.height+'px',maxWidth:'none',boxSizing:'border-box',margin:'0',zIndex:'1800',pointerEvents:'none',animation:'none',transition:'none',transformOrigin:'center center',overflow:'hidden'});
+                Object.assign(ghost.style,{position:'fixed',left:destination.left+'px',top:destination.top+'px',width:destination.width+'px',height:destination.height+'px',maxWidth:'none',boxSizing:'border-box',margin:'0',zIndex:'1800',pointerEvents:'none',animation:'none',transition:'none',transformOrigin:'100% 100%',overflow:'hidden',willChange:'transform,opacity'});
                 ghost.querySelectorAll('[id]').forEach(function(node) { node.removeAttribute('id'); });
                 ghost.querySelectorAll('img').forEach(function(img) { Object.assign(img.style,{display:'block',width:'100%',height:'100%',objectFit:'cover',maxHeight:'none'}); });
                 document.body.appendChild(ghost);
-                var dx=origin.left+origin.width/2-destination.left-destination.width/2;
+                // 2026-11-09（用户：发送动画不流畅）：原来按宽、高分别缩放（sx≠sy），
+                //   飞行途中文字会被压扁/拉长，幽灵气泡又是半透明的，看起来发虚。
+                //   现在只做等比缩放 + 位移：从输入框右侧（发送方向）升起，减速落位。
+                var startRight=origin.left+origin.width-12;
+                var dx=Math.min(startRight-destination.right,0)*.35;
                 var dy=origin.top+origin.height/2-destination.top-destination.height/2;
-                var sx=Math.max(.18,Math.min(1.25,origin.width/destination.width));
-                var sy=Math.max(.18,Math.min(1,origin.height/destination.height));
+                var sx=Math.max(.82,Math.min(1,origin.height/destination.height+.35)),sy=sx;
                 var flight={peer:peer,id:tempId,bubble:bubble,ghost:ghost};
                 bubble.style.visibility='hidden';
                 flight.finish=function() {
@@ -753,9 +757,10 @@
                 _chatSendFlights.set(tempId,flight);
                 try {
                     flight.animation=ghost.animate([
-                        {transform:'translate3d('+dx+'px,'+dy+'px,0) scale('+sx+','+sy+')',opacity:.72},
-                        {transform:'translate3d(0,0,0) scale(1,1)',opacity:1}
-                    ],{duration:290,easing:'cubic-bezier(.22,.72,.24,1)',fill:'both'});
+                        {transform:'translate3d('+dx+'px,'+dy+'px,0) scale('+sx+')',opacity:.35},
+                        {opacity:1,offset:.35},
+                        {transform:'translate3d(0,0,0) scale(1)',opacity:1}
+                    ],{duration:300,easing:'cubic-bezier(.16,.84,.3,1)',fill:'both'});
                     flight.animation.finished.then(flight.finish,flight.finish);
                 } catch (_) { flight.finish(); }
             }
@@ -2089,7 +2094,9 @@
                 //   就不存在"已读/未读"这回事。旧实现照常计算 readStatus，于是
                 //   文字气泡里同时出现 failMark（发送失败·长按重发）和 readStatus（未读），
                 //   观感矛盾且误导。这里对失败态直接清空 readStatus，只保留失败态 + 时间。
-                var readStatus = (sent && !message.__failed)
+                var payloadForStatus = getDMMessagePayload(message) || {};
+                // 撤回后的气泡只剩一行提示，「已读/未读」没有意义（2026-11-09）。
+                var readStatus = (sent && !message.__failed && !payloadForStatus.withdrawn)
                     ? (isMsgReadByMe(message)
                         ? '<span class="msg-read-status is-read">已读</span>'
                         : '<span class="msg-read-status">未读</span>')
@@ -2463,6 +2470,28 @@
                 return node;
             }
 
+            // 2026-11-09（用户：撤回动画不流畅）：撤回原来没有任何过渡——重建的行带 no-anim，
+            //   气泡内容和宽度瞬间跳变。现在：旧气泡先在合成层上收起（缩小+淡出），
+            //   新的「此消息已被撤回」再从同一位置轻轻浮现；只动 transform/opacity。
+            function animateDockChatWithdrawOut(id) {
+                if (!id || chatReducedMotion()) return Promise.resolve();
+                var row = Array.prototype.find.call(document.querySelectorAll('#dockChatMessages .chat-msg-row'), function(node) { return node.getAttribute('data-message-id') === String(id); });
+                var bubble = row && row.querySelector('.chat-msg');
+                if (!bubble || typeof bubble.animate !== 'function') return Promise.resolve();
+                bubble.style.transformOrigin = row.classList.contains('sent') ? '100% 50%' : '0 50%';
+                var animation = bubble.animate([{ opacity: 1, transform: 'scale(1)' }, { opacity: 0, transform: 'scale(.88)' }], { duration: 150, easing: 'cubic-bezier(.4,0,1,1)', fill: 'forwards' });
+                // The caller re-renders synchronously right after this resolves, so the faded node is
+                // already replaced; if the view changed meanwhile the bubble is restored instead of
+                // staying invisible inside a cached DOM snapshot.
+                return animation.finished.then(function() { setTimeout(function() { animation.cancel(); }, 0); }, function() {});
+            }
+            function animateDockChatWithdrawIn(row) {
+                var bubble = row && row.querySelector('.chat-msg');
+                if (!bubble || chatReducedMotion() || typeof bubble.animate !== 'function') return;
+                bubble.style.transformOrigin = row.classList.contains('sent') ? '100% 50%' : '0 50%';
+                bubble.animate([{ opacity: 0, transform: 'scale(.94)' }, { opacity: 1, transform: 'scale(1)' }], { duration: 220, easing: 'cubic-bezier(.2,.8,.2,1)' });
+            }
+
             function renderDockMessages(userName, msgs, forceScroll) {
                 scheduleChatReactions();
                 const el = document.getElementById('dockChatMessages');
@@ -2540,6 +2569,7 @@
                     if (k) existingRows[k] = node;
                 });
                 var newReceived=msgs.filter(function(message,index){return message.user_name!==currentUser && !existingRows[getDockChatRowKey(message,index)];}).length;
+                var withdrawnSwaps=[];
                 var orderedNodes = [];
                 var existingTimeSeps = {}, previousMessageStamp = 0;
                 Array.prototype.forEach.call(el.querySelectorAll('.chat-time-sep[data-sep-key]'), function(node) {
@@ -2567,6 +2597,9 @@
                     var template = document.createElement('template');
                     template.innerHTML = buildDockChatRowMarkup(message, avatars, isBulk || !message.__optimistic).trim();
                     var nextNode = template.content.firstElementChild;
+                    // A bubble that just became "withdrawn" (mine or the peer's) fades into its notice
+                    // instead of swapping abruptly; see animateDockChatWithdrawIn.
+                    if (node && sameConversation && !node.querySelector('.chat-msg.is-withdrawn') && nextNode.querySelector('.chat-msg.is-withdrawn')) withdrawnSwaps.push(nextNode);
                     if (node && sameConversation && node.getAttribute('data-body-sig') === buildDockChatStableBodySignature(message)) {
                         var oldMeta=node.querySelector('.msg-meta'), nextMeta=nextNode.querySelector('.msg-meta');
                         if (oldMeta && nextMeta && oldMeta.innerHTML!==nextMeta.innerHTML) oldMeta.innerHTML=nextMeta.innerHTML;
@@ -2606,6 +2639,7 @@
                   });
                 }
                 var wanted=new Set(orderedNodes); Array.from(el.children).forEach(function(node) { if (!wanted.has(node)) node.remove(); });
+                withdrawnSwaps.forEach(animateDockChatWithdrawIn);
                 el.dataset.chatUser = signatureKey;
                 _chatRenderSignature[signatureKey] = nextSignature;
                 syncDockChatHistoryButton(userName);
@@ -2673,6 +2707,8 @@
                         throw new Error(result.error || '撤回失败');
                     }
                     var withdrawnMessage = result.message;
+                    if (sameView()) await animateDockChatWithdrawOut(id);
+                    if (!sameIdentity()) return false;
                     if (!withdrawnMessage && cleanupPending && originalMessage) {
                         withdrawnMessage = Object.assign({}, originalMessage, {
                             content: JSON.stringify({ type: 'text', text: '[消息已撤回]', withdrawn: true, read_at: null }),

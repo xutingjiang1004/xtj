@@ -23,7 +23,7 @@ function createSupabaseAvailability({ fetchImpl = (...args) => fetch(...args), n
   // 覆盖所有直接读写数据库的接口。故意不含 /api/agent：AI 流程的 5xx 多半来自上游模型而不是 Supabase，
   // 在额度受限的 60 秒窗口里把它们统一说成「额度用完」会误导排查。
   function middleware(req, res, next) {
-    if (!/^(?:\/api\/(?:user|profile|photos?|post|feed|uploads|admin|dm|chat|report|my-reports|comments|likes|stats|avatar|oss|announcements|location)(?:\/|$)|\/health$|\/admin(?:\/|$))/.test(req.path)) return next();
+    if (!/^(?:\/api\/(?:user|profile|photos?|post|feed|uploads|admin|dm|chat|groups|report|my-reports|comments|likes|stats|avatar|oss|announcements|location)(?:\/|$)|\/health$|\/admin(?:\/|$))/.test(req.path)) return next();
     const json = res.json;
     res.json = function (body) {
       const upstreamLimited = body && /exceed_egress_quota|egress_quota_exceeded/.test(String(body.code || '') + ' ' + String(body.error || ''));

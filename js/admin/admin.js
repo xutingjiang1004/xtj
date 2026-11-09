@@ -3362,7 +3362,7 @@
                     r.status === 'reviewed' ? '<span class="badge badge-green">已审核</span>' :
                     r.status === 'dismissed' ? '<span class="badge" style="background:rgba(128,128,128,0.15);color:var(--text-muted)">已驳回</span>' :
                     '<span class="badge badge-green">已处理</span>';
-                var typeLabel = r.target_type === 'photo' ? '照片墙' : '帖子';
+                var typeLabel = r.target_type === 'photo' ? '照片墙' : r.target_type === 'group' ? '群聊' : '帖子';
                 h += '<tr><td>' + escapeHtml(r.reporter_name || '-') + '</td>';
                 h += '<td>' + escapeHtml(typeLabel) + '</td>';
                 h += '<td><strong>' + escapeHtml(r.target_user || '-') + '</strong></td>';
@@ -3397,7 +3397,7 @@
         box.style.cssText = 'background:rgba(255,255,255,0.95);border-radius:16px;padding:24px;max-width:560px;width:100%;max-height:85vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3);';
         box.onclick = function(e) { e.stopPropagation(); };
 
-        var typeLabel = r.target_type === 'photo' ? '照片墙' : '帖子';
+        var typeLabel = r.target_type === 'photo' ? '照片墙' : r.target_type === 'group' ? '群聊' : '帖子';
         var statusLabel = r.status === 'pending' ? '待处理' : r.status === 'actioned' ? '已处理' : r.status === 'dismissed' ? '已驳回' : r.status;
 
         var html = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;"><h3 style="margin:0;">举报详情</h3><button onclick="closeAdminActionDialog(this.closest(\'.report-detail-modal\'))" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--text-muted);padding:4px;line-height:1;">×</button></div>';
@@ -3419,7 +3419,8 @@
         }
         html += '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;">';
         if (r.status === 'pending') {
-            html += '<button class="btn-sm primary" onclick="doDeleteReportPost(\'' + safeJsStr(String(r.id)) + '\')">删除内容</button>';
+            // 群聊投诉没有可删除的单条内容（被举报人一栏是群主）。
+            if (r.target_type !== 'group') html += '<button class="btn-sm primary" onclick="doDeleteReportPost(\'' + safeJsStr(String(r.id)) + '\')">删除内容</button>';
             html += '<button class="btn-sm" style="background:rgba(255,59,96,0.1);color:#ff3b60;border:1px solid rgba(255,59,96,0.3);" onclick="doBanReportUser(\'' + safeJsStr(String(r.id)) + '\')">封禁用户</button>';
             html += '<button class="btn-sm" onclick="doMarkReportActioned(\'' + safeJsStr(String(r.id)) + '\')">标记已处理</button>';
         }

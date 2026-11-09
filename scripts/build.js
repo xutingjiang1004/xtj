@@ -126,6 +126,7 @@ const JS_FILES = [
   'js/core-animations.js',
   'js/ui-effects.js',
   'js/ux-features.js',
+  'js/chat-groups.js',
   'js/login-device.js',
    'js/ai-agent.js',
   'js/theme-toggle.js',
@@ -202,7 +203,8 @@ const CSS_FILES = [
   'css/ai-reading.css',
   'css/ai-assistant-features.css',
   'css/ui-shell.css',
-  'css/photo-preview.css'
+  'css/photo-preview.css',
+  'css/chat-groups.css'
 ];
 
 function minifyJS(filePath, optional) {

@@ -12109,6 +12109,27 @@ app.use('/api/chat', createChatSocialRouter({
   publishEvent: publishChatEvent
 }));
 
+// Group chat (2026-11-09). Permission rules live in the chat_group_* database
+// functions; images go to the private chat bucket and are only ever served to
+// members through short-lived signed URLs (never OSS, never public).
+app.use('/api/groups', require('./chat-groups').createChatGroupsRouter({
+  express: express,
+  supabase: supabase,
+  authenticateUser: authenticateUser,
+  rateLimit: rateLimit,
+  sharp: sharp,
+  reportMarker: REPORT_MARKER,
+  publishMany: publishChatEventMany,
+  signPrivate: function(path) { return dmPrivateStorage.sign(path); },
+  removePrivate: function(paths) { return removeStorageWithQueue(supabase, { bucket: PRIVATE_BUCKET, paths: paths, lastError: 'group_media_removed' }); },
+  sendBlocked: function(req) {
+    var ban = userBanError(req);
+    if (ban) return ban;
+    if (req.userRestrictions && req.userRestrictions.is_blacklisted) return { status: 403, code: 'account_blacklisted', message: '该账号已被限制聊天功能' };
+    return null;
+  }
+}));
+
 app.use('/api/profile/records', require('./profile-records').createProfileRecords({ express, supabase, authenticateUser, rateLimit }));
 const profileSettings = require('./profile-settings');
 app.use('/api/profile/settings', profileSettings.createProfileSettings({ express, supabase, authenticateUser, rateLimit, sharp }));
@@ -16715,6 +16736,35 @@ function publishChatEvent(targetUser,event,payload) {
     });
   } catch (e) {
     console.warn('[dm-realtime] publish threw:', e && e.message);
+  }
+}
+
+// Fan one event out to many user topics in batched broadcast calls (group chat
+// members). The payload only carries ids; clients fetch content through the API.
+function publishChatEventMany(targetUsers, event, payload) {
+  try {
+    if (!Array.isArray(targetUsers) || !targetUsers.length || !event || !SUPABASE_URL || !SUPABASE_SERVICE_KEY) return;
+    var messages = [];
+    var seen = Object.create(null);
+    targetUsers.forEach(function(user) {
+      var topic = dmRealtimeTopic(user);
+      if (!topic || seen[topic]) return;
+      seen[topic] = true;
+      messages.push({ topic: topic, event: event, payload: payload || {}, private: false });
+    });
+    for (var offset = 0; offset < messages.length; offset += 100) {
+      fetch(SUPABASE_URL.replace(/\/$/, '') + '/realtime/v1/api/broadcast', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: SUPABASE_SERVICE_KEY, Authorization: 'Bearer ' + SUPABASE_SERVICE_KEY },
+        body: JSON.stringify({ messages: messages.slice(offset, offset + 100) })
+      }).then(function(r) {
+        if (!r || !r.ok) console.warn('[group-realtime] broadcast rejected:', r && r.status);
+      }).catch(function(err) {
+        console.warn('[group-realtime] broadcast failed:', err && err.message);
+      });
+    }
+  } catch (e) {
+    console.warn('[group-realtime] publish threw:', e && e.message);
   }
 }
 
