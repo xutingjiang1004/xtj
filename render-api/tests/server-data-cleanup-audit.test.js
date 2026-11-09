@@ -78,23 +78,26 @@ test('photo cleanup reports pending if Storage cleanup or queue state is unconfi
   assert.match(worker, /finalUpdate\.error \|\| !finalUpdate\.data/);
 });
 
-test('account removal follows both DM participants and preserves unknown retention records', () => {
+test('account removal (注销) clears the account itself, keeps every post, photo and DM, and preserves retention records', () => {
+  // 2026-11-08 用户要求：删除账号 = 注销账号，发布过的内容和聊天消息一律保留（行为见 tests/profile-admin-delete-counts.test.js）。
   const accountRoute = serverSource.slice(serverSource.indexOf("app.delete('/admin/user/:userName'"), serverSource.indexOf('\nfunction firstNonEmptyValue()'));
-  assert.match(accountRoute, /readDmPages\('user_name'\)/);
-  assert.match(accountRoute, /readDmPages\('media_url'\)/);
-  assert.match(accountRoute, /\.eq\('media_type', DM_MARKER\)\.eq\(column, userName\)/);
-  assert.match(accountRoute, /\.eq\(column, userName\)/);
-  assert.match(accountRoute, /deleteIdsInBatches\('posts', 'id', userPostIds\)/);
-  assert.match(accountRoute, /deleteIdsInBatches\('posts', 'id', dmMessageIds, DM_MARKER\)/);
-  assert.match(accountRoute, /\.eq\('media_type', marker\)/);
-  assert.match(accountRoute, /dm_media_uploads/);
+  // 不再读取、删除私信，也不删除帖子、评论、点赞、私信媒体登记，不入队帖子/聊天/照片的存储清理
+  assert.doesNotMatch(accountRoute, /readDmPages|deleteIdsInBatches|dmMessageIds|retireAccountPostMediaUploads\(/);
+  assert.doesNotMatch(accountRoute, /from\('(?:likes|comments|dm_media_uploads)'\)\.delete/);
+  assert.doesNotMatch(accountRoute, /\.in\('media_type', \[?'(?:text|image|video)/);
+  // 清理的是账号本身和私有数据
+  assert.match(accountRoute, /AUTH_DELETED_MARKER/);
   assert.match(accountRoute, /ai_search_results/);
   assert.match(accountRoute, /ai_drafts/);
   assert.match(accountRoute, /ai_action_confirmations/);
-  assert.match(accountRoute, /未知系统 marker[^\n]*[\s\S]*?retainedSystemPostCount/);
   assert.match(accountRoute, /retainedPolicyData/);
+  assert.match(accountRoute, /content_retained/);
+  // 封禁/禁言/拉黑、邀请、会员、额度记录不在注销范围内
   assert.doesNotMatch(accountRoute, /\.from\('(?:bans|mutes|blacklist|ai_invite_redemptions|ai_user_membership|ai_user_quota_daily)'\)\.delete\(/);
-  assert.match(accountRoute, /retained_system_posts/);
+  // 存储清理只涉及头像文件
+  const cleanups = accountRoute.match(/removeStorageWithQueue\(/g) || [];
+  assert.equal(cleanups.length, 1, 'the only storage cleanup is the avatar file');
+  assert.match(accountRoute, /photoId: 'account_avatar_'/);
 });
 
 test('DM sends retain existing public URL response format pending deployed bucket policy evidence', () => {
