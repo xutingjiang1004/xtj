@@ -3621,7 +3621,15 @@
                 var menu = entry.menu, trigger = entry.trigger;
                 var rect = trigger.getBoundingClientRect(), width = menu.offsetWidth || 148, height = menu.offsetHeight;
                 menu.style.left = Math.max(8, Math.min(window.innerWidth - width - 8, rect.right - width)) + 'px';
-                menu.style.top = Math.max(8, Math.min(window.innerHeight - height - 8, rect.bottom + 6)) + 'px';
+                // 2026-11-11：帖子靠近屏幕底部时，菜单原来被硬夹在视口底边——盖住自己的「•••」按钮和手机底部导航，
+                //   最后一项几乎贴着屏幕边。下面放不下就改为从按钮上方展开；手机上给底部导航留出固定空间
+                //   （只是一个固定留白，不读取也不改动导航本身）。
+                var viewportHeight = window.innerHeight, bottomReserve = window.innerWidth < 768 ? 96 : 8;
+                var belowTop = rect.bottom + 6, aboveTop = rect.top - 6 - height, menuTop;
+                if (belowTop + height <= viewportHeight - bottomReserve) menuTop = belowTop;
+                else if (aboveTop >= 8) menuTop = aboveTop;
+                else menuTop = Math.max(8, viewportHeight - bottomReserve - height);
+                menu.style.top = menuTop + 'px';
                 menu.classList.remove('is-closing'); menu.removeAttribute('aria-hidden'); menu.removeAttribute('inert');
                 closingPostToolsMenus.delete(entry);
                 trigger.setAttribute('aria-expanded', 'true'); activePostToolsMenu = entry;

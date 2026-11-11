@@ -9281,7 +9281,15 @@ function renderProfileActivityList(kind) {
                 var menu = entry.menu, trigger = entry.trigger;
                 var rect = trigger.getBoundingClientRect(), width = menu.offsetWidth || 148, height = menu.offsetHeight;
                 menu.style.left = Math.max(8, Math.min(window.innerWidth - width - 8, rect.right - width)) + 'px';
-                menu.style.top = Math.max(8, Math.min(window.innerHeight - height - 8, rect.bottom + 6)) + 'px';
+                // 2026-11-11：帖子靠近屏幕底部时，菜单原来被硬夹在视口底边——盖住自己的「•••」按钮和手机底部导航，
+                //   最后一项几乎贴着屏幕边。下面放不下就改为从按钮上方展开；手机上给底部导航留出固定空间
+                //   （只是一个固定留白，不读取也不改动导航本身）。
+                var viewportHeight = window.innerHeight, bottomReserve = window.innerWidth < 768 ? 96 : 8;
+                var belowTop = rect.bottom + 6, aboveTop = rect.top - 6 - height, menuTop;
+                if (belowTop + height <= viewportHeight - bottomReserve) menuTop = belowTop;
+                else if (aboveTop >= 8) menuTop = aboveTop;
+                else menuTop = Math.max(8, viewportHeight - bottomReserve - height);
+                menu.style.top = menuTop + 'px';
                 menu.classList.remove('is-closing'); menu.removeAttribute('aria-hidden'); menu.removeAttribute('inert');
                 closingPostToolsMenus.delete(entry);
                 trigger.setAttribute('aria-expanded', 'true'); activePostToolsMenu = entry;
@@ -23579,6 +23587,63 @@ function renderProfileActivityList(kind) {
         }
 
         var _reportLoadId = 0;
+        // 2026-11-11（帖子板块检查）：从帖子的「•••→举报帖子」进来时，被点的那条帖子必须出现在列表里并被选中。
+        //   列表原来只来自一次直连查询（最新 200 条）：查询失败、返回为空，或者这条帖子比较旧不在其中时，
+        //   用户看到的是「暂无内容 / 加载失败」，根本选不到自己要举报的那条。现在把页面里已经加载的帖子
+        //   （信息流、帖子详情）补进列表：目标帖置顶，直连查询不可用时整个列表退回到已加载的帖子。
+        function reportItemFromPost(p) {
+            var txt = p.content || '';
+            try {
+                var j = JSON.parse(txt);
+                txt = j.content || j.title || j.caption || j.text || (typeof j === 'object' ? '' : txt) || '';
+            } catch(e) {}
+            txt = String(txt == null ? '' : txt);
+            var mediaType = String(p.media_type || '').toLowerCase();
+            var hasRenderableThumb = !!p.media_url && /^(https?:|data:|blob:)/i.test(String(p.media_url || ''));
+            if (!txt && hasRenderableThumb) txt = mediaType === 'video' ? '(视频)' : '(图片)';
+            if (txt.length > 72) txt = txt.substring(0, 72) + '...';
+            return {
+                id: p.id,
+                user_name: p.user_name,
+                text: txt,
+                thumb: hasRenderableThumb ? p.media_url : '',
+                type: 'post',
+                created_at: p.created_at,
+                kindLabel: hasRenderableThumb ? (mediaType === 'video' ? '视频帖' : '图片帖') : '文字帖'
+            };
+        }
+        function reportLoadedFeedPosts() {
+            var loaded = [];
+            try { loaded = (typeof feedAllPosts !== 'undefined' && Array.isArray(feedAllPosts)) ? feedAllPosts : []; } catch (e) { loaded = []; }
+            return loaded.filter(function(p) { return p && p.id && p.user_name && !(typeof isSystemPost === 'function' && isSystemPost(p)); });
+        }
+        function withReportFeedPosts(items) {
+            var list = Array.isArray(items) ? items.slice() : [];
+            var known = Object.create(null);
+            list.forEach(function(item) { known[String(item.id)] = true; });
+            var loaded = reportLoadedFeedPosts();
+            var target = _reportSelectedId ? loaded.find(function(p) { return String(p.id) === String(_reportSelectedId); }) : null;
+            if (target && !known[String(target.id)]) {
+                var targetItem = reportItemFromPost(target);
+                // 纯媒体且缩略图不可用的帖子也要能选中：给一个占位文字。
+                if (!targetItem.text && !targetItem.thumb) targetItem.text = '(帖子)';
+                list.unshift(targetItem); known[String(target.id)] = true;
+            }
+            if (!list.length) {
+                loaded.slice(0, 200).forEach(function(p) {
+                    if (known[String(p.id)]) return;
+                    var item = reportItemFromPost(p);
+                    if (item.text || item.thumb) { list.push(item); known[String(p.id)] = true; }
+                });
+            }
+            return list;
+        }
+        function showReportFeedFallback(container) {
+            _reportContentData = withReportFeedPosts([]);
+            if (_reportContentData.length) renderReportContentList(container);
+            else container.innerHTML = '<div class="report-loading">加载失败，请重试</div>';
+        }
+
         function loadReportContentList() {
             var reqId = ++_reportLoadId;
             var container = document.getElementById('reportContentList');
@@ -23594,32 +23659,14 @@ function renderProfileActivityList(kind) {
                         .limit(200)
                         .then(function(res) {
                             if (reqId !== _reportLoadId) return;
-                            _reportContentData = (res.data || []).map(function(p) {
-                                var txt = p.content || '';
-                                try {
-                                    var j = JSON.parse(txt);
-                                    txt = j.content || j.title || j.caption || j.text || (typeof j === 'object' ? '' : txt) || '';
-                                } catch(e) {}
-                                var mediaType = String(p.media_type || '').toLowerCase();
-                                var hasRenderableThumb = !!p.media_url && /^(https?:|data:|blob:)/i.test(String(p.media_url || ''));
-                                if (!txt && hasRenderableThumb) txt = mediaType === 'video' ? '(视频)' : '(图片)';
-                                if (txt.length > 72) txt = txt.substring(0, 72) + '...';
-                                return {
-                                    id: p.id,
-                                    user_name: p.user_name,
-                                    text: txt,
-                                    thumb: hasRenderableThumb ? p.media_url : '',
-                                    type: 'post',
-                                    created_at: p.created_at,
-                                    kindLabel: hasRenderableThumb ? (mediaType === 'video' ? '视频帖' : '图片帖') : '文字帖'
-                                };
-                            }).filter(function(item) { return item.text || item.thumb; });
+                            _reportContentData = withReportFeedPosts((res.data || []).map(reportItemFromPost).filter(function(item) { return item.text || item.thumb; }));
                             renderReportContentList(container);
                         }).catch(function() {
-                            container.innerHTML = '<div class="report-loading">加载失败，请重试</div>';
+                            if (reqId !== _reportLoadId) return;
+                            showReportFeedFallback(container);
                         });
                 } catch(e) {
-                    container.innerHTML = '<div class="report-loading">加载失败，请重试</div>';
+                    showReportFeedFallback(container);
                 }
             } else {
                 try {

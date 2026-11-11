@@ -317,3 +317,29 @@ button.comment-reply-context { min-height:44px;border:0;padding:4px 0;background
 [data-theme="dark"] .xtj-music-cover { background: linear-gradient(135deg, #2c4a3d, #234035); color: #9fdcbc; }
 [data-theme="dark"] .xtj-music-sub { color: #93ada3; }
 [data-theme="dark"] .xtj-music-play { background: #35453f !important; color: #bfeed9; box-shadow: none !important; }
+
+/* 2026-11-11 帖子板块检查（用户要求）。
+   1) 用户名很长时，右侧「公开/私密/置顶」徽章被挤成竖排两行：徽章不换行、不被压缩，名字自己省略。 */
+.post-badge-stack { flex: 0 0 auto; flex-wrap: nowrap; }
+.post-visibility-badge, .post-pin-badge, .post-detail-visibility { white-space: nowrap; flex-shrink: 0; }
+.post-header-main > .user-info { flex: 1 1 auto; min-width: 0; }
+/* 2) 深色模式下「私密」「置顶」徽章是浅灰底配暗色字，几乎看不清（只有「公开」做过深色版）。 */
+[data-theme="dark"] .post-visibility-badge.private { color: #f5d5a4; background: rgba(60, 44, 24, .95); border-color: rgba(233, 184, 112, .38); }
+[data-theme="dark"] .post-pin-badge { color: #c5efd8; background: rgba(28, 53, 40, .95); border-color: rgba(164, 217, 187, .35); }
+/* 3) 深色模式下帖子详情窗口的卡片仍是浅色底（style.css 里带 !important 的浅色规则没有深色版），
+      而文字已是浅色，正文、点赞用户、评论记录几块几乎看不见。 */
+[data-theme="dark"] #postDetailModal .post-detail-main-card,
+[data-theme="dark"] #postDetailModal .post-detail-panel--stack {
+  background: rgba(24, 34, 30, .94) !important;
+  border-color: rgba(150, 200, 174, .18) !important;
+}
+[data-theme="dark"] #postDetailModal .post-detail-content { background: transparent !important; border-color: transparent !important; }
+[data-theme="dark"] #postDetailModal .post-detail-content,
+[data-theme="dark"] #postDetailModal .post-detail-mini-copy,
+[data-theme="dark"] #postDetailModal .post-detail-mini-name,
+[data-theme="dark"] #postDetailModal .post-detail-panel-title,
+[data-theme="dark"] #postDetailModal .pdh-name { color: #e8f3ec !important; }
+[data-theme="dark"] #postDetailModal .post-detail-visibility { color: #d0f5df !important; background: rgba(28, 53, 40, .95) !important; border-color: rgba(164, 217, 187, .35) !important; }
+[data-theme="dark"] #postDetailModal .pdh-time,
+[data-theme="dark"] #postDetailModal .post-detail-stats,
+[data-theme="dark"] #postDetailModal .post-detail-mini-time { color: rgba(205, 226, 214, .74) !important; }
