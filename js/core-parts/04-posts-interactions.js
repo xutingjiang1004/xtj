@@ -1470,7 +1470,7 @@
                 // 每项是按顺序尝试的选择器：先找图片本身，找不到才退回外框（外框带 3px 边框，图要落在边框里面）。
                 var HERO_TARGET = { userProfileModal: ['#upcAvatar img', '#upcAvatar'], postDetailModal: ['.post-detail-media img', '.post-detail-media-card img'] };
                 var lastTap = { spec: null, at: 0 }, origins = Object.create(null);
-                var EASE = 'cubic-bezier(.3,.2,.1,1)';
+                var EASE = 'cubic-bezier(.26,.62,.16,1)'; // 起步略缓、收尾更长：能看清窗口是从哪里长出来的，落位不发硬
                 var TIMING = { big: { open: 430, close: 320 }, small: { open: 430, close: 320 } };
 
                 function px(value, size) {
@@ -1694,11 +1694,16 @@
                         //   原来关闭最开始约 38ms 里，整张白卡片还是满尺寸、完全不透明地画着，
                         //   iOS 上看起来就是「卡片那一小块白闪一下」。现在白底从第 0 帧就开始退，
                         //   只留飞行的头像图单独飞回去。
-                        add(box, (flight || (rect && rect.width <= 132 && rect.height <= 132)) ? (open ? [{ opacity: 0 }, { opacity: 0, offset: .22 }, { opacity: 1, offset: .6 }, { opacity: 1 }] : [{ opacity: 1 }, { opacity: 0, offset: .34 }, { opacity: 0 }]) : (open ? [{ opacity: 0 }, { opacity: 1, offset: .2 }, { opacity: 1 }] : [{ opacity: 1 }, { opacity: 1, offset: .72 }, { opacity: 0 }]), { duration: D, easing: 'linear' });
+                        // ★ 2026-11-12（用户：个人动态、头像打开关闭生硬、不连贯）：逐帧看，原来窗口要到 22%～60% 才淡入，
+                        //   而位移曲线前段很快——等窗口看得见时它已经接近全尺寸，实际观感是「整页半透明叠在帖子上再变实」，
+                        //   看不到「从头像长出来」；关闭时窗口在前 1/3（约 110ms）就消失，只剩头像图独自飞回去，显得突兀。
+                        //   现在打开时窗口从一开始就跟着头像一起长大（4%→30% 淡入），内容随后在同色遮罩下浮现；
+                        //   关闭时窗口一边缩回一边淡出到 56%，仍然从第 0 帧就开始退（不恢复会造成白闪的保持帧）。
+                        add(box, (flight || (rect && rect.width <= 132 && rect.height <= 132)) ? (open ? [{ opacity: 0 }, { opacity: 0, offset: .04 }, { opacity: 1, offset: .3 }, { opacity: 1 }] : [{ opacity: 1 }, { opacity: 0, offset: .56 }, { opacity: 0 }]) : (open ? [{ opacity: 0 }, { opacity: 1, offset: .2 }, { opacity: 1 }] : [{ opacity: 1 }, { opacity: 1, offset: .72 }, { opacity: 0 }]), { duration: D, easing: 'linear' });
                         // 关闭时不能再把白色遮盖层从透明「淡入」：那会在动画中段重新画出
                         // 一张不透明白卡片（iOS 上就是用户看到的白闪）。关闭一开始内容就被
                         // 同色层盖稳，之后只让整张卡收缩、淡出；遮盖层自身不再增亮。
-                        if (cover) add(cover, open ? [{ opacity: 1 }, { opacity: 1, offset: .14 }, { opacity: 0, offset: .62 }, { opacity: 0 }] : [{ opacity: 1 }, { opacity: 1 }], { duration: D, easing: 'linear' });
+                        if (cover) add(cover, open ? [{ opacity: 1 }, { opacity: 1, offset: .24 }, { opacity: 0, offset: .7 }, { opacity: 0 }] : [{ opacity: 1 }, { opacity: 1 }], { duration: D, easing: 'linear' });
                         // ★ 2026-11-02：关闭时遮罩原来也用 ease-out（开头最快），结果整页在
                         //   卡片还没缩下去时就已经变亮，看起来就是「白闪一下」。
                         //   关闭改成 ease-in（先按住、后面才散），并且跑满整个时长，
