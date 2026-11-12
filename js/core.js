@@ -24302,6 +24302,14 @@ function renderProfileActivityList(kind) {
                     window.openModal('postDetailModal');
                 }
                 if (body) { body.setAttribute('aria-busy', 'true'); body.scrollTop = 0; }
+                // 正文保留、只有互动没加载出来时，也给一个「重新加载」（原来只有整页失败才有）。
+                function appendDetailRetry() {
+                    var note = body && body.querySelector('.post-detail-more');
+                    if (!note || body.querySelector('.post-detail-retry')) return;
+                    var retry = document.createElement('button'); retry.type = 'button'; retry.className = 'btn btn-ghost post-detail-retry'; retry.textContent = '重新加载';
+                    retry.addEventListener('click', function() { window.openPostDetail(postId); });
+                    note.insertAdjacentElement('afterend', retry);
+                }
                 function isCurrentDetail() {
                     return _seq === _postDetailReqSeq && owner === currentUser && epoch === _authStateEpoch &&
                         window.__xtjPostDetailCurrentId === String(postId || '') &&
@@ -24343,7 +24351,7 @@ function renderProfileActivityList(kind) {
                         var readable = apiData && typeof apiData.error === 'string' && /[\u4e00-\u9fa5]/.test(apiData.error) ? apiData.error : '';
                         var errMsg = (apiData && apiData.message) || (missing ? '该帖子不存在、已删除或不可查看。' : (readable || '帖子详情暂时无法加载，请稍后重试。'));
                         if (isCurrentDetail() && body) {
-                            if (!missing && quickShown && body.querySelector('.post-detail-shell')) body.querySelectorAll('.post-detail-more').forEach(function(note) { note.textContent = '点赞和评论加载失败：' + errMsg; });
+                            if (!missing && quickShown && body.querySelector('.post-detail-shell')) { body.querySelectorAll('.post-detail-more').forEach(function(note) { note.textContent = '点赞和评论加载失败：' + errMsg; }); appendDetailRetry(); }
                             // 错误消息来自服务端，先转义再拼 HTML，防 XSS 注入
                             else body.innerHTML = '<div class="stat-empty">' + escapeHtml(errMsg) + '</div>';
                         }
@@ -24388,6 +24396,7 @@ function renderProfileActivityList(kind) {
                         // 已经画出了本机的帖子内容时，只把点赞/评论区域改成失败提示，正文留着。
                         if (quickShown && body.querySelector('.post-detail-shell')) {
                             body.querySelectorAll('.post-detail-more').forEach(function(note) { note.textContent = '点赞和评论加载失败，请稍后重试'; });
+                            appendDetailRetry();
                         } else body.innerHTML = '<div class="stat-empty">加载失败，请重试</div>';
                     }
                     console.error(e);
