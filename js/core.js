@@ -24336,9 +24336,17 @@ function renderProfileActivityList(kind) {
                         return;
                     }
                     if (!apiRes.ok || !apiData || !apiData.ok) {
-                        var errMsg = (apiData && apiData.message) || '该帖子不存在、已删除或不可查看。';
-                        // 错误消息来自服务端，先转义再拼 HTML，防 XSS 注入
-                        if (isCurrentDetail() && body) body.innerHTML = '<div class="stat-empty">' + escapeHtml(errMsg) + '</div>';
+                        // 2026-11-11：只有 400/404/422 才是「帖子不存在」。限流（429）、额度受限（402）、服务暂不可用（5xx）
+                        //   原来也显示「该帖子不存在、已删除或不可查看」，还把已经先画出来的帖子正文整块换掉——
+                        //   用户会以为帖子被删了。临时故障保留已显示的帖子，只提示互动没加载出来。
+                        var missing = apiRes.ok || apiRes.status === 400 || apiRes.status === 404 || apiRes.status === 422;
+                        var readable = apiData && typeof apiData.error === 'string' && /[\u4e00-\u9fa5]/.test(apiData.error) ? apiData.error : '';
+                        var errMsg = (apiData && apiData.message) || (missing ? '该帖子不存在、已删除或不可查看。' : (readable || '帖子详情暂时无法加载，请稍后重试。'));
+                        if (isCurrentDetail() && body) {
+                            if (!missing && quickShown && body.querySelector('.post-detail-shell')) body.querySelectorAll('.post-detail-more').forEach(function(note) { note.textContent = '点赞和评论加载失败：' + errMsg; });
+                            // 错误消息来自服务端，先转义再拼 HTML，防 XSS 注入
+                            else body.innerHTML = '<div class="stat-empty">' + escapeHtml(errMsg) + '</div>';
+                        }
                         return;
                     }
                     // S7 修复：响应落地前校验是否已被新请求替代

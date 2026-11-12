@@ -343,3 +343,7 @@ button.comment-reply-context { min-height:44px;border:0;padding:4px 0;background
 [data-theme="dark"] #postDetailModal .pdh-time,
 [data-theme="dark"] #postDetailModal .post-detail-stats,
 [data-theme="dark"] #postDetailModal .post-detail-mini-time { color: rgba(205, 226, 214, .74) !important; }
+/* 4) 深色模式下「翻译帖子」的结果是一块浅色底（只有锐评做过深色版）；翻译/锐评的失败提示在深色下和正常结果一个样。 */
+[data-theme="dark"] .post-tool-translation { background: rgba(26, 40, 34, .95); color: #d4ecdc; border-left-color: #4f9c74; }
+[data-theme="dark"] .post-tool-translation.is-error,
+[data-theme="dark"] .post-tool-critique.is-error { background: rgba(58, 30, 26, .94); color: #f4c4ba; border-color: #a85f52; }
