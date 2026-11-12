@@ -16658,7 +16658,23 @@ function showChatMessages() {
   // Detach the AI surface for a Dock tab switch without aborting the stream.
   // The request, renderer and DOM stay alive; only visibility changes.
   function hideAiChatForTabSwitch() {
-    if (!S.active) return false;
+    if (!S.active) {
+      // 2026-11-12（用户反馈：iPad 上点了小猫 AI 之后，左侧导航一直点不动）：
+      //   打开小猫后如果登录校验没通过（未登录、登录已失效，或服务受限时刷新登录失败），openAiChat 会把
+      //   S.active 置回 false，但页面本身还显示着「登录后即可使用」。原来这里一看 S.active 为 false 就直接返回，
+      //   于是切到别的导航时小猫页面一直盖在内容区上面、侧栏高亮也停在小猫——底下其实已经切过去了，看起来就是点不动。
+      //   页面还显示着就必须收起；不标记 _tabHidden，下次点小猫走完整重建。
+      var stalePanel = document.getElementById('panelAiChat');
+      if (!stalePanel || stalePanel.classList.contains('hidden') || !stalePanel.classList.contains('active')) return false;
+      stalePanel.classList.remove('active', 'is-entering', 'is-leaving');
+      stalePanel.classList.add('hidden');
+      stalePanel.setAttribute('aria-hidden', 'true');
+      document.body.classList.remove('xtj-ai-page-open');
+      try { document.body.style.overflow = ''; } catch (eStaleOverflow) {}
+      window.__xtjAiChatActive = false;
+      updateSecondaryPageState(false, 'ai-chat');
+      return true;
+    }
     var researchPanel = document.getElementById('panelDeepThink');
     var researchVisible = document.body.classList.contains('xtj-research-open') ||
       !!(researchPanel && researchPanel.classList.contains('active') && !researchPanel.classList.contains('hidden'));
