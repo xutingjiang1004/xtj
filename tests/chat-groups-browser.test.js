@@ -65,7 +65,13 @@ test('group chat: list, create, send, receive, withdraw, info page and owner too
       await p.type('#groupChatInput', '看这里');
       await p.keyboard.press('Enter');
       await p.waitForFunction(() => Array.from(document.querySelectorAll('#groupStream .grp-mention')).some(n => n.textContent === '@bob'));
-      const row = (await db.query("SELECT meta FROM chat_group_messages WHERE body='@bob 看这里'")).rows[0];
+      // The bubble is drawn before the request lands, so wait for the stored row instead of reading it at once.
+      let row;
+      for (let i = 0; i < 100 && !row; i++) {
+        row = (await db.query("SELECT meta FROM chat_group_messages WHERE body='@bob 看这里'")).rows[0];
+        if (!row) await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      assert.ok(row, 'the mention message was stored');
       assert.deepEqual(row.meta.mentions, ['bob']);
     });
 
