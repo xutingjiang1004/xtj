@@ -23525,6 +23525,9 @@ function cleanAiPrefs(input) {
   // research_model 形如 'pro' | 'flash' | 'custom:<uid>'
   var rm = String(input.research_model || '').trim().slice(0, 64);
   if (/^(pro|flash|custom:[A-Za-z0-9_-]{1,60})$/.test(rm)) out.research_model = rm;
+  // 学习模式的资料与学习对话编号（跨设备同步）
+  var studyPrefs = require('./ai-study').cleanStudyPrefs(input.study);
+  if (studyPrefs) out.study = studyPrefs;
   return out;
 }
 // 取该账号最新一行快照（不合并历史行）

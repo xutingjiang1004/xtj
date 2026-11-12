@@ -35,3 +35,39 @@ test('both chat routes add the study prompt as a system message', () => {
   assert.match(server, /require\('\.\/ai-study'\)\.buildStudyPrompt\(req\.body && req\.body\.study\);\s*if \(studyPrompt\) messages\.push\(\{ role: 'system', content: studyPrompt \}\);/);
   assert.match(server, /require\('\.\/ai-study'\)\.buildStudyPrompt\(body\.study\);\s*if \(customStudyPrompt\) conversation\.splice\(1, 0, \{ role: 'system', content: customStudyPrompt \}\);/);
 });
+
+test('word-passage rules are part of the prompt', () => {
+  const prompt = buildStudyPrompt({ exam: 'cet4' });
+  for (const part of ['单词短文', '提取图片里的全部英文单词', '不要猜', '自然的英文短文', '四级约 250–350 词', '雅思约 400–600 词', '答案与解析', '导出 PDF']) assert.ok(prompt.includes(part), part);
+});
+
+test('synced learning data is cleaned before it is stored with the account', () => {
+  const { cleanStudyPrefs } = require('../render-api/ai-study');
+  assert.equal(cleanStudyPrefs(null), null);
+  assert.equal(cleanStudyPrefs('x'), null);
+  const clean = cleanStudyPrefs({
+    profile: { exam: 'other', exam_other: '专四', textbook: 't'.repeat(200), hack: 1 },
+    convs: ['ABCDEF1', 'bad id', 'ABCDEF1', 7, 'x', ...Array.from({ length: 400 }, (_, i) => 'CONV' + String(i).padStart(4, '0'))],
+    reading: { level: 'gre', count: 99 }, updated_at: 'soon', extra: true
+  });
+  assert.deepEqual(Object.keys(clean).sort(), ['convs', 'profile', 'reading', 'updated_at']);
+  assert.equal(clean.profile.exam, 'other'); assert.equal(clean.profile.exam_other, '专四'); assert.equal(clean.profile.textbook.length, 80);
+  assert.equal(clean.convs.length, 300); assert.ok(!clean.convs.includes('bad id')); assert.equal(new Set(clean.convs).size, 300);
+  assert.deepEqual(clean.reading, { level: '', count: 5 }); assert.equal(clean.updated_at, 0);
+  assert.deepEqual(cleanStudyPrefs({ reading: { level: 'ielts', count: 8 }, updated_at: 1234.9 }).reading, { level: 'ielts', count: 8 });
+  const server = fs.readFileSync(path.join(__dirname, '../render-api/server.js'), 'utf8');
+  assert.match(server, /var studyPrefs = require\('\.\/ai-study'\)\.cleanStudyPrefs\(input\.study\);\s*if \(studyPrefs\) out\.study = studyPrefs;/);
+});
+
+test('the study PDF layout has no cover page and tidies tables, bullets and inline marks', async () => {
+  const { buildReportPdf, studyLine } = require('../render-api/ai-report-export');
+  assert.equal(studyLine('| harbour | n. | 港口 |'), 'harbour    n.    港口');
+  assert.equal(studyLine('- the *quiet* `bay`'), '• the quiet bay');
+  assert.equal(studyLine('2 * 3 = 6'), '2 * 3 = 6');
+  const answer = '## Passage\n\nThe **harbour** was quiet.\n\n## 答案与解析\n\n1. A';
+  const study = await buildReportPdf({ layout: 'study', title: '学习笔记', answer, sources: [] });
+  const report = await buildReportPdf({ title: '学习笔记', answer, sources: [] });
+  assert.equal(study.subarray(0, 5).toString(), '%PDF-');
+  const pages = buffer => (buffer.toString('latin1').match(/\/Type \/Page\b/g) || []).length;
+  assert.equal(pages(study), 1); assert.equal(pages(report), 2, 'the research layout keeps its cover page');
+});

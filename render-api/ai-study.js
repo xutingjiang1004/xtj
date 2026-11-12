@@ -64,6 +64,15 @@ function buildStudyPrompt(profile) {
       '7. 默认用中文讲解，英文例句和题目原文保留英文；用户要求全英文时再切换。'
     ].join('\n'),
     [
+      '单词短文（用户发来单词图片、截图或单词表，并要求写短文或阅读理解时）：',
+      '1. 先提取图片里的全部英文单词和短语，按出现顺序列成清单并写明一共多少个。不要漏，也不要添加图片里没有的词；认不清的词单独列出来请用户确认，不要猜。',
+      '2. 用这些词写一篇自然的英文短文：有明确的主题、连贯的情节或论点，读起来像真实的考试阅读材料，不能是把单词硬凑在一起的句子堆。目标词第一次出现时加粗。尽量全部用上；实在放不进去的词在文后列出，不要为了凑词写不通顺的句子。',
+      '3. 难度按用户指定的考试来：四级约 250–350 词，六级约 350–450 词，雅思约 400–600 词，话题和句式贴近该考试；没有指定时按用户的备考目标。单词超过约 40 个时分成两篇。',
+      '4. 短文后出阅读理解题（数量按用户要求，默认 5 道）。四六级用四选一；雅思可以混合 True/False/Not Given、填空和选择。题目要考对文章的理解，不要只考词义。',
+      '5. 先完整给出短文和题目，再单独一节「答案与解析」，最后给目标词表（单词、词性、在文中的意思），方便用户先做题再对答案。',
+      '6. 用户想保存时，告诉他可以点这条回复下方的「导出 PDF」。'
+    ].join('\n'),
+    [
       '诚实与边界：',
       '- 你手里没有用户教材的原文。不要编造教材的页码、课文、原题或“第几单元讲了什么”；需要对照原文时，请用户拍照或上传 PDF/文档。可以根据教材名称和单元主题讲通用的知识点，但要说明这是通用讲解。',
       '- 没有把握的答案要说明不确定在哪里；涉及考试政策、报名、评分细则等可能变化的信息，用联网搜索核实后再答。',
@@ -74,4 +83,27 @@ function buildStudyPrompt(profile) {
   ].join('\n\n');
 }
 
-module.exports = { cleanStudyProfile, buildStudyPrompt, EXAMS, STYLES };
+// 跨设备同步：学习资料、学习对话编号、单词短文的默认设置，随账号的 AI 偏好一起保存。
+// 与 cleanStudyProfile 不同，这里保留浏览器表单里的「其他」考试选项。
+const READING_LEVELS = ['cet4', 'cet6', 'ielts'];
+function cleanStudyPrefs(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const source = raw.profile && typeof raw.profile === 'object' && !Array.isArray(raw.profile) ? raw.profile : {};
+  const profile = cleanStudyProfile(source);
+  if (source.exam === 'other') profile.exam = 'other';
+  const seen = new Set();
+  const convs = (Array.isArray(raw.convs) ? raw.convs : []).filter(id => {
+    if (typeof id !== 'string' || !/^[A-Za-z0-9-]{6,64}$/.test(id) || seen.has(id)) return false;
+    seen.add(id); return true;
+  }).slice(-300);
+  const reading = raw.reading && typeof raw.reading === 'object' && !Array.isArray(raw.reading) ? raw.reading : {};
+  const count = Number(reading.count);
+  const updated = Number(raw.updated_at);
+  return {
+    profile, convs,
+    reading: { level: READING_LEVELS.includes(reading.level) ? reading.level : '', count: [3, 5, 8, 10].includes(count) ? count : 5 },
+    updated_at: Number.isFinite(updated) && updated > 0 ? Math.min(Math.floor(updated), Date.now() + 86400000) : 0
+  };
+}
+
+module.exports = { cleanStudyProfile, cleanStudyPrefs, buildStudyPrompt, EXAMS, STYLES };

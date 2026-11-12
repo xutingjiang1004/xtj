@@ -92,3 +92,58 @@ test('learning mode on a phone: the form stays above the bottom dock and can be 
   await page.waitForFunction(() => !document.getElementById('aiChatRoot').classList.contains('ai-study-mode'));
   assert.deepEqual(f.errors, []);
 });
+
+test('word passage: pick level and count, upload a word image, export the reply as a PDF, and sync to the account', async t => {
+  const f = await aiPolishFixture({ viewport: { width: 390, height: 844 } }); t.after(f.close);
+  const page = f.page;
+  await page.locator('#aiStudyToggle').click();
+  await page.waitForSelector('#aiStudySheet');
+  await page.locator('.ai-study-sheet-cancel').click();
+  await page.locator('[data-study-starter="words"]').click();
+  await page.waitForSelector('#aiStudySheet');
+  await page.locator('[data-study-choice="level"][data-value="ielts"]').click();
+  await page.locator('[data-study-choice="count"][data-value="8"]').click();
+  const chooser = page.waitForEvent('filechooser');
+  await page.locator('[data-study-words="image"]').click();
+  await chooser;
+  assert.equal(await page.inputValue('#aiChatMsgInput'), '请提取图片里的所有单词，用它们写一篇雅思难度的阅读短文，并出 8 道阅读理解题。');
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => aiPolish.streams.length === 1);
+  assert.ok(await page.evaluate(() => !!aiPolish.streams[0].body.study));
+  await page.evaluate(() => {
+    aiPolishEmit({ type: 'meta', conversation_id: 'POLISH01' });
+    aiPolishEmit({ type: 'content', text: '## Passage\n\nThe **harbour** was quiet.\n\n## 答案与解析\n\n1. A' });
+    aiPolishEmit({ type: 'done' });
+    aiPolish.streams.at(-1).controller.close();
+  });
+  const pdf = page.locator('.ai-msg.assistant .ai-msg-act-study-pdf');
+  await pdf.waitFor();
+  await pdf.click();
+  await page.waitForFunction(() => aiPolish.calls.some(call => call.path.endsWith('/research/export')));
+  const exported = await page.evaluate(() => aiPolish.calls.find(call => call.path.endsWith('/research/export')).body);
+  assert.equal(exported.format, 'pdf'); assert.equal(exported.layout, 'study');
+  assert.match(exported.title, /^学习笔记 \d{4}-\d{2}-\d{2}$/);
+  assert.ok(exported.answer.includes('The **harbour** was quiet.'), 'the PDF gets the original markdown, not the rendered text');
+
+  // 学习数据随账号保存：最近一次上传里有学习对话编号和单词短文设置。
+  await page.waitForFunction(() => aiPolish.aiPrefs.study && aiPolish.aiPrefs.study.reading.count === 8);
+  const synced = await page.evaluate(() => aiPolish.aiPrefs.study);
+  assert.deepEqual(synced.reading, { level: 'ielts', count: 8 });
+  assert.ok(synced.convs.includes('POLISH01')); assert.ok(synced.updated_at > 0);
+  assert.deepEqual(f.errors, []);
+});
+
+test('a second device restores the learning profile and learning conversations from the account', async t => {
+  const study = { profile: { exam: 'ielts', exam_other: '', target: '6.5', textbook: '剑桥雅思初级教程（新东方）', unit: '第 2 单元', style: 'concise', note: '' },
+    convs: ['POLISH01'], reading: { level: 'cet6', count: 3 }, updated_at: Date.now() };
+  const f = await aiPolishFixture({ viewport: { width: 1024, height: 768 }, aiPrefs: { study } }); t.after(f.close);
+  const page = f.page;
+  await page.waitForFunction(() => document.getElementById('aiChatRoot').classList.contains('ai-study-mode'));
+  assert.equal(await page.locator('.ai-chat-header-title b').textContent(), '学习');
+  assert.match(await page.locator('.ai-study-profile-value').textContent(), /雅思（目标 6\.5） · 剑桥雅思初级教程（新东方） · 第 2 单元/);
+  await page.locator('[data-study-starter="words"]').click();
+  assert.equal(await page.locator('[data-study-choice="level"][aria-checked="true"]').getAttribute('data-value'), 'cet6');
+  assert.equal(await page.locator('[data-study-choice="count"][aria-checked="true"]').getAttribute('data-value'), '3');
+  assert.equal(await page.evaluate(() => aiPolish.calls.some(call => call.method === 'PUT' && call.body.ai_prefs && call.body.ai_prefs.study)), false, 'restoring does not write back');
+  assert.deepEqual(f.errors, []);
+});

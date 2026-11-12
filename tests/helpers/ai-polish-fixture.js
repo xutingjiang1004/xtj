@@ -5,7 +5,7 @@ async function aiPolishFixture(options = {}) {
   try {
   await f.page.evaluate(options => {
     const base = fetch;
-    window.aiPolish = { historyTitles:{}, calls: [], streams: [], models: options.models || [], serverModels:options.serverModels || [], modelWriteStatus: options.modelWriteStatus || 200, checkpoints:options.checkpoints || [], capabilityResults:options.capabilityResults || [] };
+    window.aiPolish = { aiPrefs: options.aiPrefs || {}, historyTitles:{}, calls: [], streams: [], models: options.models || [], serverModels:options.serverModels || [], modelWriteStatus: options.modelWriteStatus || 200, checkpoints:options.checkpoints || [], capabilityResults:options.capabilityResults || [] };
     window.fetch = async (url, opts = {}) => {
       const u = new URL(url, location.href), path = u.pathname;
       if (!path.startsWith('/api/agent/')) return base(url, opts);
@@ -18,8 +18,9 @@ async function aiPolishFixture(options = {}) {
         if (opts.method === 'PUT') {
           if (aiPolish.modelWriteStatus !== 200) return json({ ok: false, error: 'Isolated save failure' }, aiPolish.modelWriteStatus);
           aiPolish.models = body.models || aiPolish.models;
+          if (body.ai_prefs) aiPolish.aiPrefs = Object.assign({}, aiPolish.aiPrefs, body.ai_prefs);
         }
-        return json({ ok: true, models: aiPolish.models.map(model=>{const copy={...model,key_configured:!!(model.api_key||model.key_configured),stored_reference:true,config_revision:'isolated-config-revision'};delete copy.api_key;delete copy.api_key_enc;return copy;}), server_models:aiPolish.serverModels, deleted_uids: [], ai_prefs: {} });
+        return json({ ok: true, models: aiPolish.models.map(model=>{const copy={...model,key_configured:!!(model.api_key||model.key_configured),stored_reference:true,config_revision:'isolated-config-revision'};delete copy.api_key;delete copy.api_key_enc;return copy;}), server_models:aiPolish.serverModels, deleted_uids: [], ai_prefs: aiPolish.aiPrefs });
       }
       if(path.endsWith('/chat/metadata/read'))return json({ok:true,records:(body.conversation_ids||[]).map(cid=>aiPolish.historyTitles[cid]).filter(Boolean)});
       if(path.endsWith('/chat/metadata')){const old=aiPolish.historyTitles[body.conversation_id]||{revision:0};const record={conversation_id:body.conversation_id,title:body.title,revision:old.revision+1};aiPolish.historyTitles[body.conversation_id]=record;return json({ok:true,record});}

@@ -392,6 +392,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             scopedStorageSet(RESEARCH_MODEL_PREF_KEY, prefModel);
           }
         } catch (ePref2) {}
+        try { applyServerStudyPrefs(data.ai_prefs && data.ai_prefs.study); } catch (eStudyPref) {}
         var tombstones = loadDeletedModelUids();
         return data.models.filter(function(m) {
           if (!m || !m.uid || m.uid === OPENROUTER_MODEL_UID || !m.api_key&&!m.key_configured || m.provider === 'openrouter' || m.server_managed) return false;
@@ -4693,6 +4694,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         var historyUsageLine = buildUsageLine(msg.usage);
         if(historyUsageLine) footer.appendChild(el('span', { class: 'ai-msg-usage', text: historyUsageLine }));
       }
+      if (bubbleHasBody && studyActive()) addStudyExportAction(footer, function() { return msg.content; });
     }
     if (footer.children.length > 0) node.appendChild(footer);
     // 没有正文就不挂推荐追问：追问条挂在 .ai-msg 上，会出现在一条「只有思考」
@@ -4737,6 +4739,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   }
 
   function buildEmptyState(tipText) {
+    try { syncStudyUi(); } catch (eStudySync) {}
     if (!tipText && studyActive()) return buildStudyLanding();
     var cfg = S.config || {};
     var empty = el('div', { class: 'ai-chat-empty' });
@@ -11891,6 +11894,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             var usageLine = buildUsageLine(aiMsg.usage);
             if (usageLine) footer.appendChild(el('span', { class: 'ai-msg-usage', text: usageLine }));
           }
+          if (sendSettings.study && String(aiMsg.content || '').trim()) addStudyExportAction(footer, function() { return aiMsg.content; });
           if (footer.children.length > 0) node.appendChild(footer);
           try {
             var _realNode = (node && node.isConnected) ? node
@@ -13987,6 +13991,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         } catch (e2) {}
       }
     } finally {
+      try { syncStudyUi(); } catch (eStudySync) {}
       if (requestId === S.historyRequestId) {
         S.loading = false;
         S.loadingMore = false;
@@ -14436,6 +14441,7 @@ function showChatMessages() {
     { key: 'grammar', label: '讲语法', text: '请讲解这个语法点：' },
     { key: 'vocab', label: '查单词', text: '请讲解这个单词/短语的用法：' },
     { key: 'sentence', label: '长难句', text: '请分析并翻译这个句子：\n' },
+    { key: 'words', label: '单词短文', hint: '把背过的单词变成一篇阅读理解' },
     { key: 'writing', label: '批改作文', text: '请批改我的作文并估分。\n题目：\n我的作文：\n' },
     { key: 'quiz', label: '出题练习', text: '请按我当前的教材进度出 5 道练习题，我做完再对答案。' }
   ];
@@ -14455,6 +14461,53 @@ function showChatMessages() {
   }
   function writeStudyProfile(profile) {
     scopedStorageSet(STUDY_PROFILE_KEY, JSON.stringify(profile || {}));
+    studyChanged();
+  }
+  // ---- 跨设备同步：学习资料、学习对话编号、单词短文设置随账号的 AI 偏好保存（ai_prefs.study）。
+  // 整份数据带一个修改时间，较新的一方覆盖较旧的一方。
+  var STUDY_UPDATED_KEY = 'xtj_ai_study_updated';
+  var STUDY_READING_KEY = 'xtj_ai_study_reading';
+  var STUDY_READING_LEVELS = [['cet4', '四级'], ['cet6', '六级'], ['ielts', '雅思']];
+  var studyPushTimer = null;
+  function readStudyUpdatedAt() { return Number(scopedStorageGet(STUDY_UPDATED_KEY)) || 0; }
+  function readStudyReading() {
+    var raw = null;
+    try { raw = JSON.parse(scopedStorageGet(STUDY_READING_KEY) || 'null'); } catch (e) { raw = null; }
+    raw = raw && typeof raw === 'object' ? raw : {};
+    var level = STUDY_READING_LEVELS.some(function(row) { return row[0] === raw.level; }) ? raw.level : '';
+    if (!level) { var exam = readStudyProfile().exam; level = STUDY_READING_LEVELS.some(function(row) { return row[0] === exam; }) ? exam : 'cet4'; }
+    return { level: level, count: [3, 5, 8, 10].indexOf(Number(raw.count)) >= 0 ? Number(raw.count) : 5 };
+  }
+  function writeStudyReading(value) {
+    scopedStorageSet(STUDY_READING_KEY, JSON.stringify(value || {}));
+    studyChanged();
+  }
+  function studySnapshot() {
+    return { profile: readStudyProfile(), convs: readStudyConvIds(), reading: readStudyReading(), updated_at: readStudyUpdatedAt() };
+  }
+  function pushStudyPrefs() {
+    if (!readUserName()) return;
+    try { pushServerCustomModels([], loadDeletedModelUids(), { study: studySnapshot() }).catch(function() {}); } catch (e) {}
+  }
+  function studyChanged() {
+    scopedStorageSet(STUDY_UPDATED_KEY, String(Date.now()));
+    if (!readUserName()) return;
+    if (studyPushTimer) clearTimeout(studyPushTimer);
+    studyPushTimer = setTimeout(function() { studyPushTimer = null; pushStudyPrefs(); }, 600);
+  }
+  function applyServerStudyPrefs(remote) {
+    var localAt = readStudyUpdatedAt();
+    var remoteAt = remote && typeof remote === 'object' ? Number(remote.updated_at) || 0 : 0;
+    if (remoteAt > localAt) {
+      scopedStorageSet(STUDY_PROFILE_KEY, JSON.stringify(remote.profile || {}));
+      scopedStorageSet(STUDY_CONVS_KEY, JSON.stringify(Array.isArray(remote.convs) ? remote.convs.filter(function(id) { return typeof id === 'string' && id; }).slice(-300) : []));
+      scopedStorageSet(STUDY_READING_KEY, JSON.stringify(remote.reading || {}));
+      scopedStorageSet(STUDY_UPDATED_KEY, String(remoteAt));
+      redrawStudyEmptyState();
+      syncStudyUi();
+    } else if (localAt > remoteAt && !studyPushTimer) {
+      pushStudyPrefs();
+    }
   }
   function readStudyConvIds() {
     try {
@@ -14465,8 +14518,10 @@ function showChatMessages() {
   function setStudyConv(cid, on) {
     if (!cid) { S._studyNoConv = !!on; return; }
     var list = readStudyConvIds().filter(function(id) { return id !== cid; });
+    var had = readStudyConvIds().indexOf(cid) >= 0;
     if (on) list.push(cid);
     scopedStorageSet(STUDY_CONVS_KEY, JSON.stringify(list.slice(-300)));
+    if (had !== !!on) studyChanged();
   }
   function studyActive() {
     if (!S.conversationId) return S._studyNoConv === true;
@@ -14541,6 +14596,105 @@ function showChatMessages() {
     redrawStudyEmptyState();
     syncStudyUi();
   }
+  function fillStudyInput(text) {
+    var inp = document.getElementById('aiChatMsgInput');
+    if (!inp) return;
+    inp.value = text;
+    try { inp.dispatchEvent(new Event('input', { bubbles: true })); } catch (eInput) {}
+    try { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); } catch (eFocus) {}
+  }
+  function openStudyImagePicker() {
+    var picker = document.getElementById('aiChatFileInp');
+    if (!picker) return;
+    try { picker.setAttribute('accept', 'image/*'); picker.click(); } finally { setTimeout(function() { picker.removeAttribute('accept'); }, 1000); }
+  }
+  // 单词短文：选难度和题数，然后上传单词图片（或自己输入单词），提示语自动写好。
+  function openStudyWordsSheet() {
+    var root = getAiRoot();
+    if (!root) return;
+    closeStudyProfileSheet();
+    var reading = readStudyReading();
+    var sheet = el('div', { class: 'ai-study-sheet', id: 'aiStudySheet', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'aiStudySheetTitle' });
+    sheet._opener = document.activeElement;
+    var panel = el('div', { class: 'ai-study-sheet-panel' });
+    panel.appendChild(el('h3', { id: 'aiStudySheetTitle', class: 'ai-study-sheet-title', text: '单词短文' }));
+    panel.appendChild(el('p', { class: 'ai-study-sheet-tip', text: '上传背过的单词截图或照片，我把里面的单词全部提取出来，写成一篇自然的阅读短文并出题。生成后可以在回复下方导出 PDF。' }));
+    function choice(labelText, rows, value, name) {
+      var row = el('div', { class: 'ai-study-field', role: 'radiogroup', 'aria-label': labelText });
+      row.appendChild(el('span', { text: labelText }));
+      var group = el('div', { class: 'ai-study-choices' });
+      rows.forEach(function(item) {
+        var btn = el('button', { type: 'button', class: 'ai-study-choice', role: 'radio', 'data-study-choice': name, 'data-value': String(item[0]), 'aria-checked': String(item[0]) === String(value) ? 'true' : 'false', text: item[1] });
+        btn.addEventListener('click', function(ev) {
+          ev.preventDefault();
+          Array.prototype.forEach.call(group.children, function(node) { node.setAttribute('aria-checked', node === btn ? 'true' : 'false'); });
+        });
+        group.appendChild(btn);
+      });
+      row.appendChild(group);
+      panel.appendChild(row);
+      return function() { var on = group.querySelector('[aria-checked="true"]'); return on ? on.getAttribute('data-value') : String(value); };
+    }
+    var level = choice('难度', STUDY_READING_LEVELS, reading.level, 'level');
+    var count = choice('题目数量', [[3, '3 道'], [5, '5 道'], [8, '8 道'], [10, '10 道']], reading.count, 'count');
+    function commit(withImage) {
+      var picked = { level: level(), count: Number(count()) };
+      writeStudyReading(picked);
+      var label = '';
+      STUDY_READING_LEVELS.forEach(function(row) { if (row[0] === picked.level) label = row[1]; });
+      closeStudyProfileSheet();
+      if (withImage) {
+        fillStudyInput('请提取图片里的所有单词，用它们写一篇' + label + '难度的阅读短文，并出 ' + picked.count + ' 道阅读理解题。');
+        openStudyImagePicker();
+      } else {
+        fillStudyInput('请用下面这些单词写一篇' + label + '难度的阅读短文，并出 ' + picked.count + ' 道阅读理解题。\n单词：');
+      }
+    }
+    var actions = el('div', { class: 'ai-study-sheet-actions ai-study-sheet-actions--stack' });
+    var upload = el('button', { type: 'button', class: 'ai-study-sheet-save', 'data-study-words': 'image', text: '上传单词图片' });
+    var typed = el('button', { type: 'button', class: 'ai-study-sheet-cancel', 'data-study-words': 'text', text: '我自己输入单词' });
+    var cancel = el('button', { type: 'button', class: 'ai-study-sheet-cancel ai-study-sheet-dismiss', text: '取消' });
+    upload.addEventListener('click', function(ev) { ev.preventDefault(); commit(true); });
+    typed.addEventListener('click', function(ev) { ev.preventDefault(); commit(false); });
+    cancel.addEventListener('click', function(ev) { ev.preventDefault(); closeStudyProfileSheet(); });
+    actions.appendChild(upload); actions.appendChild(typed); actions.appendChild(cancel);
+    panel.appendChild(actions);
+    sheet.addEventListener('click', function(ev) { if (ev.target === sheet) closeStudyProfileSheet(); });
+    sheet.addEventListener('keydown', function(ev) { if (ev.key === 'Escape') { ev.stopPropagation(); closeStudyProfileSheet(); } });
+    sheet.appendChild(panel);
+    root.appendChild(sheet);
+    try { upload.focus({ preventScroll: true }); } catch (eFocus) {}
+  }
+  // 学习对话里的回复可以导出 PDF（复用研究报告的导出接口）。
+  function addStudyExportAction(row, content) {
+    if (!row || row.querySelector('.ai-msg-act-study-pdf')) return;
+    var button = el('button', { type: 'button', class: 'ai-msg-act ai-msg-act-study-pdf', 'aria-label': '把这条回复导出为 PDF', text: '导出 PDF' });
+    var identity = customModelIdentity();
+    button.addEventListener('click', async function(event) {
+      event.preventDefault(); event.stopPropagation();
+      if (button.disabled) return;
+      if (!readUserName()) { notify('登录后可以导出 PDF'); return; }
+      var text = String(typeof content === 'function' ? content() : content || '').trim();
+      if (!text) { notify('这条回复还没有内容'); return; }
+      button.disabled = true; button.textContent = '正在导出…';
+      try {
+        var day = new Date();
+        var title = '学习笔记 ' + day.getFullYear() + '-' + String(day.getMonth() + 1).padStart(2, '0') + '-' + String(day.getDate()).padStart(2, '0');
+        var result = await apiRequest('POST', '/research/export', { format: 'pdf', layout: 'study', title: title, answer: text, sources: [] }, { timeoutMs: 50000 });
+        if (!customModelIdentityCurrent(identity)) return;
+        if (!result.ok || !result.data || !result.data.file) throw Error(describeError(result, '导出失败，请稍后重试'));
+        var link = document.createElement('a');
+        link.href = result.data.file.data_url; link.download = result.data.file.filename;
+        document.body.appendChild(link); link.click(); link.remove();
+        notify('已导出 PDF');
+      } catch (error) {
+        if (customModelIdentityCurrent(identity)) notify(error && error.message || '导出失败，请稍后重试');
+      } finally {
+        if (button.isConnected) { button.disabled = false; button.textContent = '导出 PDF'; }
+      }
+    });
+    row.appendChild(button);
+  }
   function buildStudyLanding() {
     var profile = readStudyProfile();
     var summary = studyProfileSummary(profile);
@@ -14564,15 +14718,11 @@ function showChatMessages() {
       chip.addEventListener('click', function(ev) {
         ev.preventDefault();
         if (item.key === 'photo') {
-          var picker = document.getElementById('aiChatFileInp');
-          if (picker) { try { picker.setAttribute('accept', 'image/*'); picker.click(); } finally { setTimeout(function() { picker.removeAttribute('accept'); }, 1000); } }
+          openStudyImagePicker();
           return;
         }
-        var inp = document.getElementById('aiChatMsgInput');
-        if (!inp) return;
-        inp.value = item.text;
-        try { inp.dispatchEvent(new Event('input', { bubbles: true })); } catch (eInput) {}
-        try { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); } catch (eFocus) {}
+        if (item.key === 'words') { openStudyWordsSheet(); return; }
+        fillStudyInput(item.text);
       });
       chips.appendChild(chip);
     });
@@ -14598,7 +14748,7 @@ function showChatMessages() {
     sheet._opener = document.activeElement;
     var panel = el('form', { class: 'ai-study-sheet-panel', novalidate: '' });
     panel.appendChild(el('h3', { id: 'aiStudySheetTitle', class: 'ai-study-sheet-title', text: '我的学习资料' }));
-    panel.appendChild(el('p', { class: 'ai-study-sheet-tip', text: '每次在学习模式里提问都会自动带上，不用重复说明。只保存在这台设备的这个账号下。' }));
+    panel.appendChild(el('p', { class: 'ai-study-sheet-tip', text: '每次在学习模式里提问都会自动带上，不用重复说明。登录后会跟随账号同步到其他设备。' }));
     function field(labelText, control) {
       var row = el('label', { class: 'ai-study-field' });
       row.appendChild(el('span', { text: labelText }));

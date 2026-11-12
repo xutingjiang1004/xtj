@@ -8722,6 +8722,17 @@ html[data-theme="dark"] .ai-chat-header .ai-study-toggle.on { background:rgba(79
   border:1px solid rgba(140,196,158,.4); background:rgba(255,255,255,.9); color:#24322e; resize:vertical;
 }
 .ai-study-sheet-actions { display:flex; gap:10px; margin-top:16px; }
+.ai-study-sheet-actions--stack { flex-direction:column; }
+.ai-study-sheet-actions--stack button { flex:0 0 auto; }
+.ai-study-sheet-actions--stack .ai-study-sheet-dismiss { border:0; min-height:40px; color:var(--text-muted, #7a908b); }
+.ai-study-choices { display:flex; flex-wrap:wrap; gap:8px; }
+.ai-study-choice {
+  flex:1 1 0; min-width:64px; min-height:44px; padding:8px 10px; border-radius:12px; cursor:pointer; font:inherit; font-size:14px;
+  border:1px solid rgba(140,196,158,.4); background:rgba(255,255,255,.9); color:#24322e; -webkit-tap-highlight-color:transparent;
+}
+.ai-study-choice[aria-checked="true"] { border-color:rgb(48,138,106); background:#ddf2e8; color:#0e7a5b; font-weight:600; }
+[data-theme="dark"] .ai-study-choice { background:rgba(255,255,255,.07); border-color:rgba(255,255,255,.16); color:#e6efec; }
+[data-theme="dark"] .ai-study-choice[aria-checked="true"] { background:rgba(79,209,165,.18); border-color:#4fd1a5; color:#a8ebd0; }
 .ai-study-sheet-actions button { flex:1; min-height:46px; border-radius:14px; font:inherit; font-size:15px; cursor:pointer; }
 .ai-study-sheet-cancel { border:1px solid rgba(140,196,158,.4); background:transparent; color:inherit; }
 .ai-study-sheet-save { border:0; background:rgb(48,138,106); color:#fff; font-weight:600; }
@@ -8753,3 +8764,14 @@ html[data-theme="dark"] .ai-chat-header .ai-study-toggle.on { background:rgba(79
   background:rgba(255,255,255,.07); border-color:rgba(255,255,255,.16); color:#e6efec;
 }
 [data-theme="dark"] .ai-study-sheet-save { background:#3fa583; }
+
+.ai-msg-footer .ai-msg-act-study-pdf {
+  min-height:32px; padding:4px 10px; border-radius:10px; cursor:pointer; font:inherit; font-size:12px;
+  border:1px solid rgba(66,155,122,.35); background:rgba(232,250,241,.9); color:rgb(40,123,101);
+}
+.ai-msg-footer .ai-msg-act-study-pdf:disabled { opacity:.6; cursor:default; }
+@media (pointer:coarse) { .ai-msg-footer .ai-msg-act-study-pdf { min-height:40px; padding:6px 12px; } }
+[data-theme="dark"] .ai-msg-footer .ai-msg-act-study-pdf { background:rgba(72,160,128,.2); border-color:rgba(127,216,182,.35); color:#a8ebd0; }
+/* 站内统一的玻璃按钮规则会盖掉表单主按钮的底色，这里用更高的优先级写回来。 */
+html body #aiChatRoot .ai-study-sheet .ai-study-sheet-save { background:rgb(48,138,106) !important; color:#fff !important; border:0 !important; box-shadow:none !important; }
+html[data-theme="dark"] body #aiChatRoot .ai-study-sheet .ai-study-sheet-save { background:#3fa583 !important; }

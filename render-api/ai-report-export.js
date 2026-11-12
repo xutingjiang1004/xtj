@@ -103,12 +103,17 @@ async function buildReportPdf(report={}) {
     });
     // Attach rejection handling while content is being generated.
     completed.catch(()=>{});
-    const blocks = parseBlocks(markdown);
+    // 学习笔记版式：没有封面和目录，正文紧跟标题；表格行、列表和行内标记整理成干净的文字。
+    const study = report.layout === 'study';
+    const blocks = parseBlocks(study ? markdown.replace(/^导出时间：.*\n?/m,'') : markdown);
     const headings = blocks.filter(block=>block.type==='heading'&&block.level>1).slice(0,100);
-    doc.fillColor('#176743').fontSize(22).text(title,{paragraphGap:12});
+    doc.fillColor('#176743').fontSize(study?18:22).text(title,{paragraphGap:study?6:12});
+    if(study)doc.fillColor('#526b60').fontSize(9).text('XTJ 小猫 AI · 学习笔记',{paragraphGap:10});
+    else{
     doc.fillColor('#526b60').fontSize(10).text('XTJ 小猫 AI · 研究成果\n' + new Date().toISOString(),{paragraphGap:16});
     if(headings.length){doc.fillColor('#16352e').fontSize(13).text('目录',{paragraphGap:8});for(const heading of headings)doc.fontSize(10).text(heading.text,{paragraphGap:4});}
     doc.addPage();
+    }
     let firstTitle=true;
     for (let index=0;index<blocks.length;index++) {
       if (report.signal && report.signal.aborted) throw Error('导出已取消');
@@ -121,7 +126,8 @@ async function buildReportPdf(report={}) {
       }else if(!block.text.trim())doc.moveDown(.35);
       else{
         doc.fillColor('#16352e').fontSize(block.type==='code'?9:10.5);
-        const text=block.type==='code'?block.text:block.text.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g,'$1 ($2)').replace(/\*\*([^*]+)\*\*/g,'$1');
+        let text=block.type==='code'?block.text:block.text.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g,'$1 ($2)').replace(/\*\*([^*]+)\*\*/g,'$1');
+        if(study&&block.type!=='code')text=studyLine(text);
         for(let offset=0;offset<text.length;offset+=2000){cancelled(report.signal);doc.text(text.slice(offset,offset+2000),{paragraphGap:4,lineGap:2});if(offset%8000===0)await yieldTurn();}
       }
       if(index%15===0)await yieldTurn();
@@ -135,12 +141,17 @@ async function buildReportPdf(report={}) {
     cancelled(report.signal);doc.end();return await completed;
   } catch(error){if(doc)doc.destroy();throw error;}finally {release();}
 }
+function studyLine(line){
+  let text=String(line);
+  if(/^\s*\|.*\|\s*$/.test(text))text=text.trim().slice(1,-1).split('|').map(cell=>cell.trim()).join('    ');
+  return text.replace(/^(\s*)[-*+]\s+/,'$1• ').replace(/^\s*>\s?/,'').replace(/(^|[^*])\*([^*\s][^*]*)\*(?!\*)/g,'$1$2').replace(/`([^`]+)`/g,'$1');
+}
 function filename(value,extension) {return String(value||'深入研究报告').replace(/[\\/:*?"<>|\x00-\x1f]/g,'_').slice(0,100)+'.'+extension;}
 function installReportExport(app,deps) {
   app.post('/api/agent/research/export',deps.authenticateUser,deps.rateLimit(60000,8),...(deps.jsonMiddleware?[deps.jsonMiddleware]:[]),async(req,res)=>{
     const controller=new AbortController(),abort=()=>controller.abort();req.once('aborted',abort);res.once('close',abort);
     try {
-      const body=req.body||{},report={title:body.title,answer:body.answer,sources:body.sources,createdAt:body.created_at,signal:controller.signal};
+      const body=req.body||{},report={title:body.title,answer:body.answer,sources:body.sources,createdAt:body.created_at,layout:body.layout==='study'?'study':undefined,signal:controller.signal};
       let buffer,mime,extension;
       if(body.format==='markdown'){buffer=Buffer.from(reportMarkdown(report));mime='text/markdown;charset=utf-8';extension='md';}
       else if(body.format==='pdf'){buffer=await buildReportPdf(report);mime='application/pdf';extension='pdf';}
@@ -150,4 +161,4 @@ function installReportExport(app,deps) {
     finally{req.removeListener('aborted',abort);res.removeListener('close',abort);}
   });
 }
-module.exports={buildReportPdf,reportMarkdown,blocksText,reportSources,filename,installReportExport};
+module.exports={studyLine,buildReportPdf,reportMarkdown,blocksText,reportSources,filename,installReportExport};
