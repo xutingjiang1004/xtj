@@ -2072,6 +2072,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     if (!root) return;
     root.classList.remove('ai-idle', 'ai-thinking', 'ai-replying');
     root.classList.add(state || 'ai-idle');
+    syncStudyUi();
     if (state === 'ai-replying') triggerAvatarPop();
   }
 
@@ -4736,6 +4737,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   }
 
   function buildEmptyState(tipText) {
+    if (!tipText && studyActive()) return buildStudyLanding();
     var cfg = S.config || {};
     var empty = el('div', { class: 'ai-chat-empty' });
     var visual = el('div', { class: 'ai-chat-empty-visual' });
@@ -10889,6 +10891,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       ? S.thinkingMode
       : DEFAULT_THINKING_MODE;
     var sendSettings = Object.assign(networkSettings(),{ model: S.selectedModel, thinkMax: S.thinkMax === true, workMode: S.workMode === true, webSearch: S.webSearchEnabled === true, responseProfile: S.responseProfile,contextManaged:S._contextManaged===true,contextWindowTokens:S._contextWindowTokens?S._contextWindowTokens():65536,contextMemory:S._contextMemoryResolver?S._contextMemoryResolver():null });
+    sendSettings.study = studyRequestPayload();
     var sendCustomCfg = isCustomModelId(sendSettings.model) ? Object.assign({}, resolveCustomModelConfig(sendSettings.model)) : null;
     // Lock synchronously before the first await (auth/token acquisition), so
     // two clicks in the same event loop cannot create two streams.
@@ -11280,6 +11283,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         work_mode: sendSettings.workMode === true,
         web_search: sendSettings.webSearch === true,network_mode:sendSettings.networkMode,
         tools_enabled: (sendSettings.webSearch === true || sendSettings.thinkMax === true || sendSettings.workMode === true),
+        study: sendSettings.study,
         // ★ 修复：自定义模型通道此前漏发 attachments，文件内容无法传给模型
         attachments: attachmentPayload || undefined,
         client_request_id: reqId,
@@ -11310,6 +11314,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         thinking_max: sendSettings.thinkMax === true,
         work_mode: sendSettings.workMode === true,
         response_profile: sendSettings.responseProfile === 'enhanced' ? 'enhanced' : 'normal',
+        study: sendSettings.study,
         attachments: attachmentPayload || undefined,
         web_search: sendSettings.webSearch,network_mode:sendSettings.networkMode,
         model: sendSettings.model
@@ -12469,6 +12474,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           if (evt.type === 'meta') {
             streamConvId = evt.conversation_id;
             if (streamConvId) {
+              // 服务端这时才分配对话编号：学习对话的标记跟着转到新编号上。
+              if (sendSettings.study && S.conversationId !== streamConvId) { setStudyConv(streamConvId, true); S._studyNoConv = false; }
               S.conversationId = streamConvId;
               writeConvId(streamConvId);
             }
@@ -14258,6 +14265,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     S.loadingMore = false;
     S.conversationId = cid;
     writeConvId(cid);
+    syncStudyUi();
     S.messages = [];
     if (S._updateContextCapacity) S._updateContextCapacity();
     S.oldestCursor = null;
@@ -14414,6 +14422,227 @@ function showChatMessages() {
     openConversationListPage();
   }
 
+  // ===================== 学习模式（顶栏「学习」入口） =====================
+  // 学习模式是聊天页的一种对话：它用同一条发送链路（图片、文档、工具、记忆照常可用），
+  // 只是每次请求多带一个 study 对象，服务端据此追加学习答疑的系统提示词（render-api/ai-study.js）。
+  // 哪些对话属于学习对话、学习资料填了什么，都按账号存在本机。
+  var STUDY_PROFILE_KEY = 'xtj_ai_study_profile';
+  var STUDY_CONVS_KEY = 'xtj_ai_study_convs';
+  var AI_STUDY_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4 2.5 9 12 14l9.5-5L12 4Z"/><path d="M6.5 11.2V16c0 1.4 2.5 2.8 5.5 2.8s5.5-1.4 5.5-2.8v-4.8"/><path d="M21.5 9v5.5"/></svg>';
+  var STUDY_EXAMS = [['', '未设置'], ['ielts', '雅思'], ['cet4', '英语四级'], ['cet6', '英语六级'], ['toefl', '托福'], ['kaoyan', '考研英语'], ['general', '日常英语'], ['other', '其他']];
+  var STUDY_STYLES = [['detailed', '详细讲解'], ['concise', '简洁直接'], ['guided', '先提示，再给答案']];
+  var STUDY_STARTERS = [
+    { key: 'photo', label: '拍照答疑', hint: '拍下或选择题目图片' },
+    { key: 'grammar', label: '讲语法', text: '请讲解这个语法点：' },
+    { key: 'vocab', label: '查单词', text: '请讲解这个单词/短语的用法：' },
+    { key: 'sentence', label: '长难句', text: '请分析并翻译这个句子：\n' },
+    { key: 'writing', label: '批改作文', text: '请批改我的作文并估分。\n题目：\n我的作文：\n' },
+    { key: 'quiz', label: '出题练习', text: '请按我当前的教材进度出 5 道练习题，我做完再对答案。' }
+  ];
+  function studyClean(value, max) {
+    return String(value == null ? '' : value).replace(/\s+/g, ' ').trim().slice(0, max);
+  }
+  function readStudyProfile() {
+    var raw = null;
+    try { raw = JSON.parse(scopedStorageGet(STUDY_PROFILE_KEY) || 'null'); } catch (e) { raw = null; }
+    if (!raw || typeof raw !== 'object') raw = {};
+    var exam = String(raw.exam || '');
+    if (!STUDY_EXAMS.some(function(row) { return row[0] === exam; })) exam = '';
+    var style = String(raw.style || 'detailed');
+    if (!STUDY_STYLES.some(function(row) { return row[0] === style; })) style = 'detailed';
+    return { exam: exam, exam_other: studyClean(raw.exam_other, 40), target: studyClean(raw.target, 40), textbook: studyClean(raw.textbook, 80),
+      unit: studyClean(raw.unit, 60), style: style, note: studyClean(raw.note, 300) };
+  }
+  function writeStudyProfile(profile) {
+    scopedStorageSet(STUDY_PROFILE_KEY, JSON.stringify(profile || {}));
+  }
+  function readStudyConvIds() {
+    try {
+      var list = JSON.parse(scopedStorageGet(STUDY_CONVS_KEY) || '[]');
+      return Array.isArray(list) ? list.filter(function(id) { return typeof id === 'string' && id; }) : [];
+    } catch (e) { return []; }
+  }
+  function setStudyConv(cid, on) {
+    if (!cid) { S._studyNoConv = !!on; return; }
+    var list = readStudyConvIds().filter(function(id) { return id !== cid; });
+    if (on) list.push(cid);
+    scopedStorageSet(STUDY_CONVS_KEY, JSON.stringify(list.slice(-300)));
+  }
+  function studyActive() {
+    if (!S.conversationId) return S._studyNoConv === true;
+    return readStudyConvIds().indexOf(S.conversationId) >= 0;
+  }
+  // 随请求发送的学习资料；不在学习对话里时返回 undefined（JSON 里不会出现这个字段）。
+  function studyRequestPayload() {
+    if (!studyActive()) return undefined;
+    var p = readStudyProfile();
+    return { exam: p.exam === 'other' ? '' : p.exam, exam_other: p.exam === 'other' ? p.exam_other : '', target: p.target, textbook: p.textbook, unit: p.unit, style: p.style, note: p.note };
+  }
+  function studyProfileSummary(p) {
+    var parts = [];
+    var examLabel = '';
+    STUDY_EXAMS.forEach(function(row) { if (row[0] === p.exam && row[0]) examLabel = row[1]; });
+    if (p.exam === 'other') examLabel = p.exam_other;
+    if (examLabel) parts.push(examLabel + (p.target ? '（目标 ' + p.target + '）' : ''));
+    if (p.textbook) parts.push(p.textbook);
+    if (p.unit) parts.push(p.unit);
+    return parts.join(' · ');
+  }
+  function syncStudyUi() {
+    var root = getAiRoot();
+    if (!root) return;
+    var on = studyActive();
+    root.classList.toggle('ai-study-mode', on);
+    var btn = document.getElementById('aiStudyToggle');
+    if (btn) {
+      btn.classList.toggle('on', on);
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      btn.title = on ? '退出学习模式' : '学习模式 - 拍照答疑、语法讲解、作文批改';
+    }
+    var title = root.querySelector('.ai-chat-header-title b');
+    if (title) title.textContent = on ? '学习' : '小猫';
+    var inp = document.getElementById('aiChatMsgInput');
+    if (inp) inp.placeholder = on ? '输入题目或上传照片' : '问' + AI_DISPLAY_NAME;
+  }
+  function studyConversationIsBlank() {
+    return !S.sending && !S.loading && !(S.messages && S.messages.length) && !!S.messagesEl &&
+      !S.messagesEl.querySelector('.ai-msg, .ai-history-loading, .ai-history-unavailable');
+  }
+  function redrawStudyEmptyState() {
+    if (!S.messagesEl || !studyConversationIsBlank()) return;
+    S.messagesEl.innerHTML = '';
+    appendEmptyState(S.messagesEl);
+  }
+  // 进入/退出学习模式。当前对话还是空的就原地切换；已经聊过就新开一段对话（旧对话保留在历史里）。
+  function setStudyMode(on) {
+    if (S._newChatBusy) { notify('正在创建新对话…'); return; }
+    if (conversationListShown()) hideConversationListPage();
+    if (studyConversationIsBlank()) {
+      setStudyConv(S.conversationId, on);
+      redrawStudyEmptyState();
+      syncStudyUi();
+      if (on && !studyProfileSummary(readStudyProfile())) openStudyProfileSheet();
+      return;
+    }
+    S._studyIntent = on ? 'enter' : 'exit';
+    var newBtn = document.querySelector('#aiChatRoot .ai-chat-new-btn');
+    if (newBtn) newBtn.click();
+    else S._studyIntent = null;
+  }
+  // 「新对话」创建完成后调用：学习模式里新开的对话仍是学习对话。
+  function takeStudyIntent() {
+    var keep = S._studyIntent ? S._studyIntent === 'enter' : studyActive();
+    S._studyIntent = null;
+    return keep;
+  }
+  function applyStudyToNewConversation(keep) {
+    setStudyConv(S.conversationId, keep);
+    if (!S.conversationId) S._studyNoConv = keep;
+    redrawStudyEmptyState();
+    syncStudyUi();
+  }
+  function buildStudyLanding() {
+    var profile = readStudyProfile();
+    var summary = studyProfileSummary(profile);
+    var wrap = el('div', { class: 'ai-chat-empty ai-study-landing' });
+    var badge = el('div', { class: 'ai-study-landing-icon', 'aria-hidden': 'true' });
+    badge.innerHTML = AI_STUDY_ICON;
+    wrap.appendChild(badge);
+    wrap.appendChild(el('div', { class: 'ai-chat-empty-title', text: '学习答疑' }));
+    wrap.appendChild(el('div', { class: 'ai-chat-empty-tip', text: '拍下题目或直接提问，我按「考点 → 思路 → 答案」讲给你。' }));
+    var card = el('button', { type: 'button', class: 'ai-study-profile-card', 'aria-label': '设置学习资料' });
+    var cardCopy = el('span', { class: 'ai-study-profile-copy' });
+    cardCopy.appendChild(el('span', { class: 'ai-study-profile-label', text: summary ? '我的学习' : '还没有设置学习目标' }));
+    cardCopy.appendChild(el('span', { class: 'ai-study-profile-value', text: summary || '告诉我你在备考什么、用哪本教材，讲解会更贴合' }));
+    card.appendChild(cardCopy);
+    card.appendChild(el('span', { class: 'ai-study-profile-edit', text: summary ? '修改' : '去设置' }));
+    card.addEventListener('click', function(ev) { ev.preventDefault(); openStudyProfileSheet(); });
+    wrap.appendChild(card);
+    var chips = el('div', { class: 'ai-study-starters', role: 'group', 'aria-label': '学习快捷入口' });
+    STUDY_STARTERS.forEach(function(item) {
+      var chip = el('button', { type: 'button', class: 'ai-study-starter', 'data-study-starter': item.key, text: item.label });
+      chip.addEventListener('click', function(ev) {
+        ev.preventDefault();
+        if (item.key === 'photo') {
+          var picker = document.getElementById('aiChatFileInp');
+          if (picker) { try { picker.setAttribute('accept', 'image/*'); picker.click(); } finally { setTimeout(function() { picker.removeAttribute('accept'); }, 1000); } }
+          return;
+        }
+        var inp = document.getElementById('aiChatMsgInput');
+        if (!inp) return;
+        inp.value = item.text;
+        try { inp.dispatchEvent(new Event('input', { bubbles: true })); } catch (eInput) {}
+        try { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); } catch (eFocus) {}
+      });
+      chips.appendChild(chip);
+    });
+    wrap.appendChild(chips);
+    var leave = el('button', { type: 'button', class: 'ai-study-leave', text: '退出学习模式' });
+    leave.addEventListener('click', function(ev) { ev.preventDefault(); setStudyMode(false); });
+    wrap.appendChild(leave);
+    return wrap;
+  }
+  function closeStudyProfileSheet() {
+    var sheet = document.getElementById('aiStudySheet');
+    if (!sheet) return;
+    var opener = sheet._opener;
+    try { sheet.remove(); } catch (e) {}
+    try { if (opener && opener.isConnected) opener.focus({ preventScroll: true }); } catch (eFocus) {}
+  }
+  function openStudyProfileSheet() {
+    var root = getAiRoot();
+    if (!root) return;
+    closeStudyProfileSheet();
+    var p = readStudyProfile();
+    var sheet = el('div', { class: 'ai-study-sheet', id: 'aiStudySheet', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'aiStudySheetTitle' });
+    sheet._opener = document.activeElement;
+    var panel = el('form', { class: 'ai-study-sheet-panel', novalidate: '' });
+    panel.appendChild(el('h3', { id: 'aiStudySheetTitle', class: 'ai-study-sheet-title', text: '我的学习资料' }));
+    panel.appendChild(el('p', { class: 'ai-study-sheet-tip', text: '每次在学习模式里提问都会自动带上，不用重复说明。只保存在这台设备的这个账号下。' }));
+    function field(labelText, control) {
+      var row = el('label', { class: 'ai-study-field' });
+      row.appendChild(el('span', { text: labelText }));
+      row.appendChild(control);
+      panel.appendChild(row);
+      return control;
+    }
+    function select(rows, value) {
+      var node = el('select', {});
+      rows.forEach(function(row) { var opt = el('option', { value: row[0], text: row[1] }); if (row[0] === value) opt.selected = true; node.appendChild(opt); });
+      return node;
+    }
+    var exam = field('备考目标', select(STUDY_EXAMS, p.exam));
+    var examOther = field('其他考试名称', el('input', { type: 'text', maxlength: '40', value: p.exam_other, placeholder: '例如：PET、专四' }));
+    var target = field('目标分数', el('input', { type: 'text', maxlength: '40', value: p.target, placeholder: '例如：雅思 6.5、四级 500' }));
+    var textbook = field('教材', el('input', { type: 'text', maxlength: '80', value: p.textbook, placeholder: '例如：剑桥雅思初级教程（新东方）' }));
+    var unit = field('学到哪里', el('input', { type: 'text', maxlength: '60', value: p.unit, placeholder: '例如：第 1 单元 语法' }));
+    var style = field('讲解方式', select(STUDY_STYLES, p.style));
+    var note = el('textarea', { maxlength: '300', rows: '3', placeholder: '例如：基础比较弱，语法术语请用大白话解释' });
+    note.value = p.note;
+    field('补充说明', note);
+    function syncOther() { examOther.parentNode.hidden = exam.value !== 'other'; }
+    exam.addEventListener('change', syncOther); syncOther();
+    var actions = el('div', { class: 'ai-study-sheet-actions' });
+    var cancel = el('button', { type: 'button', class: 'ai-study-sheet-cancel', text: '取消' });
+    var save = el('button', { type: 'submit', class: 'ai-study-sheet-save', text: '保存' });
+    actions.appendChild(cancel); actions.appendChild(save);
+    panel.appendChild(actions);
+    cancel.addEventListener('click', function(ev) { ev.preventDefault(); closeStudyProfileSheet(); });
+    sheet.addEventListener('click', function(ev) { if (ev.target === sheet) closeStudyProfileSheet(); });
+    sheet.addEventListener('keydown', function(ev) { if (ev.key === 'Escape') { ev.stopPropagation(); closeStudyProfileSheet(); } });
+    panel.addEventListener('submit', function(ev) {
+      ev.preventDefault();
+      writeStudyProfile({ exam: exam.value, exam_other: studyClean(examOther.value, 40), target: studyClean(target.value, 40), textbook: studyClean(textbook.value, 80),
+        unit: studyClean(unit.value, 60), style: style.value, note: studyClean(note.value, 300) });
+      closeStudyProfileSheet();
+      redrawStudyEmptyState();
+      notify('学习资料已保存');
+    });
+    sheet.appendChild(panel);
+    root.appendChild(sheet);
+    try { exam.focus({ preventScroll: true }); } catch (eFocus) {}
+  }
+
   function renderAiRoot() {
     var old = document.getElementById('aiChatRoot');
     if (old) {
@@ -14447,6 +14676,26 @@ function showChatMessages() {
     //   （返回、深入研究、Code、历史、新建/删除等），不再显示头像与在线状态。
     //   对应的 applyConfigToUI/updateAiStatus 里对 #aiChatHeaderAvatar / Name / Status
     //   的调用都带 if (el) 守卫，元素不存在时自动跳过，无需改动其它逻辑。
+
+    // 学习模式入口（在「深入研究」左边）
+    var studyBtn = el('button', {
+      type: 'button',
+      class: 'ai-study-toggle',
+      'aria-label': '学习模式',
+      'aria-pressed': 'false',
+      title: '学习模式 - 拍照答疑、语法讲解、作文批改',
+      id: 'aiStudyToggle'
+    });
+    var studyIcon = el('span', { class: 'ai-study-icon' });
+    studyIcon.innerHTML = AI_STUDY_ICON;
+    studyBtn.appendChild(studyIcon);
+    studyBtn.appendChild(el('span', { class: 'ai-study-label', text: '学习' }));
+    studyBtn.addEventListener('click', function(ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      setStudyMode(!studyActive());
+    });
+    header.appendChild(studyBtn);
 
     // 深入研究?toggle 按钮
     var deepThinkBtn = el('button', {
@@ -14626,6 +14875,7 @@ function showChatMessages() {
       if (S._voiceConversation) S._voiceConversation.setEnabled(false);
       ev.preventDefault();
       ev.stopPropagation();
+      var studyKeep = takeStudyIntent();
       // 回复进行中点「新对话」：像 ChatGPT / Claude 一样先停掉这条回复（已写出的部分保留在旧对话里），再新建。
       if (S.sending) interruptCurrentChat();
       // 访客没有服务端会话，直接在本地清空上下文与附件，不请求 /chat/new。
@@ -14653,6 +14903,7 @@ function showChatMessages() {
           else S.messagesEl.appendChild(buildEmptyState());
         }
         setAiRootState('ai-idle');
+        applyStudyToNewConversation(studyKeep);
         notify('已开始新的游客对话');
         return;
       }
@@ -14708,12 +14959,13 @@ function showChatMessages() {
             appendEmptyState(S.messagesEl);
           }
           setAiRootState('ai-idle');
+          applyStudyToNewConversation(studyKeep);
           // 若当前正停留在历史二级页，自动收起回到聊天区
           if (S.showingHistory) {
             hideConversationListPage();
             if (typeof histBtn !== 'undefined' && histBtn) syncAiHeaderButtons(histBtn, newBtn);
           }
-          notify('已开始新对话，旧对话仍保留在历史中');
+          notify(studyKeep ? '已开始新的学习对话' : '已开始新对话，旧对话仍保留在历史中');
         } else if (r && r.error_code === 'timeout') {
           notify('网络较慢，创建新对话超时，请再点一次');
         } else {
