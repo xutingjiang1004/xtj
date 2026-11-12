@@ -85,3 +85,25 @@ test('a temporary server failure keeps the opened post and does not claim it was
   await p.waitForFunction(() => /该帖子不存在、已删除或不可查看/.test(document.getElementById('postDetailBody').textContent));
   assert.deepEqual(f.errors, []);
 });
+
+test('plain web addresses in a post are clickable links and nothing else becomes markup', { timeout: 60000 }, async t => {
+  const f = await open(t), p = f.page;
+  f.posts.unshift({ id: '8c1cb02d-74d0-4e45-9e15-000000000779', user_name: 'alice', visibility: 'public', created_at: new Date().toISOString(), views: 0,
+    content: '看这个 https://example.com/a?b=1&c=2。还有 http://test.example.org/x). <img src=x onerror=alert(1)> javascript:alert(1) https://user:pw@evil.example.com/ ftp://files.example.com\n第二行 https://例子.example.com/路径' });
+  await p.evaluate(() => window.loadFeed(true));
+  const content = p.locator('#feed .post[data-post-id$="779"] .content');
+  await content.waitFor();
+  const links = await content.locator('a').evaluateAll(list => list.map(a => ({ href: a.getAttribute('href'), text: a.textContent, target: a.target, rel: a.rel })));
+  assert.deepEqual(links.map(l => l.href), ['https://example.com/a?b=1&c=2', 'http://test.example.org/x', 'https://例子.example.com/路径']);
+  for (const l of links) { assert.equal(l.text, l.href); assert.equal(l.target, '_blank'); assert.match(l.rel, /noopener/); assert.match(l.rel, /noreferrer/); }
+  assert.equal(await content.locator('img,script').count(), 0);
+  const text = await content.textContent();
+  assert.match(text, /<img src=x onerror=alert\(1\)> javascript:alert\(1\) https:\/\/user:pw@evil\.example\.com\/ ftp:\/\/files\.example\.com/);
+  assert.equal(await content.locator('br').count(), 1);
+  // 点链接不触发帖子上的其他点击行为，也不改变当前页面。
+  const popup = p.waitForEvent('popup').catch(() => null);
+  await content.locator('a').first().click();
+  await popup;
+  assert.equal(new URL(p.url()).origin, f.origin);
+  assert.deepEqual(f.errors, []);
+});

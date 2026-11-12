@@ -2973,14 +2973,28 @@
                     '<span class="xtj-music-cover" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V6l10-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/></svg></span>' +
                     '<span class="xtj-music-main"><b class="xtj-music-title">歌曲链接</b><span class="xtj-music-sub">' + escapeHtml(musicPlatformName(link)) + '</span></span></a>';
             }
+            // 2026-11-12（用户要求）：正文里的普通网址可以点击。只认 http/https，逐段转义后再拼链接；
+            //   带账号密码的地址、解析不了的地址保持纯文字；结尾的标点不算进链接；新窗口打开且不带来源页。
+            function linkifyPostText(text) {
+                var source = String(text || ''), re = /https?:\/\/[^\s<>"'，。！？、；：（）【】《》「」]+/gi, out = '', last = 0, m;
+                while ((m = re.exec(source))) {
+                    var raw = m[0].replace(/[.,;:!?)\]}]+$/, ''), ok = false;
+                    try { var u = new URL(raw); ok = (u.protocol === 'http:' || u.protocol === 'https:') && !u.username && !u.password && !!u.hostname; } catch (_) { ok = false; }
+                    if (!ok) continue;
+                    out += escapeHtml(source.slice(last, m.index)) + '<a class="post-content-link" href="' + escapeHtml(raw) + '" target="_blank" rel="noopener noreferrer nofollow" onclick="event.stopPropagation()">' + escapeHtml(raw) + '</a>';
+                    last = m.index + raw.length;
+                    re.lastIndex = last;
+                }
+                return (out + escapeHtml(source.slice(last))).replace(/\n/g, '<br>');
+            }
             function buildPostContentHtml(content) {
                 var text = String(content || ''), link = findMusicLink(text);
-                // ★ 修复：多行帖正文换行——escapeHtml 后把 \n 替换为 <br>（与 early-feed.js 行为一致）；
+                // ★ 修复：多行帖正文换行——转义后把 \n 替换为 <br>（与 early-feed.js 行为一致）；
                 // 仅作用于 feed 正文渲染，评论/标题等不走本函数，不受影响。
-                if (!link) return escapeHtml(text).replace(/\n/g, '<br>');
+                if (!link) return linkifyPostText(text);
                 // 链接本身换成下面的卡片；链接前后的文字（比如 App 生成的「分享…的单曲」）保留。
                 var caption = text.replace(link, '').replace(/[ \t]+$/gm, '').replace(/\n{3,}/g, '\n\n').replace(/\s*[（(]\s*来自[^)）]*[)）]\s*$/, '').replace(/\s*[：:]\s*$/, '').trim();
-                return (caption ? escapeHtml(caption).replace(/\n/g, '<br>') : '') + musicCardHtml(link);
+                return (caption ? linkifyPostText(caption) : '') + musicCardHtml(link);
             }
             var musicCards = (function() {
                 var KEY = 'xtj_music_cards_v1', TTL = 7 * 86400000, memory = Object.create(null), pending = Object.create(null), audio = null, playing = null;

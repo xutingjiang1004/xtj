@@ -347,3 +347,6 @@ button.comment-reply-context { min-height:44px;border:0;padding:4px 0;background
 [data-theme="dark"] .post-tool-translation { background: rgba(26, 40, 34, .95); color: #d4ecdc; border-left-color: #4f9c74; }
 [data-theme="dark"] .post-tool-translation.is-error,
 [data-theme="dark"] .post-tool-critique.is-error { background: rgba(58, 30, 26, .94); color: #f4c4ba; border-color: #a85f52; }
+/* 2026-11-12 正文里的网址可点击 */
+.post-content-link { color: var(--primary, #287b55); text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere; }
+[data-theme="dark"] .post-content-link { color: #7fd8ad; }
