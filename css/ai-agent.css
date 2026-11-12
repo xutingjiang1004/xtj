@@ -8736,7 +8736,7 @@ html[data-theme="dark"] .ai-chat-header .ai-study-toggle.on { background:rgba(79
 }
 @media (max-width:479px) {
   html body .ai-chat-header .ai-study-toggle .ai-study-label { display:none; }
-  html body .ai-chat-header .ai-study-toggle { padding:0 11px !important; }
+  html body .ai-chat-header .ai-study-toggle { padding:0 !important; width:44px; min-width:44px; justify-content:center; }
   .ai-chat-header .ai-chat-header-title b { display:none; }
 }
 @keyframes ai-study-fade { from { opacity:0; } to { opacity:1; } }

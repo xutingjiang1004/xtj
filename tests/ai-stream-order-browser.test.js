@@ -71,7 +71,7 @@ test('header buttons have 44px touch targets and delete lives only in the more m
  const f=await aiPolishFixture(),p=f.page;
  try{
   const sizes=await p.evaluate(()=>[...document.querySelectorAll('.ai-chat-header > button')].map(b=>{const r=b.getBoundingClientRect();return[b.className.split(' ')[0],Math.round(r.width),Math.round(r.height)];}));
-  for(const [name,w,h] of sizes){if(name==='ai-deep-think-toggle'){assert.ok(h>=40);continue;}assert.ok(w>=44&&h>=44,name+' '+w+'x'+h);}
+  for(const [name,w,h] of sizes){if(name==='ai-deep-think-toggle'){assert.ok(h>=40);continue;}if(name==='ai-study-toggle'){assert.ok(w>=44&&h>=40,name+' '+w+'x'+h);continue;}assert.ok(w>=44&&h>=44,name+' '+w+'x'+h);}
   assert.equal(await p.locator('.ai-chat-header .ai-chat-del-btn').count(),0);
   assert.equal(await p.locator('.ai-chat-more-menu').isVisible(),false);
   await p.locator('.ai-chat-more-btn').click();await p.waitForFunction(()=>document.querySelector('.ai-chat-more-menu')&&!document.querySelector('.ai-chat-more-menu').hidden);

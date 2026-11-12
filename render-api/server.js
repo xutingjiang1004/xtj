@@ -89,7 +89,6 @@ const {
 const deepseekWeb = require('./deepseek-web');
 const openRouter = require('./openrouter');
 const aiRequestFeatures = require('./ai-request-features');
-const aiStudy = require('./ai-study');
 const deepSeekPricing = require('./deepseek-pricing');
 const { queryWeather, queryWeatherData, formatWeatherText, CITY_COORDS } = require('./weather');
 const { fetchSafeWebPage, assertSafeWebUrl, requestPinnedStream, fetchSafeRaw, fetchSafeBuffer, fetchSafeRedirectBuffer } = require('./web-fetch');
@@ -22637,7 +22636,7 @@ app.post('/api/agent/custom-chat/stream', guestOpenRouterAuth, aiChatConcurrency
     return safeEnd();
   }
   var conversation = [{ role: 'system', content: buildAiCorePrompt(customConfig) + (res._aiFollowupEnabled ? assistantOutput.FOLLOWUP_INSTRUCTION : '') }].concat(fwdMessages);
-  var customStudyPrompt = aiStudy.buildStudyPrompt(body.study);
+  var customStudyPrompt = require('./ai-study').buildStudyPrompt(body.study);
   if (customStudyPrompt) conversation.splice(1, 0, { role: 'system', content: customStudyPrompt });
   try { var _memMsg3 = await aiMemoryContextMessage(toolContext); if (_memMsg3) conversation.splice(1, 0, _memMsg3); } catch (_) {}
   if(body.context_estimate===true&&body.context_management!==true)writeSse(res,{type:'meta',conversation_id:customConvId,context_budget:assistantOutput.contextEstimate(conversation,{supplied:Array.isArray(body.messages)?body.messages.length:0,retained:Math.max(0,fwdMessages.length-1)})});
@@ -24079,7 +24078,7 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, rateLimit
     // A bounded middle gear for normal chat. This is intentionally not the
     // deep_think multi-agent route and keeps provider/tool compatibility.
     // 学习模式：浏览器在学习对话里带上 study；追加一段学习答疑的系统提示词。
-    var studyPrompt = aiStudy.buildStudyPrompt(req.body && req.body.study);
+    var studyPrompt = require('./ai-study').buildStudyPrompt(req.body && req.body.study);
     if (studyPrompt) messages.push({ role: 'system', content: studyPrompt });
     var responseProfile = (req.body && req.body.response_profile) === 'enhanced' ? 'enhanced' : 'normal';
     if (responseProfile === 'enhanced') {

@@ -32,6 +32,6 @@ test('the prompt carries the learner profile, the answer order and the honesty r
 
 test('both chat routes add the study prompt as a system message', () => {
   const server = fs.readFileSync(path.join(__dirname, '../render-api/server.js'), 'utf8');
-  assert.match(server, /aiStudy\.buildStudyPrompt\(req\.body && req\.body\.study\);\s*if \(studyPrompt\) messages\.push\(\{ role: 'system', content: studyPrompt \}\);/);
-  assert.match(server, /aiStudy\.buildStudyPrompt\(body\.study\);\s*if \(customStudyPrompt\) conversation\.splice\(1, 0, \{ role: 'system', content: customStudyPrompt \}\);/);
+  assert.match(server, /require\('\.\/ai-study'\)\.buildStudyPrompt\(req\.body && req\.body\.study\);\s*if \(studyPrompt\) messages\.push\(\{ role: 'system', content: studyPrompt \}\);/);
+  assert.match(server, /require\('\.\/ai-study'\)\.buildStudyPrompt\(body\.study\);\s*if \(customStudyPrompt\) conversation\.splice\(1, 0, \{ role: 'system', content: customStudyPrompt \}\);/);
 });
