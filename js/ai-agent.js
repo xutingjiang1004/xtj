@@ -4694,7 +4694,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         var historyUsageLine = buildUsageLine(msg.usage);
         if(historyUsageLine) footer.appendChild(el('span', { class: 'ai-msg-usage', text: historyUsageLine }));
       }
-      if (bubbleHasBody && studyActive()) addStudyExportAction(footer, function() { return msg.content; });
+      if (bubbleHasBody && studyActive()) { addStudyExportAction(footer, function() { return msg.content; }); addStudyQuickActions(footer); }
     }
     if (footer.children.length > 0) node.appendChild(footer);
     // 没有正文就不挂推荐追问：追问条挂在 .ai-msg 上，会出现在一条「只有思考」
@@ -12020,7 +12020,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             var usageLine = buildUsageLine(aiMsg.usage);
             if (usageLine) footer.appendChild(el('span', { class: 'ai-msg-usage', text: usageLine }));
           }
-          if (sendSettings.study && String(aiMsg.content || '').trim()) addStudyExportAction(footer, function() { return aiMsg.content; });
+          if (sendSettings.study && String(aiMsg.content || '').trim()) { addStudyExportAction(footer, function() { return aiMsg.content; }); addStudyQuickActions(footer); }
           if (footer.children.length > 0) node.appendChild(footer);
           try {
             var _realNode = (node && node.isConnected) ? node
@@ -14256,6 +14256,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     });
     ordered.forEach(function(groupLabel) {
       var section = el('section', { class: 'ai-conv-group' });
+      var studyConvIdSet = readStudyConvIds();
       section.appendChild(el('div', { class: 'ai-conv-group-title', text: groupLabel }));
       (groups[groupLabel] || []).forEach(function(conv) {
         var item = el('div', {
@@ -14268,7 +14269,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           'aria-label': '打开对话：' + convTitle
         });
         item.appendChild(openBtn);
-        item.appendChild(el('div', { class: 'ai-conv-title', text: convTitle }));
+        var convTitleEl = el('div', { class: 'ai-conv-title', text: convTitle });
+        if (studyConvIdSet.indexOf(conv.conversation_id) >= 0) { item.classList.add('is-study'); convTitleEl.appendChild(el('span', { class: 'ai-conv-study-tag', text: '学习' })); }
+        item.appendChild(convTitleEl);
         item.appendChild(el('div', { class: 'ai-conv-time', text: conv.updated_at ? fmtTime(conv.updated_at) : '' }));
         item.appendChild(el('div', { class: 'ai-conv-preview', text: getConversationPreview(conv) }));
         var meta = el('div', { class: 'ai-conv-meta' });
@@ -14562,14 +14565,24 @@ function showChatMessages() {
   var AI_STUDY_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4 2.5 9 12 14l9.5-5L12 4Z"/><path d="M6.5 11.2V16c0 1.4 2.5 2.8 5.5 2.8s5.5-1.4 5.5-2.8v-4.8"/><path d="M21.5 9v5.5"/></svg>';
   var STUDY_EXAMS = [['', '未设置'], ['ielts', '雅思'], ['cet4', '英语四级'], ['cet6', '英语六级'], ['toefl', '托福'], ['kaoyan', '考研英语'], ['general', '日常英语'], ['other', '其他']];
   var STUDY_STYLES = [['detailed', '详细讲解'], ['concise', '简洁直接'], ['guided', '先提示，再给答案']];
+  var STUDY_STARTER_ICONS = {"photo": "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M4 8.5A2.5 2.5 0 0 1 6.5 6h1.6l1.2-1.8h5.4L15.9 6h1.6A2.5 2.5 0 0 1 20 8.5v8A2.5 2.5 0 0 1 17.5 19h-11A2.5 2.5 0 0 1 4 16.500Z\"/><circle cx=\"12\" cy=\"12.5\" r=\"3.2\"/></svg>", "grammar": "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M5 5h14M5 5v14M9.5 9.500h5M9.5 13h7M9.5 16.500h4\"/></svg>", "vocab": "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M5 4.500h9.500A3.5 3.5 0 0 1 18 8v11.500H8.500A3.5 3.5 0 0 1 5 16Z\"/><path d=\"M9 9h5M9 12.500h3\"/></svg>", "sentence": "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M4 7h16M4 12h10M4 17h13\"/><path d=\"m17 10 3 2-3 2\"/></svg>", "words": "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><rect x=\"4\" y=\"4\" width=\"16\" height=\"16\" rx=\"3\"/><path d=\"M8 9h8M8 12.500h8M8 16h5\"/></svg>", "writing": "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M16.5 4.500a2.1 2.1 0 0 1 3 3L8 19l-4 1 1-4Z\"/><path d=\"M14.5 6.500l3 3\"/></svg>", "translate": "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M4 6h8M8 4v2M6 6c0 3 2 5.5 5 6.500M10 6c0 3-2 5.5-5 6.5\"/><path d=\"m13 20 3.5-8 3.5 8M14.3 17.500h4.4\"/></svg>", "speak": "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M12 4a3 3 0 0 1 3 3v4a3 3 0 0 1-6 0V7a3 3 0 0 1 3-3Z\"/><path d=\"M6.5 11a5.5 5.5 0 0 0 11 0M12 16.500V20\"/></svg>", "quiz": "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"8\"/><path d=\"M9.8 9.800a2.3 2.3 0 1 1 3.2 2.100c-.7.3-1 .8-1 1.600M12 16.300v.2\"/></svg>", "plan": "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><rect x=\"4\" y=\"5.5\" width=\"16\" height=\"14.5\" rx=\"2.5\"/><path d=\"M4 10h16M8.5 3.500v4M15.5 3.500v4M8.5 14l2 2 4-4\"/></svg>"};
   var STUDY_STARTERS = [
-    { key: 'photo', label: '拍照答疑', hint: '拍下或选择题目图片' },
-    { key: 'grammar', label: '讲语法', text: '请讲解这个语法点：' },
-    { key: 'vocab', label: '查单词', text: '请讲解这个单词/短语的用法：' },
-    { key: 'sentence', label: '长难句', text: '请分析并翻译这个句子：\n' },
-    { key: 'words', label: '单词短文', hint: '把背过的单词变成一篇阅读理解' },
-    { key: 'writing', label: '批改作文', text: '请批改我的作文并估分。\n题目：\n我的作文：\n' },
-    { key: 'quiz', label: '出题练习', text: '请按我当前的教材进度出 5 道练习题，我做完再对答案。' }
+    { key: 'photo', label: '拍照答疑', hint: '拍题讲思路' },
+    { key: 'words', label: '单词短文', hint: '单词变阅读题' },
+    { key: 'grammar', label: '讲语法', hint: '规则与例句', text: '请讲解这个语法点：' },
+    { key: 'vocab', label: '查单词', hint: '用法与辨析', text: '请讲解这个单词/短语的用法：' },
+    { key: 'sentence', label: '长难句', hint: '拆句翻译', text: '请分析并翻译这个句子：\n' },
+    { key: 'writing', label: '批改作文', hint: '点评估分', text: '请批改我的作文并估分。\n题目：\n我的作文：\n' },
+    { key: 'translate', label: '翻译练习', hint: '中译英批改', text: '请按我的水平出 5 句中译英练习，我翻译完你再逐句批改。' },
+    { key: 'speak', label: '口语陪练', hint: '话题问答', text: '我们来练口语：请按我备考的考试出一个话题，一次只问一个问题，我回答后你先纠正再问下一个。' },
+    { key: 'quiz', label: '出题练习', hint: '按进度出题', text: '请按我当前的教材进度出 5 道练习题，我做完再对答案。' },
+    { key: 'plan', label: '学习计划', hint: '排每天任务', text: '请根据我的备考目标和目前进度，帮我排一份接下来两周的学习计划，每天不超过 1 小时。' }
+  ];
+  // 学习回复下方的固定快捷操作：点一下把这句话放进输入框，可以改完再发。
+  var STUDY_QUICK_ACTIONS = [
+    { key: 'simpler', label: '讲简单点', text: '上面这段我没完全看懂，请用更简单的话再讲一遍，多举一个例子。' },
+    { key: 'similar', label: '出类似题', text: '请再出 3 道同类型的题让我练习，我做完再给答案。' },
+    { key: 'wordlist', label: '整理单词表', text: '请把上面内容里值得记的单词和短语整理成表格：单词、音标、词性、中文意思、例句。' }
   ];
   function studyClean(value, max) {
     return String(value == null ? '' : value).replace(/\s+/g, ' ').trim().slice(0, max);
@@ -14683,7 +14696,7 @@ function showChatMessages() {
     var title = root.querySelector('.ai-chat-header-title b');
     if (title) title.textContent = on ? '学习' : '小猫';
     var inp = document.getElementById('aiChatMsgInput');
-    if (inp) inp.placeholder = on ? '输入题目或上传照片' : '问' + AI_DISPLAY_NAME;
+    if (inp) inp.placeholder = on ? '输入题目或拍照' : '问' + AI_DISPLAY_NAME;
   }
   function studyConversationIsBlank() {
     return !S.sending && !S.loading && !(S.messages && S.messages.length) && !!S.messagesEl &&
@@ -14821,6 +14834,18 @@ function showChatMessages() {
     });
     row.appendChild(button);
   }
+  function addStudyQuickActions(footer) {
+    if (!footer || footer.querySelector('.ai-study-quick')) return;
+    var host = S.messagesEl;
+    if (host) Array.prototype.forEach.call(host.querySelectorAll('.ai-study-quick'), function(old) { old.remove(); });
+    var row = el('span', { class: 'ai-study-quick', role: 'group', 'aria-label': '学习快捷操作' });
+    STUDY_QUICK_ACTIONS.forEach(function(item) {
+      var btn = el('button', { type: 'button', class: 'ai-msg-act ai-study-quick-btn', 'data-study-quick': item.key, text: item.label });
+      btn.addEventListener('click', function(ev) { ev.preventDefault(); ev.stopPropagation(); fillStudyInput(item.text); });
+      row.appendChild(btn);
+    });
+    footer.appendChild(row);
+  }
   function buildStudyLanding() {
     var profile = readStudyProfile();
     var summary = studyProfileSummary(profile);
@@ -14840,10 +14865,19 @@ function showChatMessages() {
     wrap.appendChild(card);
     var chips = el('div', { class: 'ai-study-starters', role: 'group', 'aria-label': '学习快捷入口' });
     STUDY_STARTERS.forEach(function(item) {
-      var chip = el('button', { type: 'button', class: 'ai-study-starter', 'data-study-starter': item.key, text: item.label });
+      var chip = el('button', { type: 'button', class: 'ai-study-starter', 'data-study-starter': item.key });
+      var chipIcon = el('span', { class: 'ai-study-starter-icon', 'aria-hidden': 'true' });
+      chipIcon.innerHTML = STUDY_STARTER_ICONS[item.key] || '';
+      var chipCopy = el('span', { class: 'ai-study-starter-copy' });
+      chipCopy.appendChild(el('b', { text: item.label }));
+      chipCopy.appendChild(el('small', { text: item.hint }));
+      chip.appendChild(chipIcon); chip.appendChild(chipCopy);
+      chip.style.setProperty('--study-i', String(chips.children.length));
       chip.addEventListener('click', function(ev) {
         ev.preventDefault();
         if (item.key === 'photo') {
+          var draft = document.getElementById('aiChatMsgInput');
+          if (draft && !String(draft.value || '').trim()) fillStudyInput('请解答图片里的题目。');
           openStudyImagePicker();
           return;
         }
@@ -14862,7 +14896,11 @@ function showChatMessages() {
     var sheet = document.getElementById('aiStudySheet');
     if (!sheet) return;
     var opener = sheet._opener;
-    try { sheet.remove(); } catch (e) {}
+    // 先把 id 让出来（新表单可以马上打开），旧表单播完收起动画再移除。
+    sheet.removeAttribute('id');
+    sheet.inert = true;
+    sheet.classList.add('is-leaving');
+    setTimeout(function() { try { sheet.remove(); } catch (e) {} }, prefersReducedMotion() ? 0 : 200);
     try { if (opener && opener.isConnected) opener.focus({ preventScroll: true }); } catch (eFocus) {}
   }
   function openStudyProfileSheet() {
@@ -15076,6 +15114,7 @@ function showChatMessages() {
       }
       if (!S.conversationId || S.sending || S._newChatBusy || S.deletingConversations.has(S.conversationId)) return;
       var deleteCid = S.conversationId, deleteLife = S.lifecycleId, deleteOwner = window.currentUser || '', deleteEpoch = readAiAuthEpoch();
+      var deleteWasStudy = studyActive();
       var recreateSeq = 0;
       function currentDeleteOwner() { return deleteLife === S.lifecycleId && deleteOwner === (window.currentUser || '') && deleteEpoch === readAiAuthEpoch(); }
       function currentDelete() { return currentDeleteOwner() && (S.conversationId === deleteCid || !S.conversationId); }
@@ -15114,9 +15153,12 @@ function showChatMessages() {
           S._newChatBusy = true;
           var r2 = await apiRequest('POST', '/chat/new', null, { timeoutMs: 10000 });
           if (!currentDelete()) return;
+          setStudyConv(deleteCid, false);
           if (r2 && r2.ok && r2.data && r2.data.conversation_id) {
             S.conversationId = r2.data.conversation_id;
             writeConvId(r2.data.conversation_id);
+            // 删掉的是学习对话时，接着开的新对话仍是学习对话。
+            if (deleteWasStudy) setStudyConv(r2.data.conversation_id, true);
             // 恢复 empty state（先清 loading 再追加）
             if (S.messagesEl) {
               S.messagesEl.innerHTML = '';

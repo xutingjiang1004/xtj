@@ -8684,14 +8684,28 @@ html[data-theme="dark"] .ai-chat-header .ai-study-toggle.on { background:rgba(79
 .ai-study-profile-label { font-size:12px; color:var(--text-muted, #7a908b); }
 .ai-study-profile-value { font-size:14px; font-weight:600; line-height:1.45; overflow-wrap:anywhere; color:var(--text-main, #24322e); }
 .ai-study-profile-edit { flex:0 0 auto; font-size:13px; color:rgb(48,138,106); white-space:nowrap; }
-.ai-study-starters { display:flex; flex-wrap:wrap; justify-content:center; gap:8px; width:min(100%, 420px); margin:14px auto 0; }
+.ai-study-starters { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:8px; width:min(100%, 420px); margin:14px auto 0; }
 .ai-study-starter {
-  min-height:40px; padding:8px 14px; border-radius:20px; cursor:pointer; font:inherit; font-size:13px;
-  border:1px solid rgba(140,196,158,.3); background:rgba(255,255,255,.6); color:var(--text-main, #24322e);
-  -webkit-tap-highlight-color:transparent; transition:border-color .2s, background .2s, transform .15s;
+  display:flex; align-items:center; gap:10px; min-height:56px; padding:9px 12px; border-radius:16px; cursor:pointer; text-align:left;
+  font:inherit; border:1px solid rgba(140,196,158,.28); background:rgba(255,255,255,.66); color:var(--text-main, #24322e);
+  -webkit-tap-highlight-color:transparent; transition:border-color .2s, background .2s, transform .16s cubic-bezier(.26,.62,.16,1), box-shadow .2s;
+  animation:ai-study-pop .34s cubic-bezier(.26,.62,.16,1) both; animation-delay:calc(var(--study-i, 0) * 26ms + 60ms);
 }
-.ai-study-starter[data-study-starter="photo"] { border-color:rgba(66,155,122,.5); background:rgba(232,250,241,.95); color:rgb(40,123,101); font-weight:600; }
-.ai-study-starter:active { transform:scale(.96); }
+.ai-study-starter-icon { flex:0 0 34px; width:34px; height:34px; border-radius:11px; display:grid; place-items:center; color:rgb(40,123,101); background:rgba(221,242,232,.9); }
+.ai-study-starter-icon svg { width:19px; height:19px; }
+.ai-study-starter-copy { min-width:0; display:flex; flex-direction:column; gap:1px; }
+.ai-study-starter-copy b { font-size:14px; font-weight:600; line-height:1.3; }
+.ai-study-starter-copy small { font-size:11.5px; line-height:1.35; color:var(--text-muted, #7a908b); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ai-study-starter[data-study-starter="photo"], .ai-study-starter[data-study-starter="words"] { border-color:rgba(66,155,122,.42); background:linear-gradient(135deg, rgba(232,250,241,.96), rgba(240,250,255,.9)); }
+.ai-study-starter[data-study-starter="photo"] .ai-study-starter-icon, .ai-study-starter[data-study-starter="words"] .ai-study-starter-icon { background:rgb(48,138,106); color:#fff; }
+.ai-study-starter:active { transform:scale(.97); }
+.ai-study-landing-icon, .ai-study-landing > .ai-chat-empty-title, .ai-study-landing > .ai-chat-empty-tip, .ai-study-profile-card { animation:ai-study-pop .36s cubic-bezier(.26,.62,.16,1) both; }
+.ai-study-landing > .ai-chat-empty-title { animation-delay:30ms; }
+.ai-study-landing > .ai-chat-empty-tip { animation-delay:50ms; }
+.ai-study-profile-card { animation-delay:70ms; }
+@keyframes ai-study-pop { from { opacity:0; transform:translateY(8px) scale(.985); } to { opacity:1; transform:none; } }
+@media (min-width:768px) { .ai-study-starters { grid-template-columns:repeat(3, minmax(0, 1fr)); width:min(100%, 600px); } .ai-study-profile-card { width:min(100%, 600px); } }
+@media (prefers-reduced-motion:reduce) { .ai-study-starter, .ai-study-landing-icon, .ai-study-landing > .ai-chat-empty-title, .ai-study-landing > .ai-chat-empty-tip, .ai-study-profile-card { animation:none; } }
 .ai-study-leave {
   margin:18px auto 0; min-height:36px; padding:6px 12px; border:0; background:transparent; cursor:pointer;
   font:inherit; font-size:12px; color:var(--text-muted, #7a908b);
@@ -8758,7 +8772,9 @@ html[data-theme="dark"] .ai-chat-header .ai-study-toggle.on { background:rgba(79
 [data-theme="dark"] .ai-study-profile-card, [data-theme="dark"] .ai-study-starter { background:rgba(255,255,255,.06); border-color:rgba(255,255,255,.14); color:#e6efec; }
 [data-theme="dark"] .ai-study-profile-value { color:#e6efec; }
 [data-theme="dark"] .ai-study-profile-edit { color:#7fd8b6; }
-[data-theme="dark"] .ai-study-starter[data-study-starter="photo"] { background:rgba(72,160,128,.22); border-color:rgba(127,216,182,.4); color:#a8ebd0; }
+[data-theme="dark"] .ai-study-starter[data-study-starter="photo"], [data-theme="dark"] .ai-study-starter[data-study-starter="words"] { background:rgba(72,160,128,.2); border-color:rgba(127,216,182,.36); }
+[data-theme="dark"] .ai-study-starter-icon { background:rgba(79,209,165,.16); color:#7fd8b6; }
+[data-theme="dark"] .ai-study-starter-copy small { color:rgba(214,228,223,.62); }
 [data-theme="dark"] .ai-study-sheet-panel { background:#1b2422; color:#e6efec; }
 [data-theme="dark"] .ai-study-field input, [data-theme="dark"] .ai-study-field select, [data-theme="dark"] .ai-study-field textarea {
   background:rgba(255,255,255,.07); border-color:rgba(255,255,255,.16); color:#e6efec;
@@ -8775,3 +8791,34 @@ html[data-theme="dark"] .ai-chat-header .ai-study-toggle.on { background:rgba(79
 /* 站内统一的玻璃按钮规则会盖掉表单主按钮的底色，这里用更高的优先级写回来。 */
 html body #aiChatRoot .ai-study-sheet .ai-study-sheet-save { background:rgb(48,138,106) !important; color:#fff !important; border:0 !important; box-shadow:none !important; }
 html[data-theme="dark"] body #aiChatRoot .ai-study-sheet .ai-study-sheet-save { background:#3fa583 !important; }
+
+/* 学习表单收起、学习回复的快捷操作、历史列表里的学习标记 */
+.ai-study-sheet.is-leaving { animation:ai-study-fade .2s ease-in reverse both; pointer-events:none; }
+.ai-study-sheet.is-leaving .ai-study-sheet-panel { animation:ai-study-sink .2s cubic-bezier(.4,0,.8,.4) both; }
+@keyframes ai-study-sink { to { opacity:0; transform:translateY(18px); } }
+@media (prefers-reduced-motion:reduce) { .ai-study-sheet.is-leaving, .ai-study-sheet.is-leaving .ai-study-sheet-panel { animation:none; } }
+.ai-msg-footer .ai-study-quick { display:inline-flex; flex-wrap:wrap; gap:6px; }
+.ai-msg-footer .ai-study-quick-btn {
+  min-height:32px; padding:4px 10px; border-radius:10px; cursor:pointer; font:inherit; font-size:12px;
+  border:1px solid rgba(140,196,158,.35); background:rgba(255,255,255,.7); color:var(--text-main, #24322e);
+}
+@media (pointer:coarse) { .ai-msg-footer .ai-study-quick-btn { min-height:40px; padding:6px 12px; } }
+[data-theme="dark"] .ai-msg-footer .ai-study-quick-btn { background:rgba(255,255,255,.06); border-color:rgba(255,255,255,.16); color:#e6efec; }
+.ai-conv-study-tag { display:inline-block; margin-left:6px; padding:1px 7px; border-radius:8px; font-size:11px; font-weight:500; vertical-align:1px; background:#ddf2e8; color:#0e7a5b; }
+[data-theme="dark"] .ai-conv-study-tag { background:rgba(79,209,165,.16); color:#7fd8b6; }
+html body .ai-chat-header .ai-study-toggle .ai-study-icon { transition:transform .32s cubic-bezier(.26,.62,.16,1); }
+html body .ai-chat-header .ai-study-toggle.on .ai-study-icon { transform:rotate(-8deg) scale(1.08); }
+@media (prefers-reduced-motion:reduce) { html body .ai-chat-header .ai-study-toggle .ai-study-icon { transition:none; } }
+
+/* 学习首页内容比一屏高时从顶部排起并可滚动（居中会把上半截挤出屏幕）；卡片内容靠左对齐。 */
+html body #aiChatRoot .ai-chat-messages .ai-chat-empty.ai-study-landing { justify-content:flex-start; min-height:0; height:auto; padding-top:20px; padding-bottom:24px; }
+html body #aiChatRoot .ai-study-landing .ai-study-starter { justify-content:flex-start !important; text-align:left !important; }
+@media (max-width:767px) {
+  html body #aiChatRoot .ai-chat-messages .ai-chat-empty.ai-study-landing { padding:12px 14px 20px; }
+  .ai-study-landing-icon { width:44px; height:44px; border-radius:14px; margin-bottom:8px; }
+  .ai-study-landing-icon svg { width:22px; height:22px; }
+  .ai-study-profile-card { margin-top:12px; }
+  .ai-study-starters { margin-top:10px; }
+  .ai-study-starter { min-height:52px; padding:8px 10px; gap:8px; }
+  .ai-study-leave { margin-top:10px; }
+}

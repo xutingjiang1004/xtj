@@ -147,3 +147,52 @@ test('a second device restores the learning profile and learning conversations f
   assert.equal(await page.evaluate(() => aiPolish.calls.some(call => call.method === 'PUT' && call.body.ai_prefs && call.body.ai_prefs.study)), false, 'restoring does not write back');
   assert.deepEqual(f.errors, []);
 });
+
+test('learning landing fits a phone, photo answers get a default question, and replies offer quick actions', async t => {
+  const f = await aiPolishFixture({ viewport: { width: 390, height: 844 } }); t.after(f.close);
+  const page = f.page;
+  await page.locator('#aiStudyToggle').click();
+  await page.waitForSelector('#aiStudySheet');
+  await page.locator('.ai-study-sheet-cancel').click();
+  // 收起有动画：旧表单先让出 id，播完再移除。
+  await page.waitForFunction(() => !document.getElementById('aiStudySheet'));
+  await page.waitForFunction(() => !document.querySelector('.ai-study-sheet'));
+  const layout = await page.evaluate(() => {
+    const list = document.getElementById('aiChatRoot').querySelector('.ai-chat-messages').getBoundingClientRect();
+    const first = document.querySelector('.ai-study-landing .ai-chat-empty-title').getBoundingClientRect();
+    const cards = [...document.querySelectorAll('.ai-study-starter')].map(node => {
+      const box = node.getBoundingClientRect(), icon = node.querySelector('.ai-study-starter-icon').getBoundingClientRect(), hint = node.querySelector('small');
+      return { h: box.height, iconLeft: Math.round(icon.left - box.left), clipped: hint.scrollWidth > hint.clientWidth + 1, right: box.right };
+    });
+    return { titleVisible: first.top >= list.top, count: cards.length, minH: Math.min(...cards.map(c => c.h)), lefts: [...new Set(cards.map(c => c.iconLeft))], clipped: cards.filter(c => c.clipped).length, maxRight: Math.max(...cards.map(c => c.right)), width: innerWidth };
+  });
+  assert.equal(layout.titleVisible, true, 'the top of the landing is not pushed off screen');
+  assert.equal(layout.count, 10);
+  assert.ok(layout.minH >= 44, JSON.stringify(layout));
+  assert.equal(layout.lefts.length, 1, 'card icons line up: ' + JSON.stringify(layout.lefts));
+  assert.equal(layout.clipped, 0, 'no hint is cut off');
+  assert.ok(layout.maxRight <= layout.width);
+
+  const chooser = page.waitForEvent('filechooser');
+  await page.locator('[data-study-starter="photo"]').click();
+  await chooser;
+  assert.equal(await page.inputValue('#aiChatMsgInput'), '请解答图片里的题目。');
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => aiPolish.streams.length === 1);
+  await page.evaluate(() => {
+    aiPolishEmit({ type: 'meta', conversation_id: 'POLISH01' });
+    aiPolishEmit({ type: 'content', text: '【考点】时态\n\n【答案】B' });
+    aiPolishEmit({ type: 'done' });
+    aiPolish.streams.at(-1).controller.close();
+  });
+  await page.locator('.ai-study-quick [data-study-quick="similar"]').waitFor();
+  assert.equal(await page.locator('.ai-study-quick').count(), 1);
+  await page.locator('[data-study-quick="similar"]').click();
+  assert.match(await page.inputValue('#aiChatMsgInput'), /再出 3 道同类型的题/);
+  assert.equal(await page.evaluate(() => aiPolish.streams.length), 1, 'a quick action fills the box; it does not send by itself');
+
+  // 历史列表里学习对话带「学习」标记。
+  await page.locator('.ai-chat-hist-btn').click();
+  await page.locator('.ai-conv-item[data-conv-id="POLISH01"] .ai-conv-study-tag').waitFor();
+  assert.deepEqual(f.errors, []);
+});
