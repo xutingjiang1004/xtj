@@ -4960,7 +4960,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     while (i < max && prev.charCodeAt(i) === next.charCodeAt(i)) i++;
     var j = 0;
     while (j < max - i && prev.charCodeAt(max - 1 - j) === next.charCodeAt(next.length - 1 - j)) j++;
-    if (!j || i + j < 4) return false;
+    // 只处理「旧内容原样保留、中间插入一段」的情况；旧内容本身变了就交给逐节点对比。
+    if (!j || i + j < 4 || i + j !== max) return false;
     var delta = next.slice(i, next.length - j);
     if (!delta) return false;
     var tail = streamContentTail(target);
@@ -5189,13 +5190,54 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         .replace(/\*\*[^*]+\*\*/g, '').replace(/\*[^*]+\*/g, '');
       return !/[`*\[\]]/.test(rest);
     }
+    // 从 start 开始的一个「已经写完」的代码块或表格：返回它的原文和下一块的起点；不是则返回 null。
+    // 代码块：以 ``` 开头，找到单独成行的结束围栏，且后面已经出现空行。
+    // 表格：每一行都以 | 开头并以 | 结尾（至少两行），后面已经出现空行，且下一块不是表格的延续。
+    function closedStructure(tail, start) {
+      var gap = /\n[ \t]*\n+/g, end, found;
+      if (tail.indexOf('```', start) === start) {
+        var open = tail.indexOf('\n', start);
+        if (open < 0) return null;
+        var close = /\n```[ \t]*(?=\n)/g;
+        close.lastIndex = open;
+        found = close.exec(tail);
+        if (!found) return null;
+        end = found.index + found[0].length;
+        if (tail.slice(start, end).length > 8192) return null;
+        gap.lastIndex = end;
+        found = gap.exec(tail);
+        if (!found || found.index !== end) return null;
+        return { text: tail.slice(start, end), next: gap.lastIndex };
+      }
+      if (tail.charAt(start) !== '|') return null;
+      gap.lastIndex = start;
+      found = gap.exec(tail);
+      if (!found) return null;
+      var table = tail.slice(start, found.index), rows = table.split('\n');
+      if (rows.length < 2 || table.length > 8192 || /```|<|>/.test(table)) return null;
+      for (var ri = 0; ri < rows.length; ri++) if (!/^\|.*\|[ \t]*$/.test(rows[ri])) return null;
+      var after = tail.charAt(gap.lastIndex);
+      if (!after || after === '|') return null;
+      return { text: table, next: gap.lastIndex };
+    }
     var cache = function(text) {
       if (disabled) return render(text, true);
       if (prefix && text.indexOf(prefix) !== 0) { prefix = ''; markup = ''; verified = false; blocks.clear(); tailAccel.reset(); }
       var tail = text.slice(prefix.length), breaks = /\n[ \t]*\n+/g, match, committed = 0;
+      var structural = false;
       while ((match = breaks.exec(tail))) {
         var block = tail.slice(committed, match.index);
-        if (!safeBlock(block, tail.slice(breaks.lastIndex, breaks.lastIndex + 1))) break;
+        if (!safeBlock(block, tail.slice(breaks.lastIndex, breaks.lastIndex + 1))) {
+          // 已经写完的代码块和表格也可以定稿：否则回答里出现第一个表格或代码块之后，
+          // 后面所有内容每一帧都要整段重新解析，回答越长越卡。
+          var closed = closedStructure(tail, committed);
+          if (!closed) break;
+          markup += render(closed.text, true);
+          committed = closed.next;
+          breaks.lastIndex = committed;
+          structural = true;
+          continue;
+        }
         var html = blocks.get(block);
         if (html === undefined) {
           html = render(block, true);
@@ -5206,6 +5248,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       }
       if (committed) prefix += tail.slice(0, committed);
       var result = markup + tailAccel.render(tail.slice(committed));
+      // 每定稿一个代码块或表格，都和整篇渲染核对一次；不一致就永久退回整篇渲染。
+      if (structural) verified = false;
       if (!verified && prefix) {
         var full = render(text, true);
         if (result !== full) { disabled = true; prefix = ''; markup = ''; blocks.clear(); tailAccel.reset(); return full; }
@@ -5248,6 +5292,73 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         });
       }
     };
+  }
+
+  // ── 流式显示的两个辅助：让正文匀速流出，并且不把写到一半的 Markdown 记号露出来 ──
+  function streamInsideFence(text, lineStart) {
+    var marks = text.slice(0, lineStart).match(/^```/gm);
+    return !!marks && marks.length % 2 === 1;
+  }
+  // 只影响「这一帧画什么」，不改已收到的原文：
+  // 没写完的 **加粗** / `代码` 先按已闭合来画（文字逐步出现，不闪星号和反引号），
+  // 没写完的 [链接](地址) 先只画链接文字。
+  function streamDisplayText(text) {
+    var ls = text.lastIndexOf('\n') + 1, line = text.slice(ls);
+    if (!line || line.charAt(0) === '|' || /^```/.test(line) || streamInsideFence(text, ls)) return text;
+    var masked = line.replace(/`[^`\n]*`/g, function(m) { return new Array(m.length + 1).join(' '); });
+    var tick = masked.indexOf('`');
+    if (tick >= 0) return tick < line.length - 1 ? text + '`' : text.slice(0, ls + tick);
+    var link = /(!?)\[([^\]\n]*)(?:\]\([^)\n]*|\])?$/.exec(masked);
+    if (link && link[0].length <= 400) {
+      var head = text.slice(0, ls + link.index);
+      return streamDisplayText(link[1] ? head : head + line.slice(link.index + 1, link.index + 1 + link[2].length));
+    }
+    var parts = masked.split('**');
+    if (parts.length % 2 === 0) {
+      var open = parts[parts.length - 1];
+      if (!open) return text.slice(0, text.length - 2);
+      if (/^\s/.test(open)) return text;
+      return text + (open.charAt(open.length - 1) === '*' ? '*' : '**');
+    }
+    if (/(?:^|[^*\s])\*$/.test(masked)) return text.slice(0, text.length - 1);
+    return text;
+  }
+  // 这一帧最多可以显示到哪里（返回 pending 里的字符数；0 表示先等一等）。
+  // 表格按整行出现（表头等分隔行到齐），围栏行、标题和列表记号等到后面有内容再一起出现，
+  // 这样屏幕上不会先出现「| a | b |」「-」「#」这类原始记号再变成格式。
+  function streamRevealLimit(done, pend, cut) {
+    var limit = streamRevealLimitAt(done, pend, cut);
+    // 停在某一行开头时，上一行也要过一遍规则：表头行要等分隔行到齐，不能因为下一行开始了就先露出来。
+    if (limit > 0 && pend.charAt(limit - 1) === '\n') {
+      var earlier = streamRevealLimitAt(done, pend, limit - 1);
+      if (earlier < limit - 1) limit = earlier;
+    }
+    return limit;
+  }
+  function streamRevealLimitAt(done, pend, cut) {
+    var full = done + pend, base = done.length, abs = base + cut;
+    var lineStart = full.lastIndexOf('\n', abs - 1) + 1;
+    if (lineStart < base) return cut;
+    var lineEnd = full.indexOf('\n', abs);
+    var soFar = full.slice(lineStart, abs);
+    if (!soFar) return cut;
+    function at(pos) { return Math.max(0, Math.min(pend.length, pos - base)); }
+    if (/^`{1,3}[\w+#.-]*[ \t]*$/.test(soFar)) return at(lineEnd < 0 ? lineStart : lineEnd + 1);
+    if (streamInsideFence(full, lineStart)) return cut;
+    if (soFar.charAt(0) === '|') {
+      if (lineEnd < 0) return at(lineStart);
+      var prevStart = lineStart > 1 ? full.lastIndexOf('\n', lineStart - 2) + 1 : 0;
+      if (lineStart > 0 && full.charAt(prevStart) === '|') return at(lineEnd + 1);
+      var sepEnd = full.indexOf('\n', lineEnd + 1);
+      return sepEnd < 0 ? at(lineStart) : at(sepEnd + 1);
+    }
+    if (/^[ \t#\-*+_=>\d.]+$/.test(soFar)) {
+      var available = full.slice(lineStart, lineEnd < 0 ? full.length : lineEnd);
+      var content = available.search(/[^ \t#\-*+_=>\d.]/);
+      if (content >= 0) return at(Math.max(abs, lineStart + content + 1));
+      return at(lineEnd < 0 ? lineStart : lineEnd + 1);
+    }
+    return cut;
   }
 
   function createSmoothTextRenderer(targetEl, options) {
@@ -5389,7 +5500,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       plainMarkdownMode = true;
     }
 
-    function emitText() {
+    var holdSince = 0, lastAppendAt = 0;
+    function emitText(force) {
       if (cancelled || !targetEl) return;
       if (!pending) {
         if (streamClass) targetEl.classList.remove(streamClass);
@@ -5401,15 +5513,28 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       // Plain prose keeps the search-row rhythm: a short slice each frame,
       // and a burst still finishes within about a quarter second. Markdown
       // and reduced motion commit the whole packet so tables stay intact.
-      if (options.flowPace && !reducedMotion && pending.length > 32) {
+      var take = pending.length;
+      if (options.flowPace && !reducedMotion && !force && pending.length > 32) {
         var budget = Math.max(32, Math.ceil(pending.length / 8));
         if (budget < pending.length) {
-          next = pending.slice(0, budget);
-          var snapped = takeSmoothTextChunk(next, { maxChunk: budget, minChunk: Math.min(6, budget) });
-          if (snapped && snapped.length >= Math.min(6, budget) && snapped.length < next.length) next = snapped;
-          pending = pending.slice(next.length);
-        } else pending = '';
-      } else pending = '';
+          take = budget;
+          var snapped = takeSmoothTextChunk(pending.slice(0, budget), { maxChunk: budget, minChunk: Math.min(6, budget) });
+          if (snapped && snapped.length >= Math.min(6, budget) && snapped.length < budget) take = snapped.length;
+        }
+      }
+      // 已送达的文字照旧在下一帧显示；只有写到一半的 Markdown 结构（表格行、围栏行、行首记号）
+      // 等这一行补完整再一起出现，屏幕上不先露出「| a | b |」「-」「#」这类原始记号。
+      // 上游停顿超过 0.9 秒、总共等了 6 秒、收尾或关闭动效时照常显示。
+      if (options.flowPace && !options.plainStream && !reducedMotion && !force) {
+        var limit = streamRevealLimit(rendered, pending, take);
+        if (limit <= 0) {
+          var holdNow = window.performance && performance.now ? performance.now() : Date.now();
+          if (!holdSince) holdSince = holdNow;
+          if (holdNow - lastAppendAt < 900 && holdNow - holdSince < 6000 && !drainState) return;
+        } else { take = limit; holdSince = 0; }
+      } else holdSince = 0;
+      if (take < pending.length) { next = pending.slice(0, take); pending = pending.slice(take); }
+      else pending = '';
       var firstReceivedAt = pendingFirstReceivedAt, lastReceivedAt = pendingLastReceivedAt;
       if (!pending) pendingFirstReceivedAt = pendingLastReceivedAt = 0;
       if (!next) return;
@@ -5431,7 +5556,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         // precision or clock corrections must not suppress an accepted frame.
         if (!isSelectionInTarget(targetEl)) {
           if (!appendPlainMarkdown(next)) {
-            patchInnerHTML(targetEl, renderStreamMarkdown(rendered), ink, renderStreamMarkdown.stable());
+            patchInnerHTML(targetEl, renderStreamMarkdown(options.flowPace && !force ? streamDisplayText(rendered) : rendered), ink, renderStreamMarkdown.stable());
             resumePlainMarkdownTail();
           } else { delete targetEl.__xtjStreamHtml; targetEl.__xtjStable = null; }
         } else if (!selectionRetryHandler) {
@@ -5502,6 +5627,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           pendingLastReceivedAt = stamp;
         }
         pending += String(text);
+        lastAppendAt = window.performance && performance.now ? performance.now() : Date.now();
         if (S.activeRenderers.indexOf(api) === -1) S.activeRenderers.push(api);
         if (!paused) schedule();
       },

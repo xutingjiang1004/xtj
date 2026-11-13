@@ -68,3 +68,78 @@ test('streaming block cache matches a full render at every prefix for list-heavy
   assert.ok(result.lateRatio<0.6,'late frames still re-render most of the text: '+result.lateRatio);
  }finally{await f.browser.close();}
 });
+
+test('finished code blocks and tables are frozen too, and every prefix still matches a full render',{timeout:60000},async()=>{
+ const f=await rendererFixture();try{
+  const result=await f.page.evaluate(()=>{
+   const docs=[
+    '开头\n\n```js\nconst a = 1;\n\nconsole.log(a);\n```\n\n中间一段，带**加粗**。\n\n| 词 | 义 |\n|---|---|\n| harbour | 港口 |\n| quiet | 安静 |\n\n结尾一段。\n\n- 甲\n- 乙\n\n完',
+    '| a | b |\n|---|---|\n| 1 | 2 |\n\n| c | d |\n|---|---|\n| 3 | 4 |\n\n两张表之后\n\n```\n| 不是表格 |\n```\n\n完',
+    '```py\nprint("```")\n```\n\n文字\n\n```\n未闭合的代码\n\n还在代码里',
+    '表格后直接跟行\n\n| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\n紧跟文字\n\n完'
+   ],failures=[];
+   for(const doc of docs){
+    const cache=createStreamingMarkdownCache(renderMarkdown);
+    for(let i=1;i<=doc.length;i++){const text=doc.slice(0,i);if(cache(text)!==renderMarkdown(text,true)){failures.push([doc.slice(0,10),i]);break;}}
+   }
+   // 代价：出现过表格和代码块之后，后面的帧不能再把整篇重新解析。
+   const calls=[];const counting=(t,x)=>{calls.push(t.length);return renderMarkdown(t,x);};
+   const cache=createStreamingMarkdownCache(counting);let doc='';
+   for(let i=0;i<40;i++)doc+='## 小节'+i+'\n第'+i+'段内容。\n\n| 时态 | 结构 |\n|---|---|\n| 现在完成时 | have done |\n\n```js\nconst x = '+i+';\n```\n\n';
+   const sizes=[];for(let i=0;i<doc.length;i+=9){calls.length=0;cache(doc.slice(0,i+1));sizes.push(calls.reduce((a,b)=>a+b,0)/(i+1));}
+   const late=sizes.slice(-40).sort((a,b)=>a-b);
+   return {failures,lateMedian:late[20]};
+  });
+  assert.deepEqual(result.failures,[]);
+  assert.ok(result.lateMedian<0.2,'late frames still re-render most of the text: '+result.lateMedian);
+ }finally{await f.browser.close();}
+});
+
+test('half-typed Markdown never shows raw markers while a reply streams one character at a time',{timeout:60000},async()=>{
+ const f=await rendererFixture();try{
+  const result=await f.page.evaluate(async()=>{
+   const target=document.getElementById('output');
+   const renderer=createSmoothTextRenderer(target,{flowPace:true});
+   const text='这是**加粗**和`code`以及[链接](https://a.com)。\n\n## 标题\n\n- 列表项\n- 第二项\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n```js\nlet a = 1;\n```\n\n结尾。';
+   const frame=()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+   const raw=[];let shown=0;
+   for(const ch of text){
+    renderer.append(ch);await frame();
+    const visible=target.cloneNode(true);visible.querySelectorAll('pre,code,.ai-stream-cursor').forEach(n=>n.remove());
+    const plain=visible.textContent;
+    if(/\*\*|`|\]\(|https:|^\s*\||\|\s*$|^#|^- /m.test(plain))raw.push(plain.slice(-24));
+    shown=Math.max(shown,target.textContent.length);
+   }
+   renderer.finish(text);await frame();
+   return {raw,html:target.innerHTML,full:renderMarkdown(text,false)===target.innerHTML.replace(/<span class="ai-stream-cursor"[^>]*><\/span>/,'')};
+  });
+  assert.deepEqual(result.raw,[]);
+  assert.match(result.html,/<strong>加粗<\/strong>/);assert.match(result.html,/<table>/);assert.match(result.html,/<pre>/);
+ }finally{await f.browser.close();}
+});
+
+test('arrived prose still lands on the next frame, and an unfinished table row is released when the stream stalls or ends',{timeout:60000},async()=>{
+ const f=await rendererFixture();try{
+  const result=await f.page.evaluate(async()=>{
+   const frame=()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+   const out={};
+   let target=document.getElementById('output');
+   let renderer=createSmoothTextRenderer(target,{flowPace:true});
+   renderer.append('已经送达的文字应当立刻显示。');await frame();out.prose=target.textContent;
+   renderer.append('\n\n| 半行');await frame();out.held=target.textContent;
+   renderer.finish('已经送达的文字应当立刻显示。\n\n| 半行');await frame();out.finished=target.textContent;
+   target.innerHTML='';renderer=createSmoothTextRenderer(target,{flowPace:true});
+   renderer.append('| 停住的半行');await frame();out.before=target.textContent;
+   await new Promise(r=>setTimeout(r,1100));await frame();out.after=target.textContent;
+   // 链接文字先出现，地址到齐后变成链接；中途改写不能把文字重复一遍。
+   target.innerHTML='';renderer=createSmoothTextRenderer(target,{flowPace:true});
+   for(const part of ['见[链','接','](https://a.com)','。'])renderer.append(part),await frame(),(out.link=out.link||[]).push(target.textContent);
+   return out;
+  });
+  assert.equal(result.prose,'已经送达的文字应当立刻显示。');
+  assert.equal(result.held,'已经送达的文字应当立刻显示。');
+  assert.match(result.finished,/\| 半行/);
+  assert.equal(result.before,'');assert.equal(result.after,'| 停住的半行');
+  assert.deepEqual(result.link,['见链','见链接','见链接','见链接。']);
+ }finally{await f.browser.close();}
+});
