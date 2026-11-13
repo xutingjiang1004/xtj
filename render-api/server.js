@@ -27947,7 +27947,14 @@ app.get('/api/agent/scheduled-tasks', guestAiAuth, guestAwareRateLimit(rateLimit
     if (!stOwner) return res.json({ ok: true, tasks: [] });
     var stRows = await supabase.from('ai_scheduled_tasks').select('*')
       .eq('owner_name', stOwner).order('created_at', { ascending: false }).limit(50);
-    if (stRows.error) return res.status(503).json({ ok: false, error: '定时任务表尚未迁移', tasks: [] });
+    if (stRows.error) {
+      // ★ 2026-11-14：区分「表没建」与「Supabase 额度/服务不可用」，否则用户建完表仍看到误导性提示。
+      var stErrMsg = String(stRows.error.message || '');
+      if (/egress|quota|402|service unavailable/i.test(stErrMsg)) {
+        return res.status(503).json({ ok: false, error: '网站数据服务额度已用完，定时任务暂时不可用', tasks: [] });
+      }
+      return res.status(503).json({ ok: false, error: '定时任务表尚未迁移', tasks: [] });
+    }
     return res.json({ ok: true, tasks: (stRows.data || []).map(scheduledTaskPayload) });
   } catch (e) { return res.status(500).json({ ok: false, error: '查询失败', tasks: [] }); }
 });
@@ -27974,7 +27981,13 @@ app.post('/api/agent/scheduled-tasks', guestAiAuth, guestAwareRateLimit(rateLimi
       next_run_at: stRow.next_run_at,
       last_status: 'pending'
     }).select('*');
-    if (stIns.error) return res.status(503).json({ ok: false, error: '创建失败（定时任务表尚未迁移？）' });
+    if (stIns.error) {
+      var stInsMsg = String(stIns.error.message || '');
+      if (/egress|quota|402|service unavailable/i.test(stInsMsg)) {
+        return res.status(503).json({ ok: false, error: '网站数据服务额度已用完，暂时无法创建定时任务' });
+      }
+      return res.status(503).json({ ok: false, error: '创建失败（定时任务表尚未迁移？）' });
+    }
     return res.json({ ok: true, task: scheduledTaskPayload((stIns.data && stIns.data[0]) || stRow) });
   } catch (e) { return res.status(500).json({ ok: false, error: '创建失败' }); }
 });
