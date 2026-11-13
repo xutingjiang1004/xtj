@@ -17,11 +17,18 @@ function configure(t) {
 // 公开期截止用绝对时间戳，测试必须显式指定；用远期时间，避免真实时间越过默认窗口后「公开期内」用例变红。
 const PUBLIC_UNTIL = '2099-01-01T00:00:00+08:00';
 const EXPIRED_UNTIL = '2026-10-01T00:00:00+08:00';
-const expiredEnv=()=>({OPENROUTER_API_KEY:TEST_KEY,OPENROUTER_PUBLIC_UNTIL:EXPIRED_UNTIL});
+// ★ 2026-11-13：openrouter.js 默认不读 OPENROUTER_PUBLIC_UNTIL（防 Render 残留旧值），
+//   测试要模拟窗口必须显式打开 OPENROUTER_PUBLIC_UNTIL_FORCE，两处保持一致。
+const expiredEnv=()=>({OPENROUTER_API_KEY:TEST_KEY,OPENROUTER_PUBLIC_UNTIL:EXPIRED_UNTIL,OPENROUTER_PUBLIC_UNTIL_FORCE:'1'});
 function withPublicUntil(t, value) {
   const old = process.env.OPENROUTER_PUBLIC_UNTIL;
+  const oldForce = process.env.OPENROUTER_PUBLIC_UNTIL_FORCE;
   process.env.OPENROUTER_PUBLIC_UNTIL = value;
-  t.after(() => { if (old === undefined) delete process.env.OPENROUTER_PUBLIC_UNTIL; else process.env.OPENROUTER_PUBLIC_UNTIL = old; });
+  process.env.OPENROUTER_PUBLIC_UNTIL_FORCE = '1';
+  t.after(() => {
+    if (old === undefined) delete process.env.OPENROUTER_PUBLIC_UNTIL; else process.env.OPENROUTER_PUBLIC_UNTIL = old;
+    if (oldForce === undefined) delete process.env.OPENROUTER_PUBLIC_UNTIL_FORCE; else process.env.OPENROUTER_PUBLIC_UNTIL_FORCE = oldForce;
+  });
 }
 const body = () => ({provider:'openrouter',model:openRouter.MODEL,model_uid:openRouter.MODEL_UID,base_url:openRouter.BASE_URL,
   message:'原始问题',conversation_id:'OPENROUTER01',client_request_id:'test-request',thinking_mode:'off',web_search:false,messages_include_current:false});
@@ -40,6 +47,8 @@ function routeFixture(options={}) {
   const req=new EventEmitter(),res=new EventEmitter(); req.userName=options.userName===undefined?'xxz':options.userName; req.body={...body(),...options.body};
   Object.assign(res,{writableEnded:false,headers:{},setHeader(k,v){this.headers[k]=v;},flushHeaders(){},end(){this.writableEnded=true;}});
   const c={app:{post(_path,...handlers){handler=handlers.at(-1);}},express:{json(){}},aiLargeJson(){},authenticateUser(){},aiChatConcurrencyGate(){},aiRequestMiddleware(){},resolveAiModelReference(){},rateLimit(){},
+    // ★ 2026-11-13 限时开放 15 天：custom-chat 路由新增游客限流包装，夹具需提供同名中间件。
+    guestAwareChatRateLimit(){}, guestAwareRateLimit(limiter){ return limiter || function(_req,_res,next){ next(); }; }, guestAiAuth(){},
     openRouter,ADMIN_USERNAME:'xxz',
     guestOpenRouterAuth:openRouter.createGuestOpenRouterAuth({authenticateUser(){},now:()=>Date.now()}),
     guestOpenRouterCatalogAuth:openRouter.createGuestOpenRouterAuth({authenticateUser(){},now:()=>Date.now(),allowAnonymous:true}),
@@ -196,7 +205,7 @@ test('saved free model history retains the exact model identifier even when Deep
 test('model catalog API never decrypts managed keys or caches any secret response',async t=>{
   configure(t);withPublicUntil(t,PUBLIC_UNTIL);let handler,decrypts=0;
   const a=server.indexOf("app.get('/api/agent/custom-models'"),b=server.indexOf('// PUT /api/agent/custom-models',a);
-  vm.runInNewContext(server.slice(a,b),{app:{get(_path,...h){handler=h.at(-1);}},authenticateUser(){},rateLimit(){},openRouter,ADMIN_USERNAME:'xxz',
+  vm.runInNewContext(server.slice(a,b),{app:{get(_path,...h){handler=h.at(-1);}},authenticateUser(){},rateLimit(){},guestAwareRateLimit(l){return l||function(_q,_s,n){if(n)n();};},openRouter,ADMIN_USERNAME:'xxz',
     guestOpenRouterCatalogAuth:openRouter.createGuestOpenRouterAuth({authenticateUser(){},now:()=>Date.now(),allowAnonymous:true}),
     fetchLatestAiModelsSnapshot:async()=>({models:[{uid:'old',provider:'openrouter',api_key_enc:'legacy-cipher'},{uid:'personal',provider:'qwen',api_key_enc:'personal-cipher'}],deletedUids:[]}),
     publicAiModel:vm.runInNewContext('('+server.slice(server.indexOf('function publicAiModel('),server.indexOf('async function resolveAiModelReference(')).trim()+')'),
@@ -210,7 +219,7 @@ test('model catalog API never decrypts managed keys or caches any secret respons
 test('the model catalog route lets anonymous visitors read the public directory but never personal models',async t=>{
   configure(t);withPublicUntil(t,PUBLIC_UNTIL);let handler,authChain=[];
   const a=server.indexOf("app.get('/api/agent/custom-models'"),b=server.indexOf('// PUT /api/agent/custom-models',a);
-  vm.runInNewContext(server.slice(a,b),{app:{get(_path,...h){handler=h.at(-1);authChain=h.slice(0,-1);}},authenticateUser(){},rateLimit(){},openRouter,ADMIN_USERNAME:'xxz',
+  vm.runInNewContext(server.slice(a,b),{app:{get(_path,...h){handler=h.at(-1);authChain=h.slice(0,-1);}},authenticateUser(){},rateLimit(){},guestAwareRateLimit(l){return l||function(_q,_s,n){if(n)n();};},openRouter,ADMIN_USERNAME:'xxz',
     guestOpenRouterCatalogAuth:openRouter.createGuestOpenRouterAuth({authenticateUser(){},now:()=>Date.now(),allowAnonymous:true}),
     fetchLatestAiModelsSnapshot:async()=>({models:[{uid:'personal',provider:'qwen',api_key_enc:'cipher'}],deletedUids:[]}),
     publicAiModel:m=>({uid:m.uid,provider:m.provider}),decryptAiModelSecret(){throw Error('must not decrypt');},console:{error(){}}});

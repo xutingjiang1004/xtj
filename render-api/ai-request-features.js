@@ -119,12 +119,16 @@ function makeMiddleware(deps={}){
 }
 function install(app,deps){
   const json=deps.jsonMiddleware;
-  app.post('/api/agent/attachments',deps.authenticateUser,deps.rateLimit(60000,30),json,(req,res)=>{
+  // ★ 2026-11-14（用户要求：游客也能发照片/文件）：附件复用上传/清空在窗口内允许游客，
+  //   窗口外 guestAiAuth 自动回落 authenticateUser；游客 owner 与中间件一致按 IP 隔离。
+  const attachAuth=deps.guestAiAuth||deps.authenticateUser;
+  const ownerOfRequest=(req)=>req.guestAi?('guest:'+String(req.ip||'')):ownerOf(req);
+  app.post('/api/agent/attachments',attachAuth,deps.rateLimit(60000,30),json,(req,res)=>{
     res.setHeader('Cache-Control','no-store');
-    try{res.json({ok:true,...store.add(ownerOf(req),String(req.body.conversation_id||''),req.body.attachment||{})});}
+    try{res.json({ok:true,...store.add(ownerOfRequest(req),String(req.body.conversation_id||''),req.body.attachment||{})});}
     catch(error){res.status(error.status||400).json({ok:false,code:error.code||'attachment_invalid',error:error.message});}
   });
-  app.delete('/api/agent/attachments',deps.authenticateUser,(req,res)=>{store.clear(ownerOf(req));res.json({ok:true});});
+  app.delete('/api/agent/attachments',attachAuth,(req,res)=>{store.clear(ownerOfRequest(req));res.json({ok:true});});
   return makeMiddleware({...deps,store});
 }
 async function parseCached(buffer,kind,parse){

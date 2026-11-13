@@ -59,6 +59,8 @@ test('the actual critique route enforces post visibility and bills image provide
   const scope = vm.createContext({ app, supabase, require: localRequire, ADMIN_USERNAME: 'xxz', SUPABASE_URL: 'https://supabase.test', AbortController, console,
     DEEPSEEK_MODEL_VISION: 'deepseek-flash', DEEPSEEK_MODEL_FLASH: 'deepseek-flash', endSse:require('../render-api/sse-write').endSse,writeSse: localRequire('./sse-write').writeSse,
     authenticateUser: (req, res, next) => { req.userName = req.headers['x-fixture-user']; if (!req.userName) return res.status(401).json({ error: 'unauthorized' }); next(); },
+    guestAiAuth: (req, res, next) => { req.userName = req.userName || req.headers['x-fixture-user']; if (!req.userName) return res.status(401).json({ error: 'unauthorized' }); next(); },
+    guestAwareChatRateLimit(req,res,next){next();},guestAwareRateLimit(l){return l||function(_q,_s,n){if(n)n();};},
     aiChatConcurrencyGate: pass, rateLimit: () => pass, enforceAiChatAccess: async () => ({ allowed: true }), getAiQuotaErrorMessage: () => '',
     aiSiteText: (v, n) => String(v || '').trim().slice(0, n), genConvId: () => 'fixture-conversation',
     recordAiTurnUsage: async (user, actualUsage, data) => { billed.push({ actualUsage, data }); },

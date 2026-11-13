@@ -8830,3 +8830,185 @@ html body #aiChatRoot .ai-study-landing .ai-study-starter { justify-content:flex
 .ai-msg.user .ai-file-chip { animation:ai-attach-in .24s cubic-bezier(.26,.62,.16,1) both; }
 @media (prefers-reduced-motion:reduce) { .ai-chat-file-preview, .dt-file-preview, .ai-chat-file-preview .ai-file-thumb, .dt-file-preview .ai-file-thumb, .ai-msg.user .ai-file-chip { animation:none; } }
 html[data-xtj-motion="off"] .ai-chat-file-preview, html[data-xtj-motion="off"] .dt-file-preview, html[data-xtj-motion="off"] .ai-file-thumb, html[data-xtj-motion="off"] .ai-msg.user .ai-file-chip { animation:none; }
+
+
+/* ★ 2026-11-14（用户要求）：AI 回复去掉气泡、正文全宽显示。
+   只改背景/边框/阴影/宽度/内边距；不动 aiMsgEnter 入场、流式透明度过渡、
+   生成中状态与工具调用卡片，用户自己的气泡保持不变。 */
+.ai-chat-root .ai-msg.assistant .ai-msg-bubble,
+.ai-msg.assistant .ai-msg-bubble {
+  max-width: 100% !important;
+  width: 100% !important;
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+.ai-msg.assistant .ai-msg-footer { max-width: 100% !important; }
+[data-theme="dark"] .ai-msg.assistant .ai-msg-bubble,
+html[data-theme="dark"] .ai-msg.assistant .ai-msg-bubble {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+/* ★ 2026-11-14（用户要求）：回复里的表格字号统一、不再按列忽大忽小，
+   单元格允许换行，避免第二列被右侧裁切/出现横向滚动条。
+   选择器只覆盖普通回复气泡里的表格，不影响工具调用卡片表格。 */
+.ai-msg.assistant .ai-msg-bubble table {
+  display: table !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  table-layout: auto !important;
+  overflow-x: visible !important;
+  font-size: 13px !important;
+  line-height: 1.55 !important;
+}
+.ai-msg.assistant .ai-msg-bubble th,
+.ai-msg.assistant .ai-msg-bubble td {
+  white-space: normal !important;
+  word-break: break-word !important;
+  overflow-wrap: anywhere !important;
+  font-size: 13px !important;
+  line-height: 1.55 !important;
+  padding: 7px 9px !important;
+}
+.ai-msg.assistant .ai-msg-bubble th *,
+.ai-msg.assistant .ai-msg-bubble td * {
+  font-size: inherit !important;
+  line-height: inherit !important;
+}
+.ai-msg.assistant .ai-msg-bubble th { font-weight: 650 !important; }
+
+/* ===================== ★ 2026-11-14（用户要求）：自动化 / 定时任务面板 =====================
+   新增独立类名，不复用既有气泡/工具卡片样式，避免影响回复动画与工具调用展示。 */
+.ai-auto-modal {
+  position: fixed; inset: 0; z-index: 2200;
+  display: flex; align-items: flex-end; justify-content: center;
+  background: rgba(12, 22, 20, 0.42);
+  padding: 12px;
+}
+.ai-auto-box {
+  width: min(560px, 100%);
+  max-height: min(82vh, 720px);
+  display: flex; flex-direction: column;
+  background: #fff; color: #1c2b28;
+  border-radius: 18px;
+  box-shadow: 0 18px 48px rgba(10, 30, 26, 0.24);
+  overflow: hidden;
+  padding: 14px 16px 16px;
+}
+.ai-auto-head { display: flex; align-items: center; justify-content: space-between; }
+.ai-auto-title { font-size: 16px; font-weight: 650; letter-spacing: .2px; }
+.ai-auto-close {
+  width: 30px; height: 30px; border: 0; border-radius: 10px;
+  background: rgba(0, 0, 0, 0.05); color: inherit; font-size: 18px; line-height: 1;
+  cursor: pointer;
+}
+.ai-auto-close:hover { background: rgba(0, 0, 0, 0.1); }
+.ai-auto-tip {
+  margin: 8px 0 10px; font-size: 12px; line-height: 1.55;
+  color: rgba(60, 90, 84, 0.72);
+}
+.ai-auto-list { flex: 1; min-height: 60px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.ai-auto-empty {
+  padding: 22px 10px; text-align: center; font-size: 12.5px; line-height: 1.7;
+  color: rgba(70, 100, 94, 0.66);
+}
+.ai-auto-item {
+  border: 1px solid rgba(78, 168, 142, 0.2);
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  background: rgba(246, 252, 250, 0.9);
+}
+.ai-auto-item.is-off { opacity: .62; }
+.ai-auto-item.is-error { border-color: rgba(214, 122, 108, 0.42); }
+.ai-auto-item-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.ai-auto-item-title { font-size: 13.5px; font-weight: 640; }
+.ai-auto-item-status { font-size: 11.5px; color: rgba(52, 132, 110, 0.95); flex: 0 0 auto; }
+.ai-auto-item.is-off .ai-auto-item-status { color: rgba(120, 134, 130, 0.9); }
+.ai-auto-item.is-error .ai-auto-item-status { color: #c25a4a; }
+.ai-auto-item-meta { margin-top: 3px; font-size: 11.5px; color: rgba(80, 106, 100, 0.8); }
+.ai-auto-item-last { margin-top: 5px; font-size: 11.5px; line-height: 1.5; color: rgba(60, 92, 86, 0.78); }
+.ai-auto-item-err { margin-top: 4px; font-size: 11.5px; color: #c25a4a; }
+.ai-auto-item-ops { margin-top: 8px; display: flex; gap: 6px; }
+.ai-auto-item-ops button {
+  border: 1px solid rgba(78, 168, 142, 0.32);
+  background: #fff; color: rgba(46, 118, 96, 0.95);
+  border-radius: 8px; padding: 4px 10px; font-size: 11.5px; cursor: pointer;
+}
+.ai-auto-item-ops button:hover { background: rgba(78, 168, 142, 0.12); }
+.ai-auto-item-ops button.is-danger { border-color: rgba(200, 110, 96, 0.4); color: #bf5343; }
+.ai-auto-new {
+  margin-top: 10px; width: 100%; padding: 9px 12px;
+  border: 1px dashed rgba(78, 168, 142, 0.45); border-radius: 10px;
+  background: rgba(240, 250, 246, 0.8); color: rgba(46, 118, 96, 0.95);
+  font-size: 13px; cursor: pointer;
+}
+.ai-auto-new:hover { background: rgba(78, 168, 142, 0.1); }
+.ai-auto-form {
+  margin-top: 10px; padding: 12px; border-radius: 12px;
+  background: rgba(244, 250, 248, 0.96); border: 1px solid rgba(78, 168, 142, 0.18);
+  max-height: 52vh; overflow-y: auto;
+}
+.ai-auto-field { display: block; margin-bottom: 9px; font-size: 12px; color: rgba(56, 84, 78, 0.9); }
+.ai-auto-field > span { display: block; margin-bottom: 4px; font-weight: 600; }
+.ai-auto-field input[type="text"],
+.ai-auto-field input[type="time"],
+.ai-auto-field input[type="number"],
+.ai-auto-field input[type="datetime-local"],
+.ai-auto-field textarea,
+.ai-auto-field select {
+  width: 100%; box-sizing: border-box;
+  border: 1px solid rgba(78, 168, 142, 0.28); border-radius: 9px;
+  padding: 8px 10px; font-size: 13px; font-family: inherit;
+  background: #fff; color: inherit;
+}
+.ai-auto-field textarea { resize: vertical; min-height: 68px; line-height: 1.55; }
+.ai-auto-week { display: flex; flex-wrap: wrap; gap: 6px; }
+.ai-auto-week button {
+  border: 1px solid rgba(78, 168, 142, 0.3); background: #fff;
+  color: rgba(56, 96, 88, 0.9); border-radius: 8px;
+  padding: 5px 9px; font-size: 11.5px; cursor: pointer;
+}
+.ai-auto-week button.is-on { background: rgba(66, 155, 122, 0.95); border-color: rgba(66, 155, 122, 0.95); color: #fff; }
+.ai-auto-form-ops { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
+.ai-auto-cancel, .ai-auto-submit {
+  padding: 8px 16px; border-radius: 9px; font-size: 13px; cursor: pointer;
+  border: 1px solid rgba(78, 168, 142, 0.3); background: #fff; color: rgba(56, 96, 88, 0.9);
+}
+.ai-auto-submit { background: linear-gradient(135deg, rgba(66, 155, 122, 0.98), rgba(84, 176, 158, 0.98)); border-color: transparent; color: #fff; }
+.ai-auto-submit:disabled { opacity: .6; cursor: default; }
+
+[data-theme="dark"] .ai-auto-box { background: #16211f; color: #dceae6; }
+[data-theme="dark"] .ai-auto-close { background: rgba(255, 255, 255, 0.08); }
+[data-theme="dark"] .ai-auto-tip,
+[data-theme="dark"] .ai-auto-item-meta,
+[data-theme="dark"] .ai-auto-item-last { color: rgba(190, 214, 208, 0.75); }
+[data-theme="dark"] .ai-auto-item { background: rgba(255, 255, 255, 0.04); border-color: rgba(120, 190, 170, 0.22); }
+[data-theme="dark"] .ai-auto-item-ops button,
+[data-theme="dark"] .ai-auto-week button { background: rgba(255, 255, 255, 0.06); color: #cfe9e2; }
+[data-theme="dark"] .ai-auto-new { background: rgba(255, 255, 255, 0.05); color: #cfe9e2; }
+[data-theme="dark"] .ai-auto-form { background: rgba(255, 255, 255, 0.05); border-color: rgba(120, 190, 170, 0.2); }
+[data-theme="dark"] .ai-auto-field input,
+[data-theme="dark"] .ai-auto-field textarea,
+[data-theme="dark"] .ai-auto-field select { background: rgba(10, 18, 16, 0.6); border-color: rgba(120, 190, 170, 0.28); color: #dceae6; }
+[data-theme="dark"] .ai-auto-cancel { background: rgba(255, 255, 255, 0.06); color: #cfe9e2; }
+
+@media (max-width: 640px) {
+  .ai-auto-modal { padding: 0; align-items: flex-end; }
+  .ai-auto-box { width: 100%; max-height: 88vh; border-radius: 18px 18px 0 0; }
+}
+
+/* ★ 2026-11-14（用户要求：不喜欢那个胶囊按钮）：
+   把头部「学习 / 深入研究」两个药丸按钮收敛为标签式按钮（圆角 20px → 10px）。
+   只改圆角，hover / 选中态 / 深色主题 / 移动端 44px 图标按钮 / 所有动画一律不动。
+   如需回退，删掉这一段即可。 */
+@media (min-width: 641px) {
+  html body .ai-chat-header .ai-deep-think-toggle,
+  html body .ai-chat-header .ai-study-toggle {
+    border-radius: 10px !important;
+  }
+}

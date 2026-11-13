@@ -47,8 +47,10 @@ test('P1-2 限流键必须归一化（大小写/尾斜杠变体共用同一计�
 });
 
 // ---------------------------------------------------------------- P1-3 生图接口鉴权
-test('P1-3 /api/agent/image 必须要求登录且复核重定向地址', () => {
-  assert.match(server, /app\.get\('\/api\/agent\/image', authenticateUser,/, '必须补 authenticateUser');
+test('P1-3 /api/agent/image 必须鉴权（窗口外回落登录）且复核重定向地址', () => {
+  // ★ 2026-11-13 限时开放 15 天：生图改挂 guestAiAuth——窗口内游客可用，
+  //   窗口外或带凭证的请求仍由 guestAiAuth 回落 authenticateUser，鉴权没有被摘掉。
+  assert.match(server, /app\.get\('\/api\/agent\/image', guestAiAuth,/, '必须挂游客感知鉴权（窗口外回落 authenticateUser）');
   assert.match(server, /image_upstream_blocked/, '必须校验重定向后的最终地址');
 });
 

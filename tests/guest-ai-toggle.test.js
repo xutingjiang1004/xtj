@@ -32,11 +32,21 @@ function serverGuestRuntime(config, options) {
       return res.status(401).json({ ok: false, error: '请先登录' });
     },
     rateLimit: function() { return function(req, res, next) { next(); }; },
+    // ★ 2026-11-13：限时窗口内新增的游客限流包装依赖这两个模块级符号，夹具需补齐。
+    AI_CHAT_HOURLY_IP_LIMIT: 200,
+    getRealIp: function(req) { return (req && (req.ip || (req.headers && req.headers['x-forwarded-for']))) || '0.0.0.0'; },
     // ★ 2026-10-27 限时公开：访客 AI 开关代码段内还定义了 OpenRouter 公开期鉴权中间件，
     //   它依赖 openRouter 模块，vm 上下文必须提供，否则整段代码求值即抛 ReferenceError。
     openRouter: require('../render-api/openrouter'),
     // 访客 AI 现在要两个条件同时成立：环境变量 XTJ_ALLOW_GUEST_AI=1 且后台开关打开（见 server.js 注释）。
-    process: { env: { XTJ_ALLOW_GUEST_AI: options.envFlag === undefined ? '1' : options.envFlag } },
+    // ★ 2026-11-13 限时开放 15 天：默认用 XTJ_GUEST_PUBLIC_WINDOW_OFF=1 模拟「窗口已结束」，
+    //   继续验证原双条件语义；传 { publicWindow: true } 时走真实窗口（窗口内直接放行）。
+    process: {
+      env: Object.assign(
+        { XTJ_ALLOW_GUEST_AI: options.envFlag === undefined ? '1' : options.envFlag },
+        options.publicWindow ? {} : { XTJ_GUEST_PUBLIC_WINDOW_OFF: '1' }
+      )
+    },
     console: console,
     Date: Date
   };
@@ -188,8 +198,9 @@ test('真实 aiRequestMiddleware 在开关关闭时仍由认证中间件拦截',
 });
 
 test('聊天流路由挂载访客鉴权、游客限流和每日上限', function() {
-  assert.match(serverSource, /app\.post\('\/api\/agent\/chat\/stream', guestAiAuth, aiChatConcurrencyGate, rateLimit\(3600000, AI_CHAT_HOURLY_IP_LIMIT\), guestAiAdmission,/);
-  assert.match(serverSource, /app\.get\('\/api\/agent\/guest-mode', rateLimit\(60000, 60\), async function/);
+  // ★ 2026-11-13 限时开放 15 天：游客限流改为窗口内直接放行的包装中间件，到期自动回落原限流。
+  assert.match(serverSource, /app\.post\('\/api\/agent\/chat\/stream', guestAiAuth, aiChatConcurrencyGate, guestAwareChatRateLimit, guestAiAdmission,/);
+  assert.match(serverSource, /app\.get\('\/api\/agent\/guest-mode', guestAwareRateLimit\(rateLimit\(60000, 60\)\), async function/);
   assert.match(serverSource, /allow_guest_ai: allowGuestAi/);
   assert.match(serverSource, /typeof body\.allow_guest_ai === 'boolean'/);
   assert.match(serverSource, /skipDb: !!req\.guestAi/);
@@ -204,7 +215,8 @@ test('访客聊天跳过额度校验、数据库历史与消息落库', function
   assert.match(streamBlock, /if \(!req\.guestAi\) \{\s*try \{\s*var _responsesSaveResult/);
   assert.match(streamBlock, /if \(!req\.guestAi\) \{\s*try \{\s*responsesQuota = await recordAiTurnUsage/);
   assert.match(streamBlock, /if \(!userName \|\| req\.guestAi \|\| interruptedSave/);
-  assert.match(streamBlock, /req\.guestAi \? GUEST_AI_MESSAGE_MAX_LEN : AI_CHAT_MESSAGE_MAX_LEN/);
+  // ★ 2026-11-13：窗口内游客与登录用户用同一消息长度上限（否则发大文件被 50KB 误拒）。
+  assert.match(streamBlock, /\(req\.guestAi && !guestAiPublicWindowOpen\(\)\) \? GUEST_AI_MESSAGE_MAX_LEN : AI_CHAT_MESSAGE_MAX_LEN/);
 });
 
 test('后台 AI 设置包含访客开关并随配置保存', function() {
@@ -297,11 +309,18 @@ test('游客聊天在开关开启时放行，关闭时提示登录', async funct
   assert.equal(runtime.notices[0], '请先登录后再和小猫聊天');
 });
 
-test('游客访问研究/站内搜索等入口仍被登录门禁拦截', async function() {
-  const runtime = frontendAuthRuntime();
-  assert.equal(await runtime.context.ensureUserAuthOrNotify(), false);
-  assert.equal(runtime.notices[0], '请先登录后再和小猫聊天');
-  assert.equal(runtime.preflights(), 0);
+// ★ 2026-11-13 限时开放 15 天：窗口内游客可用研究/站内搜索等全部 AI 入口；窗口外仍提示登录。
+test('限时窗口内游客可进研究/站内搜索；窗口外仍被登录门禁拦截', async function() {
+  const open = frontendAuthRuntime();
+  assert.equal(await open.context.ensureUserAuthOrNotify(), true);
+  assert.deepEqual(open.notices, []);
+  assert.equal(open.preflights(), 0);
+
+  const closed = frontendAuthRuntime();
+  closed.setGuest(false);
+  assert.equal(await closed.context.ensureUserAuthOrNotify(), false);
+  assert.equal(closed.notices[0], '请先登录后再和小猫聊天');
+  assert.equal(closed.preflights(), 0);
 });
 
 test('已登录用户继续走原有认证预检，不受访客开关影响', async function() {

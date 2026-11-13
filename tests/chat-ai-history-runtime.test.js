@@ -54,7 +54,7 @@ function row(n, conv = 'ABCDEF', extra = {}) {
 function route(start, end, db) {
   let handler;
   const c = { ...history, supabase: db, app: { get(...args) { handler = args.at(-1); }, post(...args) { handler = args.at(-1); } },
-    authenticateUser() {}, rateLimit() {}, AI_AGENT_MESSAGE_MARKER: '__ai_agent_msg__', AI_CHAT_LATEST_CONVERSATION_SCAN_LIMIT: 60,
+    authenticateUser() {}, guestAiAuth(req,res,next){ next(); }, rateLimit() {}, guestAwareRateLimit(l){ return l || function(_q,_s,n){ if(n) n(); }; }, AI_AGENT_MESSAGE_MARKER: '__ai_agent_msg__', AI_CHAT_LATEST_CONVERSATION_SCAN_LIMIT: 60,
     AI_AGENT_CONVERSATION_LIST_LIMIT: 50, parseMsgMeta: parseMeta, resolveConvId: r => parseMeta(r).convId,
     getConversationStorageMode: rows => rows.some(r => parseMeta(r).chat_mode === 'deep_think') ? 'deep_think' : 'normal', console: { log() {}, warn() {}, error() {} } };
   const a = source.indexOf(start), b = source.indexOf(end, a + start.length); assert.ok(a >= 0 && b > a);

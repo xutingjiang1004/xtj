@@ -11012,6 +11012,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // Empty/invalid drafts must never interrupt a reply. A distinct valid send
     // replaces the active turn synchronously, including its auth/preflight phase.
     if (!text && !fileList.some(function(f) { return f && f.dataUrl; })) return;
+    // ★ 2026-11-14：游客先确认 /guest-mode，避免 S.guestAi 尚未初始化时误拦（含带附件发送）
+    if (!readUserName() && !S.guestAi) { await ensureGuestAiMode(); }
     if (!readUserName() && !S.guestAi) { notify('请先登录后再和小猫聊天'); return; }
     if (!S.active) { notify('聊天面板未就绪，请重新打开后再发送'); return; }
     if (text.length > 50000) { notify('消息过长，最多 50000 字符，请精简后重试'); return; }
@@ -15541,6 +15543,15 @@ function showChatMessages() {
                 '<span class="ai-panel-row-title">上传文件</span>' +
                 rowEnd('', '<span class="ai-panel-row-trail" aria-hidden="true">' + ICO.chev + '</span>') +
               '</button>' +
+              // ★ 2026-11-14（用户要求）：定时任务 / 自动化入口
+              '<button type="button" class="ai-panel-row" data-action="automation">' +
+                '<span class="ai-panel-row-icon ai-panel-row-icon--auto" aria-hidden="true">' + (ICO.clock || ICO.think) + '</span>' +
+                '<span class="ai-panel-row-title">自动化</span>' +
+                rowEnd(
+                  '<span class="ai-panel-row-value ai-panel-row-value--auto" id="aiAutoSummary">定时任务</span>',
+                  '<span class="ai-panel-row-trail" aria-hidden="true">' + ICO.chev + '</span>'
+                ) +
+              '</button>' +
               '<button type="button" class="ai-panel-row ai-panel-row--select" data-action="open-model" aria-haspopup="dialog" aria-expanded="false">' +
                 '<span class="ai-panel-row-icon ai-panel-row-icon--model" aria-hidden="true">' + ICO.model + '</span>' +
                 '<span class="ai-panel-row-title">模型</span>' +
@@ -16798,6 +16809,209 @@ function showChatMessages() {
       fetchAiQuota(false);
     }
 
+    // ===================== ★ 2026-11-14（用户要求）：自动化 / 定时任务面板 =====================
+    // 服务端能力：模型可在对话里自主创建任务（说一句「每天 9 点搜 AI 新闻」即可），
+    // 到点由后台常驻调度器联网执行并把简报写回会话。这里提供人工入口：
+    // 查看、启停、试跑、删除，以及表单方式手动新建。样式为新增类，不影响既有动画。
+    var AUTO_ID = 'aiAutomationModal';
+    var AUTO_WEEK_CN = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+    function autoEsc(s) {
+      return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+      });
+    }
+    function autoTimeText(iso) {
+      if (!iso) return '—';
+      var d = new Date(iso);
+      if (isNaN(d.getTime())) return '—';
+      return d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+    }
+    function autoStatusText(t) {
+      if (t.enabled === false) return t.last_status === 'expired' ? '已过期' : '已暂停';
+      if (t.last_status === 'error') return '上次失败';
+      return '运行中';
+    }
+    function autoClose() {
+      var m = document.getElementById(AUTO_ID);
+      if (m && m.parentNode) m.parentNode.removeChild(m);
+    }
+    function autoApi(method, path, body) {
+      return apiRequest(method, '/scheduled-tasks' + path, body, { background: true });
+    }
+    function autoRenderList(box, tasks) {
+      if (!box) return;
+      if (!tasks || !tasks.length) {
+        box.innerHTML = '<div class="ai-auto-empty">还没有定时任务。<br>直接在小猫对话框里说一句，例如「每天早上 9 点帮我搜 AI 新闻并整理成简报」，它会自己建好。</div>';
+        return;
+      }
+      box.innerHTML = tasks.map(function(t) {
+        var st = autoStatusText(t);
+        var cls = t.enabled === false ? ' is-off' : (t.last_status === 'error' ? ' is-error' : '');
+        return '<div class="ai-auto-item' + cls + '" data-id="' + autoEsc(t.id) + '">' +
+          '<div class="ai-auto-item-head">' +
+            '<span class="ai-auto-item-title">' + autoEsc(t.title || '未命名任务') + '</span>' +
+            '<span class="ai-auto-item-status">' + autoEsc(st) + '</span>' +
+          '</div>' +
+          '<div class="ai-auto-item-meta">' + autoEsc(t.schedule_text || '') + ' · 下次 ' + autoEsc(autoTimeText(t.next_run_at)) + '</div>' +
+          (t.last_summary ? '<div class="ai-auto-item-last">上次：' + autoEsc(String(t.last_summary).slice(0, 90)) + '</div>' : '') +
+          (t.last_status === 'error' && t.last_error ? '<div class="ai-auto-item-err">' + autoEsc(String(t.last_error).slice(0, 120)) + '</div>' : '') +
+          '<div class="ai-auto-item-ops">' +
+            '<button type="button" data-auto-op="run">试跑</button>' +
+            '<button type="button" data-auto-op="toggle">' + (t.enabled === false ? '启用' : '暂停') + '</button>' +
+            '<button type="button" data-auto-op="del" class="is-danger">删除</button>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+    }
+    function openAutomationPanel() {
+      if (document.getElementById(AUTO_ID)) return;
+      var modal = document.createElement('div');
+      modal.id = AUTO_ID;
+      modal.className = 'ai-auto-modal';
+      modal.innerHTML =
+        '<div class="ai-auto-box" role="dialog" aria-modal="true" aria-label="自动化定时任务">' +
+          '<div class="ai-auto-head">' +
+            '<span class="ai-auto-title">自动化</span>' +
+            '<button type="button" class="ai-auto-close" aria-label="关闭">×</button>' +
+          '</div>' +
+          '<div class="ai-auto-tip">到点自动联网执行，结果写回会话。也可以在对话里直接说「每天 9 点帮我搜 AI 新闻」由小猫自己创建。</div>' +
+          '<div class="ai-auto-list" id="aiAutoList"><div class="ai-auto-empty">加载中…</div></div>' +
+          '<button type="button" class="ai-auto-new" id="aiAutoNewBtn">＋ 新建定时任务</button>' +
+          '<div class="ai-auto-form" id="aiAutoForm" hidden>' +
+            '<label class="ai-auto-field"><span>任务标题</span><input type="text" id="aiAutoTitle" maxlength="40" placeholder="如：AI 新闻早报"></label>' +
+            '<label class="ai-auto-field"><span>要它做什么</span><textarea id="aiAutoPrompt" rows="3" maxlength="4000" placeholder="每天早上搜一遍 AI 领域的重要新闻，按重要性排序，每条一句话总结并附来源"></textarea></label>' +
+            '<label class="ai-auto-field"><span>频率</span>' +
+              '<select id="aiAutoKind">' +
+                '<option value="daily">每天</option>' +
+                '<option value="weekly">每周</option>' +
+                '<option value="interval">每隔一段时间</option>' +
+                '<option value="once">只执行一次</option>' +
+              '</select>' +
+            '</label>' +
+            '<label class="ai-auto-field" data-kind="daily weekly"><span>时间</span><input type="time" id="aiAutoTime" value="09:00"></label>' +
+            '<div class="ai-auto-field" data-kind="weekly"><span>星期</span><div class="ai-auto-week" id="aiAutoWeek">' +
+              AUTO_WEEK_CN.map(function(n, i) { return '<button type="button" data-week="' + i + '">' + n + '</button>'; }).join('') +
+            '</div></div>' +
+            '<label class="ai-auto-field" data-kind="interval"><span>间隔（分钟）</span><input type="number" id="aiAutoInterval" min="5" max="10080" value="60"></label>' +
+            '<label class="ai-auto-field" data-kind="once"><span>执行时间</span><input type="datetime-local" id="aiAutoOnce"></label>' +
+            '<div class="ai-auto-form-ops">' +
+              '<button type="button" class="ai-auto-cancel" id="aiAutoCancel">取消</button>' +
+              '<button type="button" class="ai-auto-submit" id="aiAutoSubmit">创建</button>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
+      document.body.appendChild(modal);
+
+      var listBox = modal.querySelector('#aiAutoList');
+      var form = modal.querySelector('#aiAutoForm');
+      var kindSel = modal.querySelector('#aiAutoKind');
+      var weekPick = {};
+
+      function syncFormKind() {
+        var kind = kindSel.value;
+        form.querySelectorAll('[data-kind]').forEach(function(el) {
+          el.hidden = el.getAttribute('data-kind').split(' ').indexOf(kind) < 0;
+        });
+      }
+      function loadTasks() {
+        autoApi('GET', '').then(function(r) {
+          if (r && r.ok && r.data && r.data.ok) autoRenderList(listBox, r.data.tasks || []);
+          else autoRenderList(listBox, []);
+        }).catch(function() { autoRenderList(listBox, []); });
+      }
+
+      modal.addEventListener('click', function(e) {
+        if (e.target === modal) { autoClose(); return; }
+        if (e.target.closest('.ai-auto-close')) { autoClose(); return; }
+        if (e.target.closest('#aiAutoNewBtn')) {
+          form.hidden = !form.hidden;
+          syncFormKind();
+          return;
+        }
+        if (e.target.closest('#aiAutoCancel')) { form.hidden = true; return; }
+        var weekBtn = e.target.closest('[data-week]');
+        if (weekBtn) {
+          var w = weekBtn.getAttribute('data-week');
+          weekPick[w] = !weekPick[w];
+          weekBtn.classList.toggle('is-on', !!weekPick[w]);
+          return;
+        }
+        var opBtn = e.target.closest('[data-auto-op]');
+        if (opBtn) {
+          var item = opBtn.closest('.ai-auto-item');
+          var id = item && item.getAttribute('data-id');
+          var op = opBtn.getAttribute('data-auto-op');
+          if (!id) return;
+          if (op === 'del') {
+            if (!window.confirm('确定删除这个定时任务？')) return;
+            opBtn.disabled = true;
+            autoApi('DELETE', '/' + encodeURIComponent(id)).then(function() { loadTasks(); });
+          } else if (op === 'toggle') {
+            var turnOn = opBtn.textContent === '启用';
+            opBtn.disabled = true;
+            autoApi('POST', '/' + encodeURIComponent(id) + '/toggle', { enabled: turnOn }).then(function() { loadTasks(); });
+          } else if (op === 'run') {
+            opBtn.disabled = true;
+            opBtn.textContent = '执行中…';
+            autoApi('POST', '/' + encodeURIComponent(id) + '/run', {}).then(function(r) {
+              opBtn.disabled = false;
+              opBtn.textContent = '试跑';
+              if (r && r.ok && r.data && r.data.ok) {
+                notify('已执行完成，简报已写回会话');
+                loadTasks();
+              } else {
+                notify((r && r.data && r.data.error) || '执行失败，请稍后再试');
+              }
+            }).catch(function() { opBtn.disabled = false; opBtn.textContent = '试跑'; });
+          }
+          return;
+        }
+        if (e.target.closest('#aiAutoSubmit')) {
+          var promptEl = modal.querySelector('#aiAutoPrompt');
+          var prompt = (promptEl.value || '').trim();
+          if (!prompt) { notify('请填写「要它做什么」'); promptEl.focus(); return; }
+          var kind = kindSel.value;
+          var payload = {
+            prompt: prompt,
+            title: (modal.querySelector('#aiAutoTitle').value || '').trim(),
+            schedule_kind: kind
+          };
+          if (kind === 'daily' || kind === 'weekly') {
+            payload.daily_time = modal.querySelector('#aiAutoTime').value || '09:00';
+          }
+          if (kind === 'weekly') {
+            var days = Object.keys(weekPick).filter(function(k) { return weekPick[k]; }).map(Number);
+            if (!days.length) { notify('请选择星期几'); return; }
+            payload.weekdays = days;
+          }
+          if (kind === 'interval') payload.interval_minutes = parseInt(modal.querySelector('#aiAutoInterval').value, 10) || 60;
+          if (kind === 'once') {
+            var raw = modal.querySelector('#aiAutoOnce').value;
+            if (!raw) { notify('请选择执行时间'); return; }
+            var dt = new Date(raw);
+            if (isNaN(dt.getTime())) { notify('执行时间无效'); return; }
+            payload.run_at = dt.toISOString();
+          }
+          var submit = e.target.closest('#aiAutoSubmit');
+          submit.disabled = true;
+          autoApi('POST', '', payload).then(function(r) {
+            submit.disabled = false;
+            if (r && r.ok && r.data && r.data.ok) {
+              notify('定时任务已创建');
+              form.hidden = true;
+              modal.querySelector('#aiAutoPrompt').value = '';
+              modal.querySelector('#aiAutoTitle').value = '';
+              loadTasks();
+            } else {
+              notify((r && r.data && r.data.error) || '创建失败');
+            }
+          }).catch(function() { submit.disabled = false; notify('创建失败'); });
+        }
+      });
+      modal.addEventListener('keydown', function(e) { if (e.key === 'Escape') autoClose(); });
+      loadTasks();
+    }
+
     plusBtn.addEventListener('click', function(e) {
       e.preventDefault();
       e.stopPropagation();
@@ -16830,6 +17044,12 @@ function showChatMessages() {
           var fi = document.getElementById('aiChatFileInp');
           if (fi) fi.click();
         }, 50);
+        return;
+      }
+      if (action === 'automation') {
+        // ★ 2026-11-14（用户要求）：自动化 / 定时任务面板
+        closePanel();
+        setTimeout(function() { openAutomationPanel(); }, 60);
         return;
       }
       if (action === 'search') {
@@ -17150,10 +17370,16 @@ function showChatMessages() {
     function acceptAiChatFiles(rawFiles) {
       var fileSeq = ++_aiChatFileSelectionSeq, fileLifecycle = S.lifecycleId;
       var fileOwner = window.currentUser || '', fileEpoch = readAiAuthEpoch();
+      // ★ 2026-11-14（用户要求：游客也能发照片/文件）：游客没有账号切换概念，
+      //   不再因登录态 epoch 刷新把已选附件静默丢弃；仅已登录用户换号时才失效。
+      var fileIsGuest = !fileOwner;
       // Explicit conversation changes clear/invalidate this selection. Resolving
       // the initial history ID is the same page and must not drop a chosen file.
-      function currentFiles() { return fileSeq === _aiChatFileSelectionSeq && fileLifecycle === S.lifecycleId &&
-        fileOwner === (window.currentUser || '') && fileEpoch === readAiAuthEpoch(); }
+      function currentFiles() {
+        if (fileSeq !== _aiChatFileSelectionSeq || fileLifecycle !== S.lifecycleId) return false;
+        if (fileIsGuest) return true;
+        return fileOwner === (window.currentUser || '') && fileEpoch === readAiAuthEpoch();
+      }
       var list = Array.prototype.slice.call(rawFiles || []);
       if (!list.length) { S._aiChatFilesLoading = false; notify('没有可上传的文件'); return; }
       S._aiChatFilesLoading = true;

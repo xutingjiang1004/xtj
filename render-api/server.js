@@ -96,6 +96,8 @@ const { ocrImageBuffer } = require('./image-ocr');
 const { endSse, writeSse, writeSseComment } = require('./sse-write');
 const { getProcessEvents, settleThinkingElapsed } = require('./ai-process-events');
 const { createChatFeatures } = require('./chat-features');
+// ★ 2026-11-14（用户要求）：小猫AI 定时任务 / 自动化调度器（纯逻辑，不依赖 server.js）
+const aiScheduler = require('./ai-scheduler');
 const { createDmPrivateStorage, dmStorageBucket, PRIVATE_BUCKET } = require('./dm-private-storage');
 const { sniffDocument } = require('./dm-file-magic');
 const { createChatSocialRouter, assertCanSendDirectMessage, listChatConversations, getChatConversationState } = require('./chat-social');
@@ -1496,6 +1498,54 @@ const AI_TOOLS = [
 ];
 
 AI_TOOLS.push(...aiRequestFeatures.DOCUMENT_TOOLS);
+
+// ★ 2026-11-14（用户要求：定时任务 / 自动化）：
+//   用户只需要在对话里说一句「每天 9 点帮我搜 AI 新闻并整理」，模型自己规划频率、
+//   时间与执行内容，调用 schedule_task 落库；到点由服务端常驻调度器自动联网执行，
+//   结果写回会话。不依赖用户在线，也不需要前端额外的配置表单。
+AI_TOOLS.push(
+  {
+    type: 'function',
+    function: {
+      name: 'schedule_task',
+      description: '创建定时任务（自动化）。用户说「每天/每周/每隔多久帮我搜某信息并汇总」「到某个时间自动做某事」「以后定期帮我盯着某事」时使用。你要自己根据用户描述规划执行频率与时间，不要反问用户参数格式；用户没说时间就按最合理的方式补齐（例如每天早上 09:00）。任务到点后系统会在后台自动联网执行，并把结果写回会话列表。',
+      parameters: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', description: '任务标题，10 字以内，如「AI 新闻早报」' },
+          prompt: { type: 'string', description: '每次自动执行时要完成的具体指令。必须自足：不依赖对话上下文，写清要搜什么、关注哪些方面、整理成什么形式、多少字' },
+          schedule_kind: { type: 'string', enum: ['once', 'interval', 'daily', 'weekly'], description: 'once=只执行一次；interval=每隔 N 分钟；daily=每天固定时间；weekly=每周指定几天固定时间' },
+          daily_time: { type: 'string', description: 'daily/weekly 必填，24 小时制 HH:MM，如 09:00、21:30' },
+          weekdays: { type: 'array', items: { type: 'integer' }, description: 'weekly 必填，星期几：0=周日、1=周一 … 6=周六，例：[1,3,5]' },
+          interval_minutes: { type: 'integer', description: 'interval 必填，间隔分钟数，最少 5、最多 10080（7 天）' },
+          run_at: { type: 'string', description: 'once 必填，ISO 8601 时间，如 2026-11-15T09:00:00+08:00' },
+          timezone: { type: 'string', description: '时区，默认 Asia/Shanghai' }
+        },
+        required: ['prompt', 'schedule_kind']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_scheduled_tasks',
+      description: '列出当前用户已创建的定时任务（含频率、下次运行时间、最近一次执行结果摘要）。用户问「我有哪些定时任务」「那个每天搜新闻的任务还在跑吗」时使用。',
+      parameters: { type: 'object', properties: {}, required: [] }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'cancel_scheduled_task',
+      description: '停用并删除一个定时任务。用户说「把那个每天搜新闻的任务停掉」时，先调用 list_scheduled_tasks 拿到编号，再调用本工具。',
+      parameters: {
+        type: 'object',
+        properties: { task_id: { type: 'string', description: '任务编号（list_scheduled_tasks 返回的 id，或列表里的序号 1/2/3）' } },
+        required: ['task_id']
+      }
+    }
+  }
+);
 
 // ===================== 代码沙箱（受限执行，零依赖 / 零成本） =====================
 // ★ 安全设计（对齐项目既有 safeEvalMath 的"自建解释器、不 eval"思路）：
@@ -3712,6 +3762,91 @@ async function executeToolCallInner(toolCall, context) {
         console.warn('[extract_links] 失败:', elUrl, eEl && eEl.message || eEl);
         return { tool_name: name, url: elUrl, error: '链接提取失败，请稍后重试' };
       }
+    }
+    // ★ 2026-11-14（用户要求：定时任务 / 自动化）：创建、查看、取消三类工具。
+    //   归属人：登录用户用 userName，游客用 guest:<ip>（游客任务仅在 15 天窗口内运行）。
+    case 'schedule_task': {
+      if (context.guest && !guestAiPublicWindowOpen()) {
+        return { tool_name: name, error: '定时任务需要登录后使用' };
+      }
+      var stOwner = context.userName || (context.guest ? 'guest:' + String(context.ip || 'unknown') : '');
+      if (!stOwner) return { tool_name: name, error: '无法确定任务归属，请登录后再创建定时任务' };
+      var stRow;
+      try { stRow = aiScheduler.normalizeTaskInput(args, new Date()); }
+      catch (eSt) { return { tool_name: name, error: '定时任务参数有误：' + eSt.message }; }
+      var stInsert = await supabase.from('ai_scheduled_tasks').insert({
+        owner_name: stOwner,
+        title: stRow.title,
+        prompt: stRow.prompt,
+        schedule_kind: stRow.schedule_kind,
+        daily_time: stRow.daily_time,
+        weekdays: stRow.weekdays,
+        interval_minutes: stRow.interval_minutes,
+        run_at: stRow.run_at,
+        timezone: stRow.timezone,
+        enabled: true,
+        next_run_at: stRow.next_run_at,
+        last_status: 'pending'
+      }).select('*');
+      if (stInsert.error) {
+        var stMsg = String(stInsert.error.message || '');
+        if (/relation .* does not exist|schema cache/i.test(stMsg)) {
+          return { tool_name: name, error: '定时任务表尚未创建：请先在 Supabase 执行迁移 supabase/migrations/20261114000000_ai_scheduled_tasks.sql' };
+        }
+        return { tool_name: name, error: '创建定时任务失败：' + stMsg.slice(0, 200) };
+      }
+      var stSaved = (stInsert.data && stInsert.data[0]) || {};
+      var stNextText = stRow.next_run_at ? new Date(stRow.next_run_at).toLocaleString('zh-CN', { timeZone: stRow.timezone || 'Asia/Shanghai', hour12: false }) : '—';
+      return {
+        tool_name: name,
+        ok: true,
+        task_id: stSaved.id || null,
+        title: stRow.title,
+        schedule: aiScheduler.describeSchedule(stRow),
+        next_run_at: stRow.next_run_at,
+        content: '已创建定时任务「' + stRow.title + '」\n频率：' + aiScheduler.describeSchedule(stRow) +
+          '\n下次运行：' + stNextText + '\n到点后系统会自动联网执行，并把简报写回会话列表。'
+      };
+    }
+    case 'list_scheduled_tasks': {
+      var stListOwner = context.userName || (context.guest ? 'guest:' + String(context.ip || 'unknown') : '');
+      if (!stListOwner) return { tool_name: name, error: '请登录后查看定时任务' };
+      var stListRes = await supabase.from('ai_scheduled_tasks').select('*')
+        .eq('owner_name', stListOwner).order('created_at', { ascending: false }).limit(30);
+      if (stListRes.error) return { tool_name: name, error: '读取定时任务失败：' + String(stListRes.error.message || '').slice(0, 200) };
+      var stRows = stListRes.data || [];
+      if (!stRows.length) return { tool_name: name, ok: true, count: 0, content: '当前没有定时任务。想让我定期帮你查什么，直接说一句就行（例如「每天早上 9 点搜 AI 新闻发我」）。' };
+      var stLines = stRows.map(function(r, ri) {
+        var tick = r.enabled === false ? '已停用' : '运行中';
+        var nr = r.next_run_at ? new Date(r.next_run_at).toLocaleString('zh-CN', { timeZone: r.timezone || 'Asia/Shanghai', hour12: false }) : '—';
+        return (ri + 1) + '. [' + tick + '] ' + (r.title || '未命名') + ' · ' + aiScheduler.describeSchedule(r) + ' · 下次 ' + nr + (r.last_summary ? ' · 上次：' + String(r.last_summary).slice(0, 60) : '');
+      }).join('\n');
+      return {
+        tool_name: name, ok: true, count: stRows.length,
+        tasks: stRows.map(function(r, ri) { return { index: ri + 1, id: r.id, title: r.title, schedule: aiScheduler.describeSchedule(r), next_run_at: r.next_run_at, enabled: r.enabled, last_status: r.last_status, last_summary: r.last_summary }; }),
+        content: '当前共 ' + stRows.length + ' 个定时任务：\n' + stLines
+      };
+    }
+    case 'cancel_scheduled_task': {
+      var stDelOwner = context.userName || (context.guest ? 'guest:' + String(context.ip || 'unknown') : '');
+      if (!stDelOwner) return { tool_name: name, error: '请登录后再操作定时任务' };
+      var stKey = String(args.task_id || args.id || '').trim();
+      if (!stKey) return { tool_name: name, error: '缺少任务编号' };
+      var stTargetId = stKey;
+      // 支持用 1/2/3 这类列表序号，避免模型必须记住长 UUID
+      if (/^\d{1,2}$/.test(stKey)) {
+        var stOrd = await supabase.from('ai_scheduled_tasks').select('*')
+          .eq('owner_name', stDelOwner).order('created_at', { ascending: false }).limit(30);
+        var stOrdRows = (stOrd.data || []);
+        var stPick = stOrdRows[parseInt(stKey, 10) - 1];
+        if (!stPick) return { tool_name: name, error: '找不到序号 ' + stKey + ' 对应的任务' };
+        stTargetId = stPick.id;
+      }
+      var stDel = await supabase.from('ai_scheduled_tasks').delete()
+        .eq('id', stTargetId).eq('owner_name', stDelOwner).select('id');
+      if (stDel.error) return { tool_name: name, error: '删除失败：' + String(stDel.error.message || '').slice(0, 200) };
+      if (!stDel.data || !stDel.data.length) return { tool_name: name, error: '任务不存在或不属于你' };
+      return { tool_name: name, ok: true, task_id: stTargetId, content: '已删除该定时任务，之后不会再自动执行。' };
     }
     default:
       return { tool_name: name, error: '未知工具: ' + name };
@@ -11247,6 +11382,9 @@ function requestSearchCtx(req, userName) {
   if (/^\/api\/agent\/chat(?:\/stream)?$/.test(String(req.path||''))) host._searchCtx.preferDeepseek = true;
   // 游客标记：让搜索配额门禁跳过账号级 RPC（见 claimSearchSlot）。
   if (req.guestAi) host._searchCtx.guest = true;
+  // ★ 2026-11-14（用户要求：定时任务）：把请求 IP 带进工具上下文，
+  //   游客创建定时任务时用它做任务归属（guest:<ip>），避免任务无主。
+  if (!host._searchCtx.ip && req.ip) host._searchCtx.ip = String(req.ip);
   return host._searchCtx;
 }
 
@@ -19918,6 +20056,10 @@ const GUEST_AI_MESSAGE_MAX_LEN = 50000;
 //   所有限时分支自动失效，游客回落「环境变量 + 后台开关」双条件鉴权，无需人工干预。
 const GUEST_AI_OPEN_UNTIL = 1795881599000;
 function guestAiPublicWindowOpen() {
+  // ★ 运维 / 测试逃生口：设 XTJ_GUEST_PUBLIC_WINDOW_OFF=1 可临时按「窗口已关闭」处理，
+  //   用于验证到期后鉴权、限流、额度是否完整回落（也可以在窗口期内紧急叫停）。
+  //   线上默认不设置该变量，行为仍是「到点自动失效」，不依赖任何人工操作。
+  if (String(process.env.XTJ_GUEST_PUBLIC_WINDOW_OFF || '').trim() === '1') return false;
   return Date.now() < GUEST_AI_OPEN_UNTIL;
 }
 async function guestAiEnabled() {
@@ -20064,6 +20206,117 @@ function genConvId() {
   try { rnd = crypto.randomUUID().split('-').slice(0,2).join('').toUpperCase(); } catch(e) { rnd = Math.random().toString(36).slice(2, 8).toUpperCase(); }
   return ts + '-' + rnd;
 }
+
+// ===================== 定时任务执行器（★ 2026-11-14 用户要求） =====================
+// 到点后：① 模型把任务提示词拆成 1-3 条搜索词 → ② 服务端联网取回真实结果
+// → ③ 模型基于结果产出简报 → ④ 已登录用户写回会话（posts 两条），游客只回写任务摘要。
+// 失败不静默：异常向上抛，由调度器写 last_error，用户在任务列表里能看到原因。
+async function runScheduledTask(task) {
+  var stOwner = String(task.owner_name || '');
+  var stIsGuest = stOwner.indexOf('guest:') === 0;
+  // ★ 游客任务只在 15 天限时开放窗口内运行：窗口一关立即停用，避免变成永久免费自动化
+  if (stIsGuest && !guestAiPublicWindowOpen()) {
+    await supabase.from('ai_scheduled_tasks')
+      .update({ enabled: false, last_status: 'expired', last_error: '游客限时开放已结束，任务自动停用' })
+      .eq('id', task.id);
+    return { summary: '' };
+  }
+  var stPrompt = String(task.prompt || '').trim().slice(0, 4000);
+  if (!stPrompt) throw new Error('任务提示词为空');
+  var stTz = String(task.timezone || 'Asia/Shanghai');
+  var stNowText = new Date().toLocaleString('zh-CN', { timeZone: stTz, hour12: false });
+
+  // ① 规划搜索词（模型自选；失败则退回提示词前 80 字，保证任务不因规划失败而空转）
+  var stQueries = [];
+  try {
+    var stPlan = await callDeepSeekAI({
+      system: '你是定时任务的检索规划器。根据任务要求输出 1-3 条最有效的搜索关键词，只输出 JSON：{"queries":["关键词1","关键词2"]}。关键词要具体、可直接检索，不要写「最新」「相关」这类空词，不要带引号或解释。',
+      messages: [{ role: 'user', content: '任务：' + stPrompt + '\n当前时间：' + stNowText }],
+      jsonMode: true, max_tokens: 300, temperature: 0.2, thinking_mode: 'low', throwOnError: true
+    });
+    if (stPlan && Array.isArray(stPlan.queries)) {
+      stQueries = stPlan.queries.map(function(q) { return String(q || '').trim(); }).filter(Boolean).slice(0, 3);
+    }
+  } catch (ePlan) {
+    console.warn('[SCHEDULER] 检索规划失败，退回提示词:', ePlan && ePlan.message);
+  }
+  if (!stQueries.length) stQueries = [stPrompt.replace(/\s+/g, ' ').slice(0, 80)];
+
+  // ② 联网检索（底层 searchWeb，不走账号搜索额度；单条失败不影响整体）
+  var stItems = [];
+  for (var stQi = 0; stQi < stQueries.length; stQi++) {
+    try {
+      var stRes = await searchWeb(stQueries[stQi], 6, {});
+      var stRows = (stRes && Array.isArray(stRes.results)) ? stRes.results : [];
+      stRows.slice(0, 6).forEach(function(r) {
+        var url = String(r.url || '');
+        var title = String(r.title || '').slice(0, 160);
+        var snippet = String(r.snippet || r.description || '').slice(0, 400);
+        if (!title && !snippet) return;
+        stItems.push({ title: title, snippet: snippet, url: /^https?:\/\//i.test(url) ? url.slice(0, 400) : '', query: stQueries[stQi] });
+      });
+    } catch (eSearch) {
+      console.warn('[SCHEDULER] 搜索失败:', stQueries[stQi], eSearch && eSearch.message);
+    }
+  }
+  // 去重：同一 URL 或同一标题只保留一条
+  var stSeen = {};
+  stItems = stItems.filter(function(it) {
+    var k = (it.url || '') + '|' + (it.title || '');
+    if (stSeen[k]) return false;
+    stSeen[k] = 1;
+    return true;
+  }).slice(0, 18);
+
+  // ③ 生成简报
+  var stSourceText = stItems.length
+    ? stItems.map(function(it, i) { return (i + 1) + '. ' + it.title + (it.url ? '\n   ' + it.url : '') + '\n   ' + it.snippet; }).join('\n')
+    : '（本次没有检索到结果，请如实说明未查到，不要编造）';
+  var stReport = await callDeepSeekAI({
+    system: '你是定时任务的执行者。基于给定的检索结果，按任务要求输出一份简洁的中文简报：结论先行、分点清晰、只保留与任务直接相关的信息，每条关键信息后标注来源序号（如 [3]）。检索结果为空或与任务无关时，直接说明「本次未检索到有效信息」，严禁编造。',
+    messages: [{ role: 'user', content: '任务：' + stPrompt + '\n执行时间：' + stNowText + '\n\n检索结果：\n' + stSourceText }],
+    max_tokens: 1600, temperature: 0.3, thinking_mode: 'low', throwOnError: true
+  });
+  var stSummary = String(stReport || '').trim();
+  if (!stSummary) throw new Error('模型未返回内容');
+
+  // ④ 写回会话：游客不落库（只回写任务行摘要），登录用户写两条 posts 便于历史查看
+  if (stIsGuest) {
+    return { summary: stSummary.slice(0, 1800), conversation_id: task.conversation_id || null };
+  }
+  var stConvId = String(task.conversation_id || '').trim() || genConvId();
+  var stSearchMeta = { count: stItems.length, query: stQueries[0], queries: stQueries, results: stItems, expires_at: Date.now() + 86400000 };
+  var stNowTs = Date.now();
+  var stReportFull = stSummary + (stItems.length ? '\n\n---\n来源：\n' + stItems.slice(0, 10).map(function(it, i) { return (i + 1) + '. ' + (it.title || it.url); }).join('\n') : '');
+  var stIns = await supabase.from('posts').insert([
+    {
+      user_name: stOwner,
+      content: ('【定时任务 · ' + (task.title || '自动执行') + '】' + stPrompt).slice(0, 4000),
+      media_type: AI_AGENT_MESSAGE_MARKER,
+      media_url: buildMsgMeta('user', stConvId, null, null, 1, null, null, { scheduled_task_id: task.id }),
+      actor_key: 'ai_msg_conv_' + stConvId + '_user_' + stOwner + '_' + stNowTs,
+      created_at: new Date(stNowTs).toISOString()
+    },
+    {
+      user_name: stOwner,
+      content: stReportFull,
+      media_type: AI_AGENT_MESSAGE_MARKER,
+      media_url: buildMsgMeta('assistant', stConvId, null, null, 2, stSearchMeta, null, { scheduled_task_id: task.id, scheduled_title: task.title || '' }),
+      actor_key: 'ai_msg_conv_' + stConvId + '_' + stNowTs,
+      created_at: new Date(stNowTs + 1).toISOString()
+    }
+  ]);
+  if (stIns && stIns.error) console.warn('[SCHEDULER] 写回会话失败:', stIns.error.message);
+  return { summary: stSummary.slice(0, 1800), conversation_id: stConvId };
+}
+
+// 常驻调度器：每 30 秒扫描到点任务；多副本下靠条件更新原子抢占，不会重复执行。
+var aiTaskScheduler = aiScheduler.createScheduler({
+  supabase: supabase,
+  runTask: runScheduledTask,
+  intervalMs: 30000,
+  logger: console
+});
 
 // 解析 media_url 中的元数据：新数据为 JSON {role, convId, usage}，旧数据为纯字符串 role
 function parseMsgMeta(r) {
@@ -21991,7 +22244,8 @@ async function handleDeepThinkChat(req, res) {
 require('./ai-conversation-features').install(app,{db:supabase,authenticateUser,rateLimit});
 // AI 接口的大请求体解析（附件走 base64，上限 80MB）：先过全局内存预算，避免多账号并发把实例内存打满。
 const aiLargeJson = require('./body-budget').withBodyBudget(express.json({ limit: '80mb' }));
-const aiRequestMiddleware = aiRequestFeatures.install(app,{ authenticateUser, rateLimit, writeSse, getAiConfig, jsonMiddleware:aiLargeJson });
+// ★ 2026-11-14：附件复用上传/清空路由同步支持游客（窗口外 guestAiAuth 自动回落登录）
+const aiRequestMiddleware = aiRequestFeatures.install(app,{ authenticateUser, guestAiAuth, rateLimit, writeSse, getAiConfig, jsonMiddleware:aiLargeJson });
 
 // ★ 2026-11-13 限时开放 15 天：游客改用 guestAiAuth（窗口外自动回落登录鉴权），到期自动失效
 app.post('/api/agent/chat/cancel', guestAiAuth, async (req, res) => {
@@ -23988,7 +24242,8 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, guestAwar
   
   try {
     // 先验证输入，避免空消息/非法参数仍扣配额
-    var message = validateString(req.body && req.body.message, req.guestAi ? GUEST_AI_MESSAGE_MAX_LEN : AI_CHAT_MESSAGE_MAX_LEN, '消息内容');
+    // ★ 2026-11-14：窗口内游客与登录用户同一消息长度上限（发文件/长文档不再被 50KB 误拒）；窗口外游客仍为 50KB
+    var message = validateString(req.body && req.body.message, (req.guestAi && !guestAiPublicWindowOpen()) ? GUEST_AI_MESSAGE_MAX_LEN : AI_CHAT_MESSAGE_MAX_LEN, '消息内容');
     if (!message || message.error) {
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
@@ -27675,6 +27930,110 @@ app.get('/api/agent/drafts', guestAiAuth, guestAwareRateLimit(rateLimit(60000, 2
   } catch (e) { return res.status(500).json({ error: '查询失败' }); }
 });
 
+// ===================== 定时任务 API（★ 2026-11-14 用户要求） =====================
+// 前端「自动化」面板用：列表 / 创建 / 启停 / 删除 / 立即试跑一次。
+// 鉴权用 guestAiAuth：15 天窗口内游客可用（任务在窗口外自动停用），窗口外回落登录。
+function scheduledOwnerOf(req) {
+  if (req.guestAi && guestAiPublicWindowOpen()) return 'guest:' + String(req.ip || 'unknown');
+  return req.userName || '';
+}
+function scheduledTaskPayload(row) {
+  return Object.assign({}, row, { schedule_text: aiScheduler.describeSchedule(row) });
+}
+
+app.get('/api/agent/scheduled-tasks', guestAiAuth, guestAwareRateLimit(rateLimit(60000, 60)), async (req, res) => {
+  try {
+    var stOwner = scheduledOwnerOf(req);
+    if (!stOwner) return res.json({ ok: true, tasks: [] });
+    var stRows = await supabase.from('ai_scheduled_tasks').select('*')
+      .eq('owner_name', stOwner).order('created_at', { ascending: false }).limit(50);
+    if (stRows.error) return res.status(503).json({ ok: false, error: '定时任务表尚未迁移', tasks: [] });
+    return res.json({ ok: true, tasks: (stRows.data || []).map(scheduledTaskPayload) });
+  } catch (e) { return res.status(500).json({ ok: false, error: '查询失败', tasks: [] }); }
+});
+
+app.post('/api/agent/scheduled-tasks', guestAiAuth, guestAwareRateLimit(rateLimit(60000, 20)), async (req, res) => {
+  try {
+    var stOwner = scheduledOwnerOf(req);
+    if (!stOwner) return res.status(401).json({ ok: false, error: '请登录后再创建定时任务' });
+    var stRow;
+    try { stRow = aiScheduler.normalizeTaskInput(Object.assign({}, req.body || {}, { owner_name: stOwner }), new Date()); }
+    catch (eNorm) { return res.status(400).json({ ok: false, error: eNorm.message }); }
+    var stIns = await supabase.from('ai_scheduled_tasks').insert({
+      owner_name: stOwner,
+      title: stRow.title,
+      prompt: stRow.prompt,
+      schedule_kind: stRow.schedule_kind,
+      daily_time: stRow.daily_time,
+      weekdays: stRow.weekdays,
+      interval_minutes: stRow.interval_minutes,
+      run_at: stRow.run_at,
+      timezone: stRow.timezone,
+      conversation_id: stRow.conversation_id,
+      enabled: true,
+      next_run_at: stRow.next_run_at,
+      last_status: 'pending'
+    }).select('*');
+    if (stIns.error) return res.status(503).json({ ok: false, error: '创建失败（定时任务表尚未迁移？）' });
+    return res.json({ ok: true, task: scheduledTaskPayload((stIns.data && stIns.data[0]) || stRow) });
+  } catch (e) { return res.status(500).json({ ok: false, error: '创建失败' }); }
+});
+
+app.post('/api/agent/scheduled-tasks/:id/toggle', guestAiAuth, guestAwareRateLimit(rateLimit(60000, 60)), async (req, res) => {
+  try {
+    var stOwner = scheduledOwnerOf(req);
+    if (!stOwner) return res.status(401).json({ ok: false, error: '请登录后再操作' });
+    var stEnabled = !(req.body && req.body.enabled === false);
+    var stUpd = await supabase.from('ai_scheduled_tasks')
+      .update({ enabled: stEnabled, updated_at: new Date().toISOString() })
+      .eq('id', req.params.id).eq('owner_name', stOwner).select('*');
+    if (stUpd.error) return res.status(503).json({ ok: false, error: '操作失败' });
+    if (!stUpd.data || !stUpd.data.length) return res.status(404).json({ ok: false, error: '任务不存在' });
+    return res.json({ ok: true, task: scheduledTaskPayload(stUpd.data[0]) });
+  } catch (e) { return res.status(500).json({ ok: false, error: '操作失败' }); }
+});
+
+app.delete('/api/agent/scheduled-tasks/:id', guestAiAuth, guestAwareRateLimit(rateLimit(60000, 60)), async (req, res) => {
+  try {
+    var stOwner = scheduledOwnerOf(req);
+    if (!stOwner) return res.status(401).json({ ok: false, error: '请登录后再操作' });
+    var stDel = await supabase.from('ai_scheduled_tasks').delete()
+      .eq('id', req.params.id).eq('owner_name', stOwner).select('id');
+    if (stDel.error) return res.status(503).json({ ok: false, error: '删除失败' });
+    if (!stDel.data || !stDel.data.length) return res.status(404).json({ ok: false, error: '任务不存在' });
+    return res.json({ ok: true });
+  } catch (e) { return res.status(500).json({ ok: false, error: '删除失败' }); }
+});
+
+// 立即试跑：只允许自己的任务，且同一任务 1 分钟内不能重复触发（防误点连跑）。
+var scheduledManualRunAt = {};
+app.post('/api/agent/scheduled-tasks/:id/run', guestAiAuth, guestAwareRateLimit(rateLimit(60000, 10)), async (req, res) => {
+  try {
+    var stOwner = scheduledOwnerOf(req);
+    if (!stOwner) return res.status(401).json({ ok: false, error: '请登录后再操作' });
+    var stFound = await supabase.from('ai_scheduled_tasks').select('*')
+      .eq('id', req.params.id).eq('owner_name', stOwner).limit(1);
+    if (stFound.error) return res.status(503).json({ ok: false, error: '读取失败' });
+    var stTask = (stFound.data || [])[0];
+    if (!stTask) return res.status(404).json({ ok: false, error: '任务不存在' });
+    var stNow = Date.now();
+    if (scheduledManualRunAt[stTask.id] && stNow - scheduledManualRunAt[stTask.id] < 60000) {
+      return res.status(429).json({ ok: false, error: '刚跑过一次，请 1 分钟后再试' });
+    }
+    scheduledManualRunAt[stTask.id] = stNow;
+    var stResult = await runScheduledTask(stTask);
+    await supabase.from('ai_scheduled_tasks').update({
+      last_run_at: new Date().toISOString(), last_status: 'success', last_error: null,
+      last_summary: String((stResult && stResult.summary) || '').slice(0, 2000),
+      conversation_id: (stResult && stResult.conversation_id) || stTask.conversation_id,
+      updated_at: new Date().toISOString()
+    }).eq('id', stTask.id);
+    return res.json({ ok: true, summary: (stResult && stResult.summary) || '', conversation_id: (stResult && stResult.conversation_id) || null });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: '执行失败：' + String((e && e.message) || '').slice(0, 200) });
+  }
+});
+
 app.get('/api/agent/maintenance-tasks', authenticateUser, async (req, res) => {
   if (req.userName !== ADMIN_USERNAME) return res.status(403).json({ error: '仅管理员可用' });
   try {
@@ -28911,6 +29270,14 @@ _httpServer = app.listen(port, () => {
     });
   }, 6 * 60 * 60 * 1000);
   startDmUnreadNotifier();
+  // ★ 2026-11-14（用户要求：定时任务 / 自动化）：启动常驻调度器。
+  //   每 30s 扫描 ai_scheduled_tasks 里到点的任务；未执行迁移时只会打一条告警，不影响主服务。
+  try {
+    aiTaskScheduler.start();
+    console.log('[SCHEDULER] 定时任务调度器已启动（每 30s 扫描 ai_scheduled_tasks）');
+  } catch (eSched) {
+    console.warn('[SCHEDULER] 启动失败:', eSched && eSched.message);
+  }
   var photoMigrationBusy = false;
   async function migratePrivatePhotos() {
     if (photoMigrationBusy) return;

@@ -43,13 +43,29 @@ function failure(code, message, status = 502, retryAfter) {
 //   与 server.js 的 guestAiPublicWindowOpen() 一样不依赖任何环境变量配置。
 //   保留 env 入参仅为兼容既有调用签名；非法时间戳一律回退到默认绝对时间戳。
 function publicUntil(env = process.env) {
-  const raw = String(PUBLIC_UNTIL_DEFAULT).trim();
-  if (/^\d{10,13}$/.test(raw)) {
-    const ms = Number(raw);
+  const e = env || {};
+  // ★ 统一逃生口：与 server.js 的 guestAiPublicWindowOpen() 共用同一个开关，
+  //   设 XTJ_GUEST_PUBLIC_WINDOW_OFF=1 可整体提前结束窗口（两处同时生效，不会只关一半）。
+  if (String(e.XTJ_GUEST_PUBLIC_WINDOW_OFF || '').trim() === '1') return 0;
+  // ★ 显式覆盖开关：仅当 OPENROUTER_PUBLIC_UNTIL_FORCE=1 时才读 OPENROUTER_PUBLIC_UNTIL。
+  //   默认不读，避免 Render 上 2026-10-27 那次 24 小时公开期残留的旧值
+  //   （例如 2026-10-28T00:40:00+08:00）把本次 15 天窗口直接判成已结束。
+  if (String(e.OPENROUTER_PUBLIC_UNTIL_FORCE || '').trim() === '1') {
+    const raw = String(e.OPENROUTER_PUBLIC_UNTIL || '').trim();
+    if (/^\d{10,13}$/.test(raw)) {
+      const ms = Number(raw);
+      return ms < 1e12 ? ms * 1000 : ms;
+    }
+    const parsed = Date.parse(raw);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  const hard = String(PUBLIC_UNTIL_DEFAULT).trim();
+  if (/^\d{10,13}$/.test(hard)) {
+    const ms = Number(hard);
     return ms < 1e12 ? ms * 1000 : ms;
   }
-  const parsed = Date.parse(raw);
-  return Number.isFinite(parsed) ? parsed : Date.parse(PUBLIC_UNTIL_DEFAULT);
+  const parsedHard = Date.parse(hard);
+  return Number.isFinite(parsedHard) ? parsedHard : Date.parse(PUBLIC_UNTIL_DEFAULT);
 }
 // 公开期是否仍然有效。过期后立即关闭，无需重新部署。
 function publicWindowOpen(env = process.env, now = Date.now()) {
