@@ -53,7 +53,7 @@ async function voiceRepro(){
   const window={currentUser:'A',navigator:{hardwareConcurrency:8},addEventListener(type,fn){events[type]=fn;},
     AudioContext:class{async decodeAudioData(){decodeCount++;return decodeCount===1?decode.promise:{duration:1};}async close(){}},
     OfflineAudioContext:class{createBufferSource(){return{connect(){},start(){}};}async startRendering(){return{getChannelData:()=>new Float32Array(16000)};}},
-    xtjProtectedFetch:async(path,init)=>{saves.push({path,init});return{ok:true,json:async()=>({ok:true,message:{id:'server-message'}})};}};
+    xtjProtectedFetch:async(path,init)=>{if(String(path).startsWith('/api/agent/transcribe'))return{ok:true,status:200,json:async()=>({ok:true,available:false})};saves.push({path,init});return{ok:true,json:async()=>({ok:true,message:{id:'server-message'}})};}};
   const context={window,document:{currentScript:{src:'https://example.invalid/js/voice-transcription.js'}},Worker:StubWorker,URL,AbortController,fetch(){throw Error('network forbidden');},Float32Array,Map,console,
     setTimeout(fn,ms){const id=++timerId;timerMap.set(id,{fn,ms});return id;},clearTimeout(id){timerMap.delete(id);}};
   vm.runInNewContext(source,context,{filename:'voice-transcription.js'});

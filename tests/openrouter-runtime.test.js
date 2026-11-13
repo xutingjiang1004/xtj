@@ -225,7 +225,7 @@ test('the free search path skips paid providers even when their keys are configu
   const providers=require('../render-api/search-providers');const names=['DEEPSEEK_API_KEY','TAVILY_API_KEY','BRAVE_SEARCH_API_KEY','SERPER_API_KEY','SEARCH_API_URL'];const old=names.map(name=>[name,process.env[name]]);
   for(const name of names)process.env[name]=name==='SEARCH_API_URL'?'https://paid-search.example':TEST_KEY;
   providers._searchCache.clear();t.after(()=>{for(const [name,value]of old){if(value===undefined)delete process.env[name];else process.env[name]=value;}providers._searchCache.clear();});
-  const requests=[];t.mock.method(global,'fetch',async url=>{requests.push(String(url));assert.equal(new URL(url).hostname,'www.bing.com');return new Response('<li class="b_algo"><h2><a href="https://example.com/free-result">免费资料</a></h2><div class="b_caption"><p>真实模拟摘要</p></div></li>');});
+  const requests=[];t.mock.method(global,'fetch',async url=>{requests.push(String(url));assert.equal(new URL(url).hostname,'www.bing.com');return new Response(['free-result','free-two','free-three'].map(slug=>'<li class="b_algo"><h2><a href="https://example.com/'+slug+'">免费资料</a></h2><div class="b_caption"><p>真实模拟摘要</p></div></li>').join(''));});
   const result=await providers.searchWeb('免费路径独立测试',3,{freeOnly:true});assert.equal(result.results[0].url,'https://example.com/free-result');assert.equal(requests.length,1);
   assert.ok(result.diagnostics.enabled_providers.every(name=>['BingHtml','SearXNG'].includes(name)));
 });
