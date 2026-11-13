@@ -26,7 +26,35 @@
         if (!response.ok || !value.ok) throw new Error(value.error || '请求失败，请重试');
         return value;
     }
-    async function audioSamples(job) {
+    // 服务端识别（大模型，准确得多）。available: null 还没问过，true/false 是服务端的回答。
+    var serverSpeech = { available: null, checkedAt: 0 };
+    async function serverAvailable() {
+        if (serverSpeech.available !== null && Date.now() - serverSpeech.checkedAt < 600000) return serverSpeech.available;
+        try {
+            var status = await request('/api/agent/transcribe/status', { timeoutMs: 4000 });
+            serverSpeech.available = status.available === true;
+        } catch (_) { serverSpeech.available = false; }
+        serverSpeech.checkedAt = Date.now();
+        return serverSpeech.available;
+    }
+    // 成功返回文字（可能是空串：没听到清晰语音）；服务端不可用时返回 null，由本机识别接手。
+    async function recognizeOnServer(job, file) {
+        if (!file || file.size > 12 * 1024 * 1024 || typeof window.xtjProtectedFetch !== 'function') return null;
+        if (!(await serverAvailable()) || !sameUser(job)) return null;
+        var abort = new AbortController();
+        job.downloadAbort = abort;
+        try {
+            notify(job, 'working', '正在识别语音…');
+            var response = await window.xtjProtectedFetch('/api/agent/transcribe', { method: 'POST', timeoutMs: 50000, background: true,
+                headers: { 'Content-Type': String(file.type || 'audio/webm').split(';')[0] }, body: file, signal: abort.signal });
+            var value = await response.json().catch(function () { return null; });
+            if (response.status === 503 && value && value.code === 'transcription_unconfigured') { serverSpeech.available = false; serverSpeech.checkedAt = Date.now(); }
+            if (!response.ok || !value || value.ok !== true) return null;
+            return String(value.text || '').trim();
+        } catch (_) { return null; }
+        finally { job.downloadAbort = null; }
+    }
+    async function audioFile(job) {
         var file = job.file;
         if (!file) {
             var signed = await request('/api/chat/voice-url?peer=' + encodeURIComponent(job.peer) + '&message_id=' + encodeURIComponent(job.id));
@@ -41,6 +69,10 @@
             } finally { clearTimeout(timeout); job.downloadAbort = null; }
         }
         if (!sameUser(job) || !file || file.size > MAX_BYTES) throw new Error('语音不可用');
+        return file;
+    }
+    async function audioSamples(job, loaded) {
+        var file = loaded || await audioFile(job);
         var Audio = window.AudioContext || window.webkitAudioContext;
         var Offline = window.OfflineAudioContext || window.webkitOfflineAudioContext;
         if (!Audio || !Offline) throw new Error('当前浏览器不支持语音识别，请升级浏览器');
@@ -94,7 +126,14 @@
             if (!sameUser(job)) return;
             if (!job.text) {
                 notify(job, 'working', '准备识别语音…');
-                var samples = await audioSamples(job);
+                var source = await audioFile(job);
+                if (!sameUser(job)) return;
+                var remote = await recognizeOnServer(job, source);
+                if (!sameUser(job)) return;
+                if (remote !== null) job.text = remote;
+                else {
+                notify(job, 'working', '准备本机识别…');
+                var samples = await audioSamples(job, source);
                 if (!sameUser(job)) return;
                 try { job.text = await recognize(job, samples); }
                 catch(error){
@@ -103,6 +142,7 @@
                     var retrySamples=await audioSamples(job);
                     if(!sameUser(job))return;
                     job.text=await recognize(job,retrySamples);
+                }
                 }
                 if (!job.text) throw new Error('未识别到清晰语音，可以重新转写');
             }
@@ -184,7 +224,10 @@
         });
     }
     // Logout must release the model and discard private in-memory jobs.
+    window.addEventListener('xtj:auth-changed', function () { serverSpeech.available = null; });
     window.addEventListener('xtj:auth-changed', reset);
     window.addEventListener('pagehide', reset);
-    window.XTJVoiceTranscription = { enqueue: enqueue, retry: retry, reset: reset, transcribeBlob: transcribeBlob };
+    window.XTJVoiceTranscription = { enqueue: enqueue, retry: retry, reset: reset, transcribeBlob: transcribeBlob, serverAvailable: serverAvailable,
+        // 同步读取上一次的回答（点麦克风时不能先等网络，否则浏览器会认为录音不是用户手势触发的）。
+        serverAvailableNow: function () { return serverSpeech.available === true; } };
 }());

@@ -23,12 +23,12 @@ test('forged owner and administrator fields cannot delete another user’s photo
   const outage=handlerFixture(api,'B',true);await outage.run();assert.equal(outage.res.statusCode,503);assert.equal(outage.res.body.retryable,true);assert.equal(outage.calls.length,0);
  }
 });
-function transcriptionFixture(sent=true){const workers=[],states=[],calls=[],results=[];let saveFails=false;
- const window={currentUser:'A',addEventListener(){},AudioContext:class{async decodeAudioData(){return {duration:1};}async close(){}},OfflineAudioContext:class{createBufferSource(){return {connect(){},start(){}};}async startRendering(){return {getChannelData:()=>new Float32Array(16000)};}},xtjProtectedFetch:async(path,init)=>{calls.push({path,init});return {ok:!saveFails,json:async()=>saveFails?{ok:false,error:'保存失败'}:{ok:true,message:{id:'voice'}}};}};
+function transcriptionFixture(sent=true,server={available:false,status:503,code:'transcription_unconfigured',text:''}){const workers=[],states=[],calls=[],results=[],serverCalls=[];let saveFails=false;
+ const window={currentUser:'A',addEventListener(){},AudioContext:class{async decodeAudioData(){return {duration:1};}async close(){}},OfflineAudioContext:class{createBufferSource(){return {connect(){},start(){}};}async startRendering(){return {getChannelData:()=>new Float32Array(16000)};}},xtjProtectedFetch:async(path,init)=>{if(String(path).startsWith('/api/agent/transcribe')){serverCalls.push({path,init});if(path.endsWith('/status'))return {ok:true,status:200,json:async()=>({ok:true,available:server.available})};return {ok:server.status===200,status:server.status,json:async()=>server.status===200?{ok:true,text:server.text}:{ok:false,code:server.code}};}calls.push({path,init});return {ok:!saveFails,json:async()=>saveFails?{ok:false,error:'保存失败'}:{ok:true,message:{id:'voice'}}};}};
  class Worker{constructor(){workers.push(this);}postMessage(data){this.data=data;}terminate(){this.terminated=true;}}
  const context={window,document:{currentScript:{src:'https://example.test/js/voice-transcription.js'}},Worker,URL,AbortController,fetch,Float32Array,Map,setTimeout,clearTimeout,console};vm.runInNewContext(fs.readFileSync(require.resolve('../js/voice-transcription.js'),'utf8'),context);
  const options={owner:'A',peer:'B',id:'voice',sent,file:{size:12,arrayBuffer:async()=>new ArrayBuffer(12)},onState:j=>states.push({state:j.state,label:j.label}),onResult:(...v)=>results.push(v)};
- return {window,workers,states,calls,results,options,setSaveFails(v){saveFails=v;},enqueue(){window.XTJVoiceTranscription.enqueue(options);},result(){const w=workers.at(-1);w.onmessage({data:{id:w.data.id,type:'result',text:'你好，照片很好看'}});}};
+ return {window,workers,states,calls,results,options,serverCalls,server,setSaveFails(v){saveFails=v;},enqueue(){window.XTJVoiceTranscription.enqueue(options);},result(){const w=workers.at(-1);w.onmessage({data:{id:w.data.id,type:'result',text:'你好，照片很好看'}});}};
 }
 async function until(predicate){for(let i=0;i<100;i++){if(predicate())return;await new Promise(r=>setTimeout(r,5));}assert.fail('timed out');}
 test('device transcription queues once and retries failed persistence without recognizing twice',async()=>{
@@ -57,4 +57,15 @@ test('cancelling an AI recording releases its active worker while the queued DM 
  const pending=f.window.XTJVoiceTranscription.transcribeBlob(f.options.file,{owner:'A',signal:controller.signal}),rejected=assert.rejects(pending,/取消/);
  await until(()=>f.workers[0]?.data);f.enqueue();controller.abort();await rejected;
  await until(()=>f.workers[1]?.data);assert.equal(f.workers[0].terminated,true);f.result();await until(()=>f.results.length===1);assert.equal(f.calls.length,0);f.window.XTJVoiceTranscription.reset();
+});
+
+test('server recognition is used when available; the local model is the fallback when it fails or is not configured',async()=>{
+ const good=transcriptionFixture(false,{available:true,status:200,text:'今天学习 present perfect'});good.enqueue();await until(()=>good.results.length===1);
+ assert.equal(good.results[0][0],'今天学习 present perfect');assert.equal(good.workers.length,0,'no local model is started');
+ assert.deepEqual(good.serverCalls.map(c=>c.path),['/api/agent/transcribe/status','/api/agent/transcribe']);assert.equal(good.serverCalls[1].init.method,'POST');assert.equal(good.serverCalls[1].init.body,good.options.file);
+ const down=transcriptionFixture(false,{available:true,status:502,code:'transcription_failed'});down.enqueue();await until(()=>down.workers[0]?.data);down.result();await until(()=>down.results.length===1);
+ assert.equal(down.results[0][0],'你好，照片很好看');assert.equal(down.serverCalls.length,2);
+ const off=transcriptionFixture(false);off.enqueue();await until(()=>off.workers[0]?.data);off.result();await until(()=>off.results.length===1);
+ assert.deepEqual(off.serverCalls.map(c=>c.path),['/api/agent/transcribe/status'],'an unconfigured server is asked once and never sent audio');
+ assert.equal(off.window.XTJVoiceTranscription.serverAvailableNow(),false);assert.equal(good.window.XTJVoiceTranscription.serverAvailableNow(),true);
 });

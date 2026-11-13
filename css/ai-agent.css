@@ -8822,3 +8822,11 @@ html body #aiChatRoot .ai-study-landing .ai-study-starter { justify-content:flex
   .ai-study-starter { min-height:52px; padding:8px 10px; gap:8px; }
   .ai-study-leave { margin-top:10px; }
 }
+
+/* 附件预览出现时轻轻弹出（选完图片/文件能看到它「落」进输入区）；关闭动效时不播放。 */
+@keyframes ai-attach-in { from { opacity:0; transform:translateY(6px) scale(.96); } to { opacity:1; transform:none; } }
+.ai-chat-file-preview, .dt-file-preview { animation:ai-attach-in .22s cubic-bezier(.26,.62,.16,1) both; transform-origin:0 100%; }
+.ai-chat-file-preview .ai-file-thumb, .dt-file-preview .ai-file-thumb { animation:ai-attach-in .26s cubic-bezier(.26,.62,.16,1) .04s both; }
+.ai-msg.user .ai-file-chip { animation:ai-attach-in .24s cubic-bezier(.26,.62,.16,1) both; }
+@media (prefers-reduced-motion:reduce) { .ai-chat-file-preview, .dt-file-preview, .ai-chat-file-preview .ai-file-thumb, .dt-file-preview .ai-file-thumb, .ai-msg.user .ai-file-chip { animation:none; } }
+html[data-xtj-motion="off"] .ai-chat-file-preview, html[data-xtj-motion="off"] .dt-file-preview, html[data-xtj-motion="off"] .ai-file-thumb, html[data-xtj-motion="off"] .ai-msg.user .ai-file-chip { animation:none; }

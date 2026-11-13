@@ -381,6 +381,17 @@ function withSearchProviderTimeout(providerFn, timeoutMs, externalSignal) {
   });
 }
 
+// 同一个网页在不同搜索源里的写法略有不同（协议、www、末尾斜杠、跟踪参数），补充结果时按这个键去重。
+function searchResultKey(item) {
+  var raw = String(item && (item.url || item.link) || '').trim();
+  if (!raw) return '';
+  try {
+    var u = new URL(raw);
+    var keep = [];
+    u.searchParams.forEach(function(value, name) { if (!/^(utm_|spm$|from$|ref$|fbclid$|gclid$)/i.test(name)) keep.push(name + '=' + value); });
+    return (u.hostname.replace(/^www\./i, '') + u.pathname.replace(/\/+$/, '') + (keep.length ? '?' + keep.sort().join('&') : '')).toLowerCase();
+  } catch (_) { return raw.toLowerCase(); }
+}
 async function searchWeb(query, maxResults, options) {
   options = options || {};
   var officialOnly = options.officialOnly === true || require('./ai-request-features').current()?.officialOnly === true;
@@ -425,6 +436,7 @@ async function searchWeb(query, maxResults, options) {
 
   var mergedResults = [];
   var usedProvider = null;
+  var supplementedBy = [];
 
   // 整体搜索总超时 15 秒（原 25 秒）：provider 是**串行**降级的，最坏耗时就是各段之和。
   // 仅置标志并不能中断在途 await，须在每次循环用剩余预算收紧单 provider 的超时，
@@ -438,7 +450,7 @@ async function searchWeb(query, maxResults, options) {
     if (searchTimedOut || Date.now() >= deadline) break;
     var provider = providerList[pi];
     if (!provider.enabled) {
-      diagnostics.missing_env.push(provider.requiresEnv);
+      if (!provider.skippedForQuota) diagnostics.missing_env.push(provider.requiresEnv);
       continue;
     }
     diagnostics.enabled_providers.push(provider.name);
@@ -452,10 +464,24 @@ async function searchWeb(query, maxResults, options) {
         diagnostics.provider_errors.push({ provider: provider.name, error: result.error });
       } else if (result.results && result.results.length > 0) {
         diagnostics.provider_results.push({ provider: provider.name, count: result.results.length });
-        // 取第一个有结果的 provider
-        mergedResults = result.results;
-        usedProvider = provider.name;
-        break;
+        if (usedProvider) {
+          // 补充阶段：只并入还没有的网址。
+          var seenUrls = new Set(mergedResults.map(searchResultKey));
+          for (var ri = 0; ri < result.results.length && mergedResults.length < maxResults; ri++) {
+            var extraKey = searchResultKey(result.results[ri]);
+            if (!extraKey || seenUrls.has(extraKey)) continue;
+            seenUrls.add(extraKey); mergedResults.push(result.results[ri]);
+          }
+          supplementedBy.push(provider.name);
+        } else {
+          // 取第一个有结果的 provider
+          mergedResults = result.results.slice();
+          usedProvider = provider.name;
+        }
+        // 结果太少（少于 3 条且没到要求的数量）时，继续用不花配额的免费搜索源补齐；
+        // 付费搜索源仍然是「前面成功就不走后面」，不会多花额度。
+        if (mergedResults.length >= Math.min(3, maxResults) || officialOnly) break;
+        providerList = providerList.map(function(item, index) { return index > pi && item.requiresEnv ? Object.assign({}, item, { enabled: false, skippedForQuota: true }) : item; });
       } else {
         diagnostics.provider_results.push({ provider: provider.name, count: 0 });
       }
@@ -473,6 +499,7 @@ async function searchWeb(query, maxResults, options) {
     cache_hit: false,
     used_provider: usedProvider
   };
+  if (supplementedBy.length) finalResult.supplemented_by = supplementedBy;
   if (officialOnly && usedProvider !== 'DeepSeek') {
     finalResult.error = 'DeepSeek 官方搜索暂不可用，本次未使用第三方搜索。';
     finalResult.code = 'official_search_unavailable';
@@ -491,6 +518,7 @@ async function searchWeb(query, maxResults, options) {
 }
 
 module.exports = {
+  searchResultKey,
   searchWeb: async (...args) => require('./ai-request-features').search(() => searchWeb(...args)),
   searchTavily: async (...args) => require('./ai-request-features').search(() => searchTavily(...args)),
   searchBrave: searchBrave,

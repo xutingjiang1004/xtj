@@ -27,6 +27,9 @@
     var enabled = false, disposed = false, seq = 0, speechSeq = 0, recognition = null, recorder = null, media = null;
     var decodeAbort = null, recordTimer = null, listening = false, speaking = false, utterance = null;
     var owner = options.owner(), lastTranscript = '', finalTranscript = '', baseText = '';
+    var systemDictationFailed = false;
+    // 提前问一次服务端识别是否可用，点麦克风时直接用结果。
+    try { if (global.XTJVoiceTranscription && global.XTJVoiceTranscription.serverAvailable && global.currentUser) global.XTJVoiceTranscription.serverAvailable().catch(function () {}); } catch (_) {}
     function current(token) { return !disposed && seq === token && options.current(owner); }
     function state(label,stage,progress) { options.onState({enabled:enabled,listening:listening,speaking:speaking,stage:stage||(speaking?'speaking':utterance?'speech_wait':listening?'listening':'idle'),progress:progress===undefined?null:progress,label:label || (speaking?'正在朗读，点击麦克风可打断并提问':utterance?'正在准备朗读，点击麦克风可打断':'')}); }
     function releaseMedia() {
@@ -65,7 +68,11 @@
       interrupt();
       var token = seq, SR = global.SpeechRecognition || global.webkitSpeechRecognition;
       baseText = options.draft().replace(/\s+$/, ''); lastTranscript = finalTranscript = '';
-      if (SR) {
+      // 服务端识别可用时优先录音后交给服务端（大模型，比系统听写和本机小模型都准）；
+      // 系统听写这次会话里失败过，也改走录音。
+      var canRecord = !!(global.navigator.mediaDevices && global.navigator.mediaDevices.getUserMedia && global.MediaRecorder && global.XTJVoiceTranscription && global.XTJVoiceTranscription.transcribeBlob);
+      var preferRecording = canRecord && !!global.XTJVoiceTranscription.serverAvailableNow && global.XTJVoiceTranscription.serverAvailableNow();
+      if (SR && !(canRecord && (preferRecording || systemDictationFailed))) {
         try {
           var rec = new SR(); recognition = rec;
           rec.lang = 'zh-CN'; rec.interimResults = true; rec.continuous = false;
@@ -88,6 +95,12 @@
           rec.onerror = function(event) {
             if (!current(token) || recognition !== rec) return;
             cancelInput();
+            if (event.error !== 'not-allowed' && event.error !== 'aborted' && canRecord) {
+              // 系统听写不可用（常见于 iPad / 添加到主屏幕）：之后改用录音识别。
+              systemDictationFailed = true;
+              options.notify('系统听写不可用，已改用录音识别，请再点一次麦克风');
+              return;
+            }
             options.notify(event.error === 'not-allowed' ? '请允许麦克风权限后重试' : '语音识别未完成，输入文字仍保留，可重试');
           };
           rec.onstart=function(){if(current(token)&&recognition===rec)state('正在聆听…','listening');};
@@ -120,12 +133,12 @@
           recorder = null; listening = false;
           var blob = new Blob(chunks,{type:capture.mimeType || mime || 'audio/webm'}); chunks = [];
           if (!blob.size) { state(); options.notify('未录到声音，请重试'); return; }
-          decodeAbort = new AbortController(); state('准备本地语音识别…','initializing');
+          decodeAbort = new AbortController(); state('正在识别语音…','initializing');
           try {
             var text = await global.XTJVoiceTranscription.transcribeBlob(blob,{owner:owner.user,signal:decodeAbort.signal,onState:function(job) { if (current(token)) state(job.label,job.phase||'recognition',job.progress); }});
             if (!current(token)) return;
             decodeAbort = null; completeInput(token,text,true);
-          } catch (_) { if (current(token)) { decodeAbort = null; state(); options.notify('本地转写失败，可重新录音；文字草稿仍保留'); } }
+          } catch (_) { if (current(token)) { decodeAbort = null; state(); options.notify('语音识别失败，可重新录音；文字草稿仍保留'); } }
         };
         capture.start(250); state('正在录音，点击麦克风结束（最长 90 秒）','recording');
         recordTimer = setTimeout(function() { if (current(token) && capture.state === 'recording') capture.stop(); },90000);

@@ -112,7 +112,7 @@ test('real tool executor gates native Search/Fetch and keeps rich model evidence
     providers.searchWeb,async()=>{gates++;return{allowed,reason:'search_limit'};},{},web,async url=>{localReads++;return{url,title:'本地来源',content:'备用正文'};},(type,title,data)=>({type,title,data}),()=>({error:'搜索额度已用完'})
   );
   const sent=[];t.mock.method(dns.promises,'lookup',async()=>[{address:'93.184.216.34',family:4}]);
-  t.mock.method(global,'fetch',async(url)=>{sent.push(url);return new Response(JSON.stringify(url.endsWith('/search')?{results:[{title:'恶意协议',url:'javascript:bad',summary:'错误归属'},{title:'实际来源',url:'https://example.com/source',snippet:'界面短摘要',summary:'模型完整证据',date:'2026-10-17'}]}:{title:'实际网页',content:'# 实际正文'}));});
+  t.mock.method(global,'fetch',async(url)=>{sent.push(url);return new Response(JSON.stringify(url.endsWith('/search')?{results:[{title:'恶意协议',url:'javascript:bad',summary:'错误归属'},{title:'实际来源',url:'https://example.com/source',snippet:'界面短摘要',summary:'模型完整证据',date:'2026-10-17'},{title:'第二来源',url:'https://example.org/second',snippet:'二'},{title:'第三来源',url:'https://example.net/third',snippet:'三'}]}:{title:'实际网页',content:'# 实际正文'}));});
   const context={userName:'alice',signal:new AbortController().signal};
   const search=await execute({function:{name:'search_web',arguments:'{"query":"test"}'}},context);
   const evidence=JSON.parse(search.content);assert.equal(evidence[0].summary,'模型完整证据');assert.equal(evidence[0].published_at,'2026-10-17');
@@ -162,7 +162,7 @@ for(const outcome of ['empty','http-error','success'])test('official-only '+outc
 });
 test('official-only cache never reuses a third-party result cached in automatic mode',async t=>{
  configure(t);process.env.TAVILY_API_KEY='isolated-backup-key';const calls=[];
- t.mock.method(global,'fetch',async(url)=>{calls.push(String(url));return String(url).includes('api.deepseek.com')?new Response('{}',{status:503}):new Response(JSON.stringify({results:[{title:'备用搜索',url:'https://example.com/backup',content:'备用摘要'}]}));});
+ t.mock.method(global,'fetch',async(url)=>{calls.push(String(url));return String(url).includes('api.deepseek.com')?new Response('{}',{status:503}):new Response(JSON.stringify({results:[{title:'备用搜索',url:'https://example.com/backup',content:'备用摘要'},{title:'备用搜索二',url:'https://example.org/backup-2',content:'备用摘要二'}]}));});
  const automatic=await providers.searchWeb('相同查询的来源隔离',2,{context:{}});assert.equal(automatic.used_provider,'Tavily');
  const strict=await providers.searchWeb('相同查询的来源隔离',2,{officialOnly:true,context:{}});assert.equal(strict.cache_hit,false);assert.equal(strict.code,'official_search_unavailable');assert.equal(calls.length,3);
 });
