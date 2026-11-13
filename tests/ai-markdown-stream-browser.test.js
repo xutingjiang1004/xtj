@@ -118,28 +118,54 @@ test('half-typed Markdown never shows raw markers while a reply streams one char
  }finally{await f.browser.close();}
 });
 
-test('arrived prose still lands on the next frame, and an unfinished table row is released when the stream stalls or ends',{timeout:60000},async()=>{
+test('reply text flows out steadily in order, and an unfinished table row is released when the stream stalls or ends',{timeout:60000},async()=>{
  const f=await rendererFixture();try{
   const result=await f.page.evaluate(async()=>{
    const frame=()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+   const one=()=>new Promise(r=>requestAnimationFrame(r));
+   const until=async(test,ms)=>{const end=performance.now()+ms;while(!test()&&performance.now()<end)await one();return test();};
    const out={};
    let target=document.getElementById('output');
    let renderer=createSmoothTextRenderer(target,{flowPace:true});
-   renderer.append('已经送达的文字应当立刻显示。');await frame();out.prose=target.textContent;
-   renderer.append('\n\n| 半行');await frame();out.held=target.textContent;
-   renderer.finish('已经送达的文字应当立刻显示。\n\n| 半行');await frame();out.finished=target.textContent;
+   // 一批五十多个字：下一帧就开始出字，之后几乎每一帧都在增长，每帧只多几个字，一秒内放完。
+   const prose='已经送达的文字会连续地流出来，而不是整批跳出来或者停住不动，读起来像水一样顺着往下走，这一批字有五十多个字符。';
+   renderer.append(prose);await one();await one();out.first=target.textContent.length;
+   const sizes=[target.textContent.length];
+   for(let i=0;i<120&&target.textContent.length<prose.length;i++){await one();sizes.push(target.textContent.length);}
+   const steps=sizes.slice(1).map((n,i)=>n-sizes[i]);
+   out.total=target.textContent;out.frames=sizes.length;out.maxStep=Math.max(...steps);out.idle=steps.filter(n=>n===0).length;out.ordered=sizes.every((n,i)=>prose.startsWith(target.textContent.slice(0,n)));
+   // 大批量到达（例如上游一次给 3000 字）要加快，不能拖很久。
+   target.innerHTML='';renderer=createSmoothTextRenderer(target,{flowPace:true});
+   const big='长'.repeat(3000);const t0=performance.now();renderer.append(big);
+   out.bigDone=await until(()=>target.textContent.length>=3000,2500);out.bigMs=Math.round(performance.now()-t0);
+   // 关闭动效：整批立即显示。
+   target.innerHTML='';const realReduced=window.prefersReducedMotion;window.prefersReducedMotion=()=>true;
+   renderer=createSmoothTextRenderer(target,{flowPace:true});renderer.append(prose);out.reduced=target.textContent;window.prefersReducedMotion=realReduced;
+   target.innerHTML='';renderer=createSmoothTextRenderer(target,{flowPace:true});
+   renderer.append('开头。\n\n| 半行');await until(()=>target.textContent.length>=3,1000);await frame();await frame();out.held=target.textContent;
+   renderer.finish('开头。\n\n| 半行');await frame();out.finished=target.textContent;
    target.innerHTML='';renderer=createSmoothTextRenderer(target,{flowPace:true});
    renderer.append('| 停住的半行');await frame();out.before=target.textContent;
-   await new Promise(r=>setTimeout(r,1100));await frame();out.after=target.textContent;
+   await new Promise(r=>setTimeout(r,1100));await until(()=>target.textContent==='| 停住的半行',1500);out.after=target.textContent;
    // 链接文字先出现，地址到齐后变成链接；中途改写不能把文字重复一遍。
    target.innerHTML='';renderer=createSmoothTextRenderer(target,{flowPace:true});
-   for(const part of ['见[链','接','](https://a.com)','。'])renderer.append(part),await frame(),(out.link=out.link||[]).push(target.textContent);
+   out.link=[];
+   for(const [part,want] of [['见[链','见链'],['接','见链接'],['](https://a.com)','见链接'],['。','见链接。']]){renderer.append(part);await until(()=>target.textContent===want,1000);await frame();out.link.push(target.textContent);}
+   out.linkHtml=target.innerHTML;
    return out;
   });
-  assert.equal(result.prose,'已经送达的文字应当立刻显示。');
-  assert.equal(result.held,'已经送达的文字应当立刻显示。');
+  assert.ok(result.first>0,'text starts on the next frame');
+  assert.equal(result.total,'已经送达的文字会连续地流出来，而不是整批跳出来或者停住不动，读起来像水一样顺着往下走，这一批字有五十多个字符。');
+  assert.equal(result.ordered,true);
+  assert.ok(result.maxStep<=8,'no big jumps: '+result.maxStep);
+  assert.ok(result.frames>=12&&result.frames<=70,'spread over a short run of frames: '+result.frames);
+  assert.ok(result.idle<=result.frames/2,'most frames add text: '+result.idle+'/'+result.frames);
+  assert.equal(result.bigDone,true);assert.ok(result.bigMs<2500,'a large backlog drains quickly: '+result.bigMs);
+  assert.equal(result.reduced,result.total,'reduced motion shows the whole packet at once');
+  assert.equal(result.held,'开头。');
   assert.match(result.finished,/\| 半行/);
   assert.equal(result.before,'');assert.equal(result.after,'| 停住的半行');
   assert.deepEqual(result.link,['见链','见链接','见链接','见链接。']);
+  assert.ok(!/\[|\]\(/.test(result.linkHtml.replace(/<[^>]+>/g,'')),'no raw link syntax is left on screen');
  }finally{await f.browser.close();}
 });

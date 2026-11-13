@@ -5500,7 +5500,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       plainMarkdownMode = true;
     }
 
-    var holdSince = 0, lastAppendAt = 0;
+    var holdSince = 0, lastAppendAt = 0, paceCredit = 0;
     function emitText(force) {
       if (cancelled || !targetEl) return;
       if (!pending) {
@@ -5510,19 +5510,20 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (streamClass) targetEl.classList.add(streamClass);
       var renderStartedAt = measureStream ? (window.performance && performance.now ? performance.now() : Date.now()) : 0;
       var next = pending;
-      // Plain prose keeps the search-row rhythm: a short slice each frame,
-      // and a burst still finishes within about a quarter second. Markdown
-      // and reduced motion commit the whole packet so tables stay intact.
+      // 匀速流出（用户 2026-11-13 要求，像 ChatGPT / Claude 那样连续流出）：
+      // 模型的字是一小批一小批到的，直接落地就是「停一下、跳几个字」。这里每帧放出积压的约十分之一，
+      // 不足一个字的部分累计到下一帧，于是字按到达的平均速度连续出现，比到达晚约 0.17 秒；
+      // 总时长不变。积压很大时加快；收尾强制刷新和关闭动效时一次放完。
       var take = pending.length;
-      if (options.flowPace && !reducedMotion && !force && pending.length > 32) {
-        var budget = Math.max(32, Math.ceil(pending.length / 8));
-        if (budget < pending.length) {
-          take = budget;
-          var snapped = takeSmoothTextChunk(pending.slice(0, budget), { maxChunk: budget, minChunk: Math.min(6, budget) });
-          if (snapped && snapped.length >= Math.min(6, budget) && snapped.length < budget) take = snapped.length;
-        }
+      if (options.flowPace && !reducedMotion && !force) {
+        paceCredit += Math.max(0.34, pending.length / (pending.length > 600 ? 6 : 10));
+        take = Math.min(pending.length, Math.floor(paceCredit));
+        if (take <= 0) return;
+        paceCredit -= take;
+        if (take < pending.length && /[\uD800-\uDBFF]/.test(pending.charAt(take - 1)) && /[\uDC00-\uDFFF]/.test(pending.charAt(take))) take++;
+        if (take >= pending.length) paceCredit = 0;
       }
-      // 已送达的文字照旧在下一帧显示；只有写到一半的 Markdown 结构（表格行、围栏行、行首记号）
+      // 写到一半的 Markdown 结构（表格行、围栏行、行首记号）
       // 等这一行补完整再一起出现，屏幕上不先露出「| a | b |」「-」「#」这类原始记号。
       // 上游停顿超过 0.9 秒、总共等了 6 秒、收尾或关闭动效时照常显示。
       if (options.flowPace && !options.plainStream && !reducedMotion && !force) {

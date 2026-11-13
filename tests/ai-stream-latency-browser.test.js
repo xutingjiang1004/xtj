@@ -58,7 +58,11 @@ test('real thinking and answer streams show text immediately without an ink wash
  await emit(p,{type:'content',text:'正文也按原有顺序柔和出现。'});await frames(p);
  // 2026-10-31：正文第一个字就直接进气泡，不再先挂成时间轴上的句子。
  assert.equal(await p.locator('.ai-rail-sentence-text').count(),0);
- assert.equal(await p.evaluate(()=>!!document.querySelector('.ai-msg.assistant .ai-msg-bubble')?.textContent.includes('正文也按原有顺序柔和出现')), true);
+ // 2026-11-13：正文匀速流出（用户要求像 ChatGPT / Claude 那样连续出字）。首字在下一帧就出现，
+ // 其余按顺序在约零点几秒内流完，不再整包一次落地。
+ const early=await p.evaluate(()=>document.querySelector('.ai-msg.assistant .ai-msg-bubble')?.textContent||'');
+ assert.ok(early.length>0&&'正文也按原有顺序柔和出现。'.startsWith(early.replace(/\s+$/,'')),'first characters show at once, in order: '+early);
+ await p.waitForFunction(()=>!!document.querySelector('.ai-msg.assistant .ai-msg-bubble')?.textContent.includes('正文也按原有顺序柔和出现'),null,{timeout:2000});
  const surfaces=await p.evaluate(()=>inkSurfaces);assert.deepEqual(surfaces,[]);
  await emit(p,{type:'done',complete:true,saved:true,content:'正文也按原有顺序柔和出现。',reasoning:'真实思考逐字柔和出现。'});
  await p.waitForFunction(()=>!document.querySelector('.ai-msg.assistant.generating'));assert.deepEqual(f.errors,[]);
