@@ -22,11 +22,13 @@ function modelLabel(env = process.env) {
   const raw = String(env.OPENROUTER_MODEL_LABEL || '').trim();
   return raw ? raw.slice(0, 80) : LABEL_DEFAULT;
 }
-// ★ 2026-10-27 限时公开体验：站长决定把这个免费模型开放给所有用户（含未登录游客）24 小时。
-//   用**绝对截止时间戳**而非「服务启动后 24 小时」——后者在 Render 重启/重新部署后会被重置，
-//   变相变成无限期开放。截止时间到点后自动回退为「仅站长」，无需改代码、无需重新部署。
-//   可用环境变量 OPENROUTER_PUBLIC_UNTIL 覆盖（ISO 字符串或毫秒时间戳）。
-const PUBLIC_UNTIL_DEFAULT = '2026-10-28T00:40:00+08:00';
+// ★ 2026-11-13 限时开放 15 天：站长把这个托管模型开放给所有用户（含未登录游客），
+//   截止 2026-11-28 23:59:59 GMT+8（Unix 毫秒 1795881599000），与 server.js 的
+//   GUEST_AI_OPEN_UNTIL 完全一致。用**绝对截止时间戳**而非「服务启动后 N 小时」——
+//   后者在 Render 重启/重新部署后会被重置，变相变成无限期开放。
+//   ★ 2026-11-13 限时开放 15 天：到期自动失效，无需改代码/无需重新部署/无需改环境变量，
+//   publicWindowOpen() 到点自动返回 false，游客回落「仅站长」，窗口外一切回落原状。
+const PUBLIC_UNTIL_DEFAULT = '2026-11-28T23:59:59+08:00';
 const PUBLIC_CODE = 'OPENROUTER_PUBLIC_WINDOW';
 const PUBLIC_ENDED_CODE = 'OPENROUTER_PUBLIC_ENDED';
 function failure(code, message, status = 502, retryAfter) {
@@ -36,9 +38,12 @@ function failure(code, message, status = 502, retryAfter) {
   if (retryAfter != null && /^\d{1,6}$/.test(String(retryAfter))) error.retry_after = Number(retryAfter);
   return error;
 }
-// 解析公开期截止时间。非法值一律回退到默认绝对时间戳，避免因配置写错而永久开放。
+// ★ 2026-11-13 限时开放 15 天：窗口判定改为纯硬编码，不再读取 OPENROUTER_PUBLIC_UNTIL，
+//   避免 Render 残留上次 24 小时公开期的旧环境变量值覆盖新默认值、导致窗口打不开或永久开放；
+//   与 server.js 的 guestAiPublicWindowOpen() 一样不依赖任何环境变量配置。
+//   保留 env 入参仅为兼容既有调用签名；非法时间戳一律回退到默认绝对时间戳。
 function publicUntil(env = process.env) {
-  const raw = String(env.OPENROUTER_PUBLIC_UNTIL || PUBLIC_UNTIL_DEFAULT).trim();
+  const raw = String(PUBLIC_UNTIL_DEFAULT).trim();
   if (/^\d{10,13}$/.test(raw)) {
     const ms = Number(raw);
     return ms < 1e12 ? ms * 1000 : ms;
@@ -58,11 +63,14 @@ function publicAllowed(userName, ownerName) {
   return !!userName && userName === ownerName;
 }
 function resolveConfig(userName, ownerName, input = {}, env = process.env) {
-  // ★ 2026-10-27 限时公开：公开期内所有用户（含未登录游客）都可使用同一个免费模型。
-  //   公开期结束后自动回退为仅站长。模型、地址、Key 仍然全部锁定，浏览器无法替换。
+  // ★ 2026-11-13 限时开放 15 天：公开期内所有用户（含未登录游客）都可匿名访问；
+  //   到期后 publicWindowOpen() 变 false，自动回退为仅站长（下方 OPENROUTER_PUBLIC_ENDED）。
+  //   ★ 安全红线：模型、地址、Key 仍然全部由服务端锁定，下面的锁定校验一字未改，
+  //   游客/BYOK 不能借此指定任意模型 ID、上游地址或 API Key。
   const owner = publicAllowed(userName, ownerName);
   if (!owner && !publicWindowOpen(env)) {
-    throw failure(PUBLIC_ENDED_CODE, '站长开放的 24 小时限时体验已结束，该模型恢复为仅站长可用', 403);
+    // ★ 2026-11-13 限时开放 15 天：仅去掉过期的「24 小时」旧文案，错误码与「窗口外仅站长」语义不变
+    throw failure(PUBLIC_ENDED_CODE, '限时开放的游客 AI 体验已结束，该模型恢复为仅站长可用', 403);
   }
   const model = modelId(env);
   if (input.provider && input.provider !== 'openrouter' || input.model && input.model !== model ||
@@ -78,7 +86,7 @@ function resolveConfig(userName, ownerName, input = {}, env = process.env) {
 }
 function catalog(userName, ownerName, env = process.env) {
   if (!String(env.OPENROUTER_API_KEY || '').trim()) return [];
-  // 公开期内所有用户都能看到该模型；到期后只有站长能看到。
+  // ★ 2026-11-13 限时开放 15 天：窗口内游客可读托管模型目录；到期 publicWindowOpen() 变 false 自动仅站长可见（逻辑随常量生效，无需改代码）
   if (!publicAllowed(userName, ownerName) && !publicWindowOpen(env)) return [];
   const open = !publicAllowed(userName, ownerName);
   return [{uid:MODEL_UID,provider:'openrouter',provider_label:'OpenRouter',label:modelLabel(env),
@@ -92,13 +100,14 @@ function freePayload(payload, env = process.env) {
   delete out.route;
   return out;
 }
-// ★ 2026-10-27 限时公开：判断一个尚未解析 body 的请求是否「只想使用 OpenRouter 免费模型」。
-//   路由层的 body 解析上限是 80mb，若先解析再鉴权，未登录请求可直接让服务器分配 80MB 内存
-//   （项目既有注释明确禁止这种顺序）。因此这里只依据**客户端可控但语义明确**的提示做预判：
-//   浏览器发送 openrouter 模型时必然带上 model_uid=or_minimax_m31_free。
-//   真正的权威校验仍在 resolveConfig：模型、地址、Key 一旦被改写立即 400 拒绝。
-//   其他第三方（BYOK）模型一律仍然要求登录，游客不得借用本站服务器代理任意地址。
-function requestsOpenRouter(req) {
+// ★ 2026-11-13 限时开放 15 天：预判函数改为「窗口内一律放行」——不再要求
+//   X-XTJ-Model-Uid 头、不再只认 or_minimax_m31_free 单一托管模型、不再只认 provider=openrouter，
+//   游客可用服务端目录内任意模型（自定义/第三方链路）；窗口外保留原「仅托管模型」预判兜底。
+//   ★ 安全红线：这里只决定「是否允许匿名访问」，模型、地址、Key 仍由 resolveConfig 全部锁定，
+//   游客/BYOK 不能借此指定任意上游 API 地址、API Key 或任意模型 ID。
+function requestsOpenRouter(req, env = process.env, now = Date.now()) {
+  // ★ 2026-11-13 限时开放 15 天：窗口内对所有请求放行全部模型，到期自动失效
+  if (publicWindowOpen(env, now)) return true;
   try {
     const uid = String(req.headers['x-xtj-model-uid'] || '').trim().toLowerCase();
     if (uid === MODEL_UID) return true;
@@ -118,16 +127,21 @@ function hasCredentials(req) {
   } catch (_) {}
   return false;
 }
-// 游客鉴权：仅在公开期开放，且请求明确指向 OpenRouter 时放行匿名用户。
-// 其他情况一律回落到 authenticateUser（登录）。
-// allowAnonymous=true 时（例如「模型目录」这类不含任何密钥的只读接口），
-// 公开期内直接放行匿名，不需要 X-XTJ-Model-Uid 头。
+// ★ 2026-11-13 限时开放 15 天：游客鉴权窗口内统一放开——chat（allowAnonymous=false）
+//   与 catalog（allowAnonymous=true）都放行全部匿名请求并置 req.guestAi=true
+//   （server.js 所有游客分支依赖该标记）；不再要求 X-XTJ-Model-Uid 头、不再只认单一托管模型。
+//   窗口外一律回落 authenticateUser，到期自动失效、回落原状。
+//   allowAnonymous=true 分支仅跳过预判、不跳过下面的游客标记设置，故两个分支都会置 req.guestAi。
+//   ★ 安全红线：只放开「是否允许匿名访问」这层；模型、地址、Key 仍全部由 resolveConfig 服务端锁定。
 function createGuestOpenRouterAuth({ authenticateUser, env = process.env, now = () => Date.now(), allowAnonymous = false }) {
   return async function guestOpenRouterAuth(req, res, next) {
+    // ★ 2026-11-13 限时开放 15 天：窗口外一切回落登录鉴权，到期自动失效
     if (!publicWindowOpen(env, now())) return authenticateUser(req, res, next);
     // 已登录（携带凭证）的请求一律走真实认证，保留封禁/账号状态等全部校验。
     if (hasCredentials(req)) return authenticateUser(req, res, next);
-    if (!allowAnonymous && !requestsOpenRouter(req)) return authenticateUser(req, res, next);
+    // ★ 2026-11-13 限时开放 15 天：窗口内 requestsOpenRouter 恒放行，chat/catalog 一致通过；
+    //   传入 env/now() 使预判与上面的窗口判定同源。
+    if (!allowAnonymous && !requestsOpenRouter(req, env, now())) return authenticateUser(req, res, next);
     req.guestAi = true;
     req.userName = '';
     req.accountId = '';

@@ -19912,7 +19912,18 @@ const AI_CHAT_LATEST_CONVERSATION_SCAN_LIMIT = 60;
 const GUEST_AI_HOURLY_LIMIT = 100;
 const GUEST_AI_DAILY_TURNS = 200;
 const GUEST_AI_MESSAGE_MAX_LEN = 50000;
+// ★ 2026-11-13 限时开放 15 天：未登录游客全功能、不限额度的硬截止时间戳。
+//   到期时间 2026-11-28 23:59:59 GMT+8（Unix 毫秒 1795881599000）。
+//   到期后 Date.now() 超过该值，guestAiPublicWindowOpen() 自动返回 false，
+//   所有限时分支自动失效，游客回落「环境变量 + 后台开关」双条件鉴权，无需人工干预。
+const GUEST_AI_OPEN_UNTIL = 1795881599000;
+function guestAiPublicWindowOpen() {
+  return Date.now() < GUEST_AI_OPEN_UNTIL;
+}
 async function guestAiEnabled() {
+  // ★ 2026-11-13 限时开放 15 天：窗口内直接返回 true，不查环境变量、不查 DB，
+  //   避免异步/DB 故障导致游客被误拒；到期后自动回到下方原双条件逻辑。
+  if (guestAiPublicWindowOpen()) return true;
   if (String(process.env.XTJ_ALLOW_GUEST_AI || '').trim() !== '1') return false;
   try {
     var config = await getAiConfig();
@@ -19942,6 +19953,8 @@ const guestAiHourlyLimiter = rateLimit(3600000, GUEST_AI_HOURLY_LIMIT);
 var guestAiDayCounter = { key: '', count: 0 };
 function guestAiAdmission(req, res, next) {
   if (!req.guestAi) return next();
+  // ★ 2026-11-13 限时开放 15 天：窗口内游客不限额度，跳过 100/h 与 200/day 限流；到期自动失效。
+  if (guestAiPublicWindowOpen()) return next();
   return guestAiHourlyLimiter(req, res, function() {
     var key = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
     if (guestAiDayCounter.key !== key) {
@@ -19954,6 +19967,44 @@ function guestAiAdmission(req, res, next) {
     guestAiDayCounter.count += 1;
     next();
   });
+}
+
+// ★ 2026-11-13 限时开放 15 天：AI 聊天/深研/custom-chat 路由的限流包装。
+//   窗口内游客直接 next()（不受 200/h 的 IP 限流），仅保留单 IP 每分钟 ≤600 次的
+//   极宽松进程内兜底，防上游被打爆；非游客或窗口外一律走原限流。
+//   到期后 guestAiPublicWindowOpen() 变 false，游客自动回落原限流，无需人工干预。
+var _guestAwareChatBaseLimiter = rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT);
+var guestChatMinuteStore = new Map(); // ip -> { minute, count }
+function guestAwareChatRateLimit(req, res, next) {
+  if (!(req.guestAi && guestAiPublicWindowOpen())) {
+    return _guestAwareChatBaseLimiter(req, res, next);
+  }
+  var ip = getRealIp(req);
+  var minute = Math.floor(Date.now() / 60000);
+  var rec = guestChatMinuteStore.get(ip);
+  if (!rec || rec.minute !== minute) {
+    rec = { minute: minute, count: 0 };
+    guestChatMinuteStore.set(ip, rec);
+    // 顺手清理已过期分钟的旧 key，避免进程内 Map 无限增长
+    if (guestChatMinuteStore.size > 4096) {
+      guestChatMinuteStore.forEach(function(v, k) { if (v.minute !== minute) guestChatMinuteStore.delete(k); });
+    }
+  }
+  rec.count += 1;
+  if (rec.count > 600) {
+    return res.status(429).json({ ok: false, code: 'guest_rate_limit', retryable: true, error: '请求过于频繁，请稍后再试' });
+  }
+  return next();
+}
+
+// ★ 2026-11-13 限时开放 15 天：AI 功能路由限流的通用包装。
+//   窗口内游客（含 guest-mode 这类未挂鉴权、无凭证的请求）直接放行、不限次数；
+//   已登录用户与窗口外一律走原 limiter，到期自动失效，无需人工干预。
+function guestAwareRateLimit(limiter) {
+  return function(req, res, next) {
+    if (guestAiPublicWindowOpen() && (req.guestAi || (!req.userName && !_getTokenFromRequest(req)))) return next();
+    return limiter(req, res, next);
+  };
 }
 
 // ★ 思考Max：切历史上下文，先按条数上限（256/2048）取最近，再从旧到新累计，
@@ -20743,7 +20794,7 @@ app.get('/admin/ai-agent/daily-usage', verifyToken, securityRateLimit(60000, 60)
 });
 
 // GET /api/agent/guest-mode - 访客 AI 开关状态（公开只读，供前端决定是否放行发送）
-app.get('/api/agent/guest-mode', rateLimit(60000, 60), async function(req, res) {
+app.get('/api/agent/guest-mode', guestAwareRateLimit(rateLimit(60000, 60)), async function(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   var enabled = await guestAiEnabled();
   return res.json({ ok: true, enabled: enabled });
@@ -21401,6 +21452,8 @@ async function loadAiContext(userName, convId, clientHistory, historyOptions) {
 //   流程: 限流 → 验证 → 上下文 → runMultiAgentFlow (Planner→Workers→Synthesizer) → 保存 → done
 async function handleDeepThinkChat(req, res) {
   var userName = req.userName;
+  // ★ 2026-11-13 限时开放 15 天：窗口内游客不限额度、不查账号级额度 RPC、不写 posts/不记账；到期自动失效
+  var guestWindow = !!(req.guestAi && guestAiPublicWindowOpen());
   var clientReqId = req.body && req.body.client_request_id;
   var startTime = Date.now();
   var aborted = false;
@@ -21537,7 +21590,8 @@ async function handleDeepThinkChat(req, res) {
 
     // 2. token/搜索额度 + 请求次数兜底
     // 搜索额度不阻断深度思考整轮（第三方搜索在工具/预搜层单独拦截）
-    var rl = await enforceAiChatAccess(userName, { needSearch: false });
+    // ★ 2026-11-13 限时开放 15 天：窗口内游客不限额度，跳过会拒绝空用户名（no_user）的 enforceAiChatAccess；到期自动失效
+    var rl = guestWindow ? { allowed: true, reason: null, quota: null } : await enforceAiChatAccess(userName, { needSearch: false });
     if (!rl.allowed) {
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
@@ -21631,9 +21685,12 @@ async function handleDeepThinkChat(req, res) {
           thinking_log: cachedHit.thinking_log || [],
           think_duration_ms: cachedHit.think_duration_ms || 0
         };
+        // ★ 2026-11-13 限时开放 15 天：窗口内游客不写 posts（跳过 saveDeepThinkChatTurn），不落库；到期自动失效
+        if (!guestWindow) {
         var cachedSaved = await saveDeepThinkChatTurn({ db: supabase, userName: userName, convId: convId,
           message: originalDeepMessage, content: cachedContent, marker: AI_AGENT_MESSAGE_MARKER, buildMeta: buildMsgMeta,
           requestId: clientReqId, userExtra: deepUserExtra, assistantExtra: cacheExtra, usage: cachedUsage, durationMs: cacheExtra.think_duration_ms });
+        }
       } catch (e) { try { console.error('[AI-CACHE] save on hit failed:', e && e.message); } catch (_) {} }
       sseSend({
         type: 'done',
@@ -21739,6 +21796,8 @@ async function handleDeepThinkChat(req, res) {
 
     try { clearInterval(_heartbeatTimer); } catch (e) {}
     if (aborted) {
+      // ★ 2026-11-13 限时开放 15 天：窗口内游客中断时不写 posts、不记账（跳过 saveInterruptedChatTurn / recordAbortedStreamUsage），不落库；到期自动失效
+      if (!guestWindow) {
       await saveInterruptedChatTurn({ db: supabase, userName: userName, convId: convId,
         message: originalDeepMessage || message, content: (flowResult && (flowResult.finalContent || flowResult.synth_content)) || '',
         model: (flowResult && flowResult.model) || selectedDeepModel, thinkingMode: finalThinkingMode,
@@ -21766,6 +21825,7 @@ async function handleDeepThinkChat(req, res) {
       } catch (eAbortQ) {
         console.error('[AI-QUOTA] deep think aborted record failed:', eAbortQ && eAbortQ.message);
         flushDeepThinkAbortEstimate();
+      }
       }
       releaseDeepResearch();
       return safeEnd();
@@ -21830,10 +21890,13 @@ async function handleDeepThinkChat(req, res) {
           thinking_log: mergedThinkingLog,
           think_duration_ms: totalDurationMs
         };
+        // ★ 2026-11-13 限时开放 15 天：窗口内游客不写 posts（跳过 saveDeepThinkChatTurn），不落库；到期自动失效
+        if (!guestWindow) {
         deepSaved = await saveDeepThinkChatTurn({ db: supabase, userName: userName, convId: convId,
           message: originalDeepMessage, content: finalContent, marker: AI_AGENT_MESSAGE_MARKER, buildMeta: buildMsgMeta,
           requestId: clientReqId, userExtra: deepUserExtra, assistantExtra: deepThinkExtra,
           usage: usageToStore, searchMeta: searchMetaToStore, durationMs: totalDurationMs });
+        }
       } catch (e) {
         console.error('[DEEP-THINK] save messages failed:', e.message);
       }
@@ -21864,6 +21927,8 @@ async function handleDeepThinkChat(req, res) {
     if (!aborted) {
       var deepQuota = null;
       try {
+        // ★ 2026-11-13 限时开放 15 天：窗口内游客不限额度、不记账（跳过 recordAiTurnUsage）；到期自动失效
+        if (!guestWindow) {
         deepQuota = await recordAiTurnUsage(userName, synthUsage, {
           conversation_id: convId,
           model: normalizeDeepSeekUsageModel(flowResult.model || selectedDeepModel, selectedDeepModel),
@@ -21874,6 +21939,7 @@ async function handleDeepThinkChat(req, res) {
           search_count: Math.max(0, Math.floor(Number(flowResult && flowResult.search_count) || 0)),
           did_search: Math.max(0, Math.floor(Number(flowResult && flowResult.search_count) || 0)) > 0
         });
+        }
       } catch (eDeepQ) {
         console.error('[AI-QUOTA] deep think record failed:', eDeepQ && eDeepQ.message);
       }
@@ -21927,7 +21993,8 @@ require('./ai-conversation-features').install(app,{db:supabase,authenticateUser,
 const aiLargeJson = require('./body-budget').withBodyBudget(express.json({ limit: '80mb' }));
 const aiRequestMiddleware = aiRequestFeatures.install(app,{ authenticateUser, rateLimit, writeSse, getAiConfig, jsonMiddleware:aiLargeJson });
 
-app.post('/api/agent/chat/cancel', authenticateUser, async (req, res) => {
+// ★ 2026-11-13 限时开放 15 天：游客改用 guestAiAuth（窗口外自动回落登录鉴权），到期自动失效
+app.post('/api/agent/chat/cancel', guestAiAuth, async (req, res) => {
   try {
     var convId = String(req.body && req.body.conversation_id || '').trim();
     if (!convId) return res.status(400).json({ error: 'conversation_id required' });
@@ -21953,7 +22020,10 @@ app.post('/api/agent/chat/cancel', authenticateUser, async (req, res) => {
 });
 
 // POST /api/agent/chat
-app.post('/api/agent/chat', authenticateUser, aiChatConcurrencyGate, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), aiLargeJson, aiRequestMiddleware, async (req, res) => {
+// ★ 2026-11-13 限时开放 15 天：游客改用 guestAiAuth + 包装限流（窗口外自动回落登录鉴权），到期自动失效
+app.post('/api/agent/chat', guestAiAuth, aiChatConcurrencyGate, guestAwareChatRateLimit, aiLargeJson, aiRequestMiddleware, async (req, res) => {
+  // ★ 2026-11-13 限时开放 15 天：窗口内游客不限额度、不查账号级额度 RPC、不写 posts/不记账；到期自动失效
+  var guestWindow = !!(req.guestAi && guestAiPublicWindowOpen());
   var aborted = false;
   // 客户端断开时 abort 底层 DeepSeek 调用，避免请求结束后仍占用 3-5 分钟资源
   var requestAbortCtrl = new AbortController();
@@ -21970,6 +22040,8 @@ app.post('/api/agent/chat', authenticateUser, aiChatConcurrencyGate, rateLimit(3
   var _chatUsageRecorded = false;
   async function recordChatTurnOnce(usageArg, optsArg) {
     if (_chatUsageRecorded) return null;
+    // ★ 2026-11-13 限时开放 15 天：窗口内游客不记账（跳过 recordAiTurnUsage）；到期自动失效
+    if (guestWindow) return null;
     _chatUsageRecorded = true;
     try {
       return await recordAiTurnUsage(userName, usageArg || {}, optsArg || {});
@@ -21997,7 +22069,8 @@ app.post('/api/agent/chat', authenticateUser, aiChatConcurrencyGate, rateLimit(3
 
     // 2. 用户级 token + 请求次数兜底。
     // 搜索额度只约束第三方搜索，不因 search_limit 整段拒绝聊天（额度用尽后仍走内置 web_search）。
-    var rl = await enforceAiChatAccess(userName, { needSearch: false, promptChars: String(messageEarly || '').length });
+    // ★ 2026-11-13 限时开放 15 天：窗口内游客不限额度，跳过会拒绝空用户名（no_user）的 enforceAiChatAccess；到期自动失效
+    var rl = guestWindow ? { allowed: true, reason: null, quota: null } : await enforceAiChatAccess(userName, { needSearch: false, promptChars: String(messageEarly || '').length });
     if (!rl.allowed) {
       return res.status(429).json({
         error: getAiQuotaErrorMessage(rl.reason),
@@ -22073,7 +22146,8 @@ app.post('/api/agent/chat', authenticateUser, aiChatConcurrencyGate, rateLimit(3
     //   web_search 明确为 true 或 false → 走 Responses API 启用内置 web_search；
     //   true 时再叠加 Tavily 第三方集群搜索；未传 → 走原标准路径（向后兼容）。
     var webSearchPref = req.body && req.body.web_search;
-    var thirdPartySearchOk = await canUseThirdPartySearch(userName);
+    // ★ 2026-11-13 限时开放 15 天：窗口内游客直接放行第三方搜索，跳过会拒绝空用户名（no_user）的 canUseThirdPartySearch/measureSearchQuota 查库；到期自动失效
+    var thirdPartySearchOk = guestWindow ? true : await canUseThirdPartySearch(userName);
     // ★ 修正：只有用户明确打开网页搜索时才走 Responses API（它需要内置 web_search 工具）。
     //   web_search === false 时回退标准 Chat Completions 路径，该路径能显式禁用 reasoning，
     //   避免 Responses API 省略 reasoning 参数导致推理模型仍默认思考，同时响应更快。
@@ -22311,6 +22385,8 @@ app.post('/api/agent/chat', authenticateUser, aiChatConcurrencyGate, rateLimit(3
       };
       try { usageToStore.search_call_count = (toolCallsInfo || []).filter(function(t) { return t && t.name === 'search_web'; }).length; } catch (e) {}
     }
+    // ★ 2026-11-13 限时开放 15 天：窗口内游客不写 posts（跳过 supabase.from('posts').insert），不落库；到期自动失效
+    if (!guestWindow) {
     try {
       await supabase.from('posts').insert([
         {
@@ -22330,6 +22406,7 @@ app.post('/api/agent/chat', authenticateUser, aiChatConcurrencyGate, rateLimit(3
       ]);
     } catch (e) {
       console.error('[AGENT-CHAT] save messages failed:', e.message);
+    }
     }
 
     var chatQuota = null;
@@ -22396,7 +22473,10 @@ app.post('/api/agent/chat', authenticateUser, aiChatConcurrencyGate, rateLimit(3
 //     后服务端执行并把结果回喂模型继续推理（多轮，最多 CUSTOM_TOOL_MAX_ROUNDS 轮），
 //     同时推送 tool_calls/tool_pending/tool_result/tool_error SSE 供前端展示时间线。
 //     上游不支持 function calling（400/404/422）时自动回退为不带工具重试。
-app.post('/api/agent/custom-chat/stream', guestOpenRouterAuth, aiChatConcurrencyGate, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), aiLargeJson, aiRequestMiddleware, resolveAiModelReference, async (req, res) => {
+// ★ 2026-11-13 限时开放 15 天：窗口内游客不限额度，IP 限流换成包装版，到期自动失效
+app.post('/api/agent/custom-chat/stream', guestOpenRouterAuth, aiChatConcurrencyGate, guestAwareChatRateLimit, aiLargeJson, aiRequestMiddleware, resolveAiModelReference, async (req, res) => {
+  // ★ 2026-11-13 限时开放 15 天：窗口内游客不限额度、不查账号级额度 RPC、不写 posts/不记账；到期自动失效
+  var guestWindow = !!(req.guestAi && guestAiPublicWindowOpen());
   var customStartedAt = Date.now(), customTurnFinished = false;
   var aborted = false;
   var _heartbeatTimer = null;
@@ -22430,7 +22510,8 @@ app.post('/api/agent/custom-chat/stream', guestOpenRouterAuth, aiChatConcurrency
   // Public window only opens the server-managed OpenRouter model. A guest who
   // sends the OpenRouter hint header but a different provider/base_url in the
   // body must not turn this route into an anonymous proxy for arbitrary hosts.
-  if (req.guestAi && provider !== 'openrouter') {
+  // ★ 2026-11-13 限时开放 15 天：窗口内游客放开全部模型（provider 不再限 openrouter），窗口外保持；到期自动失效
+  if (req.guestAi && !guestAiPublicWindowOpen() && provider !== 'openrouter') {
     writeSse(res, { type: 'error', error: '请先登录后再使用第三方模型', code: 'auth_required' });
     return safeEnd();
   }
@@ -22472,7 +22553,8 @@ app.post('/api/agent/custom-chat/stream', guestOpenRouterAuth, aiChatConcurrency
   //   （含未登录游客）完全免费 —— 不走 token 日额度门禁、也不落账扣 token。
   //   免费模型走 freeOnly 路径（禁用全部付费搜索 provider），仅使用免费搜索源。
   if (req.userName && req.userName !== ADMIN_USERNAME && provider !== 'openrouter') {
-    var customGate = await enforceAiChatAccess(req.userName, { needSearch: false });
+    // ★ 2026-11-13 限时开放 15 天：窗口内游客不限额度，跳过会拒绝空用户名（no_user）的 enforceAiChatAccess；到期自动失效
+    var customGate = guestWindow ? { allowed: true, reason: null, quota: null } : await enforceAiChatAccess(req.userName, { needSearch: false });
     if (!customGate.allowed) {
       writeSse(res, { type: 'error', error: getAiQuotaErrorMessage(customGate.reason || 'rate_limited'), code: customGate.reason || 'rate_limited' });
       return safeEnd();
@@ -22953,10 +23035,13 @@ app.post('/api/agent/custom-chat/stream', guestOpenRouterAuth, aiChatConcurrency
       customTurnFinished = true;
       // thinking-only 轮次没有 content 结算点，落库与下发前都先补结算，避免写入/下发 0。
       settleThinkingElapsed(res);
+      // ★ 2026-11-13 限时开放 15 天：窗口内游客不写 posts（跳过 saveCustomChatTurn），不落库；到期自动失效
+      if (!guestWindow) {
       var customSaved = await saveCustomChatTurn({ db: supabase, userName: req.userName, convId: customConvId,
         message: customFinalText, content: finalAssistantContent, reasoning: reasoningText, model: chosenModel,
         thinkingMode: _thinkMode, webSearch: _webSearch, processEvents: getProcessEvents(res), cards: customSiteCards,
         visionUrls: customVisionUrls, requestId: reqId, usage:customUsageReported?Object.assign({},customUsage):null,followups: _customParts.followups,contextMemory:res._aiContextMemory,contextBudget:res._aiContextBudget, buildMeta: buildMsgMeta, marker: AI_AGENT_MESSAGE_MARKER, thinkingElapsedMs: res._aiThinkingElapsedMs || 0 });
+      }
       // thinking-only 轮次没有 content 结算点，这里补结算，避免下发 0。
       settleThinkingElapsed(res);
       writeSse(res, {
@@ -23015,6 +23100,8 @@ app.post('/api/agent/custom-chat/stream', guestOpenRouterAuth, aiChatConcurrency
     try { clearTimeout(timer); } catch (e) {}
     req.removeListener('aborted', abortCustomUpstream);
     res.removeListener('close', abortCustomUpstream);
+    // ★ 2026-11-13 限时开放 15 天：窗口内游客不写 posts（跳过 saveInterruptedChatTurn），不落库；到期自动失效
+    if (!guestWindow) {
     if (_customGatePassed && !customTurnFinished) {
       await saveInterruptedChatTurn({ db: supabase, userName: req.userName, convId: customConvId,
         message: text, content: finalAssistantContent, reasoning: reasoningText, model: chosenModel,
@@ -23023,6 +23110,7 @@ app.post('/api/agent/custom-chat/stream', guestOpenRouterAuth, aiChatConcurrency
         contextMemory:res._aiContextMemory,contextBudget:res._aiContextBudget,
         thinkingElapsedMs: res._aiThinkingElapsedMs || 0, startedAt: customStartedAt, requestId: reqId,
         finishReason: aborted ? 'cancelled' : 'upstream_error' });
+    }
     }
     // ★ S6 审计修复：正常完成 / 中断 / 失败路径统一记账。
     //   search_count 取自 toolContext.searchConsumed —— 与门禁 measureSearchQuota
@@ -23058,7 +23146,10 @@ app.post('/api/agent/custom-chat/stream', guestOpenRouterAuth, aiChatConcurrency
 //   meta / deep_think_init / deep_think_stage / deep_think_planned / deep_think_tool /
 //   thinking_chunk{agent_role} / answer_chunk / content / done{agent_count,sources,search_count} / error
 // ─────────────────────────────────────────────────────────────
-app.post('/api/agent/custom-chat/deep-stream', guestOpenRouterAuth, aiChatConcurrencyGate, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), aiLargeJson, aiRequestMiddleware, resolveAiModelReference, async (req, res) => {
+// ★ 2026-11-13 限时开放 15 天：窗口内游客不限额度，IP 限流换成包装版，到期自动失效
+app.post('/api/agent/custom-chat/deep-stream', guestOpenRouterAuth, aiChatConcurrencyGate, guestAwareChatRateLimit, aiLargeJson, aiRequestMiddleware, resolveAiModelReference, async (req, res) => {
+  // ★ 2026-11-13 限时开放 15 天：窗口内游客不限额度、不查账号级额度 RPC、不写 posts/不记账；到期自动失效
+  var guestWindow = !!(req.guestAi && guestAiPublicWindowOpen());
   var aborted = false;
   var _heartbeatTimer = null;
   function clearHeartbeat() { if (_heartbeatTimer) { try { clearInterval(_heartbeatTimer); } catch (_) {} _heartbeatTimer = null; } }
@@ -23094,7 +23185,8 @@ app.post('/api/agent/custom-chat/deep-stream', guestOpenRouterAuth, aiChatConcur
   // Public window only opens the server-managed OpenRouter model. A guest who
   // sends the OpenRouter hint header but a different provider/base_url in the
   // body must not turn this route into an anonymous proxy for arbitrary hosts.
-  if (req.guestAi && provider !== 'openrouter') {
+  // ★ 2026-11-13 限时开放 15 天：窗口内游客放开全部模型（provider 不再限 openrouter），窗口外保持；到期自动失效
+  if (req.guestAi && !guestAiPublicWindowOpen() && provider !== 'openrouter') {
     writeSse(res, { type: 'error', error: '请先登录后再使用第三方模型', code: 'auth_required' });
     return safeEnd();
   }
@@ -23289,7 +23381,8 @@ app.post('/api/agent/custom-chat/deep-stream', guestOpenRouterAuth, aiChatConcur
     //   与 gate 标志取或，确保只要产生了内容就一定记账。
     var _customDeepUpstreamUsed = false;
     if (req.userName && req.userName !== ADMIN_USERNAME && provider !== 'openrouter') {
-      var customDeepGate = await enforceAiChatAccess(req.userName, { needSearch: false });
+      // ★ 2026-11-13 限时开放 15 天：窗口内游客不限额度，跳过会拒绝空用户名（no_user）的 enforceAiChatAccess；到期自动失效
+      var customDeepGate = guestWindow ? { allowed: true, reason: null, quota: null } : await enforceAiChatAccess(req.userName, { needSearch: false });
       if (!customDeepGate.allowed) {
         sseSend({ type: 'error', error: getAiQuotaErrorMessage(customDeepGate.reason || 'rate_limited'), code: customDeepGate.reason || 'rate_limited' });
         return safeEnd();
@@ -23397,9 +23490,12 @@ app.post('/api/agent/custom-chat/deep-stream', guestOpenRouterAuth, aiChatConcur
     if (aborted || controller.signal.aborted) return safeEnd();
     if (!finalContent.trim()) { sseSend({type:'error',error:'研究未生成正文，请重试',code:'CUSTOM_DEEP_EMPTY'}); return safeEnd(); }
     customDeepCompleted = true;
+    // ★ 2026-11-13 限时开放 15 天：窗口内游客不写 posts（跳过 saveDeepThinkChatTurn），不落库；到期自动失效
+    if (!guestWindow) {
     customDeepSaved = await saveDeepThinkChatTurn({db:supabase,userName:req.userName,convId:customDeepConvId,message:originalCustomDeepMessage,content:finalContent,
       marker:AI_AGENT_MESSAGE_MARKER,buildMeta:buildMsgMeta,requestId:body.client_request_id,userExtra:customDeepUserExtra,
       assistantExtra:{deep_think:true,thinking_log:customDeepThinkingLog,agent_count:agents.length},usage:{model:chosenModel,thinking_mode:customDeepThinkingMode}});
+    }
     sseSend({
       type: 'done',
       complete: true,
@@ -23423,11 +23519,14 @@ app.post('/api/agent/custom-chat/deep-stream', guestOpenRouterAuth, aiChatConcur
     }
   } finally {
     try { clearTimeout(timer); } catch (e) {}
+    // ★ 2026-11-13 限时开放 15 天：窗口内游客不写 posts（跳过 saveInterruptedChatTurn），不落库；到期自动失效
+    if (!guestWindow) {
     if (!customDeepCompleted && !customDeepSaved && _customDeepUpstreamUsed) await saveInterruptedChatTurn({db:supabase,userName:req.userName,convId:customDeepConvId,
       message:originalCustomDeepMessage,content:finalContent||'',reasoning:thinkingAcc||'',chatMode:'deep_think',model:chosenModel,
       thinkingMode:customDeepThinkingMode,
       thinkingLog:customDeepThinkingLog,finishReason:aborted||controller.signal.aborted?'cancelled':'failed',
       marker:AI_AGENT_MESSAGE_MARKER,buildMeta:buildMsgMeta,requestId:body.client_request_id,visionUrls:customDeepUserExtra.vision_urls,attachmentContext:customDeepUserExtra.attachment_context});
+    }
     // ★ S6 审计修复：结束时统一记账（正常完成/中断/失败路径都覆盖），
     //   把本请求实际发起的搜索次数与估算 token 落入 ai 配额，杜绝"断开免单/永不落账"
     if ((_customDeepGatePassed || _customDeepUpstreamUsed) && req.userName && provider !== 'openrouter') {
@@ -23559,7 +23658,7 @@ function cleanDeletedUidList(input) {
 // GET /api/agent/custom-models - 读取当前账号的自定义模型（只返回无密钥引用）
 // ★ 2026-10-27 限时公开：公开期内允许未登录游客读取目录（仅含 OpenRouter 托管模型，
 //   不含任何个人模型与密钥）；到期后自动回落到 authenticateUser。
-app.get('/api/agent/custom-models', guestOpenRouterCatalogAuth, rateLimit(60000, 60), async (req, res) => {
+app.get('/api/agent/custom-models', guestOpenRouterCatalogAuth, guestAwareRateLimit(rateLimit(60000, 60)), async (req, res) => {
   res.setHeader('Cache-Control','no-store');
   var serverModels = openRouter.catalog(req.userName, ADMIN_USERNAME);
   // 游客没有账号快照：只返回托管目录，个人模型一律为空。
@@ -23636,7 +23735,8 @@ app.put('/api/agent/custom-models', authenticateUser, rateLimit(60000, 30), asyn
 // ★ 2026-09-26（审计 P1-3/P2-4）：补 authenticateUser —— 此前该路由匿名可用，
 //   配合当时按 req.path 分桶（可被大小写/尾斜杠变体绕过）的限流，可被用来刷
 //   第三方付费生图（单请求最坏 45s、5 次退避重试）。
-app.get('/api/agent/image', authenticateUser, securityRateLimit(3600000, 40), async (req, res) => {
+// ★ 2026-11-13 限时开放 15 天：生图对游客开放，改用 guestAiAuth（窗口外自动回落登录鉴权），到期自动失效
+app.get('/api/agent/image', guestAiAuth, securityRateLimit(3600000, 40), async (req, res) => {
   var prompt = String(req.query.prompt || '').trim().slice(0, 500);
   if (!prompt) return res.status(400).json({ error: '缺少生图描述', code: 'invalid_prompt' });
   var allowedSizes = { square_hd: 1, square: 1, portrait_4_3: 1, portrait_16_9: 1, landscape_4_3: 1, landscape_16_9: 1 };
@@ -23743,7 +23843,8 @@ app.get('/api/agent/image', authenticateUser, securityRateLimit(3600000, 40), as
 
 
 // POST /api/agent/chat/stream - 流式 SSE 输出
-app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), guestAiAdmission, aiLargeJson, aiRequestMiddleware, async (req, res) => {
+// ★ 2026-11-13 限时开放 15 天：窗口内游客不限额度，IP 限流换成包装版，到期自动失效
+app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, guestAwareChatRateLimit, guestAiAdmission, aiLargeJson, aiRequestMiddleware, async (req, res) => {
   res._aiRetryOwner={userName:req.userName,accountId:String(req.accountId||'')};
   res._aiFollowupEnabled = !!(req.body && req.body.followup_suggestions === true);
   res._aiFollowupQuestion = String(req.body && req.body.message || '').slice(0,1000);
@@ -24121,7 +24222,9 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, rateLimit
     // 第三方搜索日额度（免费默认 10 次）；用尽后仅保留模型内置 web_search。
     // 复用本轮额度校验结果，避免模型调用前再多一次 getQuota 往返。
     var thirdPartySearchOkEarly;
-    if (req.guestAi) thirdPartySearchOkEarly = false;
+    // ★ 2026-11-13 限时开放 15 天：窗口内游客直接放行第三方搜索（游客 rl.quota 为 null，
+    //   绝不走 canUseThirdPartySearch('') 查库）；窗口外保持 false，到期自动失效。
+    if (req.guestAi) thirdPartySearchOkEarly = guestAiPublicWindowOpen();
     else if (userName === ADMIN_USERNAME) thirdPartySearchOkEarly = true;
     else {
       var _sq = (rl && rl.quota) || {};
@@ -25886,7 +25989,12 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, rateLimit
 //   mode=normal → 只返回普通聊天会话（deep_think=false）
 //   mode=deep_think → 只返回深度研究会话（deep_think=true）
 //   不传 mode → 返回全部
-app.get('/api/agent/chat/conversations', authenticateUser, async (req, res) => {
+// ★ 2026-11-13 限时开放 15 天：游客改用 guestAiAuth（窗口外自动回落登录鉴权），到期自动失效
+app.get('/api/agent/chat/conversations', guestAiAuth, async (req, res) => {
+  // ★ 2026-11-13 限时开放 15 天：窗口内游客无账号会话，直接返回空列表，跳过 list_ai_conversations RPC（不查库）；到期自动失效
+  if (req.guestAi && guestAiPublicWindowOpen()) {
+    return res.json({ ok: true, conversations: [], has_more: false, next_cursor: null });
+  }
   try {
     var mode = String(req.query.mode || '').trim();
     if (mode && !['normal', 'deep_think'].includes(mode)) return res.status(400).json({ ok: false, error: 'mode 参数无效' });
@@ -25905,7 +26013,8 @@ app.get('/api/agent/chat/conversations', authenticateUser, async (req, res) => {
 });
 
 // GET /api/agent/search-health - 搜索健康检查（验证搜索 Provider 可用性）
-app.get('/api/agent/search-health', authenticateUser, rateLimit(60000, 5), async (req, res) => {
+// ★ 2026-11-13 限时开放 15 天：游客改用 guestAiAuth（窗口外自动回落登录鉴权），到期自动失效
+app.get('/api/agent/search-health', guestAiAuth, guestAwareRateLimit(rateLimit(60000, 5)), async (req, res) => {
   try {
     if (req.userName !== ADMIN_USERNAME) {
       return res.status(403).json({ ok: false, code: 'admin_required', error: '仅管理员可检查联网搜索状态' });
@@ -26853,7 +26962,8 @@ require('./ai-workbench').registerWorkbenchRoutes(app,{authenticateUser:authenti
 //   4) 24h LRU 缓存（key=sha256(query+model+mode)，命中直接回放）
 //   5) 最终报告持久化到 posts（type=tavily_research 以兼容历史读取），research_done 携带 message_id
 // 事件：research_stage / research_step / research_content / research_sources / research_done / heartbeat / error
-app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), aiLargeJson, aiRequestMiddleware, async (req, res) => {
+// ★ 2026-11-13 限时开放 15 天：游客改用 guestAiAuth + 包装限流（窗口外自动回落登录鉴权），到期自动失效
+app.post('/api/agent/research/stream', guestAiAuth, aiChatConcurrencyGate, guestAwareChatRateLimit, aiLargeJson, aiRequestMiddleware, async (req, res) => {
   var aborted = false;
   var _researchAbort = new AbortController();
   var cancelToken = { cancelled: false };
@@ -26910,13 +27020,19 @@ app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, 
 
   try {
     var userName = req.userName || '';
+    // ★ 2026-11-13 限时开放 15 天：窗口内游客 userName 为空，深研链路所有依赖账号的
+    //   Supabase 读写一律跳过（不查库不写库），报告仍通过 SSE research_done 正常返回；
+    //   到期后 guestAiPublicWindowOpen() 自动变 false，游客回落登录鉴权，本分支自动失效。
+    var guestWindow = !!(req.guestAi && guestAiPublicWindowOpen());
     // ★ 并发上限：每用户最多 1 个研究任务、全局最多 5 个，超限返回 concurrent
-    researchRelease = tryAcquireDeepResearch(userName);
+    // ★ 2026-11-13 限时开放 15 天：游客用 guest IP 作并发 key（空 userName 会被 tryAcquireDeepResearch 拒绝），到期自动失效
+    researchRelease = tryAcquireDeepResearch(guestWindow ? ('guest:' + getRealIp(req)) : userName);
     if (!researchRelease) {
       writeSse(res, { type: 'error', error: 'concurrent', code: 'concurrent', message: '请等待上一个研究请求完成' });
       return safeEnd();
     }
-    var resumeId = String(req.body && req.body.checkpoint_id || '');
+    // ★ 2026-11-13 限时开放 15 天：游客禁用断点恢复，避免 researchCheckpoints.begin 查库；到期自动失效
+    var resumeId = guestWindow ? '' : String(req.body && req.body.checkpoint_id || '');
     if (resumeId && !/^[a-f\d-]{36}$/i.test(resumeId)) throw new Error('断点无效');
     if (resumeId) {
       checkpointJob = await researchCheckpoints.begin({ userName:userName, accountId:req.accountId }, null, resumeId);
@@ -26927,7 +27043,14 @@ app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, 
     var allowResearchSearch = !(req.body && req.body.web_search === false);
     var remainingSearch = allowResearchSearch && (!checkpointJob || checkpointJob.state.stage !== 'synthesize' || (checkpointJob.state.workers || []).some(function(w) { return !w || w.status !== 'success'; }) || (checkpointJob.state.gapWorkers || []).some(function(w) { return !w || w.status !== 'success'; }));
     // 深入研究与小猫/Code 共用日额度；研究默认会联网搜索，免费用户需有搜索余量
-    var researchGate = await enforceAiChatAccess(userName, { needSearch: remainingSearch });
+    // ★ 2026-11-13 限时开放 15 天：窗口内游客不限额度，直接置 allowed（空 userName 绝不查 DB 配额）；到期自动失效
+    var researchGate;
+    if (guestWindow) {
+      // ★ 2026-11-13 限时开放 15 天：游客不限额度、不查账号级配额；到期自动失效
+      researchGate = { allowed: true, reason: null, quota: null };
+    } else {
+      researchGate = await enforceAiChatAccess(userName, { needSearch: remainingSearch });
+    }
     if (!researchGate.allowed) {
       writeSse(res, {
         type: 'error',
@@ -26939,7 +27062,8 @@ app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, 
       return safeEnd();
     }
     // ★ 配额绕过修复：深入研究前强制过第三方搜索配额 gate（空 userName 也拒绝，不再默认放行）
-    var researchSearchGate = await measureSearchQuota(userName);
+    // ★ 2026-11-13 限时开放 15 天：窗口内游客不限搜索额度，跳过会拒绝空用户名（no_user）的 measureSearchQuota；到期自动失效
+    var researchSearchGate = guestWindow ? { allowed: true, reason: null, quota: null } : await measureSearchQuota(userName);
     if (remainingSearch && !researchSearchGate.allowed) {
       var researchSearchMsg = researchSearchGate.reason === 'search_limit' ? '今日搜索次数已达上限' : getAiQuotaErrorMessage(researchSearchGate.reason || 'search_limit');
       writeSse(res, {
@@ -26984,7 +27108,8 @@ app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, 
     //   否则换模型研究会命中上一个模型的旧报告（表现为"选了模型但报告没变"）。
     var documents = checkpointJob ? checkpointJob.state.request.documents||[] : [];
     var documentFingerprint = checkpointJob ? checkpointJob.state.request.document_fingerprint||'' : '';
-    if(!checkpointJob&&req.body&&req.body.reuse_documents===true&&!(req.body.attachments&&req.body.attachments.length)){documents=await require('./research-documents').loadConversationDocuments(supabase,userName,convId,aiConversationActorPattern(convId));if(documents.length){documentFingerprint=require('node:crypto').createHash('sha256').update(documents.map(function(d){return d.name+':'+d.sha256;}).join('\n')).digest('hex');require('./research-documents').publicDocuments(documents).forEach(function(document){writeSse(res,{type:'research_document',document:Object.assign({},document,{reused:true})});});}}
+    // ★ 2026-11-13 限时开放 15 天：窗口内游客跳过 loadConversationDocuments（不查库加载账号历史）；到期自动失效
+    if(!guestWindow&&!checkpointJob&&req.body&&req.body.reuse_documents===true&&!(req.body.attachments&&req.body.attachments.length)){documents=await require('./research-documents').loadConversationDocuments(supabase,userName,convId,aiConversationActorPattern(convId));if(documents.length){documentFingerprint=require('node:crypto').createHash('sha256').update(documents.map(function(d){return d.name+':'+d.sha256;}).join('\n')).digest('hex');require('./research-documents').publicDocuments(documents).forEach(function(document){writeSse(res,{type:'research_document',document:Object.assign({},document,{reused:true})});});}}
     if (!checkpointJob && req.body && Array.isArray(req.body.attachments) && req.body.attachments.length) {
       var preparedDocuments = await require('./research-documents').prepareResearchDocuments(req.body.attachments,{parseDocumentBuffer:parseDocumentBuffer,ocrImageBuffer:ocrImageBuffer,sharp:sharp,signal:_researchAbort.signal,onDocument:function(document){writeSse(res,{type:'research_document',document:document});}});
       documents=preparedDocuments.documents;documentFingerprint=preparedDocuments.fingerprint;
@@ -27015,6 +27140,10 @@ app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, 
         // S-6: 缓存命中不再每次 insert 新 tavily_research 记录 ——
         // 按 user+query+answer 查已有记录复用，避免历史表膨胀。
         var cachedMsgId = null;
+        // ★ 2026-11-13 限时开放 15 天：窗口内游客跳过缓存命中里的 posts 历史查询 /
+        //   persistResearchRecord / recordAiTurnUsage（不查库不写库），message_id 保持 null、
+        //   saved:false；到期后自动恢复原逻辑。
+        if (!guestWindow) {
         try {
           var existingResearch = await supabase.from('posts')
             .select('id, content, media_url')
@@ -27051,6 +27180,7 @@ app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, 
           search_count: 0,
           did_search: false
         }).catch(function() {});
+        }
         if (!aborted && Array.isArray(cached.thinking_log)) cached.thinking_log.forEach(function(entry){writeSse(res,{type:'research_thinking',agent_role:entry.agent_role,chunk:entry.chunk});});
         cachedBoard.save.report = cachedMsgId ? 'saved' : 'failed';
         if (!aborted) writeSse(res,{type:'research_board',...cachedBoard});
@@ -27061,7 +27191,8 @@ app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, 
 
     // ★ 自托管多智能体深度研究：主agent(大哥) 收任务 → 派 1-5 子agent 并行调研 → 主agent 汇总
     //   完全不依赖 Tavily 编排/搜索；子agent 使用 DeepSeek 内置 web_search。事件契约与旧代理一致。
-    if (!checkpointJob && req.body && req.body.checkpoint === true) {
+    // ★ 2026-11-13 限时开放 15 天：窗口内游客跳过 researchCheckpoints.begin（不写 DB 断点）；到期自动失效
+    if (!guestWindow && !checkpointJob && req.body && req.body.checkpoint === true) {
       checkpointJob = await researchCheckpoints.begin({userName:userName,accountId:req.accountId}, {query:query, model:model, research_model:researchModel, mode:mode, rewrite:rewrite, refresh:true, conversation_id:convId,web_search:allowResearchSearch,documents:documents,document_fingerprint:documentFingerprint});
     }
     if (checkpointJob) writeSse(res, {type:'research_checkpoint', checkpoint_id:checkpointJob.id, conversation_id:convId, resumed:checkpointJob.resumed});
@@ -27087,6 +27218,9 @@ app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, 
     //   此前直接 return safeEnd() 不扣任何费用 → 可零成本刷爆研究配额。
     if (aborted || (cancelToken && cancelToken.cancelled)) {
       if (checkpointJob) { try { await checkpointJob.finish('interrupted'); checkpointFinished = true; } catch (_) {} }
+      // ★ 2026-11-13 限时开放 15 天：窗口内游客跳过中断写库（persistResearchRecord /
+      //   saveInterruptedChatTurn / recordAbortedStreamUsage），不查库不写库；到期自动失效。
+      if (!guestWindow) {
       if (!cancelToken.discarded && selfResult && (selfResult.answer || (selfResult.thinking_log || []).length)) await persistResearchRecord(userName, convId, query, selfResult.answer, selfResult.sources, selfResult.thinking_log,
         { interrupted: true, complete: false, finish_reason: 'cancelled',model:managedResearchModel||undefined });
       else if (!cancelToken.discarded) await saveInterruptedChatTurn({ db: supabase, userName: userName, convId: convId, message: query,
@@ -27098,6 +27232,7 @@ app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, 
         usage: (selfResult && selfResult.usage) || null,
         searchApiCount: Math.floor(Number(selfResult && selfResult.search_count) || 0)
       });
+      }
       return safeEnd();
     }
     if (!selfResult || !selfResult.answer) {
@@ -27109,10 +27244,13 @@ app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, 
     if (managedResearchModel && selfResult.usage) selfResult.usage.model = managedResearchModel;
     var researchFinalMeta = {model:managedResearchModel||undefined,research_board:selfResult.board||null,documents:selfResult.documents||[],prepared_documents:documents};
     if(selfResult.complete===false)Object.assign(researchFinalMeta,{interrupted:true,complete:false,finish_reason:'upstream_error'});
-    var msgId = await persistResearchRecord(userName, convId, query, selfResult.answer, selfResult.sources, selfResult.thinking_log, researchFinalMeta);
+    // ★ 2026-11-13 限时开放 15 天：窗口内游客跳过 persistResearchRecord（不写库），message_id 为 null；到期自动失效
+    var msgId = guestWindow ? null : await persistResearchRecord(userName, convId, query, selfResult.answer, selfResult.sources, selfResult.thinking_log, researchFinalMeta);
     // ★ 修复 S4（簇 A，续）：持久化已完成 → 本次研究的所有上游费用均已实际发生，
     //   此处断开同样必须补记账（此前直接 return 会漏掉整笔研究用量）。
     if (aborted) {
+      // ★ 2026-11-13 限时开放 15 天：窗口内游客跳过中断记账（不写库）；到期自动失效
+      if (!guestWindow) {
       await recordAbortedStreamUsage(userName, {
         convId: convId, usedModel: managedResearchModel || model, source: 'research_stream_aborted',
         message: query,
@@ -27120,6 +27258,7 @@ app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, 
         usage: (selfResult && selfResult.usage) || null,
         searchApiCount: Math.floor(Number(selfResult && selfResult.search_count) || 0)
       });
+      }
       return safeEnd();
     }
     if (checkpointJob) { try { await checkpointJob.finish(selfResult.complete === false || !msgId ? 'failed' : 'complete'); checkpointFinished = true; } catch (_) { writeSse(res,{type:'research_stage',stage:'checkpoint_failed',message:'断点状态未同步，请复制保留本次报告。'}); } }
@@ -27127,6 +27266,8 @@ app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, 
 
     // 扣减深入研究全链路 token（输入/思考/输出）与实际搜索次数
     var researchQuota = null;
+    // ★ 2026-11-13 限时开放 15 天：窗口内游客不限额度、不记账（跳过 recordAiTurnUsage）；到期自动失效
+    if (!guestWindow) {
     try {
       var researchUsage = (selfResult && selfResult.usage) || null;
       var researchSearchHits = Math.max(
@@ -27148,6 +27289,7 @@ app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, 
       });
     } catch (eResearchQ) {
       console.error('[AI-QUOTA] research record failed:', eResearchQ && eResearchQ.message);
+    }
     }
 
     if (selfResult.complete === false) {
@@ -27185,7 +27327,12 @@ app.post('/api/agent/research/stream', authenticateUser, aiChatConcurrencyGate, 
 
 // GET /api/agent/research/history - 当前用户的研究记录（content JSON type=tavily_research）
 // 每页最多 50 条。before 是 {at,id} 游标；旧数据库函数没有该参数时，第一页仍可用。
-app.get('/api/agent/research/history', authenticateUser, rateLimit(60000, 30), async (req, res) => {
+// ★ 2026-11-13 限时开放 15 天：游客改用 guestAiAuth（窗口外自动回落登录鉴权），到期自动失效
+app.get('/api/agent/research/history', guestAiAuth, guestAwareRateLimit(rateLimit(60000, 30)), async (req, res) => {
+  // ★ 2026-11-13 限时开放 15 天：窗口内游客无账号研究历史，跳过 list_ai_research_records RPC（不查库）；到期自动失效
+  if (req.guestAi && guestAiPublicWindowOpen()) {
+    return res.json({ ok: true, records: [], has_more: false, next_cursor: null });
+  }
   try {
     var limit = Math.min(Math.max(parseInt(req.query && req.query.limit, 10) || 10, 1), 50);
     var before;
@@ -27207,7 +27354,12 @@ app.get('/api/agent/research/history', authenticateUser, rateLimit(60000, 30), a
 
 // POST /api/agent/chat/delete - 删除用户指定的对话（软删除，管理员仍可查看）
 // rateLimit 参考相邻端点（如 research/history 的 60000/30），防刷量逐条 UPDATE
-app.post('/api/agent/chat/delete', authenticateUser, rateLimit(60000, 30), async (req, res) => {
+// ★ 2026-11-13 限时开放 15 天：游客改用 guestAiAuth（窗口外自动回落登录鉴权），到期自动失效
+app.post('/api/agent/chat/delete', guestAiAuth, guestAwareRateLimit(rateLimit(60000, 30)), async (req, res) => {
+  // ★ 2026-11-13 限时开放 15 天：窗口内游客无账号会话，直接返回 ok，跳过 soft_delete_ai_conversation RPC（不写库）；到期自动失效
+  if (req.guestAi && guestAiPublicWindowOpen()) {
+    return res.json({ ok: true });
+  }
   try {
     var convId = String(req.body && req.body.conversation_id || '').trim();
     if (!/^[A-Za-z0-9-]{6,128}$/.test(convId)) return res.status(400).json({ ok: false, error: 'conversation_id 格式无效' });
@@ -27222,7 +27374,8 @@ app.post('/api/agent/chat/delete', authenticateUser, rateLimit(60000, 30), async
   }
 });
 // POST /api/agent/chat/new - 开始新对话（生成新 conversation_id，不删除旧记录）
-app.post('/api/agent/chat/new', authenticateUser, async (req, res) => {
+// ★ 2026-11-13 限时开放 15 天：游客改用 guestAiAuth（窗口外自动回落登录鉴权），到期自动失效
+app.post('/api/agent/chat/new', guestAiAuth, async (req, res) => {
   try {
   return res.json({ ok: true, conversation_id: genConvId() });
   } catch (e) {
@@ -27297,10 +27450,14 @@ async function loadPostToolPost(postId, userName) {
   return post;
 }
 
-app.post('/api/agent/post-tools', authenticateUser, rateLimit(60000, 20), async (req, res) => {
+// ★ 2026-11-13 限时开放 15 天：游客改用 guestAiAuth（窗口外自动回落登录鉴权），到期自动失效
+app.post('/api/agent/post-tools', guestAiAuth, guestAwareRateLimit(rateLimit(60000, 20)), async (req, res) => {
   try {
+    // ★ 2026-11-13 限时开放 15 天：窗口内游客不限额度、不查账号级额度 RPC、不记账；到期自动失效
+    var guestWindow = !!(req.guestAi && guestAiPublicWindowOpen());
     // ★ 计量修复：翻译/锐评消耗 DeepSeek token，必须接入用户额度与请求次数兜底
-    var toolAccess = await enforceAiChatAccess(req.userName, { needSearch: false });
+    // ★ 2026-11-13 限时开放 15 天：窗口内游客不限额度，跳过会拒绝空用户名（no_user）的 enforceAiChatAccess；到期自动失效
+    var toolAccess = guestWindow ? { allowed: true, reason: null, quota: null } : await enforceAiChatAccess(req.userName, { needSearch: false });
     if (!toolAccess.allowed) {
       return res.status(429).json({ error: getAiQuotaErrorMessage(toolAccess.reason), code: toolAccess.reason || 'rate_limited', quota: toolAccess.quota || null });
     }
@@ -27319,12 +27476,18 @@ app.post('/api/agent/post-tools', authenticateUser, rateLimit(60000, 20), async 
       if (cached && cached.expiresAt > Date.now()) return res.json({ ok: true, cached: true, translation: cached.translation });
       var translation = await callDeepSeekAI({ system: '当前场景：帖子翻译。\n准确翻译为简洁中文，保留段落、标点、emoji、人名和语气，不要添加评论。', messages: [{ role: 'user', content: content }], max_tokens: 1600, thinking_mode: 'off' });
       if (!translation) return res.status(502).json({ error: 'translation_failed' });
+      // ★ 2026-11-13 限时开放 15 天：窗口内游客不记账（跳过 recordAiTurnUsage）；到期自动失效
+      if (!guestWindow) {
       recordAiTurnUsage(req.userName, null, { model: DEEPSEEK_MODEL_REASONER, source: 'post_tools', message: content.slice(0, 500), content: translation, reasoning: '', search_count: 0, did_search: false }).catch(function() {});
+      }
       postTranslationCache.set(cacheKey, { translation: translation, expiresAt: Date.now() + 6 * 60 * 60 * 1000 });
       return res.json({ ok: true, translation: translation });
     }
     var scanRaw = await callDeepSeekAI({ system: 'Review this post only for a user report form. Return JSON with suspected(boolean), risk_level(low|medium|high), categories(string array), summary(string), evidence(string array), suggested_reason(string). Do not recommend enforcement.', messages: [{ role: 'user', content: content }], jsonMode: true, max_tokens: 700, thinking_mode: 'off' });
+    // ★ 2026-11-13 限时开放 15 天：窗口内游客不记账（跳过 recordAiTurnUsage）；到期自动失效
+    if (!guestWindow) {
     recordAiTurnUsage(req.userName, null, { model: DEEPSEEK_MODEL_REASONER, source: 'post_tools', message: content.slice(0, 500), content: JSON.stringify(scanRaw || {}), reasoning: '', search_count: 0, did_search: false }).catch(function() {});
+    }
     return res.json({ ok: true, scan: scanRaw || { suspected: false, risk_level: 'low', categories: [], summary: 'AI 检测暂不可用。', evidence: [], suggested_reason: '' } });
   } catch (e) {
     var code = String(e && e.message || 'post_tool_failed');
@@ -27354,7 +27517,10 @@ setInterval(function() {
   }
 }, 10 * 60 * 1000).unref(); // ★ 审计修复：翻译缓存清理不应阻止进程退出
 
-app.post('/api/agent/post-chat/stream', authenticateUser, aiChatConcurrencyGate, rateLimit(60000, 12), async (req, res) => {
+// ★ 2026-11-13 限时开放 15 天：游客改用 guestAiAuth 且窗口内不限次数（窗口外自动回落登录），到期自动失效
+app.post('/api/agent/post-chat/stream', guestAiAuth, aiChatConcurrencyGate, guestAwareRateLimit(rateLimit(60000, 12)), async (req, res) => {
+  // ★ 2026-11-13 限时开放 15 天：本路由仍用 authenticateUser（游客不可达）；此处为窗口收口的防御性包裹，窗口外/已登录行为不变，到期自动失效
+  var guestWindow = !!(req.guestAi && guestAiPublicWindowOpen());
   var closed = false;
   var requestAbort = new AbortController();
   res.on('close', function() { if (!res.writableEnded) { closed = true; requestAbort.abort(); } });
@@ -27367,7 +27533,8 @@ app.post('/api/agent/post-chat/stream', authenticateUser, aiChatConcurrencyGate,
   var streamed = false;
   try {
     // ★ 计量修复：帖子锐评消耗 DeepSeek token，必须接入用户额度与请求次数兜底
-    var critiqueAccess = await enforceAiChatAccess(req.userName, { needSearch: false });
+    // ★ 2026-11-13 限时开放 15 天：窗口内游客不限额度，跳过会拒绝空用户名（no_user）的 enforceAiChatAccess；到期自动失效
+    var critiqueAccess = guestWindow ? { allowed: true, reason: null, quota: null } : await enforceAiChatAccess(req.userName, { needSearch: false });
     if (!critiqueAccess.allowed) {
       if (!closed) {
         writeSse(res, { error: getAiQuotaErrorMessage(critiqueAccess.reason), code: critiqueAccess.reason || 'rate_limited' }, 'error');
@@ -27420,7 +27587,10 @@ app.post('/api/agent/post-chat/stream', authenticateUser, aiChatConcurrencyGate,
     //   跳过，而 callDeepSeekAI 已完整执行、上游费用已发生 → 可零成本刷配额。
     //   对齐 code/ai 通道（S3）的修复模式：记账移出守卫，仅在确实产生过输出时记。
     if (reply && String(reply).length > 0) {
+      // ★ 2026-11-13 限时开放 15 天：窗口内游客不记账（跳过 recordAiTurnUsage）；到期自动失效
+      if (!guestWindow) {
       recordAiTurnUsage(req.userName, critiqueUsage, { model: DEEPSEEK_MODEL_FLASH, source: 'post_chat', message: content.slice(0, 500) || '[图片帖子：' + post.id + '，' + preparedCritique.imageCount + '张]', content: sanitizePostCritique(reply || ''), reasoning: '', search_count: 0, did_search: false }).catch(function() {});
+      }
     }
   } catch (e) {
     if (!closed) {
@@ -27434,7 +27604,8 @@ app.post('/api/agent/post-chat/stream', authenticateUser, aiChatConcurrencyGate,
   await endSse(res);
 });
 
-app.post('/api/agent/site-search', authenticateUser, rateLimit(60000, 20), async (req, res) => {
+// ★ 2026-11-13 限时开放 15 天：游客可用站内搜索且窗口内不限次数（窗口外自动回落登录），到期自动失效
+app.post('/api/agent/site-search', guestAiAuth, guestAwareRateLimit(rateLimit(60000, 20)), async (req, res) => {
   try {
     var rawQuery = String(req.body && req.body.query || '').trim();
     var sources = Array.isArray(req.body && req.body.sources) ? req.body.sources : ['posts'];
@@ -27467,7 +27638,10 @@ app.post('/api/agent/site-search', authenticateUser, rateLimit(60000, 20), async
       return (b.created_at || '').localeCompare(a.created_at || '');
     });
     results = results.slice(0, limit);
-    aiSitePersistResults(req.userName, results).catch(function(e) { console.error('[site-search] persist failed:', e && e.message); });
+    // ★ 2026-11-13 限时开放 15 天：游客不落库（不写 ai_search_results）；到期自动失效
+    if (!(req.guestAi && guestAiPublicWindowOpen())) {
+      aiSitePersistResults(req.userName, results).catch(function(e) { console.error('[site-search] persist failed:', e && e.message); });
+    }
     var response = { ok: true, query: query, results: results, card: aiSiteCard('search_results', '站内搜索结果', { results: results }), search_plan: { keywords: plan.keywords, author: plan.author, date_from: plan.date_from, date_to: plan.date_to, sources: plan.sources } };
     if (sourceErrors.length) response.source_errors = sourceErrors;
     return res.json(response);
@@ -27477,8 +27651,11 @@ app.post('/api/agent/site-search', authenticateUser, rateLimit(60000, 20), async
   }
 });
 
-app.get('/api/agent/search-result/:id', authenticateUser, rateLimit(60000, 20), async (req, res) => {
+// ★ 2026-11-13 限时开放 15 天：游客通道（窗口外自动回落登录），到期自动失效
+app.get('/api/agent/search-result/:id', guestAiAuth, guestAwareRateLimit(rateLimit(60000, 20)), async (req, res) => {
   try {
+    // ★ 2026-11-13 限时开放 15 天：游客无账号、不落库，直接返回空结果且不查 DB；到期自动失效
+    if (req.guestAi && guestAiPublicWindowOpen()) return res.status(404).json({ error: '搜索结果不存在或已过期' });
     var id = aiSiteText(req.params.id, 80);
     var lookup = await supabase.from('ai_search_results').select('id,source,source_id,title,snippet,jump_target,created_at,expires_at').eq('id', id).eq('owner_name', req.userName).gt('expires_at', new Date().toISOString()).maybeSingle();
     if (lookup.error) return res.status(503).json({ error: 'AI 工具数据表尚未迁移' });
@@ -27487,8 +27664,11 @@ app.get('/api/agent/search-result/:id', authenticateUser, rateLimit(60000, 20), 
   } catch (e) { return res.status(500).json({ error: '查询失败' }); }
 });
 
-app.get('/api/agent/drafts', authenticateUser, rateLimit(60000, 20), async (req, res) => {
+// ★ 2026-11-13 限时开放 15 天：游客通道（窗口外自动回落登录），到期自动失效
+app.get('/api/agent/drafts', guestAiAuth, guestAwareRateLimit(rateLimit(60000, 20)), async (req, res) => {
   try {
+    // ★ 2026-11-13 限时开放 15 天：游客无账号草稿，返回空列表且不查 DB；到期自动失效
+    if (req.guestAi && guestAiPublicWindowOpen()) return res.json({ ok: true, drafts: [] });
     var rows = await supabase.from('ai_drafts').select('id,kind,title,body,status,created_at,updated_at').eq('owner_name', req.userName).neq('status', 'deleted').order('updated_at', { ascending: false }).limit(100);
     if (rows.error) return res.status(503).json({ error: 'AI 工具数据表尚未迁移' });
     return res.json({ ok: true, drafts: rows.data || [] });
@@ -27582,7 +27762,12 @@ app.post('/api/agent/actions/:id/cancel', authenticateUser, async (req, res) => 
 //   - 带 conversation_id：只返回该 conv 的消息
 //   - 不带 conversation_id：先查最近一条 AI 消息解析其 convId，再返回这个 conv 的消息
 //   - 带 before（ISO 时间）：分页加载比 before 更早的消息（滚动加载更多用）
-app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
+// ★ 2026-11-13 限时开放 15 天：游客改用 guestAiAuth（窗口外自动回落登录鉴权），到期自动失效
+app.get('/api/agent/chat/history', guestAiAuth, async (req, res) => {
+  // ★ 2026-11-13 限时开放 15 天：窗口内游客无账号聊天历史，直接返回空列表，跳过 list_ai_conversations / queryAiHistoryPage（不查库）；到期自动失效
+  if (req.guestAi && guestAiPublicWindowOpen()) {
+    return res.json({ ok: true, conversation_id: String(req.query && req.query.conversation_id || '').trim() || null, messages: [], has_more: false, oldest: null, oldest_id: null, next_cursor: null });
+  }
   try {
     var userName = req.userName;
     var convId = String(req.query.conversation_id || '').trim();

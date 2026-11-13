@@ -4801,10 +4801,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var isTimeout = r && (r.status === 0 || r.error_code === 'timeout');
     var isNetwork = r && r.error_code === 'network_error';
     var isAuth = r && (r.error_code === 'auth' || r.status === 401);
-    // ★ 未登录访客的 AI 权限已关闭：这里不能再说「登录已失效」（他根本没登录过），
-    //   直接给一句「登录后即可使用」，按钮也换成登录。
-    var guestBlocked = isAuth && !readUserName();
-    var tip = isAuth
+    // ★ 2026-11-13 限时开放 15 天：窗口内游客（/guest-mode 已放行、S.guestAi=true）遇到 401
+    //   不再当作登录阻断：不弹登录框、不放阻断文案，仅给中性的限时开放说明 + 重试历史按钮。
+    //   已登录用户的 401（登录已失效→刷新）与窗口外游客的登录引导逻辑保持原样。
+    var guestFree = isAuth && !readUserName() && !!S.guestAi;
+    var guestBlocked = isAuth && !readUserName() && !guestFree;
+    var tip = guestFree
+      ? '限时开放中，聊天记录暂无法加载，你仍可继续和小猫聊天'
+      : isAuth
       ? (guestBlocked ? '登录后即可使用小猫 AI' : '登录已失效，请重新登录后再发送')
       : isTimeout
       ? '聊天记录加载超时，可继续发送消息或点击重试'
@@ -7285,9 +7289,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   }
 
   async function ensureUserAuthOrNotify(options) {
-    // 未登录访客：只有普通聊天可以在后台开关开启时继续，其他 AI 功能仍需登录。
     if (!readUserName()) {
-      if (options && options.allowGuest && await ensureGuestAiMode()) return true;
+      // ★ 2026-11-13 限时开放 15 天：游客不再需要 allowGuest 标记，一律按后台 /guest-mode
+      //   开关放行（窗口内 enabled:true 时所有 AI 功能可用）；窗口外仍回到登录提示。
+      //   已登录分支完全不动：不请求 /guest-mode、不触发刷新/清理登录态。
+      if (await ensureGuestAiMode()) return true;
       notify('请先登录后再和小猫聊天');
       return false;
     }
@@ -9110,7 +9116,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   async function openDeepThinkPage() {
     if (S._voiceConversation) S._voiceConversation.setEnabled(false);
     ensureAiAccountState();
-    if (!window.currentUser) {
+    // ★ 2026-11-13 限时开放 15 天：先拉取游客开关，避免直接点深入研究时 S.guestAi 尚未初始化。
+    if (!window.currentUser) await ensureGuestAiMode();
+    if (!window.currentUser && !S.guestAi) {
       notify('请先登录后再使用深入研究');
       return;
     }
@@ -10914,7 +10922,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
   async function openSiteSearchPage() {
     ensureAiAccountState();
-    if (!window.currentUser) {
+    // ★ 2026-11-13 限时开放 15 天：先拉取游客开关，避免直接点站内搜索时 S.guestAi 尚未初始化。
+    if (!window.currentUser) await ensureGuestAiMode();
+    if (!window.currentUser && !S.guestAi) {
       notify('请先登录后再使用站内搜索');
       return;
     }
