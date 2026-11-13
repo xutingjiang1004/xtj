@@ -704,3 +704,8 @@ html.xtj-photo-preview-ready #photoPreviewOverlay.pp-gesturing .pp-preview-toolb
 
 /* 2026-11-01：去掉照片加载时「光扫过」的骨架动画（用户不喜欢）；加载反馈只留底部樱花进度条。 */
 #photoPreviewOverlay .pp-image-loading, #photoPreviewOverlay .pp-image-loading .pp-sweep { display: none !important; animation: none !important; }
+
+/* 2026-11-13：看大图时左下角的作者、时间、浏览数叠在图片上，图片是浅色时几乎看不见。加深文字投影。 */
+#photoPreviewOverlay .pp-story .pp-user, #photoPreviewOverlay .pp-story .pp-time,
+#photoPreviewOverlay .pp-story-stats .pp-views { text-shadow: 0 1px 2px rgba(0, 0, 0, .8), 0 0 12px rgba(0, 0, 0, .55); }
+#photoPreviewOverlay .pp-story-stats :is(button, .pp-views) svg { filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .7)); }

@@ -7346,7 +7346,8 @@
                     var list = byId(kind === 'views' ? 'postStatsViewsList' : 'postStatsLikesList');
                     var count = byId(kind === 'views' ? 'postStatsViewsCount' : 'postStatsLikesCount');
                     if (!list || !count) return;
-                    count.textContent = state.loginRequired ? '–' : String(state.total != null ? state.total : state.rows.length);
+                    // 还没加载出来或加载失败时不显示 0（那会被读成「没有人」），用占位符。
+                    count.textContent = state.loginRequired || (state.total == null && !state.rows.length && (state.error || state.loading)) ? '–' : String(state.total != null ? state.total : state.rows.length);
                     var html;
                     if (state.loginRequired) html = '<li class="post-stats-note">登录后可以查看浏览用户</li>';
                     else if (state.rows.length) html = state.rows.map(function(row) { return rowHtml(row.user_name); }).join('');
@@ -7383,7 +7384,9 @@
                             if (!state.cursor) break;
                         }
                     } catch (error) {
-                        if (current()) state.error = (error && error.message) || '加载失败，请重试';
+                        // 服务端有时只回一个英文错误码（如 not_found）；不把它原样显示给用户。
+                        var statMessage = String(error && error.message || '');
+                        if (current()) state.error = /[\u4e00-\u9fff]/.test(statMessage) ? statMessage : '加载失败，请重试';
                     } finally {
                         if (current()) { state.loading = false; paint(kind, state); }
                     }

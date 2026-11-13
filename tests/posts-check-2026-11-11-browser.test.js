@@ -107,3 +107,40 @@ test('plain web addresses in a post are clickable links and nothing else becomes
   assert.equal(new URL(p.url()).origin, f.origin);
   assert.deepEqual(f.errors, []);
 });
+
+// ---- 2026-11-13 第二轮检查 ----
+test('dark post detail has no stray background between its cards, and the filter user block has no leftover highlight', { timeout: 60000 }, async t => {
+  const f = await open(t, { theme: 'dark' }), p = f.page;
+  await p.evaluate(() => window.openPostDetail(document.querySelector('#feed .post').dataset.postId));
+  await p.waitForSelector('#postDetailBody .post-detail-shell');
+  assert.equal(await p.evaluate(() => getComputedStyle(document.querySelector('#postDetailBody .post-detail-shell')).backgroundColor), 'rgba(0, 0, 0, 0)');
+  await p.keyboard.press('Escape');
+  await p.waitForFunction(() => !document.querySelector('#postDetailModal.show, #postDetailModal.active') || getComputedStyle(document.getElementById('postDetailModal')).display === 'none');
+  await p.evaluate(() => window.toggleFilterPanel());
+  await p.waitForSelector('#postFilterPanel .post-filter-user-block');
+  assert.equal(await p.evaluate(() => getComputedStyle(document.querySelector('#postFilterPanel .post-filter-user-block')).boxShadow), 'none');
+  assert.deepEqual(f.errors, []);
+});
+
+test('a failed viewers/likes list shows a plain message and a dash, never a raw error code or a zero', { timeout: 60000 }, async t => {
+  const f = await open(t), p = f.page;
+  await p.route('**/api/post/**/viewers**', route => route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ ok: false, error: 'not_found' }) }));
+  await p.route('**/api/post/**/likers**', route => route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ ok: false, error: '服务器开小差了' }) }));
+  await p.locator('#feed .post .post-stat-link').first().click();
+  await p.locator('#postStatsViewsList .post-stats-error').waitFor();
+  const views = await p.locator('#postStatsViewsList').textContent(), likes = await p.locator('#postStatsLikesList').textContent();
+  assert.ok(!/not_found/.test(views), views); assert.match(views, /加载失败，请重试/);
+  assert.ok(!/[a-z]+_[a-z]+/.test(likes), likes);
+  assert.equal(await p.locator('#postStatsViewsCount').textContent(), '–');
+  assert.equal(await p.locator('#postStatsViewsList .post-stats-retry').count(), 1);
+  assert.deepEqual(f.errors.filter(e => !/404|500|Failed to load resource/.test(String(e))), []);
+});
+
+test('on a tablet the composer shows focus on the card, not as an outline pressed against the text', { timeout: 60000 }, async t => {
+  const f = await open(t, { viewport: { width: 1024, height: 768 } }), p = f.page;
+  await p.locator('#postInp').click();
+  await p.keyboard.type('今天去了海边');
+  const style = await p.evaluate(() => { const s = getComputedStyle(document.getElementById('postInp')); return s.outlineStyle + ' ' + s.outlineWidth; });
+  assert.ok(/^none|0px$/.test(style), style);
+  assert.deepEqual(f.errors, []);
+});

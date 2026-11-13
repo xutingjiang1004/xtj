@@ -350,3 +350,14 @@ button.comment-reply-context { min-height:44px;border:0;padding:4px 0;background
 /* 2026-11-12 正文里的网址可点击 */
 .post-content-link { color: var(--primary, #287b55); text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere; }
 [data-theme="dark"] .post-content-link { color: #7fd8ad; }
+
+/* ===== 2026-11-13 帖子板块检查 ===== */
+/* 深色：帖子详情外壳带着信息流卡片的紫灰底，从正文、点赞、评论三块之间的缝里露出来成了杂色条纹。 */
+html[data-theme="dark"] #postDetailBody .post.post-detail-shell { background: transparent !important; }
+/* 筛选面板「用户」一栏带着旧样式的内侧高光，深色下是一条多余的弧线。 */
+html body #postFilterPanel .post-filter-user-block { box-shadow: none; }
+/* 平板/电脑：发帖框获得焦点时，输入框自己的焦点描边紧贴文字（左右没有留白）。
+   改由整个发帖卡片显示焦点（和手机一致），输入框不再单独描边。 */
+#panelPosts .publish-box #postInp:focus, #panelPosts .publish-box #postInp:focus-visible { outline: none !important; }
+#panelPosts .publish-box:focus-within { border-color: rgba(66, 155, 122, .55); box-shadow: 0 0 0 3px rgba(66, 155, 122, .12); }
+html[data-theme="dark"] #panelPosts .publish-box:focus-within { border-color: rgba(127, 216, 182, .5); box-shadow: 0 0 0 3px rgba(127, 216, 182, .12); }
