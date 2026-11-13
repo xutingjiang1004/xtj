@@ -252,6 +252,8 @@ test('typing and opening context details cannot replace the active server budget
  const before=await p.locator('.ai-context-label').textContent();await p.locator('#aiChatMsgInput').fill('继续');await p.getByRole('button',{name:/上下文窗口/}).click();
  const popup=p.getByRole('region',{name:'上下文窗口详情'});assert.equal(await p.locator('.ai-context-label').textContent(),before);assert.match(await popup.locator('.ai-context-usage').textContent(),/24,000/);
  await p.keyboard.press('Escape');await finish(p,0,'上下文按同一口径估算。',{context_budget:budget});await p.waitForFunction(()=>document.querySelector('#aiChatPauseBtn').style.display==='none');
+ // 正文是匀速流出的（2026-11-13）：等它流完、这条回复收尾之后，上下文估算才会按最终内容更新。
+ await p.waitForFunction(()=>(document.querySelector('.ai-msg.assistant .ai-msg-bubble')?.textContent||'').includes('上下文按同一口径估算。')&&!document.querySelector('.ai-msg.assistant.generating'));await p.waitForTimeout(300);
  await p.getByRole('button',{name:/上下文窗口/}).click();const detail=await popup.locator('.ai-context-usage').textContent();assert.match(detail,/23,/);assert.match(await popup.textContent(),/剩余比例已扣除预留/);assert.deepEqual(f.errors,[]);
 });
 
