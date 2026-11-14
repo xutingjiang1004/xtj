@@ -39,8 +39,7 @@ test('上游拒绝 web 工具时整体摘掉扩展字段重试一次，退回原
 
 test('主聊天路由：只在用户打开搜索且非工作模式时启用原生联网，并透传引用来源', () => {
   assert.match(server, /web_tools: \(!workModeEnabled && webSearchPref === true\) \? \['search', 'read_url'\] : null,/);
-  // 与 function 工具混用时官方可能拒绝 safety_check，因此聊天通道先关掉（需要时另开无工具通道）
-  assert.match(server, /safety_check: false,/);
+  assert.match(server, /safety_check: !workModeEnabled && webSearchPref === true,/);
   assert.match(server, /type: 'sources', items: sent\.slice\(0, 8\)/);
   // 原生通道生效时跳过本地强制预搜，否则结果已注入、模型不会去联网
   assert.match(server, /var nativeWebActive = req\.body && req\.body\.web_search === true && req\.body\.native_web !== false;/);
