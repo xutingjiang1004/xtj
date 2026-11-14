@@ -12694,6 +12694,32 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             continue;
           }
 
+          if (evt.type === 'sources' && Array.isArray(evt.items) && evt.items.length) {
+            // ★ 2026-11-14（DeepSeek 原生联网）：官方 web 工具返回的引用来源。
+            //   同一轮可能分多次下发，这里按 URL 去重累积；最多展示 8 条，避免刷屏。
+            var srcWrap = assistantNode.querySelector('.ai-sources');
+            if (!srcWrap) {
+              srcWrap = el('div', { class: 'ai-sources' });
+              srcWrap.appendChild(el('div', { class: 'ai-sources-title', text: '来源' }));
+              srcWrap._seen = Object.create(null);
+              if (assistantBubble && assistantBubble.parentNode === assistantNode) assistantNode.insertBefore(srcWrap, assistantBubble.nextSibling);
+              else assistantNode.appendChild(srcWrap);
+            }
+            evt.items.forEach(function(item) {
+              var srcUrl = String((item && item.url) || '').trim();
+              if (!/^https?:\/\//i.test(srcUrl) || srcWrap._seen[srcUrl]) return;
+              if (srcWrap.querySelectorAll('.ai-source-item').length >= 8) return;
+              srcWrap._seen[srcUrl] = 1;
+              var host = '';
+              try { host = new URL(srcUrl).hostname.replace(/^www\./, ''); } catch (_) {}
+              var link = el('a', { class: 'ai-source-item', href: srcUrl, target: '_blank', rel: 'noopener noreferrer' });
+              link.appendChild(el('span', { class: 'ai-source-title', text: String((item && item.title) || srcUrl) }));
+              if (host) link.appendChild(el('span', { class: 'ai-source-host', text: host }));
+              srcWrap.appendChild(link);
+            });
+            continue;
+          }
+
           if (evt.type === 'search') {
             var searchCount = evt.count;
             var searchBar = assistantNode.querySelector('.ai-search-status');

@@ -9012,3 +9012,19 @@ html[data-theme="dark"] .ai-msg.assistant .ai-msg-bubble {
     border-radius: 10px !important;
   }
 }
+
+/* ★ 2026-11-14（接入 DeepSeek 原生联网）：回答下方的引用来源。
+   只在服务端真的回传 url_citation 时出现；没有来源就不占任何高度。
+   视觉沿用正文的阅读排版：无卡片、无边框，靠字号与颜色分层。 */
+.ai-sources { margin: 10px 2px 2px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.ai-sources-title { font-size: 12px; line-height: 1.5; color: var(--ai-text-muted, #8a9995); letter-spacing: .02em; }
+.ai-source-item { display: inline-flex; align-items: baseline; gap: 6px; max-width: 100%; padding: 4px 9px; border-radius: 8px; background: rgba(120, 170, 160, 0.10); color: inherit; text-decoration: none; font-size: 12px; line-height: 1.45; transition: background .16s ease; }
+.ai-source-item:hover { background: rgba(120, 170, 160, 0.2); }
+.ai-source-title { max-width: 15em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-source-host { color: var(--ai-text-muted, #8a9995); font-size: 11px; white-space: nowrap; }
+[data-theme="dark"] .ai-source-item { background: rgba(120, 190, 170, 0.14); }
+[data-theme="dark"] .ai-source-item:hover { background: rgba(120, 190, 170, 0.24); }
+@media (max-width: 640px) {
+  .ai-source-title { max-width: 11em; }
+  .ai-sources { gap: 6px; }
+}

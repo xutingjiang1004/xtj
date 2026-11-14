@@ -26,6 +26,9 @@
   function create(options) {
     var enabled = false, disposed = false, seq = 0, speechSeq = 0, recognition = null, recorder = null, media = null;
     var decodeAbort = null, recordTimer = null, listening = false, speaking = false, utterance = null;
+    // ★ 2026-11-14（DeepSeek 语音）：服务端朗读用的音频对象与中断句柄；
+    //   ttsUnavailable 一旦为真，本次页面生命周期内不再尝试，直接走浏览器语音合成。
+    var ttsAudio = null, ttsAbort = null, ttsUnavailable = false, ttsUrl = '';
     var owner = options.owner(), lastTranscript = '', finalTranscript = '', baseText = '';
     var systemDictationFailed = false;
     // 提前问一次服务端识别是否可用，点麦克风时直接用结果。
@@ -41,6 +44,14 @@
       speaking = false;
       if (utterance) utterance.onstart = utterance.onend = utterance.onerror = null;
       utterance = null;
+      // 服务端朗读：中断请求、停止播放并释放对象 URL
+      try { if (ttsAbort) ttsAbort.abort(); } catch (_) {}
+      ttsAbort = null;
+      if (ttsAudio) {
+        try { ttsAudio.onplaying = ttsAudio.onended = ttsAudio.onerror = null; ttsAudio.pause(); } catch (_) {}
+        ttsAudio = null;
+      }
+      if (ttsUrl) { try { global.URL.revokeObjectURL(ttsUrl); } catch (_) {} ttsUrl = ''; }
       try { if (global.speechSynthesis) global.speechSynthesis.cancel(); } catch (_) {}
       state();
     }
@@ -158,13 +169,20 @@
     function speak(value, autoContinue) {
       cancelInput(); stopSpeech();
       if (!options.current(owner)) return;
-      if (!global.speechSynthesis || !global.SpeechSynthesisUtterance) { options.notify('当前浏览器不支持朗读，仍可使用语音输入'); return; }
       var text = speechText(value);
       if (!text) return;
       if (text.length > 50000) { text = text.slice(0,50000); options.notify('回复较长，本次朗读前 5 万字'); }
-      var parts = text.match(/[\s\S]{1,220}(?:[。！？\n]|$)|[\s\S]{1,220}/g) || [text];
-      var speechToken = speechSeq, index = 0;
+      var speechToken = speechSeq;
       function speechCurrent(){return !disposed&&speechToken===speechSeq&&options.current(owner);}
+      // ★ 2026-11-14：先试服务端朗读（DeepSeek TTS，音色自然、移动端一致）；
+      //   未配置/失败时无缝回落到浏览器语音合成，不提示错误、不打断对话。
+      if (serverSpeak(text, speechToken, speechCurrent, autoContinue)) return;
+      browseSpeak(text, speechToken, speechCurrent, autoContinue);
+    }
+    function browseSpeak(text, speechToken, speechCurrent, autoContinue) {
+      if (!global.speechSynthesis || !global.SpeechSynthesisUtterance) { options.notify('当前浏览器不支持朗读，仍可使用语音输入'); return; }
+      var parts = text.match(/[\s\S]{1,220}(?:[。！？\n]|$)|[\s\S]{1,220}/g) || [text];
+      var index = 0;
       function next() {
         if (!speechCurrent()) return;
         if (index >= parts.length) { speaking = false; utterance = null; state(); if (enabled && autoContinue) void listen(); return; }
@@ -181,6 +199,59 @@
         catch (_) { stopSpeech(); options.notify('朗读暂时无法启动，点击回复下的“朗读”可重试'); }
       }
       next();
+    }
+    // 服务端朗读：按 600 字切段串行播放。首段就失败 → 回落到浏览器合成；
+    // 中途失败 → 停止并提示重试（避免半截朗读突然换音色）。
+    function serverSpeak(text, speechToken, speechCurrent, autoContinue) {
+      if (ttsUnavailable) return false;
+      if (!global.fetch || typeof global.xtjProtectedFetch !== 'function' || !global.Audio || !global.URL) return false;
+      var parts = text.match(/[\s\S]{1,600}(?:[。！？\n]|$)|[\s\S]{1,600}/g) || [text];
+      var index = 0, started = false;
+      function finish() { if (!speechCurrent()) return; speaking = false; state(); if (enabled && autoContinue) void listen(); }
+      function playNext() {
+        if (!speechCurrent()) return;
+        if (index >= parts.length) { finish(); return; }
+        var chunk = parts[index++];
+        var ctrl = new global.AbortController();
+        ttsAbort = ctrl;
+        speaking = false; state('正在准备朗读，点击麦克风可打断','speech_wait');
+        global.xtjProtectedFetch('/api/agent/tts', {
+          method: 'POST', timeoutMs: 60000, background: true, signal: ctrl.signal,
+          headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: chunk })
+        }).then(function(response) {
+          if (!response.ok) throw new Error('tts unavailable');
+          return response.blob();
+        }).then(function(blob) {
+          if (!speechCurrent()) return;
+          ttsAbort = null;
+          var url = global.URL.createObjectURL(blob);
+          ttsUrl = url;
+          var audio = new global.Audio(url);
+          ttsAudio = audio;
+          audio.onplaying = function() { if (!speechCurrent()) return; started = true; speaking = true; state('正在朗读，点击麦克风可打断并提问','speaking'); };
+          audio.onended = function() {
+            try { global.URL.revokeObjectURL(url); } catch (_) {}
+            if (ttsUrl === url) ttsUrl = '';
+            if (ttsAudio === audio) ttsAudio = null;
+            playNext();
+          };
+          audio.onerror = function() { if (!speechCurrent()) return; speaking = false; state(); options.notify('朗读播放失败，点击回复下的“朗读”可重试'); };
+          var played = audio.play();
+          if (played && typeof played.catch === 'function') played.catch(function() {
+            if (!speechCurrent()) return;
+            if (!started) { ttsUnavailable = true; browseSpeak(text, speechToken, speechCurrent, autoContinue); }
+            else { speaking = false; state(); options.notify('朗读被浏览器暂停，点击回复下的“朗读”可重试'); }
+          });
+        }).catch(function() {
+          if (!speechCurrent()) return;
+          ttsAbort = null;
+          if (started) { speaking = false; state(); options.notify('朗读中断，点击回复下的“朗读”可重试'); return; }
+          ttsUnavailable = true;
+          browseSpeak(text, speechToken, speechCurrent, autoContinue);
+        });
+      }
+      playNext();
+      return true;
     }
     function setEnabled(value) {
       enabled = !!value; cancelInput(); stopSpeech(); state();

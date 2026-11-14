@@ -54,8 +54,9 @@ test('research pipeline: cache/rewrite/persist helpers remain intact', () => {
 
 test('POST /api/agent/research/stream is authenticated, rate-limited and SSE-forwarded', () => {
   const source = routeSource('post', '/api/agent/research/stream', "app.post('/api/agent/chat/delete'");
-  assert.match(source, /authenticateUser/);
-  assert.match(source, /rateLimit\(3600000,\s*AI_CHAT_HOURLY_IP_LIMIT\)/); // shares the cat AI chat IP limit
+  assert.match(source, /guestAiAuth/);
+  assert.match(source, /guestAwareChatRateLimit/); // shares the cat AI chat IP limit
+  assert.match(server, /var _guestAwareChatBaseLimiter = rateLimit\(3600000, AI_CHAT_HOURLY_IP_LIMIT\)/);
   assert.match(source, /text\/event-stream/);
   assert.match(source, /flushHeaders\(\)/);
   // 心跳：每 4s 检查，沉默 ≥8s 发 heartbeat
@@ -150,7 +151,7 @@ test('POST /api/agent/research/stream supports rewrite + modes and self-hosted m
 
 test('GET /api/agent/research/history is authenticated, rate-limited and filters tavily_research rows', () => {
   const source = routeSource('get', '/api/agent/research/history', "app.post('/api/agent/chat/delete'");
-  assert.match(source, /authenticateUser/);
+  assert.match(source, /guestAiAuth/);
   assert.match(source, /rateLimit\(60000,\s*30\)/);
   assert.match(source, /supabase\.rpc\('list_ai_research_records'/);
   const migration = fs.readFileSync('supabase/migrations/20261012095854_chat_ai_history_boundary.sql', 'utf8');

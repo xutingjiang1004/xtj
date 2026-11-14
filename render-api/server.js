@@ -1940,6 +1940,21 @@ async function executeToolCall(toolCall, context) {
   finally { guardSettled = true; clearTimeout(guardTimer); guardRun.catch(function() {}); }
 }
 
+// ★ 2026-11-14：Supabase 额度受限（402 egress_quota_exceeded）时不要把上游错误码原样丢给模型，
+// 否则模型会向用户复述 "exceed_egress_quota" 这种无意义字符串，甚至让人误以为参数写错。
+// 统一转成「能做什么」的中文提示；返回空串表示不是这两类已知错误，调用方按原样兜底。
+function aiTaskDbError(err) {
+  var msg = String((err && err.message) || err || '');
+  if (/exceed_egress_quota|egress_quota_exceeded/i.test(msg)) {
+    return '网站数据服务（Supabase）本月流量额度已用完，数据库读写被平台拒绝，定时任务现在无法创建、查询或取消。'
+      + '这与任务参数无关：不要告诉用户任务已建好，也不要建议重试同样的参数；请如实说明需要等额度重置或升级 Supabase 之后再试。';
+  }
+  if (/relation .* does not exist|schema cache/i.test(msg)) {
+    return '定时任务表尚未创建：请先在 Supabase 执行迁移 supabase/migrations/20261114000000_ai_scheduled_tasks.sql';
+  }
+  return '';
+}
+
 async function executeToolCallInner(toolCall, context) {
   // ★ 配额绕过修复：context 可能是 undefined 或裸 AbortSignal（历史调用方传法），
   // 统一规整为对象并初始化请求级已用搜索计数，防止单请求内多轮工具调用超发。
@@ -3790,9 +3805,8 @@ async function executeToolCallInner(toolCall, context) {
       }).select('*');
       if (stInsert.error) {
         var stMsg = String(stInsert.error.message || '');
-        if (/relation .* does not exist|schema cache/i.test(stMsg)) {
-          return { tool_name: name, error: '定时任务表尚未创建：请先在 Supabase 执行迁移 supabase/migrations/20261114000000_ai_scheduled_tasks.sql' };
-        }
+        var stFriendly = aiTaskDbError(stInsert.error);
+        if (stFriendly) return { tool_name: name, error: stFriendly };
         return { tool_name: name, error: '创建定时任务失败：' + stMsg.slice(0, 200) };
       }
       var stSaved = (stInsert.data && stInsert.data[0]) || {};
@@ -3813,7 +3827,7 @@ async function executeToolCallInner(toolCall, context) {
       if (!stListOwner) return { tool_name: name, error: '请登录后查看定时任务' };
       var stListRes = await supabase.from('ai_scheduled_tasks').select('*')
         .eq('owner_name', stListOwner).order('created_at', { ascending: false }).limit(30);
-      if (stListRes.error) return { tool_name: name, error: '读取定时任务失败：' + String(stListRes.error.message || '').slice(0, 200) };
+      if (stListRes.error) return { tool_name: name, error: aiTaskDbError(stListRes.error) || ('读取定时任务失败：' + String(stListRes.error.message || '').slice(0, 200)) };
       var stRows = stListRes.data || [];
       if (!stRows.length) return { tool_name: name, ok: true, count: 0, content: '当前没有定时任务。想让我定期帮你查什么，直接说一句就行（例如「每天早上 9 点搜 AI 新闻发我」）。' };
       var stLines = stRows.map(function(r, ri) {
@@ -3837,6 +3851,7 @@ async function executeToolCallInner(toolCall, context) {
       if (/^\d{1,2}$/.test(stKey)) {
         var stOrd = await supabase.from('ai_scheduled_tasks').select('*')
           .eq('owner_name', stDelOwner).order('created_at', { ascending: false }).limit(30);
+        if (stOrd.error) return { tool_name: name, error: aiTaskDbError(stOrd.error) || ('读取定时任务失败：' + String(stOrd.error.message || '').slice(0, 200)) };
         var stOrdRows = (stOrd.data || []);
         var stPick = stOrdRows[parseInt(stKey, 10) - 1];
         if (!stPick) return { tool_name: name, error: '找不到序号 ' + stKey + ' 对应的任务' };
@@ -3844,7 +3859,7 @@ async function executeToolCallInner(toolCall, context) {
       }
       var stDel = await supabase.from('ai_scheduled_tasks').delete()
         .eq('id', stTargetId).eq('owner_name', stDelOwner).select('id');
-      if (stDel.error) return { tool_name: name, error: '删除失败：' + String(stDel.error.message || '').slice(0, 200) };
+      if (stDel.error) return { tool_name: name, error: aiTaskDbError(stDel.error) || ('删除失败：' + String(stDel.error.message || '').slice(0, 200)) };
       if (!stDel.data || !stDel.data.length) return { tool_name: name, error: '任务不存在或不属于你' };
       return { tool_name: name, ok: true, task_id: stTargetId, content: '已删除该定时任务，之后不会再自动执行。' };
     }
@@ -9666,6 +9681,9 @@ async function callDeepSeekViaResponses(messages, options) {
 
   try {
     var workingInput = inputItems.slice();
+    // ★ 2026-11-14：一旦本轮确认上游不接受原生 web 工具，后续所有轮次都不再尝试，
+    //   避免每轮都先吃一个 400 再降级（白白多一次往返延迟）。
+    var nativeWebOff = false;
     var workingInstructions = instructions;
     for (var round = 0; round < maxToolRounds; round++) {
       onProgress();
@@ -9700,6 +9718,25 @@ async function callDeepSeekViaResponses(messages, options) {
       //   tools 一律下发；若上游仍拒绝，下方已有 effort:none 自动降级重试兜底。
       var allowToolsWithThinking = true;
       if (tools && tools.length && (!useThinking || allowToolsWithThinking)) apiBody.tools = tools;
+      // ★ 2026-11-14（用户要求接入 DeepSeek 原生联网能力）：可选的服务端 web 工具。
+      //   声明后由 DeepSeek 自己完成「搜索 → 打开页面 → 页内查找」，答案里带 url_citation，
+      //   不再依赖本地 search_web 工具与第三方搜索额度。与 function 工具可同时下发；
+      //   若上游因安全审核/标题等扩展字段拒绝（400），下面的 fetch 循环会整体降级重试，
+      //   保证最差情况退回原有 function 工具链路，不会把聊天打挂。
+      var nativeToolList = null;
+      if (options && Array.isArray(options.web_tools) && options.web_tools.length && !nativeWebOff) {
+        nativeToolList = [];
+        options.web_tools.forEach(function(wt) {
+          if (wt === 'search' && nativeToolList.indexOf('deepseek_web_search') < 0) nativeToolList.push('deepseek_web_search');
+          if (wt === 'read_url' && nativeToolList.indexOf('deepseek_read_url') < 0) nativeToolList.push('deepseek_read_url');
+        });
+        if (nativeToolList.length) {
+          apiBody.tools = (apiBody.tools || []).concat(nativeToolList.map(function(n) { return { type: n }; }));
+          apiBody.tool_choice = 'auto';
+        }
+      }
+      if (nativeToolList && options.safety_check) apiBody.safety_check = { level: 'high' };
+      if (nativeToolList && options.title_enabled) apiBody.title = { enabled: true };
       if (workingInstructions) apiBody.instructions = workingInstructions;
       if (useStream) apiBody.stream_options = { include_usage: true };
       // Responses API：reasoning.effort 仅支持 none/low/high/max（无 medium）。
@@ -9723,7 +9760,8 @@ async function callDeepSeekViaResponses(messages, options) {
       //   Render 出口到 api.deepseek.com 偶发连接重置直接整轮失败。
       //   这里对「fetch 网络异常」与「HTTP 5xx」做一次短退避重试（仅每轮一次）。
       var resp = null;
-      for (var _fetchAttempt = 0; _fetchAttempt < 2; _fetchAttempt++) {
+      var nativeDown = false, retried5xx = false, retriedNet = false;
+      for (var _fetchAttempt = 0; _fetchAttempt < 3; _fetchAttempt++) {
         try {
           resp = await fetch(DEEPSEEK_RESPONSES_URL, {
             method: 'POST',
@@ -9734,7 +9772,23 @@ async function callDeepSeekViaResponses(messages, options) {
             body: JSON.stringify(apiBody),
             signal: controller.signal
           });
-          if (resp && resp.status >= 500 && _fetchAttempt === 0) {
+          // ★ 2026-11-14：原生 web 工具/安全审核被拒时不要直接失败——把扩展字段整体摘掉，
+          //   退回调用方原本的 function 工具链路再试一次（用户感知为"搜索稍弱但能答"）。
+          if (resp && resp.status === 400 && nativeToolList && !nativeDown) {
+            var _peekTxt = '';
+            try { _peekTxt = await resp.clone().text(); } catch (_) {}
+            if (/tool|safety_check|title/i.test(_peekTxt)) {
+              nativeDown = true;
+              nativeWebOff = true;
+              console.warn('[RESPONSES] native web tools rejected, retrying without them, round', round);
+              delete apiBody.safety_check;
+              delete apiBody.title;
+              if (tools && tools.length) apiBody.tools = tools; else delete apiBody.tools;
+              continue;
+            }
+          }
+          if (resp && resp.status >= 500 && !retried5xx) {
+            retried5xx = true;
             console.error('[RESPONSES] upstream 5xx (' + resp.status + '), retrying once, round', round);
             await new Promise(function(r) { setTimeout(r, 900); });
             continue;
@@ -9743,7 +9797,8 @@ async function callDeepSeekViaResponses(messages, options) {
         } catch (_netErr) {
           if (externalSignal && externalSignal.aborted) throw _netErr;
           if (_netErr && _netErr.name === 'AbortError') throw _netErr;
-          if (_fetchAttempt === 0) {
+          if (!retriedNet) {
+            retriedNet = true;
             console.error('[RESPONSES] network error (' + (_netErr && _netErr.message) + '), retrying once, round', round);
             await new Promise(function(r) { setTimeout(r, 900); });
             continue;
@@ -24618,6 +24673,8 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, guestAwar
       // ===== Responses API 路径（优先内置 web_search；第三方可补充） =====
       var responsesContent = '';
       var responsesReasoning = '';
+      // ★ 2026-11-14：原生联网引用的跨轮回去重表（同一 URL 只推一次）
+      var seenSources = Object.create(null);
       var responsesUsage = null;
       var responsesToolCallsInfo = [];
       var responsesSiteCards = attachmentCardsStream.slice(0, 32);
@@ -24664,6 +24721,23 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, guestAwar
         thinking_mode: thinkingMode,
         tools: responsesTools,
         tool_choice: 'auto',
+        // ★ 2026-11-14（用户要求）：搜索开关打开时改用 DeepSeek 原生 web 工具——
+        //   搜索/打开页面/页内查找都由服务端完成，答案里带 url_citation，
+        //   比本地 function 工具更接近 App 的联网体验；上游拒绝时自动降级。
+        web_tools: (!workModeEnabled && webSearchPref === true) ? ['search', 'read_url'] : null,
+        safety_check: !workModeEnabled && webSearchPref === true,
+        onSources: function(items) {
+          if (aborted || !Array.isArray(items) || !items.length) return;
+          var sent = [];
+          items.forEach(function(it) {
+            var u = String((it && it.url) || '').trim();
+            if (!/^https?:\/\//i.test(u) || seenSources[u]) return;
+            seenSources[u] = 1;
+            sent.push({ url: u, title: String((it && it.title) || u) });
+          });
+          if (!sent.length) return;
+          try { writeSse(res, { type: 'sources', items: sent.slice(0, 8) }); } catch (e) {}
+        },
         max_tool_rounds: workModeEnabled ? aiTaskPolicy.MAX_TOOL_ROUNDS : 4,
         signal: requestAbortCtrl ? requestAbortCtrl.signal : null,
         _userName: userName,
@@ -27204,6 +27278,9 @@ var researchCheckpoints = require('./research-checkpoints').installResearchCheck
 require('./ai-report-export').installReportExport(app,{authenticateUser:authenticateUser,rateLimit:rateLimit,jsonMiddleware:express.json({limit:'6mb'})});
 // 语音转文字：配置了 VOICE_TRANSCRIPTION_API_KEY 才启用；未配置时浏览器退回本机识别。
 app.use('/api/agent/transcribe', require('./voice-transcribe').createVoiceTranscribe({ express, authenticateUser, rateLimit }));
+// ★ 2026-11-14（用户要求接入 DeepSeek 语音）：朗读走官方 TTS，返回 WAV；
+//   未配置密钥或上游失败时前端自动回落浏览器语音合成，功能不会消失。
+app.use('/api/agent/tts', require('./deepseek-tts').createDeepSeekTts({ express, guestAiAuth, rateLimit }));
 console.log(require('./voice-transcribe').describeConfig());
 require('./ai-tool-retry').installToolRetry(app,{authenticateUser:authenticateUser,rateLimit:rateLimit,execute:executeToolCall,gate:enforceAiChatAccess,record:recordAiTurnUsage,feedback:toolFeedback,normalize:normalizeToolResultItems,store:require('./ai-tool-retry-store').createToolRetryStore(supabase)});
 require('./ai-workbench').registerWorkbenchRoutes(app,{authenticateUser:authenticateUser,rateLimit:rateLimit,executeToolCall:executeToolCall,parseDocumentBuffer:parseDocumentBuffer,ocrImageBuffer:ocrImageBuffer,sharp:sharp,jsonMiddleware:express.json({limit:'12mb'}),assets:require('./ai-workbench-assets').createWorkbenchAssets(supabase),requestContext:function(req){return {userName:req.userName};},exportDocument:async function(args,owner,signal){var pdf=await require('./ai-report-export').buildReportPdf(Object.assign({},args,{signal:signal}));return {tool_name:'generate_pdf',content:'PDF 已生成',cards:[{type:'file',id:'workbench-pdf',protocol:'xtj.ai.ui.v1',data:{filename:require('./ai-report-export').filename(args.filename||args.title,'pdf'),mime_type:'application/pdf',data_url:'data:application/pdf;base64,'+pdf.toString('base64')}}]};}});

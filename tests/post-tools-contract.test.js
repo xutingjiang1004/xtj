@@ -16,8 +16,11 @@ test('post actions expose only the fixed tools menu and no edit entry', () => {
 });
 
 test('post tools are server-authoritative and expose an SSE post chat endpoint', () => {
-  assert.match(server, /app\.post\('\/api\/agent\/post-tools', authenticateUser/);
-  assert.match(server, /app\.post\('\/api\/agent\/post-chat\/stream', authenticateUser/);
+  // ★ 2026-11-14：访客窗口开放后统一走 guestAiAuth（窗口外内部回落 authenticateUser），
+  //   因此这里断言鉴权网关而不是旧的中间件名；真正要求「必须有身份」的语义由回落保证。
+  assert.match(server, /app\.post\('\/api\/agent\/post-tools', guestAiAuth/);
+  assert.match(server, /app\.post\('\/api\/agent\/post-chat\/stream', guestAiAuth/);
+  assert.match(server, /function guestAiAuth[\s\S]{0,400}authenticateUser\(req, res, next\)/);
   assert.match(server, /loadPostToolPost\(postId, req\.userName\)/);
   assert.match(server, /post\.is_deleted === true/);
   assert.match(server, /already_chinese/);

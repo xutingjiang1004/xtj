@@ -13,10 +13,13 @@ function routeLine() {
 
 test('deep research shares the cat AI chat IP limit instead of its own hard-coded 20 per hour', () => {
   const line = routeLine();
-  assert.match(line, /rateLimit\(3600000, AI_CHAT_HOURLY_IP_LIMIT\)/);
+  // ★ 2026-11-14：访客窗口开放后限流改由 guestAwareChatRateLimit 代理，
+  //   其底座就是聊天用的 3600000/200 限流器，因此共享配额这一点不变。
+  assert.match(line, /guestAwareChatRateLimit/);
   assert.doesNotMatch(line, /rateLimit\(3600000, 20\)/);
-  // same token / hourly quota gate as chat
-  assert.match(server, /var researchGate = await enforceAiChatAccess\(userName, \{ needSearch: remainingSearch \}\)/);
+  assert.match(server, /var _guestAwareChatBaseLimiter = rateLimit\(3600000, AI_CHAT_HOURLY_IP_LIMIT\)/);
+  // 登录用户仍然走同一个 token/每小时配额闸门（访客窗口内跳过，见 guestAiPublicWindowOpen 分支）
+  assert.match(server, /researchGate = await enforceAiChatAccess\(userName, \{ needSearch: remainingSearch \}\)/);
 });
 
 test('research sub-agents report searches and pages as research_activity events with safe fields', () => {
