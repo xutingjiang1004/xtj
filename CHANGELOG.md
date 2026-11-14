@@ -1,5 +1,24 @@
 # 更新日志
 
+## 2026-11-14 深入研究附件接入官方版面解析（用户要求 · 混合增强）
+
+**本地解析不足的资料，现在能被官方解析救回来**
+
+- 触发条件收紧到两类：`document.status==='unread'`（本地没读出：PPT、扫描件 PDF、加密、格式不支持）或 `document.truncated===true`（本地 14000 字被截断）。**正常读全的文件完全不触发**，不额外花钱；图片不参与，守住上一轮「图片别动」的边界。
+- 新增 `render-api/research-native-parse.js` 侧车通道：把候选文档上传到官方 Files API 拿 `file_id`，再用一次 `deepseek-flash` + `input_file` 请求把文档忠实转写成纯文本，切成 `[F:P]` 段落追加到 `documents`。
+- 为什么用侧车而不是直接挂：研究主链路是 `callDeepSeek`（chat/completions + 推理模型 + 多智能体，还可切第三方自定义模型），而官方文件引用**必须配 `deepseek-flash`**，直接挂到每个 agent 上会被拒且重复计费。转写成文本后由 `documentsContext()` 自动注入所有 agent：
+  - `[F1:P1]` 引用体系不变，模型仍按段落编号引用，不声称看过全文；
+  - `documentFingerprint` 仍基于 `name+sha256` 不变 → 24h 缓存 key、断点状态不受影响；
+  - 多智能体流程、自定义研究模型、checkpoint、SSE 事件契约全部一行未改；
+  - **前端零改动**（研究请求本就带 `data_url`，服务端自行上传），无需重建产物。
+- 增强放在「全部文件未读出就抛错」之前：**只上传 PPT / 扫描件时原本直接报错，现在能被官方解析救回来**，这是本轮最实质的能力增益。
+- 官方硬性要求 `purpose` 排在 `file` 之前，已按序构造并写进契约测试；PDF/Word/PPT 用 `rich_layout_recognition`（含图表），纯文本/表格/电子书用 `user_data`。
+- 成本与稳定性：一次研究最多补 3 个文件；相同资料（同 cacheKey+sha256）命中进程内缓存不重复付费；附件若已带 `file_id` 直接复用不重传；上游 400（不认 `max_output_tokens`）自动摘掉该字段重试一次。未配置密钥、`RESEARCH_NATIVE_PARSE_ENABLED=false`、上传/转写失败、超时、用户取消**一律静默回落**，绝不阻断研究。密钥只走服务端。
+- `limitation` 会注明「已补充官方版面解析（含图表/扫描件文字）；引用仍按 [F:P] 段落编号，不代表看过原文件全部页面」，前端 `research_document` 进度事件照常刷新。
+
+- 测试：`tests/research-native-parse-runtime.test.js` 16 项 + `tests/research-native-parse-contract.test.js` 8 项。
+- 仍未接入：DeepSeek ASR（录音 webm/opus 需服务端转码）、普通聊天图片改走 `file_id`（收益低且可能降质），均维持现状。
+
 ## 2026-11-14 小猫AI 接入 DeepSeek 官方文件解析（用户要求）
 
 **能读 PDF / Word / PPT / 表格 / 电子书了**

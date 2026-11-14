@@ -692,3 +692,11 @@ WebKit 会拒绝在 `navigator.audioSession.type === 'playback'` 时调用 `getU
 - 文档（PDF/DOC/DOCX/PPT/PPTX + 纯文本/表格/电子书）发送前经服务端代理上传到 DeepSeek Files API，聊天以 Responses 的 `input_file` 引用；图片保持原有内联视觉链路不动。
 - 只引用本轮文件（去重、≤20），上游拒绝 `input_file` 时自动摘掉并退回本地文本解析；上传失败不阻断发送，密钥不下放到前端。
 - 仍未接入：DeepSeek ASR（录音格式需转码）、图片改用 `file_id` 引用（收益低、风险高）。
+
+## 2026-11-14 深入研究附件官方版面解析（用户要求 · 混合增强）
+
+- 研究主链路走 chat/completions + 推理模型 + 多智能体，官方 `file_id` 只配 `deepseek-flash`；因此不做「把 input_file 挂到 agent」，改为侧车转写：官方解析结果转成 `[F:P]` 段落追加到 `documents`，由 `documentsContext()` 自动注入，引用体系/指纹缓存/断点/自定义模型/前端全部不动。
+- 只对本地 `unread` 或 `truncated` 的非图片文档触发，正常读全不触发、一次最多 3 个、进程内缓存避免重复付费、附件已有 `file_id` 直接复用。
+- 增强置于「全部未读出就抛错」之前，纯 PPT / 扫描件研究从报错变为可用。
+- 开关：`RESEARCH_NATIVE_PARSE_ENABLED=false`（联动 `DEEPSEEK_FILES_ENABLED`）可一键关闭；任何上游失败静默回落，不阻断研究。
+- 图片、ASR 维持现状，不改动。

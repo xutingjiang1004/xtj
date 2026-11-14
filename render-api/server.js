@@ -27356,6 +27356,10 @@ app.use('/api/agent/tts', require('./deepseek-tts').createDeepSeekTts({ express,
 //   上传到官方 Files API 拿 file_id，聊天时以 input_file 引用，模型能看版面与图表。
 //   上传失败时前端静默回落本地文本解析，不影响发送。
 app.use('/api/agent/files', require('./deepseek-files').createDeepSeekFiles({ express, guestAiAuth, rateLimit }));
+// ★ 2026-11-14（用户要求：深入研究附件的官方解析 / 混合增强）：模块级单例，
+//   进程内缓存转写结果，同一资料在同一部署实例上重复研究不重复付费。
+//   只在本地「未读出 / 被截断」的非图片文档上触发；任何失败静默回落，不阻断研究。
+var researchNativeParse = require('./research-native-parse').createResearchNativeParse({ env: process.env, fetchImpl: fetch });
 console.log(require('./voice-transcribe').describeConfig());
 require('./ai-tool-retry').installToolRetry(app,{authenticateUser:authenticateUser,rateLimit:rateLimit,execute:executeToolCall,gate:enforceAiChatAccess,record:recordAiTurnUsage,feedback:toolFeedback,normalize:normalizeToolResultItems,store:require('./ai-tool-retry-store').createToolRetryStore(supabase)});
 require('./ai-workbench').registerWorkbenchRoutes(app,{authenticateUser:authenticateUser,rateLimit:rateLimit,executeToolCall:executeToolCall,parseDocumentBuffer:parseDocumentBuffer,ocrImageBuffer:ocrImageBuffer,sharp:sharp,jsonMiddleware:express.json({limit:'12mb'}),assets:require('./ai-workbench-assets').createWorkbenchAssets(supabase),requestContext:function(req){return {userName:req.userName};},exportDocument:async function(args,owner,signal){var pdf=await require('./ai-report-export').buildReportPdf(Object.assign({},args,{signal:signal}));return {tool_name:'generate_pdf',content:'PDF 已生成',cards:[{type:'file',id:'workbench-pdf',protocol:'xtj.ai.ui.v1',data:{filename:require('./ai-report-export').filename(args.filename||args.title,'pdf'),mime_type:'application/pdf',data_url:'data:application/pdf;base64,'+pdf.toString('base64')}}]};}});
@@ -27520,6 +27524,23 @@ app.post('/api/agent/research/stream', guestAiAuth, aiChatConcurrencyGate, guest
     if (!checkpointJob && req.body && Array.isArray(req.body.attachments) && req.body.attachments.length) {
       var preparedDocuments = await require('./research-documents').prepareResearchDocuments(req.body.attachments,{parseDocumentBuffer:parseDocumentBuffer,ocrImageBuffer:ocrImageBuffer,sharp:sharp,signal:_researchAbort.signal,onDocument:function(document){writeSse(res,{type:'research_document',document:document});}});
       documents=preparedDocuments.documents;documentFingerprint=preparedDocuments.fingerprint;
+      // ★ 2026-11-14（用户要求：深入研究附件的官方解析 / 混合增强）
+      //   本地「未读出 / 14000 字截断」的非图片文档，额外跑一次官方版面解析并转成
+      //   [F:P] 段落追加到 documents。必须放在下面「全部未读出就抛错」之前：
+      //   只上传 PPT / 扫描件时，原本会直接报错，现在能被官方解析救回来。
+      //   fingerprint 仍基于 name+sha256 不变 → 24h 缓存 key 与断点状态完全不受影响；
+      //   documentsContext() 自动把补充段落注入所有子 agent，主链路一行未改。
+      try {
+        await researchNativeParse.enhance(documents, req.body.attachments, {
+          signal: _researchAbort.signal,
+          cacheKey: userName + '|' + documentFingerprint,
+          onEnhanced: function(doc) {
+            try { writeSse(res, { type: 'research_document', document: require('./research-documents').publicDocuments([doc])[0] }); } catch (_) {}
+          }
+        });
+      } catch (_eNativeParse) {
+        console.warn('[RESEARCH-NATIVE] skipped:', _eNativeParse && _eNativeParse.message);
+      }
       if(!documents.some(function(d){return d.status==='read';}))throw Error('文件没有提取到可用文字，请检查格式和大小；图片也可在普通对话中分析。');
     }
     var cacheKey = researchCacheKey(userName, query, model, mode + '|' + researchModel + '|' + (allowResearchSearch?'web':'files') + '|' + documentFingerprint + '|' + (req.aiRequestScope?JSON.stringify([req.aiRequestScope.policy.mode,req.aiRequestScope.policy.maxSearches,req.aiRequestScope.policy.maxSeconds]):''), req.accountId);
