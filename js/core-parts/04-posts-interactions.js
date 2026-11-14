@@ -1622,6 +1622,10 @@
                     var far = 'translate3d(' + (rect.left - layout.left).toFixed(2) + 'px,' + (rect.top - layout.top).toFixed(2) + 'px,0) scale(' + sx.toFixed(4) + ',' + sy.toFixed(4) + ')';
                     var big = layout.width * layout.height > 90000;
                     var D = TIMING[big ? 'big' : 'small'][kind];
+                    // ★ 2026-11-14：允许单次调用用 speed 系数缩短 morph 时长（默认 1，全站节奏不变）。
+                    //   小猫 AI 输入框左侧「+」面板传 speed:0.8 → 开/关各加快 20%；照片、帖子弹窗等
+                    //   其它共用 xtjMorph 的调用都不传该参数，TIMING 与动画时长完全不受影响。
+                    if (o && o.speed > 0 && isFinite(o.speed)) D = Math.max(60, Math.round(D * o.speed));
                     var saved = { transition: priorTransition, origin: box.style.transformOrigin, will: box.style.willChange, position: box.style.position, blur: box.style.getPropertyValue('backdrop-filter'), blurPriority: box.style.getPropertyPriority('backdrop-filter'), blurWebkit: box.style.getPropertyValue('-webkit-backdrop-filter'), blurWebkitPriority: box.style.getPropertyPriority('-webkit-backdrop-filter') };
                     var anims = [], nodes = [], restores = [];
                     var handle = { kind: kind, ended: false, box: box, anims: anims };

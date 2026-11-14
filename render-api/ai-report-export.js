@@ -148,7 +148,11 @@ function studyLine(line){
 }
 function filename(value,extension) {return String(value||'深入研究报告').replace(/[\\/:*?"<>|\x00-\x1f]/g,'_').slice(0,100)+'.'+extension;}
 function installReportExport(app,deps) {
-  app.post('/api/agent/research/export',deps.authenticateUser,deps.rateLimit(60000,8),...(deps.jsonMiddleware?[deps.jsonMiddleware]:[]),async(req,res)=>{
+  // ★ 2026-11-14（用户要求）：游客在限时开放窗口内也能导出 PDF / Markdown，不再提示「要登录」。
+  //   guestAiAuth 在窗口外会自动回落 authenticateUser，带凭证的请求仍走真实鉴权；
+  //   未传 guestAiAuth 的调用方（测试夹具、其它嵌入场景）保持原有 authenticateUser 行为。
+  var exportAuth = deps.guestAiAuth || deps.authenticateUser;
+  app.post('/api/agent/research/export',exportAuth,deps.rateLimit(60000,8),...(deps.jsonMiddleware?[deps.jsonMiddleware]:[]),async(req,res)=>{
     const controller=new AbortController(),abort=()=>controller.abort();req.once('aborted',abort);res.once('close',abort);
     try {
       const body=req.body||{},report={title:body.title,answer:body.answer,sources:body.sources,createdAt:body.created_at,layout:body.layout==='study'?'study':undefined,signal:controller.signal};

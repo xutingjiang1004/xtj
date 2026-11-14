@@ -5556,12 +5556,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var renderStartedAt = measureStream ? (window.performance && performance.now ? performance.now() : Date.now()) : 0;
       var next = pending;
       // 匀速流出（用户 2026-11-13 要求，像 ChatGPT / Claude 那样连续流出）：
-      // 模型的字是一小批一小批到的，直接落地就是「停一下、跳几个字」。这里每帧放出积压的约十分之一，
-      // 不足一个字的部分累计到下一帧，于是字按到达的平均速度连续出现，比到达晚约 0.17 秒；
+      // 模型的字是一小批一小批到的，直接落地就是「停一下、跳几个字」。这里每帧放出积压的约十五分之一，
+      // 不足一个字的部分累计到下一帧，于是字按到达的平均速度连续出现，比到达晚约 0.25 秒；
       // 总时长不变。积压很大时加快；收尾强制刷新和关闭动效时一次放完。
+      // ★ 2026-11-14（用户要求）：正文回复由 0.17s 放慢到 0.25s（10 → 15，大积压 6 → 9）。
+      //   flowPace 只挂在正文 renderer 上，思考过程 renderer 不带该选项，故思考过程节奏完全不变。
       var take = pending.length;
       if (options.flowPace && !reducedMotion && !force) {
-        paceCredit += Math.max(0.34, pending.length / (pending.length > 600 ? 6 : 10));
+        paceCredit += Math.max(0.34, pending.length / (pending.length > 600 ? 9 : 15));
         take = Math.min(pending.length, Math.floor(paceCredit));
         if (take <= 0) return;
         paceCredit -= take;
@@ -12067,7 +12069,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               results: searchResults || []
             }));
           }
-          var footer = el('div', { class: 'ai-msg-footer' });
+          // ★ 2026-11-14：收尾尾部节点轻淡入，避免按钮/时间「突然闪现」。
+          var footer = el('div', { class: 'ai-msg-footer ai-tail-reveal' });
           if (aiMsg.created_at) footer.appendChild(el('span', { class: 'ai-msg-time', text: fmtTime(aiMsg.created_at) }));
           // ★ 工作模式徽标：让用户能明确看到「这条回复是工作模式产出的」，
           //   避免开了工作模式却因为界面无变化而误以为没生效。
@@ -13716,7 +13719,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             //   也不应判定为中断，否则会渲染"回复中断，内容可能不完整"的错误提示。
             var streamInterrupted = evt.interrupted === true && evt.complete !== true;
             var streamComplete = evt.complete === true;
-            var streamSaved = evt.saved === true;
+            // ★ 2026-11-14（用户要求）：移除收尾那条「未保存」提示。
+            //   游客窗口内回复本就不落库，这条提示每条都出现、碍眼且会在收尾瞬间闪一下。
+            //   evt.saved 仍由 userMsg._pendingSync 正常消费，这里只去掉可见提示。
             
             if (assistantNode) {
               ensureAssistantBubbleReady();
@@ -13764,22 +13769,18 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             consumeAiAttachment(fileData);
             if(S.autoScrollPinned&&!_aiUserPinnedUp)scrollToBottom(messagesEl,true);
             
-            // 中断/未保存提示
+            // 中断提示（保留）；未保存提示按用户要求移除，避免收尾瞬间闪现。
             if (streamInterrupted && aiContent) {
-              var interrNote = el('div', { class: 'ai-interrupt-note' }, '回复中断，内容可能不完整');
+              var interrNote = el('div', { class: 'ai-interrupt-note ai-tail-reveal' }, '回复中断，内容可能不完整');
               if (assistantNode) {
                 assistantNode.appendChild(interrNote);
                 try { attachContinueGenerateBtn(assistantNode, messagesEl); } catch (eCont) {}
               }
             }
-            if (!streamSaved && aiContent) {
-              var saveNote = el('div', { class: 'ai-save-note' }, '本次回复未保存，刷新后可能丢失');
-              if (assistantNode) assistantNode.appendChild(saveNote);
-            }
             
             // 显示清洗提示
             if (evt.filtered && aiContent) {
-              var filteredNote = el('div', { class: 'ai-filtered-note' }, '已自动清理动作描述');
+              var filteredNote = el('div', { class: 'ai-filtered-note ai-tail-reveal' }, '已自动清理动作描述');
               if (assistantNode) assistantNode.appendChild(filteredNote);
             }
             
@@ -14901,7 +14902,8 @@ function showChatMessages() {
     button.addEventListener('click', async function(event) {
       event.preventDefault(); event.stopPropagation();
       if (button.disabled) return;
-      if (!readUserName()) { notify('登录后可以导出 PDF'); return; }
+      // ★ 2026-11-14（用户要求）：限时开放窗口内游客也能导出 PDF。
+      //   服务端已改用 guestAiAuth（窗口外自动回落登录鉴权），前端不再提前拦截。
       var text = String(typeof content === 'function' ? content() : content || '').trim();
       if (!text) { notify('这条回复还没有内容'); return; }
       button.disabled = true; button.textContent = '正在导出…';
@@ -16266,11 +16268,13 @@ function showChatMessages() {
       closeTimer = setTimeout(function() {
         panelShell.classList.remove('is-opening');
         closeTimer = null;
-      }, 340);
+      }, 272); // 340 × 0.8：与 morph speed:0.8 保持一致
       // 从「+」按钮长出来（共用 xtjMorph）：窗口外框从按钮的矩形连续变到最终矩形。
       try {
         var morphFrom = window.xtjMorph && !prefersReducedMotion() && window.xtjMorph.motionOk() ? window.xtjMorph.rectOfElement(plusBtn) : null;
-        if (morphFrom) { void panelShell.offsetWidth; window.xtjMorph.open(panelShell, { rect: morphFrom }); }
+        // ★ 2026-11-14（用户要求）：只加快这个 + 面板的开合动画 20%，
+        //   speed 是按调用传入的时长系数；照片/帖子等共用 xtjMorph 的地方不传，时长不变。
+        if (morphFrom) { void panelShell.offsetWidth; window.xtjMorph.open(panelShell, { rect: morphFrom, speed: 0.8 }); }
       } catch (eMorph) {}
     }
 
@@ -16292,7 +16296,7 @@ function showChatMessages() {
         var morphTo = window.xtjMorph.rectOfElement(plusBtn);
         if (morphTo) {
           panelShell.classList.remove('is-closing'); panelShell.classList.add('open');
-          var morphHandle = window.xtjMorph.close(panelShell, { rect: morphTo, hide: function() {
+          var morphHandle = window.xtjMorph.close(panelShell, { rect: morphTo, speed: 0.8, hide: function() {
             panelShell.classList.remove('open', 'is-closing');
             panelClosing = false;
             if (closeTimer) { clearTimeout(closeTimer); closeTimer = null; }
@@ -16317,7 +16321,7 @@ function showChatMessages() {
         panelShell.classList.remove('is-closing');
         panelClosing = false;
         closeTimer = null;
-      }, 230);
+      }, 184); // 230 × 0.8：与 morph speed:0.8 保持一致
     }
 
     function closeInviteModal() {

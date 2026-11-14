@@ -490,6 +490,20 @@
   gap: 6px;
 }
 
+/* ★ 2026-11-14（用户要求「深入一下」）：正文收尾时底部按钮 / 时间 / 提示由「瞬间闪现」
+   改为一次轻淡入，消除回复结束那一下突然闪出来的观感。该 class 只挂在流式收尾新建的
+   尾部节点上，历史消息渲染不带它；回复动画本体、工具调用卡片、Dock 一律不动。 */
+.ai-tail-reveal {
+  animation: ai-tail-reveal 200ms ease-out both;
+}
+@keyframes ai-tail-reveal {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ai-tail-reveal { animation: none; }
+}
+
 .ai-msg-usage,
 .ai-msg-time,
 .ai-msg-warn {
@@ -5738,7 +5752,6 @@ html.xtj-reduce-motion .ai-copy-menu .ai-reply-menu-panel { animation: none; }
   text-align: left;
 }
 .ai-interrupt-note,
-.ai-save-note,
 .ai-filtered-note {
   text-align: center;
   padding: 6px 12px;
@@ -5749,10 +5762,6 @@ html.xtj-reduce-motion .ai-copy-menu .ai-reply-menu-panel { animation: none; }
 .ai-interrupt-note {
   background: rgba(200,160,60,0.1);
   color: #a87d2a;
-}
-.ai-save-note {
-  background: rgba(60,160,200,0.08);
-  color: #2a7da8;
 }
 .ai-filtered-note {
   background: rgba(200,60,60,0.06);

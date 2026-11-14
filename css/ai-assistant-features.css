@@ -180,14 +180,16 @@
   box-shadow: 0 16px 48px rgba(34,75,56,.14), 0 3px 10px rgba(34,75,56,.05), inset 0 1px 0 rgba(255,255,255,.85);
   /* 展开/收回由脚本从「+」按钮出发（xtjMorph，只用 transform / opacity）；没有动画时退回一次快速淡入淡出。 */
   clip-path: none; transform: none; animation: none;
-  transition: opacity 120ms ease, visibility 0s 120ms;
+  /* ★ 2026-11-14：+ 面板开合加快 20%（morph 主路径由 js 传 speed:0.8），
+     这里是「没有 morph」时的兜底淡入淡出，同步 120ms → 96ms 保持一致。 */
+  transition: opacity 96ms ease, visibility 0s 96ms;
   scrollbar-width: thin;
 }
 #panelAiChat #aiPlusPanelShell.open {
   opacity: 1; visibility: visible; pointer-events: auto; transform: none; clip-path: none;
-  transition: opacity 120ms ease, visibility 0s;
+  transition: opacity 96ms ease, visibility 0s;
 }
-#panelAiChat #aiPlusPanelShell.is-closing { opacity: 0; transform: none; clip-path: none; transition: opacity 120ms ease, visibility 0s 120ms; }
+#panelAiChat #aiPlusPanelShell.is-closing { opacity: 0; transform: none; clip-path: none; transition: opacity 96ms ease, visibility 0s 96ms; }
 #panelAiChat #aiPlusPanelShell::before,#panelAiChat #aiPlusPanelShell::after { content: none; }
 #panelAiChat #aiPlusPanelShell .ai-plus-panel-content { padding: 14px; max-height: none; overflow: visible; }
 #panelAiChat #aiPlusPanelShell .ai-menu-heading { display: flex; align-items: center; justify-content: space-between; padding: 0 4px 12px; font-size: 15px; font-weight: 600; letter-spacing: .04em; }

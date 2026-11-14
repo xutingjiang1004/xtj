@@ -1,5 +1,35 @@
 # 更新日志
 
+## 2026-11-14 小猫AI 收尾体验、游客导出与深入研究修复（用户要求 · 一次性合并）
+
+**去掉「本次回复未保存，刷新后可能丢失」**
+
+- 流式收尾不再创建 `.ai-save-note` 可见提示。`evt.saved` 仍由 `userMsg._pendingSync` 正常消费，历史/缓存同步逻辑一行未改；CSS 里对应的孤立样式一并清掉。
+
+**导出 PDF 不再提示「要登录」**
+
+- 前端：学习模式 `addStudyExportAction()` 去掉 `readUserName()` 提前拦截；研究报告的导出按钮本就没有拦截。
+- 后端：`/api/agent/research/export` 改挂 `guestAiAuth`（`installReportExport` 优先取 `deps.guestAiAuth`，未传时回落 `deps.authenticateUser`，测试夹具与其它嵌入场景不受影响）。限时开放窗口内游客可直接导出，窗口外自动回落登录鉴权，带凭证请求仍走真实认证。
+
+**深入研究一直用不了：根因修复**
+
+- `handleDeepThinkChat()` 里游客 `userName` 为空，`tryAcquireDeepResearch('')` 永远返回 `null`，深度思考/回退链路每次都在并发闸门被判 `concurrent`（「请等待上一个请求完成」），点重试也无效。
+- 与 `/api/agent/research/stream` 保持一致，窗口内改用 `guest:<ip>` 作并发 key；非游客仍走 `tryAcquireDeepResearch(userName)`。同步修正 `tests/deep-research-slot-leak-contract.test.js` 里已过时、当前基线为红的 S9-5 锚点，并新增 S9-8 回归哨兵。
+
+**正文回复 0.17s → 0.25s（思考过程不动）**
+
+- `flowPace` 每帧放出积压的比例由 `1/10` 改为 `1/15`（大积压 `1/6 → 1/9`）。`flowPace` 只挂在正文 renderer 上，思考过程 renderer 不带该选项，节奏完全不变。
+
+**+ 面板开合加快 20%（只改这一处）**
+
+- `xtjMorph.run()` 新增可选的按调用 `speed` 时长系数（默认 1，全站 `TIMING` 不变）；小猫 AI 输入框左侧 + 面板的 `open/close` 传 `speed: 0.8`，配套计时 `340→272ms`、`230→184ms`，无 morph 兜底淡入 `120→96ms`。照片、帖子弹窗、Dock 等其它共用 morph 的调用一律不传，动画时长不受影响。
+
+**回复收尾「突然闪一下」**
+
+- 收尾新建的 footer（时间/用量/徽标/导出按钮）与中断、清洗提示挂 `.ai-tail-reveal`，一次 200ms 轻淡入，不再瞬间闪现；历史消息渲染不挂该 class。回复动画本体、工具调用卡片、Dock 一律未动。
+
+- 测试：`tests/ai-report-export.test.js` 新增游客导出与注册契约 2 项；`tests/deep-research-slot-leak-contract.test.js` 修正 S9-5 + 新增 S9-8。
+
 ## 2026-11-14 深入研究附件接入官方版面解析（用户要求 · 混合增强）
 
 **本地解析不足的资料，现在能被官方解析救回来**

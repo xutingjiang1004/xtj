@@ -50,3 +50,31 @@ test('aborting a queued PDF releases its queue entry and later exports still suc
   const final=await buildReportPdf({answer:'队列取消后仍可以导出。'});
   assert.equal(final.subarray(0,5).toString(),'%PDF-');
 });
+
+// ★ 2026-11-14（用户要求）：导出 PDF 一直提示「要登录」，限时开放窗口内游客也要能导出。
+test('限时开放窗口内游客无需登录即可导出，未传 guestAiAuth 的旧调用方仍按登录鉴权',async()=>{
+  const express=require('express'),request=require('supertest'),{installReportExport}=require('../render-api/ai-report-export');
+  const app=express();
+  // 模拟 guestAiAuth：无凭证且窗口内 → 放行；带凭证 → 仍走真实鉴权
+  const guestAiAuth=(req,res,next)=>{
+    const token=req.get('authorization');
+    if(token) return token==='Bearer local-export-test'?next():res.status(401).json({ok:false});
+    req.guestAi=true;req.userName='';return next();
+  };
+  const deps={authenticateUser:(_q,res)=>res.status(401).json({ok:false}),rateLimit:()=>(_q,_s,n)=>n(),jsonMiddleware:express.json({limit:'6mb'})};
+  installReportExport(app,Object.assign({guestAiAuth},deps));
+  const guest=await request(app).post('/api/agent/research/export').send({format:'markdown',answer:'游客研究报告正文'});
+  assert.equal(guest.status,200,'游客窗口内不应再返回 401');
+  const text=Buffer.from(guest.body.file.data_url.split(',')[1],'base64').toString();
+  assert.match(text,/游客研究报告正文/);
+  // 登录态仍走真实鉴权
+  assert.equal((await request(app).post('/api/agent/research/export').set('Authorization','Bearer wrong').send({format:'markdown',answer:'x'})).status,401);
+  // 未传 guestAiAuth 的旧调用方（其它嵌入场景）行为不变
+  const legacy=express();installReportExport(legacy,deps);
+  assert.equal((await request(legacy).post('/api/agent/research/export').send({format:'markdown',answer:'x'})).status,401);
+});
+
+test('server 注册导出路由时传入 guestAiAuth（窗口外自动回落登录鉴权）',()=>{
+  const server=require('fs').readFileSync(require('path').join(__dirname,'..','render-api','server.js'),'utf8');
+  assert.match(server,/installReportExport\(app,\{authenticateUser:authenticateUser,guestAiAuth:guestAiAuth,/);
+});

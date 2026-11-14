@@ -283,7 +283,12 @@ for(const theme of ['light','dark'])test('glass bars and new-content pill expose
 for(const theme of ['light','dark'])test('unified menu keeps real controls and reverses closing motion in '+theme,{timeout:60000},async t=>{
  const f=await fixture(t,{theme}),p=f.page,plus=p.locator('.ai-plus-btn'),menu=p.locator('#aiPlusPanelShell');
  await plus.click();await menu.locator('[data-action="open-model"]').waitFor();
- assert.equal(await menu.locator('.ai-task-budget').count(),0);assert.equal(await menu.locator('.ai-panel-row').count(),7);
+ assert.equal(await menu.locator('.ai-task-budget').count(),0);
+ // ★ 2026-11-14：菜单项会随功能增加（定时任务、语音对话等），不再写死行数 7；
+ //   改为校验真实控件齐全且各恰好 1 个，既防控件丢失也防重复渲染。
+ const rowCount=await menu.locator('.ai-panel-row').count();
+ assert.ok(rowCount>=7,'菜单应保留全部真实控件，实际 '+rowCount+' 行');
+ for(const action of ['pro','upload','automation','open-model','open-think','search'])assert.equal(await menu.locator('[data-action="'+action+'"].ai-panel-row').count(),1,action+' 控件应恰好 1 个');
  const styles=await menu.locator('.ai-panel-row-icon').evaluateAll(nodes=>nodes.map(n=>({color:getComputedStyle(n).color,background:getComputedStyle(n).backgroundColor,hasSvg:!!n.querySelector('svg')})));
  assert.ok(styles.every(s=>s.hasSvg&&s.color===styles[0].color&&s.background===styles[0].background));
  await plus.click();await plus.click();await p.waitForFunction(()=>document.querySelector('#aiPlusPanelShell').classList.contains('open'));

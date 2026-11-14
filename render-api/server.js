@@ -21870,7 +21870,11 @@ async function handleDeepThinkChat(req, res) {
   });
 
   // ★ 并发上限：先 acquire，成功后再 track，避免同 conv 覆盖进行中任务的 cancel 句柄
-  var releaseDeep = tryAcquireDeepResearch(userName);
+  // ★ 2026-11-14 修复「深入研究一直用不了」：游客 userName 为空，tryAcquireDeepResearch('')
+  //   永远返回 null，深度思考/回退链路每次都在闸门处被判 concurrent（「请等待上一个请求完成」）。
+  //   与 /api/agent/research/stream 保持一致，窗口内改用 guest:<ip> 作并发 key；
+  //   非游客分支保留 tryAcquireDeepResearch(userName)，登录用户行为不变。
+  var releaseDeep = guestWindow ? tryAcquireDeepResearch('guest:' + getRealIp(req)) : tryAcquireDeepResearch(userName);
   if (!releaseDeep) {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
@@ -27346,7 +27350,7 @@ async function runSelfResearchFlow(opts) {
 //   （其他第三方 BYOK 模型仍要求登录）。
 require('./ai-model-capabilities').installModelCapabilities(app, {resolveReference:resolveAiModelReference,ownerName:ADMIN_USERNAME,authenticateUser:guestOpenRouterAuth,rateLimit:rateLimit,gate:enforceAiChatAccess,record:recordAiTurnUsage});
 var researchCheckpoints = require('./research-checkpoints').installResearchCheckpoints(app, { db: supabase, authenticateUser: authenticateUser, rateLimit: rateLimit });
-require('./ai-report-export').installReportExport(app,{authenticateUser:authenticateUser,rateLimit:rateLimit,jsonMiddleware:express.json({limit:'6mb'})});
+require('./ai-report-export').installReportExport(app,{authenticateUser:authenticateUser,guestAiAuth:guestAiAuth,rateLimit:rateLimit,jsonMiddleware:express.json({limit:'6mb'})});
 // 语音转文字：配置了 VOICE_TRANSCRIPTION_API_KEY 才启用；未配置时浏览器退回本机识别。
 app.use('/api/agent/transcribe', require('./voice-transcribe').createVoiceTranscribe({ express, authenticateUser, rateLimit }));
 // ★ 2026-11-14（用户要求接入 DeepSeek 语音）：朗读走官方 TTS，返回 WAV；
