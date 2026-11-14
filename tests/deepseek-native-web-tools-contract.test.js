@@ -39,7 +39,8 @@ test('上游拒绝 web 工具时整体摘掉扩展字段重试一次，退回原
 
 test('主聊天路由：只在用户打开搜索且非工作模式时启用原生联网，并透传引用来源', () => {
   assert.match(server, /web_tools: \(!workModeEnabled && webSearchPref === true\) \? \['search', 'read_url'\] : null,/);
-  assert.match(server, /safety_check: !workModeEnabled && webSearchPref === true,/);
+  // 与 function 工具混用时官方可能拒绝 safety_check，因此聊天通道先关掉（需要时另开无工具通道）
+  assert.match(server, /safety_check: false,/);
   assert.match(server, /type: 'sources', items: sent\.slice\(0, 8\)/);
   assert.match(server, /var seenSources = Object\.create\(null\);/);
   // 引用按 URL 去重，避免同一来源重复刷屏

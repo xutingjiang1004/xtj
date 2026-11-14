@@ -24725,7 +24725,9 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, guestAwar
         //   搜索/打开页面/页内查找都由服务端完成，答案里带 url_citation，
         //   比本地 function 工具更接近 App 的联网体验；上游拒绝时自动降级。
         web_tools: (!workModeEnabled && webSearchPref === true) ? ['search', 'read_url'] : null,
-        safety_check: !workModeEnabled && webSearchPref === true,
+        // 官方限制：web 工具与 function 工具混用时，safety_check 可能被拒（400）。
+        // 先不叠加审核，确认原生工具本身可用；需要审核时再单独开一条无工具通道。
+        safety_check: false,
         onSources: function(items) {
           if (aborted || !Array.isArray(items) || !items.length) return;
           var sent = [];
