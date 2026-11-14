@@ -204,7 +204,7 @@
     // 中途失败 → 停止并提示重试（避免半截朗读突然换音色）。
     function serverSpeak(text, speechToken, speechCurrent, autoContinue) {
       if (ttsUnavailable) return false;
-      if (!global.fetch || typeof global.xtjProtectedFetch !== 'function' || !global.Audio || !global.URL) return false;
+      if (!global.fetch || !global.Audio || !global.URL) return false;
       var parts = text.match(/[\s\S]{1,600}(?:[。！？\n]|$)|[\s\S]{1,600}/g) || [text];
       var index = 0, started = false;
       function finish() { if (!speechCurrent()) return; speaking = false; state(); if (enabled && autoContinue) void listen(); }
@@ -215,10 +215,15 @@
         var ctrl = new global.AbortController();
         ttsAbort = ctrl;
         speaking = false; state('正在准备朗读，点击麦克风可打断','speech_wait');
-        global.xtjProtectedFetch('/api/agent/tts', {
+        // 登录用户带令牌（过期会话会被续期）；访客直接用普通 fetch，走 15 天公开窗口。
+        var reqInit = {
           method: 'POST', timeoutMs: 60000, background: true, signal: ctrl.signal,
           headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: chunk })
-        }).then(function(response) {
+        };
+        var ttsRequest = (global.currentUser && typeof global.xtjProtectedFetch === 'function')
+          ? global.xtjProtectedFetch('/api/agent/tts', reqInit)
+          : global.fetch('/api/agent/tts', reqInit);
+        ttsRequest.then(function(response) {
           if (!response.ok) throw new Error('tts unavailable');
           return response.blob();
         }).then(function(blob) {

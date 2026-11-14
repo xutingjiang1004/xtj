@@ -68,7 +68,8 @@ test('来源样式存在且不引入卡片外框（沿用正文阅读排版）',
 test('朗读改走服务端 TTS，失败时回落浏览器语音合成', () => {
   const voice = fs.readFileSync(path.join(root, 'js', 'ai-core', 'voice-conversation.js'), 'utf8');
   assert.match(voice, /function serverSpeak\(/);
-  assert.match(voice, /xtjProtectedFetch\('\/api\/agent\/tts'/);
+  assert.match(voice, /xtjProtectedFetch\('\/api\/agent\/tts', reqInit\)/);
+  assert.match(voice, /global\.fetch\('\/api\/agent\/tts', reqInit\)/);
   assert.match(voice, /if \(serverSpeak\(text, speechToken, speechCurrent, autoContinue\)\) return;/);
   assert.match(voice, /ttsUnavailable = true;\s*\n\s*browseSpeak\(/);
   assert.match(server, /app\.use\('\/api\/agent\/tts', require\('\.\/deepseek-tts'\)\.createDeepSeekTts/);

@@ -679,3 +679,10 @@ WebKit 会拒绝在 `navigator.audioSession.type === 'playback'` 时调用 `getU
 
 - 删帖时帖子的缩略图和封面一起清：OSS 上的在删帖成功后尽力删除；Supabase 上的随删帖事务排进持久清理队列。只认 `posts/thumb_<32位十六进制>.jpg` 与 `posters/…` 两种固定路径，且别的帖子的内容仍提到同一文件名时不删（内容由发帖人提交，不能凭它点名删别人的文件）。
 - 不新增登记表、不改数据库函数；发帖失败的缩略图清理沿用「清理请求带 extra_paths」的既有做法。
+
+## 2026-11-14 小猫AI 原生联网与朗读（用户要求）
+
+- 搜索开关打开时改用 DeepSeek 服务端 web 工具（`deepseek_web_search` / `deepseek_read_url`）并开启 `safety_check: high`，不再先跑本地强制预搜；上游拒绝时自动整体降级回原 function 工具链路，降级后本轮不重试。搜索开关关闭时保持原行为。
+- 回复的「朗读」优先走 `/api/agent/tts`（官方语音，服务端补 WAV 头）；未配置或失败时静默回落浏览器语音合成，不弹错误。访客在公开窗口内可直接使用。
+- 定时任务的数据库错误不再把 `exceed_egress_quota` 原样交给模型，按「额度用完 / 表未迁移」分流成可执行提示。
+- 文件解析/OCR 与 DeepSeek ASR 暂不接入：前者要改消息体与历史回传，后者需要服务端把 webm/opus 转成 wav/ogg；等确认后再做。
