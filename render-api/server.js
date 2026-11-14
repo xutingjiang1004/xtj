@@ -24527,6 +24527,10 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, guestAwar
     //   false → 优先模型内置搜索；需要时仍可借助第三方作补充（不禁止）
     var allowSearch = adminSearchAllowed;
     var webSearchPref = req.body && req.body.web_search;
+    // ★ 2026-11-14：搜索开关打开时交给官方 web 工具，不再先跑一遍本地强制预搜；
+    //   否则搜索结果已被注入上下文，模型根本不需要联网，原生工具永远用不上。
+    //   调用方显式传 native_web:false 可回到旧链路（排查/回滚用）。
+    var nativeWebActive = req.body && req.body.web_search === true && req.body.native_web !== false;
     // 主动预搜：开开关，或消息有搜索/时效意图；图片 OCR 默认不预搜
     var proactiveSearch = allowSearch && !blockAutoSearchForOcr && (webSearchPref === true || explicitSearchIntent || liveInfoIntent);
     // 第三方搜索日额度（免费默认 10 次）；用尽后仅保留模型内置 web_search。
@@ -24660,7 +24664,7 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, guestAwar
     var thirdPartySearchOk = thirdPartySearchOkEarly;
     var useTavilyCluster = thirdPartySearchOk && ((webSearchPref === true) || (webSearchPref === false && proactiveSearch));
     var webSearchEnabled = (webSearchPref === true);
-    await runRequiredSearch({ enabled: webSearchEnabled, text: searchCleanMessage || message, messages: messages, execute: executeToolCall, context: Object.assign(requestSearchCtx(req, userName), { signal: requestAbortCtrl.signal }), write: event => writeSse(res, event), normalizeItems: normalizeToolResultItems });
+    await runRequiredSearch({ enabled: webSearchEnabled && !nativeWebActive, text: searchCleanMessage || message, messages: messages, execute: executeToolCall, context: Object.assign(requestSearchCtx(req, userName), { signal: requestAbortCtrl.signal }), write: event => writeSse(res, event), normalizeItems: normalizeToolResultItems });
     if(req.body.context_management===true){for(var managedIndex=0;managedIndex<histSlice.length;managedIndex++){messages[managedIndex+1].context_id=histSlice[managedIndex].context_id;messages[managedIndex+1].context_truncated=histSlice[managedIndex].context_truncated;}manageAiContextWindow(messages,histSlice.length,req,res,convId,requestAbortCtrl.signal);}
     if (aborted || res.writableEnded) return safeEnd();
     var useBuiltInSearch = !_visionEngaged && validatedModel === DEEPSEEK_RESPONSES_MODEL;
@@ -24685,7 +24689,7 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, guestAwar
       var tavilyPromise = null;
       var tavilyResults = null;
       var presearchProvider = null;
-      var shouldServerSearch = !workModeEnabled && webSearchPref !== true && thirdPartySearchOk && allowSearch && !blockAutoSearchForOcr && (
+      var shouldServerSearch = !nativeWebActive && !workModeEnabled && webSearchPref !== true && thirdPartySearchOk && allowSearch && !blockAutoSearchForOcr && (
         (useTavilyCluster && !hasImageOcrMsg)
         || (useThinking && proactiveSearch)
         || (explicitSearchIntent || liveInfoIntent)
