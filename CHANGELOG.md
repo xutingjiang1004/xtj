@@ -1,5 +1,19 @@
 # 更新日志
 
+## 2026-11-14 小猫AI 接入 DeepSeek 官方文件解析（用户要求）
+
+**能读 PDF / Word / PPT / 表格 / 电子书了**
+
+- 发送前，非图片文档先经服务端代理 `POST /api/agent/files/upload` 上传到官方 Files API：PDF/DOC/DOCX/PPT/PPTX 用 `rich_layout_recognition`（文字 + 图表），TXT/MD/CSV/JSON/XLSX/EPUB 等用 `user_data`（不计费）。官方硬性要求 `purpose` 排在 `file` 之前，已按序构造 multipart。
+- 拿到 `file_id` 后，聊天时以 Responses 的 `input_file` 内容块引用，模型能看到版面、图表和扫描件文字；图片继续走原有视觉链路，不受影响。
+- 只引用**本轮**文件并去重、最多 20 个，避免历史逐轮累加触发官方「单次 20 文档 / 8MiB 文本」限制。
+- 上游若因 `safety_check` / web 工具组合拒绝 `input_file`，自动摘掉文件引用重试一次；本地抽取的文本始终留在上下文里，最差退回原来的纯文本解析，聊天不会失败。
+- 上传失败（格式不支持、加密、超时、额度、未配置密钥）一律给中文提示并静默回落，**绝不阻断发送**；密钥只在服务端。
+
+- 新增 `render-api/deepseek-files.js`；`GET /api/agent/files/status` 可查是否可用，`DELETE /api/agent/files/:id` 供运维。
+- 测试：`tests/deepseek-files-runtime.test.js` 13 项 + `tests/deepseek-files-contract.test.js` 8 项。
+- 没做：ASR（浏览器 webm/opus 需服务端转码）、图片改走 `file_id`（现有内联视觉链路已可用，动了反而有风险）。
+
 ## 2026-11-14 小猫AI 接入 DeepSeek 官方联网与朗读（用户要求）
 
 **联网搜索改成官方能力**

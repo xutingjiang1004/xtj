@@ -686,3 +686,9 @@ WebKit 会拒绝在 `navigator.audioSession.type === 'playback'` 时调用 `getU
 - 回复的「朗读」优先走 `/api/agent/tts`（官方语音，服务端补 WAV 头）；未配置或失败时静默回落浏览器语音合成，不弹错误。访客在公开窗口内可直接使用。
 - 定时任务的数据库错误不再把 `exceed_egress_quota` 原样交给模型，按「额度用完 / 表未迁移」分流成可执行提示。
 - 文件解析/OCR 与 DeepSeek ASR 暂不接入：前者要改消息体与历史回传，后者需要服务端把 webm/opus 转成 wav/ogg；等确认后再做。
+
+## 2026-11-14 小猫AI 官方文件解析（用户要求）
+
+- 文档（PDF/DOC/DOCX/PPT/PPTX + 纯文本/表格/电子书）发送前经服务端代理上传到 DeepSeek Files API，聊天以 Responses 的 `input_file` 引用；图片保持原有内联视觉链路不动。
+- 只引用本轮文件（去重、≤20），上游拒绝 `input_file` 时自动摘掉并退回本地文本解析；上传失败不阻断发送，密钥不下放到前端。
+- 仍未接入：DeepSeek ASR（录音格式需转码）、图片改用 `file_id` 引用（收益低、风险高）。

@@ -47,7 +47,9 @@ for (const kind of ['native','DSML fallback']) test(kind+': ordinary Pro tool co
 test('automatic Flash chat starts its model with available search tools instead of waiting for redundant legacy presearch', async () => {
   const preparation = section('      var shouldServerSearch = ', '      // ★ 修复（P0「工具调用被当成正文回复」根因之二）');
   let searches = 0;
-  const scope = {workModeEnabled:true,webSearchPref:false,thirdPartySearchOk:true,allowSearch:true,blockAutoSearchForOcr:false,
+  // ★ 2026-11-14：搜索开关打开时改走官方 web 工具，这段决策代码新增了
+  //   nativeWebActive 判断。此夹具模拟的是"未启用原生联网"的旧链路，显式置 false。
+  const scope = {nativeWebActive:false,workModeEnabled:true,webSearchPref:false,thirdPartySearchOk:true,allowSearch:true,blockAutoSearchForOcr:false,
     useTavilyCluster:false,hasImageOcrMsg:false,useThinking:true,proactiveSearch:true,explicitSearchIntent:true,liveInfoIntent:true,
     _preloadedQuery:'',searchCleanMessage:'核对今天的原始公告',_preloadedSearchPromise:null,userName:'isolated',req:{_searchApiCalls:{}},
     searchWebForUser:async()=>{searches++;return{results:[]};},console:{error(){}}};

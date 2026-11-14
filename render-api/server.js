@@ -4782,6 +4782,7 @@ app.use(function corsErrorHandler(err, req, res, next) {
 // unauthenticated request could make Express allocate and parse 80 MB bodies.
 var LARGE_JSON_POST_PATHS = {
   '/api/agent/attachments': true,
+  '/api/agent/files/upload': true,
   '/api/agent/research/export': true,
   '/api/agent/chat': true,
   '/api/agent/chat/stream': true,
@@ -6974,6 +6975,20 @@ function extractVisionImageUrls(attachments) {
     urls.push(dataUrl);
   }
   return urls;
+}
+
+// ★ 2026-11-14（文件解析）：从本轮附件里挑出已上传到官方 Files API 的 file_id。
+//   只取当前请求，历史轮次不重复引用——官方限制「单次最多 20 个文档、
+//   文本合计 8MiB」，且跨轮会把全文一直留在上下文里，重复引用会迅速撑爆。
+function collectDeepSeekFileIds(attachments) {
+  if (!Array.isArray(attachments)) return [];
+  var ids = [];
+  for (var i = 0; i < attachments.length && ids.length < 20; i++) {
+    var a = attachments[i];
+    var id = a && typeof a === 'object' ? String(a.file_id || '').trim() : '';
+    if (/^file-api-[A-Za-z0-9_-]+$/.test(id) && ids.indexOf(id) < 0) ids.push(id);
+  }
+  return ids;
 }
 
 /** 去掉附件/OCR/dataURL，得到适合当搜索词的用户原话 */
@@ -9585,6 +9600,29 @@ async function callDeepSeekViaResponses(messages, options) {
     }
   }
 
+  // ★ 2026-11-14（用户要求接入 DeepSeek 文件解析）：把已上传到官方 Files API 的
+  //   文档以 input_file 引用。Responses API 要求它出现在 user message 的 content
+  //   数组里，这里附加到最后一条 user 消息（离问题最近）。只引用本轮文件，
+  //   避免历史逐轮累加触发官方「单次最多 20 个文档 / 文本合计 8MiB」限制。
+  //   本地解析文本仍照常注入，上游拒绝 input_file 时可无缝退回原链路。
+  var nativeFileIds = [];
+  if (options && Array.isArray(options.input_files)) {
+    for (var nfi = 0; nfi < options.input_files.length && nativeFileIds.length < 20; nfi++) {
+      var nfId = String((options.input_files[nfi] && options.input_files[nfi].file_id) || options.input_files[nfi] || '').trim();
+      if (/^file-api-[A-Za-z0-9_-]+$/.test(nfId) && nativeFileIds.indexOf(nfId) < 0) nativeFileIds.push(nfId);
+    }
+  }
+  if (nativeFileIds.length) {
+    for (var nfi2 = inputItems.length - 1; nfi2 >= 0; nfi2--) {
+      if (inputItems[nfi2].type === 'message' && inputItems[nfi2].role === 'user') {
+        var nativeFileParts = [{ type: 'input_text', text: String(inputItems[nfi2].content) }];
+        nativeFileIds.forEach(function(fid) { nativeFileParts.push({ type: 'input_file', file_id: fid }); });
+        inputItems[nfi2].content = nativeFileParts;
+        break;
+      }
+    }
+  }
+
   // 构建 tools 数组。
   // ★ 2026-09-13 修复（工具不可用的隐藏诱因）：
   //   旧实现无条件塞入 `{ type: 'web_search' }`。但 DeepSeek Responses API 明确
@@ -9684,6 +9722,9 @@ async function callDeepSeekViaResponses(messages, options) {
     // ★ 2026-11-14：一旦本轮确认上游不接受原生 web 工具，后续所有轮次都不再尝试，
     //   避免每轮都先吃一个 400 再降级（白白多一次往返延迟）。
     var nativeWebOff = false;
+    // 官方在 web tools / safety_check=high 组合下可能不接受 input_file 内容块；
+    // 一旦确认被拒，本轮后续工具轮次都不再携带文件引用。
+    var nativeFilesOff = false;
     var workingInstructions = instructions;
     for (var round = 0; round < maxToolRounds; round++) {
       onProgress();
@@ -9784,6 +9825,25 @@ async function callDeepSeekViaResponses(messages, options) {
               delete apiBody.safety_check;
               delete apiBody.title;
               if (tools && tools.length) apiBody.tools = tools; else delete apiBody.tools;
+              continue;
+            }
+          }
+          // ★ 文件解析降级：上游若不接受 input_file（与 web tools / 安全审核组合时
+          //   偶发 400），摘掉文件引用再试一次。本地抽取的文本仍在上下文里，
+          //   最差情况退回原来的纯文本解析，聊天不会失败。
+          if (resp && resp.status === 400 && nativeFileIds.length && !nativeFilesOff) {
+            var _filePeek = '';
+            try { _filePeek = await resp.clone().text(); } catch (_) {}
+            if (/input_file|file_id|document|content.?part|files?/i.test(_filePeek)) {
+              nativeFilesOff = true;
+              console.warn('[RESPONSES] input_file rejected, retrying without file references, round', round);
+              for (var _wi = 0; _wi < workingInput.length; _wi++) {
+                var _wiItem = workingInput[_wi];
+                if (_wiItem && _wiItem.type === 'message' && Array.isArray(_wiItem.content)) {
+                  _wiItem.content = _wiItem.content.filter(function(_p) { return _p && _p.type === 'input_text'; })
+                    .map(function(_p) { return _p.text; }).join('\n');
+                }
+              }
               continue;
             }
           }
@@ -22496,6 +22556,8 @@ app.post('/api/agent/chat', guestAiAuth, aiChatConcurrencyGate, guestAwareChatRa
           ? aiToolsForWorkMode()
           : aiToolsForSearch(useTavilyCluster),
         tool_choice: 'auto',
+        // ★ 2026-11-14：非流式 /chat 路径同样支持官方文件解析（手机端会走这里）。
+        input_files: collectDeepSeekFileIds(req.body && req.body.attachments),
         max_tool_rounds: workModeEnabled ? aiTaskPolicy.MAX_TOOL_ROUNDS : 4,
         signal: requestAbortCtrl.signal,
         _userName: userName,
@@ -24732,6 +24794,9 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, guestAwar
         // 官方文档建议对外服务开启基础风控；若上游因它与 function 工具混用而 400，
         // Responses 层会自动整体降级，聊天不会失败。
         safety_check: !workModeEnabled && webSearchPref === true,
+        // ★ 2026-11-14：本轮上传的文档以官方 file_id 引用，模型可看版面/图表/OCR；
+        //   上游若拒绝 input_file，Responses 层会自动摘掉并退回本地文本解析。
+        input_files: collectDeepSeekFileIds(req.body && req.body.attachments),
         onSources: function(items) {
           if (aborted || !Array.isArray(items) || !items.length) return;
           var sent = [];
@@ -27287,6 +27352,10 @@ app.use('/api/agent/transcribe', require('./voice-transcribe').createVoiceTransc
 // ★ 2026-11-14（用户要求接入 DeepSeek 语音）：朗读走官方 TTS，返回 WAV；
 //   未配置密钥或上游失败时前端自动回落浏览器语音合成，功能不会消失。
 app.use('/api/agent/tts', require('./deepseek-tts').createDeepSeekTts({ express, guestAiAuth, rateLimit }));
+// ★ 2026-11-14（用户要求接入 DeepSeek 文件解析）：PDF / Word / PPT / 表格先在服务端
+//   上传到官方 Files API 拿 file_id，聊天时以 input_file 引用，模型能看版面与图表。
+//   上传失败时前端静默回落本地文本解析，不影响发送。
+app.use('/api/agent/files', require('./deepseek-files').createDeepSeekFiles({ express, guestAiAuth, rateLimit }));
 console.log(require('./voice-transcribe').describeConfig());
 require('./ai-tool-retry').installToolRetry(app,{authenticateUser:authenticateUser,rateLimit:rateLimit,execute:executeToolCall,gate:enforceAiChatAccess,record:recordAiTurnUsage,feedback:toolFeedback,normalize:normalizeToolResultItems,store:require('./ai-tool-retry-store').createToolRetryStore(supabase)});
 require('./ai-workbench').registerWorkbenchRoutes(app,{authenticateUser:authenticateUser,rateLimit:rateLimit,executeToolCall:executeToolCall,parseDocumentBuffer:parseDocumentBuffer,ocrImageBuffer:ocrImageBuffer,sharp:sharp,jsonMiddleware:express.json({limit:'12mb'}),assets:require('./ai-workbench-assets').createWorkbenchAssets(supabase),requestContext:function(req){return {userName:req.userName};},exportDocument:async function(args,owner,signal){var pdf=await require('./ai-report-export').buildReportPdf(Object.assign({},args,{signal:signal}));return {tool_name:'generate_pdf',content:'PDF 已生成',cards:[{type:'file',id:'workbench-pdf',protocol:'xtj.ai.ui.v1',data:{filename:require('./ai-report-export').filename(args.filename||args.title,'pdf'),mime_type:'application/pdf',data_url:'data:application/pdf;base64,'+pdf.toString('base64')}}]};}});

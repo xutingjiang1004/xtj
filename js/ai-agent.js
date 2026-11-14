@@ -2922,6 +2922,47 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   }
 
   var aiFeatureRequestClient=null;
+  // ★ 2026-11-14（用户要求接入 DeepSeek 文件解析）：发送前把 PDF / Word / PPT /
+  //   表格 / 电子书 / 纯文本上传到官方 Files API，拿到 file_id 写回附件对象，
+  //   服务端再以 input_file 引用，模型就能看到版面、图表与扫描件文字。
+  //   图片不走这里（继续用原有视觉链路）；任何失败都静默忽略，回落本地文本解析，
+  //   绝不能因为解析服务不可用而阻止用户发消息。
+  async function uploadAiDocument(att, headers, signal) {
+    var resp = await fetch(API_BASE + '/files/upload', {
+      method: 'POST',
+      headers: Object.assign({}, headers || {}, { 'Content-Type': 'application/json' }),
+      credentials: 'include',
+      body: JSON.stringify({ name: att.name, type: att.type, data_url: att.data_url }),
+      signal: signal
+    });
+    if (!resp || !resp.ok) return;
+    var data = await resp.json().catch(function() { return null; });
+    if (data && data.ok && /^file-api-[A-Za-z0-9_-]+$/.test(String(data.file_id || ''))) {
+      att.file_id = String(data.file_id);
+    }
+  }
+
+  async function ensureDeepSeekFileIds(payload, headers, signal) {
+    if (!Array.isArray(payload) || !payload.length) return;
+    var pending = payload.filter(function(a) {
+      return a && !a.file_id && !/^image\//i.test(String(a.type || '')) &&
+        typeof a.data_url === 'string' && a.data_url.indexOf('data:') === 0 &&
+        /\.(pdf|docx?|pptx?|xlsx?|txt|md|csv|json|xml|yaml|ya?ml|log|epub|mobi|py|js|ts|java|c|cpp|h|sql|html?|css|rtf|srt|vtt)$/i.test(String(a.name || ''));
+    });
+    if (!pending.length) return;
+    var cursor = 0;
+    async function worker() {
+      while (cursor < pending.length) {
+        if (signal && signal.aborted) return;
+        var one = pending[cursor++];
+        try { await uploadAiDocument(one, headers, signal); } catch (_) {}
+      }
+    }
+    var workers = [];
+    for (var wi = 0; wi < Math.min(2, pending.length); wi++) workers.push(worker());
+    await Promise.all(workers);
+  }
+
   async function aiFeatureFetch(url,options){
     if(/\/(?:custom-chat\/(?:stream|deep-stream)|research\/stream)$/.test(String(url))){var identity=customModelIdentity();await customModelWriteQueue;if(!customModelIdentityCurrent(identity))throw new DOMException('请求已取消','AbortError');}
     var features=window.XtjAiCore&&window.XtjAiCore.AssistantFeatures;
@@ -11400,6 +11441,15 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var headers = withOpenRouterHint(auth.headers || {}, isCustomModel ? customCfg : null);
     var waitingThinking = assistantNode.querySelector('.ai-thinking[data-phase]');
     if (waitingThinking) { waitingThinking.dataset.phase = 'waiting'; setThinkingStatus(waitingThinking,'正在思考中'); }
+    // ★ 2026-11-14：内置模型发送前先解析文档（UI 已立即显示，这里只等待解析结果）。
+    //   上传失败不阻断发送；第三方自定义模型不经过 DeepSeek，不需要 file_id。
+    if (!isCustomModel && attachmentPayload && attachmentPayload.length) {
+      var _fileHint = assistantNode.querySelector('.ai-thinking[data-phase]');
+      if (_fileHint) { try { setThinkingStatus(_fileHint, '正在解析文件…'); } catch (_) {} }
+      try { await ensureDeepSeekFileIds(attachmentPayload, headers, controller.signal); } catch (_) {}
+      if ((sendToken !== S.sendSeq || !customModelIdentityCurrent(sendIdentity)) || (S._currentReqId !== reqId) || !S.active || controller.signal.aborted) return;
+      if (_fileHint) { try { setThinkingStatus(_fileHint, '正在思考中'); } catch (_) {} }
+    }
     var fetchBody;
     if (isCustomModel && customCfg) {
       // ★ 思考Max 上下文拼装：开启时尽量保留全部上下文不压缩（榨干性能）；
