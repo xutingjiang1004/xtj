@@ -755,7 +755,7 @@
   function canDeletePhotoWallPhoto(item) {
     var current = String(window.currentUser || '');
     return !!(item && current && (item.username === current ||
-      (current === 'xxz' && typeof window.isAdmin === 'function' && window.isAdmin())));
+      (typeof window.isAdmin === 'function' && window.isAdmin())));
   }
   window.canDeletePhotoWallPhoto = canDeletePhotoWallPhoto;
 

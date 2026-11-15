@@ -5658,6 +5658,19 @@ function renderProfileActivityList(kind) {
                 }
             }
 
+            function safeRandomUuid() {
+                if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+                    try { return window.crypto.randomUUID(); } catch (_) {}
+                }
+                if (window.crypto && typeof window.crypto.getRandomValues === 'function') {
+                    var bytes = window.crypto.getRandomValues(new Uint8Array(16));
+                    bytes[6] = (bytes[6] & 15) | 64; bytes[8] = (bytes[8] & 63) | 128;
+                    var hex = Array.from(bytes, function(value) { return value.toString(16).padStart(2, '0'); }).join('');
+                    return [hex.slice(0,8),hex.slice(8,12),hex.slice(12,16),hex.slice(16,20),hex.slice(20)].join('-');
+                }
+                return 'uuid-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+            }
+
             // ===================== 点赞 =====================
             function getCurrentLikeIdentityValues() {
                 var values = [];
@@ -6468,7 +6481,8 @@ function renderProfileActivityList(kind) {
                 // uncertain response. Keep it with the preserved comment draft.
                 var commentAttempt = null;
                 function newCommentRequestId() {
-                    if (typeof window.crypto.randomUUID === 'function') return window.crypto.randomUUID();
+                    if (typeof safeRandomUuid === 'function') return safeRandomUuid();
+                    if (window.crypto && typeof window.crypto.randomUUID === 'function') return window.crypto.randomUUID();
                     var bytes = window.crypto.getRandomValues(new Uint8Array(16));
                     bytes[6] = (bytes[6] & 15) | 64; bytes[8] = (bytes[8] & 63) | 128;
                     var hex = Array.from(bytes, function(value) { return value.toString(16).padStart(2, '0'); }).join('');
@@ -11908,7 +11922,7 @@ function renderProfileActivityList(kind) {
             }
             function rememberPendingPostMedia(owner, path, uploadId, keepForRetry, extraPaths) {
                 var rows = readPendingPostMedia(owner).filter(function(row) { return row.storage_path !== path; });
-                var entry = { storage_path: path, upload_id: uploadId, keep_for_retry: !!keepForRetry };
+                var entry = { storage_path: path, upload_id: uploadId, keep_for_retry: !!keepForRetry, created_at: Date.now() };
                 // 缩略图/视频封面不在上传登记表里：把它们的路径跟原图记在一起，放弃发布时才清得掉。
                 if (Array.isArray(extraPaths) && extraPaths.length) entry.extra_paths = extraPaths.slice(0, 2);
                 rows.push(entry);
@@ -11934,8 +11948,9 @@ function renderProfileActivityList(kind) {
             function retryPendingPostMedia() {
                 var identity = { owner: currentUser, epoch: _authStateEpoch };
                 if (!identity.owner) return;
+                var now = Date.now();
                 readPendingPostMedia(identity.owner).forEach(function(row) {
-                    if (row && row.keep_for_retry) return;
+                    if (row && row.keep_for_retry && (!row.created_at || (now - row.created_at < 900000))) return;
                     if (Array.from(activePostUploadFlights).some(function(flight) { return flight.owner === identity.owner; })) return;
                     cleanupPendingPostMedia(identity, row.storage_path, row.upload_id, row.extra_paths);
                 });
@@ -12027,9 +12042,17 @@ function renderProfileActivityList(kind) {
                             thumbUrls = (cachedUpload.thumbs || []).slice();
                             reusedUpload = true;
                         } else {
+                            if (window.XtjPostComposerMedia && typeof window.XtjPostComposerMedia.ready === 'function') {
+                                try {
+                                    await Promise.race([
+                                        window.XtjPostComposerMedia.ready(),
+                                        new Promise(function(resolve) { setTimeout(resolve, 3000); })
+                                    ]);
+                                } catch (_) {}
+                            }
                             var uploaded = await window.XtjPostMedia.mapUploads(selectedPostMedia, async function(selectedFile, position) {
                                 assertPostPublishIdentity(flight);
-                                var path = buildStorageUploadPath('posts', selectedFile.name), uploadId = crypto.randomUUID();
+                                var path = buildStorageUploadPath('posts', selectedFile.name), uploadId = safeRandomUuid();
                                 var pending = { storage_path: path, upload_id: uploadId };
                                 uploadedMedia.push(pending);
                                 rememberPendingPostMedia(flight.owner, path, uploadId);
@@ -12062,7 +12085,7 @@ function renderProfileActivityList(kind) {
                                 var thumbUrl = '';
                                 var thumbFile = window.XtjPostComposerMedia && typeof window.XtjPostComposerMedia.thumbFile === 'function' ? window.XtjPostComposerMedia.thumbFile(selectedFile) : null;
                                 if (thumbFile) {
-                                    var thumbPath = 'posts/thumb_' + crypto.randomUUID().replace(/-/g, '') + '.jpg';
+                                    var thumbPath = 'posts/thumb_' + safeRandomUuid().replace(/-/g, '') + '.jpg';
                                     // 先登记再上传：上传途中失败/关页，清理也能带上这张缩略图。
                                     pending.extra_paths = [thumbPath];
                                     rememberPendingPostMedia(flight.owner, path, uploadId, false, pending.extra_paths);
@@ -12347,6 +12370,12 @@ function renderProfileActivityList(kind) {
                             feedAllPosts = [];
                             feedAllComments = [];
                             feedAllLikes = [];
+                            feedLoadedPages = [];
+                            feedNextOffset = 0;
+                            feedNextCursor = null;
+                            feedEndReached = false;
+                            markFeedStateChanged();
+                        } else if (forceRefresh) {
                             feedLoadedPages = [];
                             feedNextOffset = 0;
                             feedNextCursor = null;
@@ -13176,6 +13205,12 @@ function renderProfileActivityList(kind) {
                 return formatMsgTime(sentAt);
             }
 
+            function isGroupChatActive() {
+                try {
+                    return !!(window.__xtjChatGroups && typeof window.__xtjChatGroups.state === 'function' && window.__xtjChatGroups.state().active);
+                } catch (_) { return false; }
+            }
+
             function showNotification(userName, message, messageId, sentAt) {
                 resetDmNotificationIdentity();
                 if(messageId){if(dmNotificationIds.has(String(messageId)))return;dmNotificationIds.add(String(messageId));}
@@ -13183,7 +13218,7 @@ function renderProfileActivityList(kind) {
                 var preferences = window.__xtjProfileMessagePreferences;
                 var ownPreferences = preferences && preferences.owner === currentUser && preferences.epoch === _authStateEpoch;
                 if (ownPreferences ? preferences.enabled === false : window.safeStorage.get('xtj-notif') === 'off') return;
-                if (currentDockTab === 'chat' && !document.hidden && dockChatActiveUser === userName) return;
+                if (currentDockTab === 'chat' && !document.hidden && !isGroupChatActive() && dockChatActiveUser === userName) return;
 
                 const container = document.getElementById('notificationContainer');
                 if (!container) return;
@@ -14040,7 +14075,7 @@ function renderProfileActivityList(kind) {
                     // 增量：把 payload 直接并入该会话缓存（同 id 的乐观消息就地被替换），
                     //   不再触发 loadDockChatMessages 的全量回拉。
                     upsertDockChatCacheMessage(otherUser, message);
-                    var convOpen = (currentDockTab === 'chat' && !document.hidden && dockChatActiveUser === otherUser);
+                    var convOpen = (currentDockTab === 'chat' && !document.hidden && !isGroupChatActive() && dockChatActiveUser === otherUser);
                     if (convOpen) {
                         var key = getDockChatCacheKey(otherUser);
                         _chatRenderSignature[otherUser] = undefined;
@@ -16740,7 +16775,7 @@ function renderProfileActivityList(kind) {
                 if (payload && payload.withdrawn) {
                     return '<span class="msg-text withdrawn">此消息已被撤回</span>';
                 }
-                if(payload.flash){var own=message.user_name===currentUser,expired=!own&&(payload.flash.state==='expired'||flashLocallyViewed(currentUser,message.id));return '<button type="button" class="chat-flash-card" '+(expired||message.__optimistic?'disabled':'onclick="openChatFlash(\''+escapeHtml(String(message.id))+'\')"')+' aria-label="'+(expired?'闪图已失效':own?'查看自己发送的闪图，不限次数':'查看一次性闪图，3 秒后失效')+'"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 2-10 12h7l-1 8 10-12h-7z"/></svg><span>'+(expired?'闪图已失效':'闪图 3 秒')+'</span></button>';}
+                if(payload.flash){var own=message.user_name===currentUser,expired=!own&&(payload.flash.state==='expired'||flashLocallyViewed(currentUser,message.id));return '<button type="button" class="chat-flash-card" '+(expired||message.__optimistic?'disabled':'onclick="openChatFlash(\''+safeJsStr(String(message.id))+'\')"')+' aria-label="'+(expired?'闪图已失效':own?'查看自己发送的闪图，不限次数':'查看一次性闪图，3 秒后失效')+'"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 2-10 12h7l-1 8 10-12h-7z"/></svg><span>'+(expired?'闪图已失效':'闪图 3 秒')+'</span></button>';}
                 var media = resolveDockChatMedia(message);
                 var messageText = getDMMessageText(message);
                 if (media && media.kind === 'image') {
@@ -21228,7 +21263,9 @@ function renderProfileActivityList(kind) {
                                 });
                             });
                         }
-                        var chatFocused = focused && document.activeElement.id === 'dockChatInput' && currentDockTab === 'chat';
+                        var activeId = document.activeElement && document.activeElement.id;
+                        var isChatInputEl = activeId === 'dockChatInput' || activeId === 'groupChatInput';
+                        var chatFocused = focused && isChatInputEl && currentDockTab === 'chat';
                         document.body.classList.toggle('ios-chat-keyboard-open', !!(chatFocused && isKeyboardVisible));
                         if (dockBar) dockBar.style.display = isKeyboardVisible ? 'none' : '';
                         if (isKeyboardVisible && (!keyboardWasVisible || previousHeight !== appHeight || previousFocusedInput !== document.activeElement)) {

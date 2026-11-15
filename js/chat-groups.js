@@ -467,7 +467,14 @@
   function closeGroup(immediate) {
     var view = $('groupChatView');
     var conv = state.active;
-    if (conv) saveDraft(conv.id, $('groupChatInput') ? $('groupChatInput').value : '');
+    if (conv) {
+      saveDraft(conv.id, $('groupChatInput') ? $('groupChatInput').value : '');
+      if (conv.messages) {
+        conv.messages.forEach(function (m) {
+          if (m && m.__preview) { try { URL.revokeObjectURL(m.__preview); } catch (_) {} }
+        });
+      }
+    }
     state.active = null;
     stopPolling();
     closeInfo(true);
@@ -791,11 +798,16 @@
     conv.messages.delete(localId); conv.nodes.delete(localId);
     var index = conv.order.indexOf(localId);
     if (conv.messages.has(msg.id)) { // already rendered through a poll
+      if (local && local.__preview) { try { URL.revokeObjectURL(local.__preview); } catch (_) {} }
       if (index >= 0) conv.order.splice(index, 1);
       if (node) node.remove();
       return;
     }
     if (local && local.__preview && !msg.media_url) msg.__preview = local.__preview;
+    else if (local && local.__preview) {
+      var prevToRevoke = local.__preview;
+      setTimeout(function () { try { URL.revokeObjectURL(prevToRevoke); } catch (_) {} }, 3000);
+    }
     conv.messages.set(msg.id, msg);
     if (index >= 0) conv.order[index] = msg.id;
     if (node) {
@@ -926,7 +938,10 @@
       if (file.size > 40 * 1024 * 1024) { toast('图片太大了'); continue; }
       var preview = URL.createObjectURL(file);
       var dims = await new Promise(function (resolve) { var probe = new Image(); probe.onload = function () { resolve([probe.naturalWidth, probe.naturalHeight]); }; probe.onerror = function () { resolve([0, 0]); }; probe.src = preview; });
-      if (state.active !== conv) return;
+      if (state.active !== conv) {
+        try { URL.revokeObjectURL(preview); } catch (_) {}
+        return;
+      }
       var msg = localMessage(conv, 'image', '', { __preview: preview, meta: { width: dims[0], height: dims[1] } });
       var replyId = conv.reply && conv.reply.id; setReply(null);
       addLocal(conv, msg);

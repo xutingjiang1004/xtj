@@ -1,3 +1,16 @@
+            function safeRandomUuid() {
+                if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+                    try { return window.crypto.randomUUID(); } catch (_) {}
+                }
+                if (window.crypto && typeof window.crypto.getRandomValues === 'function') {
+                    var bytes = window.crypto.getRandomValues(new Uint8Array(16));
+                    bytes[6] = (bytes[6] & 15) | 64; bytes[8] = (bytes[8] & 63) | 128;
+                    var hex = Array.from(bytes, function(value) { return value.toString(16).padStart(2, '0'); }).join('');
+                    return [hex.slice(0,8),hex.slice(8,12),hex.slice(12,16),hex.slice(16,20),hex.slice(20)].join('-');
+                }
+                return 'uuid-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+            }
+
             // ===================== 点赞 =====================
             function getCurrentLikeIdentityValues() {
                 var values = [];
@@ -808,7 +821,8 @@
                 // uncertain response. Keep it with the preserved comment draft.
                 var commentAttempt = null;
                 function newCommentRequestId() {
-                    if (typeof window.crypto.randomUUID === 'function') return window.crypto.randomUUID();
+                    if (typeof safeRandomUuid === 'function') return safeRandomUuid();
+                    if (window.crypto && typeof window.crypto.randomUUID === 'function') return window.crypto.randomUUID();
                     var bytes = window.crypto.getRandomValues(new Uint8Array(16));
                     bytes[6] = (bytes[6] & 15) | 64; bytes[8] = (bytes[8] & 63) | 128;
                     var hex = Array.from(bytes, function(value) { return value.toString(16).padStart(2, '0'); }).join('');
@@ -6248,7 +6262,7 @@
             }
             function rememberPendingPostMedia(owner, path, uploadId, keepForRetry, extraPaths) {
                 var rows = readPendingPostMedia(owner).filter(function(row) { return row.storage_path !== path; });
-                var entry = { storage_path: path, upload_id: uploadId, keep_for_retry: !!keepForRetry };
+                var entry = { storage_path: path, upload_id: uploadId, keep_for_retry: !!keepForRetry, created_at: Date.now() };
                 // 缩略图/视频封面不在上传登记表里：把它们的路径跟原图记在一起，放弃发布时才清得掉。
                 if (Array.isArray(extraPaths) && extraPaths.length) entry.extra_paths = extraPaths.slice(0, 2);
                 rows.push(entry);
@@ -6274,8 +6288,9 @@
             function retryPendingPostMedia() {
                 var identity = { owner: currentUser, epoch: _authStateEpoch };
                 if (!identity.owner) return;
+                var now = Date.now();
                 readPendingPostMedia(identity.owner).forEach(function(row) {
-                    if (row && row.keep_for_retry) return;
+                    if (row && row.keep_for_retry && (!row.created_at || (now - row.created_at < 900000))) return;
                     if (Array.from(activePostUploadFlights).some(function(flight) { return flight.owner === identity.owner; })) return;
                     cleanupPendingPostMedia(identity, row.storage_path, row.upload_id, row.extra_paths);
                 });
@@ -6367,9 +6382,17 @@
                             thumbUrls = (cachedUpload.thumbs || []).slice();
                             reusedUpload = true;
                         } else {
+                            if (window.XtjPostComposerMedia && typeof window.XtjPostComposerMedia.ready === 'function') {
+                                try {
+                                    await Promise.race([
+                                        window.XtjPostComposerMedia.ready(),
+                                        new Promise(function(resolve) { setTimeout(resolve, 3000); })
+                                    ]);
+                                } catch (_) {}
+                            }
                             var uploaded = await window.XtjPostMedia.mapUploads(selectedPostMedia, async function(selectedFile, position) {
                                 assertPostPublishIdentity(flight);
-                                var path = buildStorageUploadPath('posts', selectedFile.name), uploadId = crypto.randomUUID();
+                                var path = buildStorageUploadPath('posts', selectedFile.name), uploadId = safeRandomUuid();
                                 var pending = { storage_path: path, upload_id: uploadId };
                                 uploadedMedia.push(pending);
                                 rememberPendingPostMedia(flight.owner, path, uploadId);
@@ -6402,7 +6425,7 @@
                                 var thumbUrl = '';
                                 var thumbFile = window.XtjPostComposerMedia && typeof window.XtjPostComposerMedia.thumbFile === 'function' ? window.XtjPostComposerMedia.thumbFile(selectedFile) : null;
                                 if (thumbFile) {
-                                    var thumbPath = 'posts/thumb_' + crypto.randomUUID().replace(/-/g, '') + '.jpg';
+                                    var thumbPath = 'posts/thumb_' + safeRandomUuid().replace(/-/g, '') + '.jpg';
                                     // 先登记再上传：上传途中失败/关页，清理也能带上这张缩略图。
                                     pending.extra_paths = [thumbPath];
                                     rememberPendingPostMedia(flight.owner, path, uploadId, false, pending.extra_paths);
@@ -6687,6 +6710,12 @@
                             feedAllPosts = [];
                             feedAllComments = [];
                             feedAllLikes = [];
+                            feedLoadedPages = [];
+                            feedNextOffset = 0;
+                            feedNextCursor = null;
+                            feedEndReached = false;
+                            markFeedStateChanged();
+                        } else if (forceRefresh) {
                             feedLoadedPages = [];
                             feedNextOffset = 0;
                             feedNextCursor = null;

@@ -1936,7 +1936,7 @@
                 if (payload && payload.withdrawn) {
                     return '<span class="msg-text withdrawn">此消息已被撤回</span>';
                 }
-                if(payload.flash){var own=message.user_name===currentUser,expired=!own&&(payload.flash.state==='expired'||flashLocallyViewed(currentUser,message.id));return '<button type="button" class="chat-flash-card" '+(expired||message.__optimistic?'disabled':'onclick="openChatFlash(\''+escapeHtml(String(message.id))+'\')"')+' aria-label="'+(expired?'闪图已失效':own?'查看自己发送的闪图，不限次数':'查看一次性闪图，3 秒后失效')+'"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 2-10 12h7l-1 8 10-12h-7z"/></svg><span>'+(expired?'闪图已失效':'闪图 3 秒')+'</span></button>';}
+                if(payload.flash){var own=message.user_name===currentUser,expired=!own&&(payload.flash.state==='expired'||flashLocallyViewed(currentUser,message.id));return '<button type="button" class="chat-flash-card" '+(expired||message.__optimistic?'disabled':'onclick="openChatFlash(\''+safeJsStr(String(message.id))+'\')"')+' aria-label="'+(expired?'闪图已失效':own?'查看自己发送的闪图，不限次数':'查看一次性闪图，3 秒后失效')+'"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 2-10 12h7l-1 8 10-12h-7z"/></svg><span>'+(expired?'闪图已失效':'闪图 3 秒')+'</span></button>';}
                 var media = resolveDockChatMedia(message);
                 var messageText = getDMMessageText(message);
                 if (media && media.kind === 'image') {
@@ -6424,7 +6424,9 @@
                                 });
                             });
                         }
-                        var chatFocused = focused && document.activeElement.id === 'dockChatInput' && currentDockTab === 'chat';
+                        var activeId = document.activeElement && document.activeElement.id;
+                        var isChatInputEl = activeId === 'dockChatInput' || activeId === 'groupChatInput';
+                        var chatFocused = focused && isChatInputEl && currentDockTab === 'chat';
                         document.body.classList.toggle('ios-chat-keyboard-open', !!(chatFocused && isKeyboardVisible));
                         if (dockBar) dockBar.style.display = isKeyboardVisible ? 'none' : '';
                         if (isKeyboardVisible && (!keyboardWasVisible || previousHeight !== appHeight || previousFocusedInput !== document.activeElement)) {

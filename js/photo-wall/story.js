@@ -290,7 +290,7 @@
       var values=[row.user_name||'用户',row.content||'',new Date(row.created_at).toLocaleString('zh-CN')];
       values.forEach(function(value,i){if(item.children[i].textContent!==value)item.children[i].textContent=value;});
       var remove=item.querySelector('button');
-      var canDelete=window.currentUser&&(row.user_name===window.currentUser||(window.currentUser==='xxz'&&window.isAdmin&&window.isAdmin()));
+      var canDelete=window.currentUser&&(row.user_name===window.currentUser||(typeof window.isAdmin==='function'&&window.isAdmin()));
       if(canDelete&&!remove){remove=document.createElement('button');remove.type='button';remove.textContent='删除';remove.setAttribute('aria-label','删除评论');remove.onclick=function(){deleteComment(item._commentData,this);};item.appendChild(remove);}
       else if(!canDelete&&remove)remove.remove();
       var at=list.children[index];if(at!==item)list.insertBefore(item,at||null);

@@ -604,7 +604,7 @@
             if (c) {
                 c.disabled = pendingPreviewDeletes.has(String(i.id));
                 // L3 修复：移除硬编码管理员名 'xxz'，改用 isAdmin()（后端仍独立校验）
-                var d = window.currentUser === 'xxz' && typeof window.isAdmin === "function" && window.isAdmin(), p = !!window.currentUser && window.currentUser === i.username;
+                var d = typeof window.isAdmin === "function" && window.isAdmin(), p = !!window.currentUser && window.currentUser === i.username;
                 c.hidden = !(d || p);
                 c.style.display = d || p ? 'flex' : 'none';
                 c.title = '删除';
@@ -1482,7 +1482,7 @@
             var selectedPhoto = t;
             if (!selectedPhoto || pendingPreviewDeletes.has(String(selectedPhoto.id))) return;
             if (!window.currentUser || (selectedPhoto.username !== window.currentUser &&
-                !(window.currentUser === 'xxz' && typeof window.isAdmin === 'function' && window.isAdmin()))) {
+                !(typeof window.isAdmin === 'function' && window.isAdmin()))) {
                 window.showToast('无权删除这张照片'); return;
             }
             var deleteButton = document.getElementById("ppDeleteBtn"), o = deleteButton ? deleteButton.getBoundingClientRect() : null;

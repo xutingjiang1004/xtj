@@ -73,6 +73,12 @@
                 return formatMsgTime(sentAt);
             }
 
+            function isGroupChatActive() {
+                try {
+                    return !!(window.__xtjChatGroups && typeof window.__xtjChatGroups.state === 'function' && window.__xtjChatGroups.state().active);
+                } catch (_) { return false; }
+            }
+
             function showNotification(userName, message, messageId, sentAt) {
                 resetDmNotificationIdentity();
                 if(messageId){if(dmNotificationIds.has(String(messageId)))return;dmNotificationIds.add(String(messageId));}
@@ -80,7 +86,7 @@
                 var preferences = window.__xtjProfileMessagePreferences;
                 var ownPreferences = preferences && preferences.owner === currentUser && preferences.epoch === _authStateEpoch;
                 if (ownPreferences ? preferences.enabled === false : window.safeStorage.get('xtj-notif') === 'off') return;
-                if (currentDockTab === 'chat' && !document.hidden && dockChatActiveUser === userName) return;
+                if (currentDockTab === 'chat' && !document.hidden && !isGroupChatActive() && dockChatActiveUser === userName) return;
 
                 const container = document.getElementById('notificationContainer');
                 if (!container) return;
@@ -937,7 +943,7 @@
                     // 增量：把 payload 直接并入该会话缓存（同 id 的乐观消息就地被替换），
                     //   不再触发 loadDockChatMessages 的全量回拉。
                     upsertDockChatCacheMessage(otherUser, message);
-                    var convOpen = (currentDockTab === 'chat' && !document.hidden && dockChatActiveUser === otherUser);
+                    var convOpen = (currentDockTab === 'chat' && !document.hidden && !isGroupChatActive() && dockChatActiveUser === otherUser);
                     if (convOpen) {
                         var key = getDockChatCacheKey(otherUser);
                         _chatRenderSignature[otherUser] = undefined;

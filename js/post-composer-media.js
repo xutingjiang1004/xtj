@@ -225,37 +225,49 @@
     try { window.XtjPostMedia.validateSelection(entries.map(function(e) { return e.file; }).concat(added)); }
     catch (error) { toast(error.message); return false; }
     var created = [];
-    try { added.forEach(function(file) { created.push({ file: file, url: URL.createObjectURL(file), retained: 0, discarded: false }); }); }
+    try {
+      added.forEach(function(file) {
+        var resolveReady;
+        var readyPromise = new Promise(function(resolve) { resolveReady = resolve; });
+        created.push({ file: file, url: URL.createObjectURL(file), retained: 0, discarded: false, readyPromise: readyPromise, resolveReady: resolveReady });
+      });
+    }
     catch (error) { created.forEach(function(e) { URL.revokeObjectURL(e.url); }); toast('无法预览附件，请重新选择'); return false; }
     entries = entries.concat(created); selectionVersion++; render();
     created.forEach(function (entry) {
       var type = window.XtjPostMedia && window.XtjPostMedia.effectiveType ? window.XtjPostMedia.effectiveType(entry.file) : String(entry.file.type || '');
       if (type.startsWith('image/')) {
         captureThumb(entry, function (blob) {
-          if (!blob || entry.discarded) return;
+          if (!blob || entry.discarded) { if (entry.resolveReady) entry.resolveReady(); return; }
           try {
             entry.thumbFile = new File([blob], 'thumb-' + Date.now() + '.jpg', { type: 'image/jpeg' });
             entry.thumbUrl = URL.createObjectURL(blob);
-          } catch (_) { return; }
+          } catch (_) { if (entry.resolveReady) entry.resolveReady(); return; }
+          if (entry.resolveReady) entry.resolveReady();
         });
         return;
       }
-      if (!type.startsWith('video/')) return;
+      if (!type.startsWith('video/')) {
+        if (entry.resolveReady) entry.resolveReady();
+        return;
+      }
       capturePoster(entry, function (blob) {
-        if (!blob || entry.discarded) return;
+        if (!blob || entry.discarded) { if (entry.resolveReady) entry.resolveReady(); return; }
         try {
           entry.posterFile = new File([blob], 'poster-' + Date.now() + '.jpg', { type: 'image/jpeg' });
           entry.posterUrl = URL.createObjectURL(blob);
-        } catch (_) { return; }
+        } catch (_) { if (entry.resolveReady) entry.resolveReady(); return; }
         var thumb = entry.node && entry.node.querySelector('video');
-        if (thumb) { thumb.poster = entry.posterUrl; entry.node.classList.remove('is-video-pending'); return; }
-        render();
+        if (thumb) { thumb.poster = entry.posterUrl; entry.node.classList.remove('is-video-pending'); }
+        else { render(); }
+        if (entry.resolveReady) entry.resolveReady();
       });
     });
     return true;
   }
   window.XtjPostComposerMedia = { getFiles: function() { finishDrag(); return entries.map(function(e) { return e.file; }); }, clear: clear, append: append, reorder: reorder,
     getVersion: function() { return selectionVersion; }, retainImage: retainImage,
+    ready: function() { return Promise.all(entries.map(function(e) { return e.readyPromise || Promise.resolve(); })); },
     // 视频封面（第一帧）在选片时就截好，发布时作为图片附件一起上传。
     posterFile: function(file) { var entry = entries.find(function(e) { return e.file === file; }); return entry && entry.posterFile ? entry.posterFile : null; },
     // 图片缩略图（480px JPEG）：发布时另存一份给信息流列表用，原图仍照常上传。

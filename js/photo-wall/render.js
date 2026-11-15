@@ -155,6 +155,20 @@
     if (!window.currentUser) { if (window.showToast) window.showToast('请登录后查看照片墙'); return; }
     var list = getCurrentRenderablePhotoWallPhotos(triggerEl);
     var nextIndex = Number(index || 0);
+    if (triggerEl) {
+      var card = triggerEl.closest ? triggerEl.closest('.photo-wall-item[data-photo-id]') : null;
+      var clickedId = card ? card.getAttribute('data-photo-id') : null;
+      if (clickedId && list && list.length) {
+        var foundIndex = -1;
+        for (var fi = 0; fi < list.length; fi++) {
+          if (String(list[fi].id) === String(clickedId) || String(list[fi].cloudId) === String(clickedId)) {
+            foundIndex = fi;
+            break;
+          }
+        }
+        if (foundIndex >= 0) nextIndex = foundIndex;
+      }
+    }
     if ((!list || !list.length) && triggerEl && triggerEl.closest) {
       var card = triggerEl.closest('.photo-wall-item[data-photo-id]');
       var fallback = card ? findPhotoById(card.getAttribute('data-photo-id'), window.photoWallData || []) : null;
@@ -184,7 +198,12 @@
       var time = formatPhotoTime(p.timestamp);
       var index = base + i;
       var delay = Math.min(index * 30, 300);
-      html += '<div class="photo-wall-item pw-stagger-enter" role="button" tabindex="0" aria-label="' + esc(username + '的照片，' + time + (p.caption ? '，' + p.caption : '')) + '" data-photo-id="' + esc(String(p.id)) + '" style="animation-delay:' + delay + 'ms" onclick="openPhotoWallPreviewAt(' + index + ', this)" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();(this.querySelector(\'img\')||this).click();}">';
+      var aspectStyle = '';
+      if (p.width && p.height && p.width > 0 && p.height > 0) {
+        var ratio = Math.max(3 / 4, Math.min(4 / 3, p.width / p.height));
+        aspectStyle = '--pw-aspect:' + (Math.round(1000 * ratio) / 1000) + ';';
+      }
+      html += '<div class="photo-wall-item pw-stagger-enter" role="button" tabindex="0" aria-label="' + esc(username + '的照片，' + time + (p.caption ? '，' + p.caption : '')) + '" data-photo-id="' + esc(String(p.id)) + '" style="' + aspectStyle + 'animation-delay:' + delay + 'ms" onclick="openPhotoWallPreviewAt(' + index + ', this)" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();(this.querySelector(\'img\')||this).click();}">';
       var recent=recentPhotos.get(String(p.id));
       html += recent ? '<img src="' + safeUrl(recent.url) + '" alt="photo" class="pw-blur-done" data-recent-upload-id="' + esc(String(p.id)) + '" loading="eager" decoding="async">' : '<img src="' + esc(FALLBACK_IMG) + '" alt="photo" class="pw-blur-in" data-src="' + safeUrl(realUrl) + '" loading="lazy" decoding="async">';
       html += '<span class="pw-skeleton" aria-hidden="true"></span>';
