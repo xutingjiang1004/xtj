@@ -2684,7 +2684,8 @@ async function executeToolCallInner(toolCall, context) {
         };
       }
       try {
-        var erResp = await fetch('https://open.er-api.com/v6/latest/' + encodeURIComponent(fromCur), { signal: AbortSignal.timeout(8000) });
+        var erSignal = context && context.signal ? AbortSignal.any([context.signal, AbortSignal.timeout(8000)]) : AbortSignal.timeout(8000);
+        var erResp = await fetch('https://open.er-api.com/v6/latest/' + encodeURIComponent(fromCur), { signal: erSignal });
         if (!erResp.ok) return { tool_name: name, from: fromCur, to: toCur, error: '汇率服务暂不可用' };
         var erData = await erResp.json();
         if (!erData || erData.result !== 'success' || !erData.rates || !erData.rates[toCur]) {
@@ -2735,10 +2736,11 @@ async function executeToolCallInner(toolCall, context) {
         var cryptoId = CRYPTO_IDS[lowerSym] || CRYPTO_IDS[sym] || CRYPTO_IDS[lowerSym.split('/')[0]] || null;
         if (cryptoId || /^[a-z]{2,10}\/usdt$/i.test(sym) || /^(btc|eth|sol|doge|xrp|bnb)$/i.test(sym)) {
           var cgId = cryptoId || String(lowerSym.split('/')[0] || lowerSym);
+          var cgSignal = context && context.signal ? AbortSignal.any([context.signal, AbortSignal.timeout(8000)]) : AbortSignal.timeout(8000);
           var cgResp = await fetch(
             'https://api.coingecko.com/api/v3/simple/price?ids=' + encodeURIComponent(cgId) +
             '&vs_currencies=usd,cny&include_24hr_change=true',
-            { signal: AbortSignal.timeout(8000), headers: { Accept: 'application/json' } }
+            { signal: cgSignal, headers: { Accept: 'application/json' } }
           );
           if (!cgResp.ok) return { tool_name: name, symbol: sym, error: '加密货币行情暂不可用（HTTP ' + cgResp.status + '）' };
           var cgData = await cgResp.json();
@@ -2790,9 +2792,16 @@ async function executeToolCallInner(toolCall, context) {
           // 美股裸代码 AAPL / TSLA
           tencentSym = 'us' + sym.toUpperCase();
         }
-        var sqResp = await fetch('https://qt.gtimg.cn/q=' + encodeURIComponent(tencentSym), { signal: AbortSignal.timeout(8000) });
+        var sqSignal = context && context.signal ? AbortSignal.any([context.signal, AbortSignal.timeout(8000)]) : AbortSignal.timeout(8000);
+        var sqResp = await fetch('https://qt.gtimg.cn/q=' + encodeURIComponent(tencentSym), { signal: sqSignal });
         if (!sqResp.ok) return { tool_name: name, symbol: sym, error: '行情服务暂不可用（HTTP ' + sqResp.status + '）' };
-        var sqText = await sqResp.text();
+        var sqBuf = await sqResp.arrayBuffer();
+        var sqText;
+        try {
+          sqText = new TextDecoder('gbk').decode(sqBuf);
+        } catch (_) {
+          sqText = Buffer.from(sqBuf).toString('utf8');
+        }
         var sqMatch = sqText.match(/="([^"]+)"/);
         if (!sqMatch || !sqMatch[1] || sqMatch[1].indexOf('~') < 0) {
           return { tool_name: name, symbol: sym, error: '未找到该证券的行情（代码可能无效或不在支持范围）' };
@@ -5597,7 +5606,22 @@ async function executeAiSiteTool(name, args, context) {
       else if (s.status === 'rejected') errors.push({ source: s.reason && s.reason.message || 'unknown' });
     });
     var stored = await aiSitePersistResults(userName, [].concat.apply([], [found]).slice(0, 40));
-    return { tool_name: name, query: aiSiteText(args.query, 120), results_count: stored.length, results: stored, cards: [aiSiteCard('search_results', '站内搜索结果', { results: stored })] };
+    var siteContent = stored.length ? JSON.stringify(stored.map(function(item) {
+      return {
+        source: item.source,
+        title: item.title,
+        snippet: item.snippet,
+        created_at: item.created_at
+      };
+    })) : '[]';
+    return {
+      tool_name: name,
+      query: aiSiteText(args.query, 120),
+      results_count: stored.length,
+      results: stored,
+      content: siteContent,
+      cards: [aiSiteCard('search_results', '站内搜索结果', { results: stored })]
+    };
   }
   var payload = { args: args, requested_by: userName };
   var confirmation = await aiSiteCreateConfirmation(userName, name, payload);
