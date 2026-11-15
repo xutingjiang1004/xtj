@@ -5041,44 +5041,6 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     return true;
   }
 
-  /* Rich Markdown uses the parser + node diff path because unfinished inline
-     syntax can change meaning as the answer grows. It preserves stable nodes,
-     but parsing/traversal can still scale with the open block. Plain prose is
-     appended directly by the bounded fast path in createStreamRenderer.
-     A pure suffix or a new list item extends the existing nodes instead. */
-  function patchInnerHTML(targetEl, html, ink) {
-    if (!targetEl) return;
-    if (targetEl.__xtjStreamHtml && tryExtendStreamHtml(targetEl, targetEl.__xtjStreamHtml, html, ink)) {
-      targetEl.__xtjStreamHtml = html;
-      return;
-    }
-    function children(parent, wanted, depth) {
-      var old = Array.from(parent.childNodes).filter(function(n) { return !(n.nodeType === 1 && n.classList.contains('ai-stream-cursor')); });
-      var pos = 0;
-      Array.from(wanted.childNodes).forEach(function(want) {
-        var have = old[pos++];
-        if (!have) { var added = want.cloneNode(true); parent.insertBefore(added, parent.querySelector(':scope > .ai-stream-cursor')); if (ink) ink.inserted(added); return; }
-        if (have.nodeType === want.nodeType && (want.nodeType === 3 ? have.data === want.data : have.isEqualNode(want))) return;
-        if (have.nodeType === 3 && want.nodeType === 3) {
-          var before = have.data;
-          if (want.data.indexOf(before) === 0) { have.appendData(want.data.slice(before.length)); if (ink) ink.record(have, before.length, have.length); }
-          else have.data = want.data;
-          return;
-        }
-        var same = have.nodeType === 1 && want.nodeType === 1 && have.tagName === want.tagName && depth < 32 && have.attributes.length === want.attributes.length;
-        if (same) same = Array.from(want.attributes).every(function(a) { return have.getAttribute(a.name) === a.value; });
-        if (same) children(have, want, depth + 1);
-        else parent.replaceChild(want.cloneNode(true), have);
-      });
-      for (; pos < old.length; pos++) if (old[pos].parentNode === parent) old[pos].remove();
-    }
-    try {
-      var holder = document.createElement('div'); holder.innerHTML = html;
-      children(targetEl, holder, 0);
-    } catch (_) { targetEl.innerHTML = html; }
-    targetEl.__xtjStreamHtml = html;
-  }
-
   // Closed blocks stay in the caller's block cache. This only bounds the open
   // tail: a long list re-renders the current line, and a long paragraph
   // re-renders its plain suffix, once the result has matched a full render.

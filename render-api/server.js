@@ -25279,7 +25279,7 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, guestAwar
                 try { console.warn('[AI-FC] parse tool result error:', e && e.message); } catch(ee) {}
               }
               var _n1 = normalizeToolResultItems(trItems, 12);
-              if (!writeSse(res, toolFeedback(item.toolResult, item.toolCallId, normalizeToolResultItems))) { aborted = true; return safeEnd(); }
+              if (!writeSse(res, toolFeedback(item.toolResult, item.toolCallId, normalizeToolResultItems, (item.toolResult && item.toolResult.tool_name) || (item.name || '')))) { aborted = true; return safeEnd(); }
               if (Array.isArray(item.toolResult.cards)) {
                 item.toolResult.cards.forEach(function(card) { card = Object.assign({}, card, { tool_call_id: item.toolCallId }); siteToolCards.push(card); writeSse(res, { type: 'card', call_id: item.toolCallId, card: card }); });
               }
@@ -26121,7 +26121,10 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, guestAwar
     }
     
     // 处理 tool calls
-    var toolCallsArr = Object.values(pendingToolCalls).filter(function(t) { return t.id && t.name; });
+    var toolCallsArr = Object.values(pendingToolCalls).filter(function(t) { return t && t.name; });
+    toolCallsArr.forEach(function(t, idx) {
+      if (!t.id) t.id = 'call_' + Date.now().toString(36) + '_' + idx;
+    });
     if (toolCallsArr.length > 0 && finishReason === 'tool_calls' && !aborted) {
       // 通知前端 AI 正在使用工具
       var toolsInfo = toolCallsArr.map(function(t) {
@@ -26200,7 +26203,7 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, guestAwar
         }
         
         var _n2 = normalizeToolResultItems(toolResult.content, 12);
-        writeSse(res, toolFeedback(toolResult, toolResults[ti].id, normalizeToolResultItems, ''));
+        writeSse(res, toolFeedback(toolResult, toolResults[ti].id, normalizeToolResultItems, toolResults[ti].name));
         if (toolResult.error) writeSse(res, { type: 'tool_error', call_id: toolResults[ti].id, tool_name: toolResult.tool_name || '', error: toolResult.error });
         if (Array.isArray(toolResult.cards)) {
           toolResult.cards.forEach(function(card) { card = Object.assign({}, card, { tool_call_id: toolResults[ti].id }); siteToolCards.push(card); writeSse(res, { type: 'card', call_id: toolResults[ti].id, card: card }); });
