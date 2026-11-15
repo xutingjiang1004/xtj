@@ -233,16 +233,26 @@
           ttsUrl = url;
           var audio = new global.Audio(url);
           ttsAudio = audio;
-          audio.onplaying = function() { if (!speechCurrent()) return; started = true; speaking = true; state('正在朗读，点击麦克风可打断并提问','speaking'); };
-          audio.onended = function() {
+          function cleanupAudio() {
             try { global.URL.revokeObjectURL(url); } catch (_) {}
             if (ttsUrl === url) ttsUrl = '';
             if (ttsAudio === audio) ttsAudio = null;
+          }
+          audio.onplaying = function() { if (!speechCurrent()) return; started = true; speaking = true; state('正在朗读，点击麦克风可打断并提问','speaking'); };
+          audio.onended = function() {
+            cleanupAudio();
             playNext();
           };
-          audio.onerror = function() { if (!speechCurrent()) return; speaking = false; state(); options.notify('朗读播放失败，点击回复下的“朗读”可重试'); };
+          audio.onerror = function() {
+            cleanupAudio();
+            if (!speechCurrent()) return;
+            speaking = false;
+            state();
+            options.notify('朗读播放失败，点击回复下的“朗读”可重试');
+          };
           var played = audio.play();
           if (played && typeof played.catch === 'function') played.catch(function() {
+            if (!started) cleanupAudio();
             if (!speechCurrent()) return;
             if (!started) { ttsUnavailable = true; browseSpeak(text, speechToken, speechCurrent, autoContinue); }
             else { speaking = false; state(); options.notify('朗读被浏览器暂停，点击回复下的“朗读”可重试'); }

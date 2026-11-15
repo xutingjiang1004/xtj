@@ -53,10 +53,18 @@
     span: { title:1 }
   };
   var _passthroughTpl = null;
+  function safeOrigin() {
+    try {
+      if (typeof location !== 'undefined' && location.origin && location.origin !== 'null') {
+        return location.origin;
+      }
+    } catch (_) {}
+    return 'https://xtj.local';
+  }
   function passthroughUrlValue(rawVal, allowDataImage) {
     var decoded = decodeHtmlEntities(rawVal).replace(/[\t\r\n ]/g, '');
     var protocol = '';
-    try { protocol = new URL(decoded, location.origin).protocol.toLowerCase(); } catch (e) { protocol = ''; }
+    try { protocol = new URL(decoded, safeOrigin()).protocol.toLowerCase(); } catch (e) { protocol = ''; }
     if (protocol === 'http:' || protocol === 'https:' || protocol === 'mailto:') return decoded;
     if (protocol === 'data:' && allowDataImage && /^data:image\/(?!svg\b)/i.test(decoded)) return decoded;
     // 无显式协议：允许相对路径/锚点；拒绝协议相对 URL（//host）
@@ -130,7 +138,7 @@
       var rawVal = dq !== undefined ? dq : (sq !== undefined ? sq : (unq || ''));
       var decoded = decodeHtmlEntities(rawVal).replace(/[\t\r\n ]/g, '');
       var protocol = '';
-      try { protocol = new URL(decoded, location.origin).protocol.toLowerCase(); } catch (e) { protocol = ''; }
+      try { protocol = new URL(decoded, safeOrigin()).protocol.toLowerCase(); } catch (e) { protocol = ''; }
       if (protocol === 'http:' || protocol === 'https:' || protocol === 'mailto:') return match;
       if (protocol === 'data:' && /^data:image\/(?!svg\b)/i.test(decoded)) return match;
       // 无显式协议（相对路径/锚点）视为安全

@@ -1713,7 +1713,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var cleanHref = aiDecodeHtmlEntities(String(href).trim());
       var protocolOk = false;
       try {
-        var parsedUrl = new URL(cleanHref, window.location && window.location.origin ? window.location.origin : 'https://xtj.local');
+        var baseOrigin = (window.location && window.location.origin && window.location.origin !== 'null') ? window.location.origin : 'https://xtj.local';
+        var parsedUrl = new URL(cleanHref, baseOrigin);
         var proto = String(parsedUrl.protocol || '').toLowerCase();
         protocolOk = (proto === 'http:' || proto === 'https:' || proto === 'mailto:');
       } catch (_) { protocolOk = false; }
@@ -9299,6 +9300,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var panel = document.getElementById('panelDeepThink');
     if(S._dtReading){S._dtReading.reader.dispose();S._dtReading=null;}
     if(panel)panel.querySelectorAll('.ai-research-card').forEach(function(card){if(card._exportAbort)card._exportAbort.abort();});
+    resetActiveRenderersByChannel('deep');
     try {
       if (S.dtViewportCleanup) { S.dtViewportCleanup(); S.dtViewportCleanup = null; }
       // Invalidate every callback first, then abort the actual network

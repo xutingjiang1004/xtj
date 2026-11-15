@@ -155,7 +155,7 @@ function installReportExport(app,deps) {
   app.post('/api/agent/research/export',exportAuth,deps.rateLimit(60000,8),...(deps.jsonMiddleware?[deps.jsonMiddleware]:[]),async(req,res)=>{
     const controller=new AbortController(),abort=()=>controller.abort();req.once('aborted',abort);res.once('close',abort);
     try {
-      const body=req.body||{},report={title:body.title,answer:body.answer,sources:body.sources,createdAt:body.created_at,layout:body.layout==='study'?'study':undefined,signal:controller.signal};
+      const body=req.body||{},report={title:body.title,answer:body.answer===undefined?blocksText(body.blocks):body.answer,blocks:body.blocks,sources:body.sources,createdAt:body.created_at,layout:body.layout==='study'?'study':undefined,signal:controller.signal};
       let buffer,mime,extension;
       if(body.format==='markdown'){buffer=Buffer.from(reportMarkdown(report));mime='text/markdown;charset=utf-8';extension='md';}
       else if(body.format==='pdf'){buffer=await buildReportPdf(report);mime='application/pdf';extension='pdf';}

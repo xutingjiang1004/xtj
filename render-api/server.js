@@ -26331,8 +26331,11 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, guestAwar
     }
 
 
-    // toolRound 超限兜底
+    // toolRound 超限兜底：若前序轮次已累积有正文回复，优先交还用户，避免整条作废
     if (!aborted) {
+      if (contentBuffer && contentBuffer.trim().length > 0) {
+        return safeEnd();
+      }
       return terminateWithError({ type: 'error', error: 'AI 工具调用次数过多，请简化后重试' });
     }
     return safeEnd();

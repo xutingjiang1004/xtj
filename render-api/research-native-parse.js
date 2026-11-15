@@ -56,7 +56,8 @@ function needsEnhance(doc, att) {
   if (/^data:image\//i.test(dataUrl)) return false;
   const name = String(att.name || doc.name || '');
   if (!purposeFor(name)) return false;          // 官方不支持的格式（含图片）一律不补
-  if (!decodeDataUrl(dataUrl)) return false;     // 没有可上传的原始文件数据
+  const hasPresetId = /^file-api-[A-Za-z0-9_-]+$/.test(String((att && att.file_id) || ''));
+  if (!hasPresetId && !decodeDataUrl(dataUrl)) return false;     // 没有可上传的原始文件数据
   return true;
 }
 
