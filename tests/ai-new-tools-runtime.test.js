@@ -1,5 +1,11 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict'), fs = require('node:fs'), vm = require('node:vm');
+// ★ 2026-11-16 审计 P0：server.js 的 chat/research 片段引用模块级 aiFileOwnership，
+//   本文件用 vm 抽取片段执行，需把真实实例注入每个沙箱上下文（生产代码零改动）。
+const aiFileOwnership = require('../render-api/ai-file-ownership').shared;
+for (const key of ['runInNewContext', 'runInContext']) { const orig = vm[key]; vm[key] = function (code, context, ...rest) {
+  if (context && typeof context === 'object' && !context.aiFileOwnership) context.aiFileOwnership = aiFileOwnership;
+  return orig.call(vm, code, context, ...rest); }; }
 const { probeCapabilities, thinkingParameters } = require('../render-api/ai-model-capabilities');
 const { createResearchCheckpoints } = require('../render-api/research-checkpoints');
 const source = fs.readFileSync('render-api/server.js','utf8');

@@ -12,9 +12,12 @@ const pkg = () => read('package.json');
 
 test('服务端挂载 /api/agent/files，并让上传路径跳过 2mb 全局 JSON 限制', () => {
   const s = server();
-  assert.match(s, /app\.use\('\/api\/agent\/files', require\('\.\/deepseek-files'\)\.createDeepSeekFiles\(\{ express, guestAiAuth, rateLimit \}\)\)/);
+  assert.match(s, /app\.use\('\/api\/agent\/files', require\('\.\/deepseek-files'\)\.createDeepSeekFiles\(\{ express, guestAiAuth, rateLimit, adminAuth: aiFilesAdminAuth \}\)\)/);
   assert.match(s, /'\/api\/agent\/files\/upload': true,/);
   assert.match(s, /express\.json\(\{\s*limit: '2mb'/);
+  // ★ 2026-11-16（U-S9）：删除接口必须挂管理员鉴权，不能再挂 guestAiAuth
+  assert.match(s, /const aiFilesAdminAuth = function \(req, res, next\)/);
+  assert.match(s, /req\.userName !== ADMIN_USERNAME/);
 });
 
 test('Files API 代理：purpose 必须在 file 之前，三类 purpose 与官方一致', () => {
@@ -41,13 +44,47 @@ test('上传代理校验：data URL 严格格式、文件名清洗、file_id 合
 
 test('服务端只收集本轮合法 file_id，最多 20 个且去重', () => {
   const s = server();
-  assert.match(s, /function collectDeepSeekFileIds\(attachments\)/);
+  assert.match(s, /function collectDeepSeekFileIds\(attachments, req\)/);
   assert.match(s, /ids\.length < 20/);
   assert.match(s, /ids\.indexOf\(id\) < 0/);
   assert.match(s, /\^file-api-\[A-Za-z0-9_-\]\+\$/);
-  // 主聊天流与非流式 /chat 两条路径都接入
-  const hits = s.match(/input_files: collectDeepSeekFileIds\(req\.body && req\.body\.attachments\)/g) || [];
+  // 主聊天流与非流式 /chat 两条路径都接入（带 req 用于归属校验）
+  const hits = s.match(/input_files: collectDeepSeekFileIds\(req\.body && req\.body\.attachments, req\)/g) || [];
   assert.ok(hits.length >= 2, '内置流式与非流式路径都要支持文件解析');
+});
+
+// ★ 2026-11-16（审计 P0 U-S9 / U-S10 / U-S2 / U-S5）：四条越权/SSRF 修复的接线守卫。
+test('P0：官方 file_id 归属登记在上传、引用、删除三处闭环', () => {
+  const s = server(), f = files();
+  assert.match(s, /require\('\.\/ai-file-ownership'\)/);
+  assert.match(s, /setAiFileIpResolver\(getRealIp\)/);
+  // 上传登记
+  assert.match(f, /fileOwnership\.register\(fileId, req\)/);
+  // 引用校验（collect 内部 + 三条入口剥离）
+  assert.match(s, /aiFileOwnership\.isOwnedBy\(id, req\)/);
+  const strips = s.match(/aiFileOwnership\.stripForeignFileIds\(req\.body, req\)/g) || [];
+  assert.ok(strips.length >= 3, 'chat / chat-stream / research-stream 三条入口都要剥离非本人 file_id');
+  // 删除路径：管理员鉴权为唯一门槛 + 删除后清登记（避免误伤运维清理）
+  assert.match(f, /router\.delete\('\/:fileId', deleteGuard/);
+  assert.match(f, /fileOwnership\.forget\(fileId\)/);
+  assert.match(f, /const deleteGuard = typeof adminAuth === 'function'/);
+});
+
+test('P0：游客 cancel 越权改为严格归属键比对（不再用空串短路）', () => {
+  const s = server();
+  assert.match(s, /ownerKey: aiFileOwnership\.ownerKeyOf\(req\)/);
+  assert.match(s, /var reqOwner = aiFileOwnership\.ownerKeyOf\(req\)/);
+  assert.match(s, /if \(jobOwner !== reqOwner\)/);
+  assert.ok(!/if \(job\.userName && job\.userName !== req\.userName\)/.test(s), '旧空串短路写法必须移除');
+});
+
+test('P0：分享页链接预览改为 manual 重定向 + 每跳公网校验', () => {
+  const p = read('render-api/photo-access.js');
+  assert.match(p, /redirect: 'manual'/);
+  assert.match(p, /LINK_MAX_REDIRECTS/);
+  assert.match(p, /async function assertPublicLinkTarget/);
+  assert.match(p, /isPrivateAddress\(address\)/);
+  assert.ok(!/redirect: 'follow'/.test(p.split('function readHtmlHead')[1] || ''), 'readHtmlHead 不得再自动跟随重定向');
 });
 
 test('Responses 输入：input_file 只挂在 user message 的 content 数组里', () => {

@@ -1,5 +1,10 @@
 'use strict';
 const crypto = require('node:crypto');
+const net = require('node:net');
+const dns = require('node:dns').promises;
+// ★ 2026-11-16（审计 P0 U-S5）：复用全站统一的私网地址判定，防止链接预览
+//   的域名解析到内网后仍被放行（DNS rebinding 类绕过）。
+const { isPrivateAddress } = require('./web-fetch');
 const { Readable, Transform } = require('node:stream');
 const { mediaTraffic } = require('./media-traffic');
 const { pipeline } = require('node:stream/promises');
@@ -403,12 +408,57 @@ function publicLink(raw) {
   return url;
 }
 
-async function readHtmlHead(url, limit = LINK_MAX_BYTES) {
-  const res = await fetch(url, {
-    redirect: 'follow',
-    signal: AbortSignal.timeout(LINK_TIMEOUT),
-    headers: { 'user-agent': LINK_UA, accept: 'text/html,application/xhtml+xml' },
-  });
+// ★ 2026-11-16（审计 P0 U-S5）：分享页对游客开放，正文里的链接完全由用户控制。
+//   原先 `redirect:'follow'` 只在入口用 publicLink 校验一次字面量，服务端会
+//   自动跟随 302 跳到 127.0.0.1 / 169.254.169.254 / 内网域名，形成 SSRF。
+//   现改为 manual 手动跟跳，每一跳都重新校验「字面量 + DNS 解析结果」。
+const LINK_MAX_REDIRECTS = 3;
+
+async function assertPublicLinkTarget(raw, lookupImpl) {
+  const url = publicLink(raw);
+  if (!url) return null;
+  // 用 WHATWG URL 规范化后的 hostname，可挡住 0177.0.0.1 / 整数 IP 等变形写法。
+  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  if (isPrivateAddress(host)) return null;
+  if (net.isIP(host)) return url; // 公网字面 IP，无需 DNS
+  // 域名还要校验 DNS 解析结果，避免把内网地址藏在 A/AAAA 记录后面（rebinding）。
+  let answers = null;
+  try {
+    const lookup = typeof lookupImpl === 'function' ? lookupImpl : dns.lookup;
+    answers = await lookup(host, { all: true, verbatim: true });
+  } catch (_) { return null; }
+  const list = Array.isArray(answers) ? answers : [answers];
+  if (!list.length) return null;
+  for (const item of list) {
+    const address = typeof item === 'string' ? item : (item && item.address);
+    if (!address || isPrivateAddress(address)) return null;
+  }
+  return url;
+}
+
+async function readHtmlHead(url, limit = LINK_MAX_BYTES, options) {
+  const opts = options || {};
+  const lookupImpl = opts.lookupImpl;
+  const fetchImpl = typeof opts.fetchImpl === 'function' ? opts.fetchImpl : fetch;
+  let current = url;
+  let res = null;
+  for (let hop = 0; hop <= LINK_MAX_REDIRECTS; hop++) {
+    const target = await assertPublicLinkTarget(current, lookupImpl);
+    if (!target) return '';
+    res = await fetchImpl(target.href, {
+      redirect: 'manual',
+      signal: AbortSignal.timeout(LINK_TIMEOUT),
+      headers: { 'user-agent': LINK_UA, accept: 'text/html,application/xhtml+xml' },
+    });
+    if (res.status >= 300 && res.status < 400) {
+      const location = res.headers && res.headers.get ? res.headers.get('location') : '';
+      if (!location) return '';
+      current = new URL(location, target.href).href;
+      continue;
+    }
+    break;
+  }
+  if (!res || (res.status >= 300 && res.status < 400)) return ''; // 超过最大跳数
   if (!res.ok) return '';
   if (!/text\/html|application\/xhtml/i.test(String(res.headers.get('content-type') || ''))) return '';
   if (!res.body) return String(await res.text()).slice(0, limit);
@@ -483,8 +533,8 @@ async function spotifyPreview(url) {
   };
 }
 
-async function ogPreview(url) {
-  const page = await readHtmlHead(url.href);
+async function ogPreview(url, options) {
+  const page = await readHtmlHead(url.href, LINK_MAX_BYTES, options);
   if (!page) return null;
   let title = metaContent(page, ['og:title', 'twitter:title']);
   if (!title) {
@@ -507,7 +557,7 @@ async function ogPreview(url) {
   };
 }
 
-async function linkPreview(raw) {
+async function linkPreview(raw, options) {
   const url = publicLink(raw);
   if (!url) return null;
   const hit = LINK_CACHE.get(url.href);
@@ -516,7 +566,7 @@ async function linkPreview(raw) {
   try {
     if (/(^|\.)music\.apple\.com$/i.test(url.hostname)) data = await appleMusicPreview(url);
     else if (/(^|\.)open\.spotify\.com$/i.test(url.hostname)) data = await spotifyPreview(url);
-    if (!data) data = await ogPreview(url);
+    if (!data) data = await ogPreview(url, options);
   } catch (_) { data = null; }
   if (LINK_CACHE.size > 400) LINK_CACHE.clear();
   LINK_CACHE.set(url.href, { at: Date.now(), data });
@@ -613,4 +663,4 @@ function renderPostSharePage(row, items, origin, preview = null, options = {}) {
   const shareUrl = origin + '/share/posts/' + encodeURIComponent(row.id);
   return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="referrer" content="no-referrer"><title>${html(title)} · XTJ</title><meta name="description" content="${html(description)}"><meta property="og:type" content="article"><meta property="og:site_name" content="XTJ"><meta property="og:title" content="${html(title)}"><meta property="og:description" content="${html(description)}"><meta property="og:url" content="${html(shareUrl)}"><meta property="og:image" content="${html(shareImage)}">${coverMeta}<meta name="twitter:card" content="summary_large_image"><meta name="twitter:image" content="${html(shareImage)}"><link rel="icon" type="image/png" sizes="192x192" href="${origin}/img/icon-192.png"><link rel="apple-touch-icon" sizes="180x180" href="${origin}/img/icon-180.png"><meta name="theme-color" content="#059669"><style>body{margin:0;background:#f0faf7;color:#233c37;font:16px/1.7 system-ui,sans-serif}header,main,footer{max-width:680px;margin:auto;padding:20px}header{display:flex;justify-content:space-between;align-items:center}a{color:#247d6c;text-decoration:none}main{display:grid;gap:16px}.post-card,article,.media{background:#ffffff80;border:1px solid #ffffffb0;border-radius:18px;padding:18px;margin:0}p{white-space:pre-wrap;overflow-wrap:anywhere}.author{margin:0 0 10px;font-weight:600}.author-line{margin:0 4px;color:#4a6660;font-size:14px;font-weight:600}time{margin-left:12px;color:#718680;font-size:13px;font-weight:400}.text{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font-size:17px}.empty{color:#718680;margin:0}button{font:inherit;color:inherit;cursor:pointer}.photo{display:block;width:100%;border:0;padding:0;background:transparent}.photo img{display:block;max-width:100%;max-height:70vh;width:auto;height:auto;margin:auto;border-radius:12px}.retry{border:0;background:transparent}.media{display:flex;justify-content:center}.media video{display:block;width:auto;height:auto;max-width:100%;max-height:70vh;border-radius:12px;background:#000;object-fit:contain}.media audio{width:100%}.lblock{display:grid;gap:10px}.lcard{display:flex;gap:14px;align-items:center;padding:14px;border-radius:18px;background:#ffffffcc;border:1px solid #ffffffb0;text-decoration:none;color:inherit}.lc-cover{width:76px;height:76px;border-radius:14px;object-fit:cover;flex:0 0 auto;background:#e8f5ef}.lcard.music .lc-cover{width:96px;height:96px}.lc-body{display:flex;flex-direction:column;gap:3px;min-width:0}.lc-title{font-weight:700;font-size:16px;line-height:1.35;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}.lc-desc{color:#4a6660;font-size:14px;line-height:1.4;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}.lc-host{color:#718680;font-size:13px}.lc-audio{width:100%}.cta{display:block;text-align:center;padding:14px 18px;border-radius:14px;background:linear-gradient(135deg,#3d9a6c,#2f7d57);color:#fff !important;font-weight:700;text-decoration:none;box-shadow:0 8px 20px rgba(61,154,108,.28)}.cta:active{transform:translateY(1px)}footer{color:#718680;font-size:14px}dialog{padding:0;border:0;background:transparent;max-width:100vw;max-height:100dvh}dialog::backdrop{background:#10211feb}.viewer{display:flex;align-items:center;justify-content:center;width:100vw;height:100dvh;overflow:auto}.viewer img{max-width:100%;max-height:100%;object-fit:contain}.close{position:fixed;right:20px;top:20px;border:0;background:#ffffffdf;border-radius:50%;width:44px;height:44px;font-size:24px}.viewer{touch-action:none}.viewer.is-zoomed{touch-action:auto}.viewer img.zoomed{max-width:none;max-height:none}</style><script src="/js/media-cache.min.js?v=hq1920-v1" defer></script><script src="/js/photo-share.min.js?v=hq1920-v1" defer></script></head><body><header><strong>XTJ · 帖子分享</strong><a href="/">打开网站</a></header><main>${postHead}${card}${body}<a class="cta" href="${html(origin)}">打开 XTJ 看更多</a></main><footer>这篇帖子来自 XTJ，打开网站可以看到更多精彩内容。</footer><dialog><div class="viewer"><img alt="图片预览"></div><button class="close" aria-label="关闭预览">×</button></dialog></body></html>`;
 }
-module.exports = { PHOTO_BUCKET, PHOTO_COOKIE, POST_MEDIA_COOKIE, setPhotoSession, photoStoragePath, safePhotoPath, originalPhotoPath, livePhoto, canReadPhoto, canReadSharedPhoto, photoMediaUrl, photoPayload, shareCodec, protectPhotoPath, migratePhotoStorage, streamOriginal, createPhotoAccess, renderSharePage, renderPostSharePage, linkPreview, publicLink, sharePosterUrl };
+module.exports = { PHOTO_BUCKET, PHOTO_COOKIE, POST_MEDIA_COOKIE, setPhotoSession, photoStoragePath, safePhotoPath, originalPhotoPath, livePhoto, canReadPhoto, canReadSharedPhoto, photoMediaUrl, photoPayload, shareCodec, protectPhotoPath, migratePhotoStorage, streamOriginal, createPhotoAccess, renderSharePage, renderPostSharePage, linkPreview, publicLink, sharePosterUrl, readHtmlHead, assertPublicLinkTarget };

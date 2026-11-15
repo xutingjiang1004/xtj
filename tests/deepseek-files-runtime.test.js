@@ -14,13 +14,16 @@ const {
 const openServers = [];
 afterHook(() => Promise.all(openServers.map(s => s.close())));
 
-async function start(env, upstream) {
+async function start(env, upstream, options) {
+  const opts = options || {};
   const calls = [];
   const app = express();
   app.use('/api/agent/files', createDeepSeekFiles({
     express, env, timeoutMs: 400,
     guestAiAuth: (req, res, next) => next(),
     rateLimit: () => (req, res, next) => next(),
+    // ★ 2026-11-16（U-S9）：默认不注入 adminAuth → DELETE 一律 403（fail-closed）。
+    adminAuth: opts.adminAuth,
     fetchImpl: async (url, init) => { calls.push({ url, init }); return upstream(url, init); }
   }));
   const server = http.createServer(app);
@@ -189,8 +192,18 @@ test('网络异常 → 502；解析超时 → 504', async () => {
   await s.close();
 });
 
-test('DELETE: 校验 file_id 格式，合法时转发删除', async () => {
+test('DELETE ★ P0 U-S9: 未注入管理员鉴权时一律 403，游客不可删全站文件', async () => {
   const s = await start({ DEEPSEEK_API_KEY: 'k' }, () => jsonResponse(200, { deleted: true }));
+  let r = await fetch(s.base + '/file-api-abc123', { method: 'DELETE' });
+  assert.equal(r.status, 403);
+  assert.equal(s.calls.length, 0, '被拒绝的请求不得触达上游');
+  await s.close();
+});
+
+test('DELETE ★ P0 U-S9: 管理员鉴权通过后校验格式并转发删除，删后清登记', async () => {
+  const s = await start({ DEEPSEEK_API_KEY: 'k' }, () => jsonResponse(200, { deleted: true }), {
+    adminAuth: (req, res, next) => next()
+  });
   let r = await fetch(s.base + '/not-a-file-id', { method: 'DELETE' });
   assert.equal(r.status, 400);
   r = await fetch(s.base + '/file-api-abc123', { method: 'DELETE' });

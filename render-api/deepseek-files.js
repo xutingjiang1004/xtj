@@ -8,6 +8,13 @@
 //  - purpose 字段必须排在 file 之前（官方硬性要求，顺序错了直接 400）；
 //  - 图片不走这里：现有视觉链路（内联 image_url + OCR）已经可用，不动它；
 //  - 任何失败都返回明确的中文提示，前端静默回落本地解析，聊天不会失败。
+//
+// ★ 2026-11-16（审计 P0 U-S9 / U-S10）：全站共用一个 DeepSeek 账号，
+//   file_id 是账号级全局标识。上传成功后立刻登记归属者；删除接口不再对游客
+//   开放，且只有该文件归属者本人可删；聊天/研究链路由 server.js 剥离非本人
+//   file_id。未登记或身份不符一律拒绝（fail-closed）。
+
+const fileOwnership = require('./ai-file-ownership').shared;
 
 const FILES_URL = 'https://api.deepseek.com/files';
 const MAX_BYTES = 32 * 1024 * 1024;       // 单文件上限（官方 100MiB，这里控制内存与代理超时）
@@ -72,10 +79,15 @@ function upstreamMessage(status, detail) {
 }
 
 function createDeepSeekFiles({
-  express, guestAiAuth, rateLimit,
+  express, guestAiAuth, rateLimit, adminAuth,
   env = process.env, fetchImpl = fetch, timeoutMs = DEFAULT_TIMEOUT_MS
 }) {
   const router = express.Router();
+  // ★ 2026-11-16（U-S9）：删除接口只允许管理员调用。未注入 adminAuth 时
+  //   一律 403（fail-closed），避免像原先那样挂 guestAiAuth 把全站文件暴露给游客。
+  const deleteGuard = typeof adminAuth === 'function' ? adminAuth : function (req, res) {
+    return res.status(403).json({ ok: false, error: '无权删除该文件' });
+  };
 
   router.get('/status', (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
@@ -140,6 +152,10 @@ function createDeepSeekFiles({
       return res.status(502).json({ ok: false, code: 'bad_upload_response', error: '文件解析服务返回异常，请稍后重试' });
     }
 
+    // ★ 2026-11-16（U-S10）：登记 file_id 归属，后续聊天/研究引用时校验。
+    //   登记失败不影响本次上传（前端仍可用，只是引用侧会拒绝，属安全降级）。
+    fileOwnership.register(fileId, req);
+
     return res.json({
       ok: true,
       file_id: fileId,
@@ -150,7 +166,11 @@ function createDeepSeekFiles({
   });
 
   // 运维用：删除某个已解析文件。前端不会主动调用（会话历史里的 file_id 需要长期可用）。
-  router.delete('/:fileId', guestAiAuth, rateLimit(60000, 10), async (req, res) => {
+  // ★ 2026-11-16（U-S9）：改挂管理员鉴权（deleteGuard），游客/普通用户一律挡在门外。
+  //   归属由管理员身份统一把关：文件的上传者通常不是管理员，且进程重启后登记会
+  //   丢失，若在删除侧再做 file_id 归属比对会让运维清理彻底失效。归属校验用于
+  //   「引用」路径（见 ai-file-ownership.js），两者职责分开。
+  router.delete('/:fileId', deleteGuard, rateLimit(60000, 10), async (req, res) => {
     const s = settings(env);
     if (!s.enabled) return res.status(503).json({ ok: false, code: 'files_unconfigured', error: '文件解析服务未配置' });
     const fileId = String(req.params.fileId || '');
@@ -161,6 +181,7 @@ function createDeepSeekFiles({
         headers: { Authorization: 'Bearer ' + s.key },
         signal: AbortSignal.timeout(15000)
       });
+      if (resp.ok) fileOwnership.forget(fileId);
       return res.json({ ok: resp.ok, deleted: resp.ok });
     } catch (_) {
       return res.status(502).json({ ok: false, error: '删除失败，请稍后重试' });

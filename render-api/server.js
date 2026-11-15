@@ -17,6 +17,9 @@ const { readPhotoWallPage } = require('./photo-wall-page');
 const { createAdaptivePoller } = require('./adaptive-poller');
 const { createMediaPreviews } = require('./media-previews');
 const { mediaTraffic } = require('./media-traffic');
+// ★ 2026-11-16（审计 P0 U-S9 / U-S10）：官方 Files API 的 file_id 归属登记。
+//   与 render-api/deepseek-files.js 共享同一实例：上传时登记，引用/删除时校验。
+const { shared: aiFileOwnership, setIpResolver: setAiFileIpResolver } = require('./ai-file-ownership');
 
 const cors = require('cors');
 const crypto = require('crypto');
@@ -5013,6 +5016,10 @@ function getRealIp(req) {
   return getClientIp(req);
 }
 
+// ★ 2026-11-16（U-S9 / U-S10）：让官方 Files API 的归属命名空间用与全站一致的
+//   getRealIp，而不是裸 req.ip（Render 反代下曾退化为 10.x 内网导致游客互相串号）。
+setAiFileIpResolver(getRealIp);
+
 // 获取客户端 IP（仅信任 req.ip：trust proxy=1 时 Express 负责解析 X-Forwarded-For，
 // 客户端无法伪造；不再读取 cf-connecting-ip / x-real-ip 等可任意设置的请求头，防止 IP 伪造污染安全检测）
 // ★ 2026-09-21 修复（IP 全部落成 10.x 内网地址）：
@@ -7004,13 +7011,17 @@ function extractVisionImageUrls(attachments) {
 // ★ 2026-11-14（文件解析）：从本轮附件里挑出已上传到官方 Files API 的 file_id。
 //   只取当前请求，历史轮次不重复引用——官方限制「单次最多 20 个文档、
 //   文本合计 8MiB」，且跨轮会把全文一直留在上下文里，重复引用会迅速撑爆。
-function collectDeepSeekFileIds(attachments) {
-  if (!Array.isArray(attachments)) return [];
+// ★ 2026-11-16（审计 P0 U-S10）：全站共用一个 DeepSeek 账号，file_id 是账号级
+//   全局标识。只保留「本次请求者本人上传并登记」的 file_id，杜绝凭猜到的
+//   file_id 引用他人私有文档；无 req 时 fail-closed 返回空。
+function collectDeepSeekFileIds(attachments, req) {
+  if (!Array.isArray(attachments) || !req) return [];
   var ids = [];
   for (var i = 0; i < attachments.length && ids.length < 20; i++) {
     var a = attachments[i];
     var id = a && typeof a === 'object' ? String(a.file_id || '').trim() : '';
-    if (/^file-api-[A-Za-z0-9_-]+$/.test(id) && ids.indexOf(id) < 0) ids.push(id);
+    if (/^file-api-[A-Za-z0-9_-]+$/.test(id) && ids.indexOf(id) < 0 &&
+        aiFileOwnership.isOwnedBy(id, req)) ids.push(id);
   }
   return ids;
 }
@@ -21852,7 +21863,10 @@ async function handleDeepThinkChat(req, res) {
   var _controller, _heartbeatTimer;
 
   // 取消 token — 用于 /api/agent/chat/cancel
-  var cancelToken = { cancelled: false, userName: userName };
+  // ★ 2026-11-16（审计 P0 U-S2）：带上不可伪造的归属键。原先只存 userName，
+  //   游客为空串，导致 /chat/cancel 的 `job.userName && ...` 被短路，任意游客
+  //   都能取消他人任务。
+  var cancelToken = { cancelled: false, userName: userName, ownerKey: aiFileOwnership.ownerKeyOf(req) };
   // ★ S2 配套：断开路径的估算记账只执行一次
   var _deepThinkAbortUsageRecorded = false;
   // ★ 双重记账修复：断开时的估算记账改为"延迟挂起"——若研究流程随后正常跑完，
@@ -22398,7 +22412,13 @@ app.post('/api/agent/chat/cancel', guestAiAuth, async (req, res) => {
     if (!/^[A-Z0-9\-]{6,}$/i.test(convId)) return res.status(400).json({ error: 'conversation_id 格式无效' });
     var job = activeDeepThinkJobs.get(convId);
     if (job) {
-      if (job.userName && job.userName !== req.userName) {
+      // ★ 2026-11-16（审计 P0 U-S2）：改成严格的归属键比对（fail-closed）。
+      //   游客 userName 为空串，旧写法 `job.userName && ...` 会被短路成「放行」，
+      //   任何游客都能凭 convId 取消他人任务。兼容窗口内旧 job（无 ownerKey）
+      //   时用「登录名 + 游客标记」兜底，绝不再用空串短路。
+      var reqOwner = aiFileOwnership.ownerKeyOf(req);
+      var jobOwner = job.ownerKey || (job.userName ? 'user:' + job.userName : 'guest:legacy');
+      if (jobOwner !== reqOwner) {
         return res.status(403).json({ error: '无权取消其他用户的深度思考' });
       }
       job.cancelled = true;
@@ -22419,6 +22439,9 @@ app.post('/api/agent/chat/cancel', guestAiAuth, async (req, res) => {
 // POST /api/agent/chat
 // ★ 2026-11-13 限时开放 15 天：游客改用 guestAiAuth + 包装限流（窗口外自动回落登录鉴权），到期自动失效
 app.post('/api/agent/chat', guestAiAuth, aiChatConcurrencyGate, guestAwareChatRateLimit, aiLargeJson, aiRequestMiddleware, async (req, res) => {
+  // ★ 2026-11-16（U-S10）：剥离请求体中不属于本次请求者的官方 file_id，
+  //   防止凭猜到的 file_id 引用全站共享账号下他人上传的私有文档。
+  aiFileOwnership.stripForeignFileIds(req.body, req);
   // ★ 2026-11-13 限时开放 15 天：窗口内游客不限额度、不查账号级额度 RPC、不写 posts/不记账；到期自动失效
   var guestWindow = !!(req.guestAi && guestAiPublicWindowOpen());
   var aborted = false;
@@ -22585,7 +22608,7 @@ app.post('/api/agent/chat', guestAiAuth, aiChatConcurrencyGate, guestAwareChatRa
           : aiToolsForSearch(useTavilyCluster),
         tool_choice: 'auto',
         // ★ 2026-11-14：非流式 /chat 路径同样支持官方文件解析（手机端会走这里）。
-        input_files: collectDeepSeekFileIds(req.body && req.body.attachments),
+        input_files: collectDeepSeekFileIds(req.body && req.body.attachments, req),
         max_tool_rounds: workModeEnabled ? aiTaskPolicy.MAX_TOOL_ROUNDS : 4,
         signal: requestAbortCtrl.signal,
         _userName: userName,
@@ -24244,6 +24267,8 @@ app.get('/api/agent/image', guestAiAuth, securityRateLimit(3600000, 40), async (
 // POST /api/agent/chat/stream - 流式 SSE 输出
 // ★ 2026-11-13 限时开放 15 天：窗口内游客不限额度，IP 限流换成包装版，到期自动失效
 app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, guestAwareChatRateLimit, guestAiAdmission, aiLargeJson, aiRequestMiddleware, async (req, res) => {
+  // ★ 2026-11-16（U-S10）：同上，流式入口同样先剥离非本人 file_id。
+  aiFileOwnership.stripForeignFileIds(req.body, req);
   res._aiRetryOwner={userName:req.userName,accountId:String(req.accountId||'')};
   res._aiFollowupEnabled = !!(req.body && req.body.followup_suggestions === true);
   res._aiFollowupQuestion = String(req.body && req.body.message || '').slice(0,1000);
@@ -24824,7 +24849,7 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, guestAwar
         safety_check: !workModeEnabled && webSearchPref === true,
         // ★ 2026-11-14：本轮上传的文档以官方 file_id 引用，模型可看版面/图表/OCR；
         //   上游若拒绝 input_file，Responses 层会自动摘掉并退回本地文本解析。
-        input_files: collectDeepSeekFileIds(req.body && req.body.attachments),
+        input_files: collectDeepSeekFileIds(req.body && req.body.attachments, req),
         onSources: function(items) {
           if (aborted || !Array.isArray(items) || !items.length) return;
           var sent = [];
@@ -27389,7 +27414,18 @@ app.use('/api/agent/tts', require('./deepseek-tts').createDeepSeekTts({ express,
 // ★ 2026-11-14（用户要求接入 DeepSeek 文件解析）：PDF / Word / PPT / 表格先在服务端
 //   上传到官方 Files API 拿 file_id，聊天时以 input_file 引用，模型能看版面与图表。
 //   上传失败时前端静默回落本地文本解析，不影响发送。
-app.use('/api/agent/files', require('./deepseek-files').createDeepSeekFiles({ express, guestAiAuth, rateLimit }));
+// ★ 2026-11-16（审计 P0 U-S9）：删除接口改挂管理员鉴权，不再对游客开放。
+//   该接口前端零调用（注释自称「运维用」），原先挂 guestAiAuth 让任意游客可删
+//   全站共享账号下的文件；现只有管理员本人上传的文件可被删除。
+const aiFilesAdminAuth = function (req, res, next) {
+  return authenticateUser(req, res, function () {
+    if (req.userName !== ADMIN_USERNAME) {
+      return res.status(403).json({ ok: false, error: '需要管理员账号' });
+    }
+    return next();
+  });
+};
+app.use('/api/agent/files', require('./deepseek-files').createDeepSeekFiles({ express, guestAiAuth, rateLimit, adminAuth: aiFilesAdminAuth }));
 // ★ 2026-11-14（用户要求：深入研究附件的官方解析 / 混合增强）：模块级单例，
 //   进程内缓存转写结果，同一资料在同一部署实例上重复研究不重复付费。
 //   只在本地「未读出 / 被截断」的非图片文档上触发；任何失败静默回落，不阻断研究。
@@ -27409,6 +27445,9 @@ require('./ai-workbench').registerWorkbenchRoutes(app,{authenticateUser:authenti
 // 事件：research_stage / research_step / research_content / research_sources / research_done / heartbeat / error
 // ★ 2026-11-13 限时开放 15 天：游客改用 guestAiAuth + 包装限流（窗口外自动回落登录鉴权），到期自动失效
 app.post('/api/agent/research/stream', guestAiAuth, aiChatConcurrencyGate, guestAwareChatRateLimit, aiLargeJson, aiRequestMiddleware, async (req, res) => {
+  // ★ 2026-11-16（U-S10）：研究链路会复用附件里的 preset file_id（不经过
+  //   collectDeepSeekFileIds），必须在入口剥离非本人 file_id 后再交给解析侧车。
+  aiFileOwnership.stripForeignFileIds(req.body, req);
   var aborted = false;
   var _researchAbort = new AbortController();
   var cancelToken = { cancelled: false };
