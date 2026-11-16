@@ -20,7 +20,10 @@ function installUploadAccess(app, { supabase, supabaseUrl, optionalAuth, rateLim
     try {
       // posters/ 是视频首帧封面：它只是公开帖子的缩略图，和 avatars 一样按公开资源处理，
       // 否则每张封面都要回表匹配帖子内容，既慢又容易 404（页面看到的就是一块黑底）。
-      let allowed = /^(avatars|site-support|posters)\//.test(path);
+      // 但仍要按 aux-media 的 POSTER_PATH 收窄格式：原来 posters/ 任意子路径都放行，等于公开任意文件。
+      // require 放在函数内延迟执行，避免与 post-query / photo-access 的循环依赖（同 mediaStreamer）。
+      const posterOk = () => { try { return require('./aux-media').POSTER_PATH.test(path); } catch (_) { return false; } };
+      let allowed = /^(avatars|site-support)\//.test(path) || (path.startsWith('posters/') && posterOk());
       if (path.startsWith('profile-images/')) {
         const url = supabase.storage.from('uploads').getPublicUrl(path).data.publicUrl;
         const covers = await checked(supabase.from('account_profile_settings').select('user_name,account_id,settings').eq('settings->>cover_url',url));
@@ -83,7 +86,8 @@ function installUploadAccess(app, { supabase, supabaseUrl, optionalAuth, rateLim
         // 之前两种情况一律 503，结果既误导用户也误导排查。
         const reason = String((error && error.message) || 'unknown').slice(0, 80);
         const transient = /unavailable|timeout|aborted/i.test(reason) && !/not.?found|missing/i.test(reason);
-        res.set('X-XTJ-Media-Error', reason);
+        console.warn('[upload-access] media stream failed:', reason);
+        res.set('X-XTJ-Media-Error', transient ? 'transient' : 'missing');
         if (transient) return res.status(503).json({ ok:false, code:'media_unavailable', retryable:true });
         return res.status(404).json({ ok:false, code:'media_missing' });
       }

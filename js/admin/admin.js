@@ -181,11 +181,19 @@
     var TOKEN_SALT_KEY = 'xtj_admin_token_salt';
 
     // 生成随机盐（字母数字，避免特殊字符破坏 storage）
+    // ★ 安全加固：salt 是本地 token 混淆的关键材料，不能用可被预测的 Math.random()。
+    //   改用 crypto.getRandomValues（CSPRNG）；仅在环境不支持时回退到 Math.random()，
+    //   保持旧浏览器/非安全上下文兼容。真正的鉴权边界仍在后端签名校验，此处只提升本地混淆强度。
     function _generateTokenSalt() {
         var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
         var out = '';
-        for (var i = 0; i < 24; i++) {
-            out += chars.charAt(Math.floor(Math.random() * chars.length));
+        var cryptoObj = (typeof crypto !== 'undefined' && crypto) || (typeof window !== 'undefined' && window.crypto);
+        if (cryptoObj && typeof cryptoObj.getRandomValues === 'function') {
+            var bytes = new Uint8Array(24);
+            cryptoObj.getRandomValues(bytes);
+            for (var i = 0; i < bytes.length; i++) out += chars.charAt(bytes[i] % chars.length);
+        } else {
+            for (var j = 0; j < 24; j++) out += chars.charAt(Math.floor(Math.random() * chars.length));
         }
         return out;
     }
@@ -543,6 +551,9 @@
                 clearTimeout(at);
                 if (externalSignal) externalSignal.removeEventListener('abort', forwardAbort);
                 var renewed = await refreshUserAccessToken();
+                // ★ 补齐「刷新后校验」：刷新期间会话可能已被登出/切换（generation 变化），
+                //   此时不得用刷新得到的 token 重试，否则旧会话凭证可绕过本地锁继续发请求。
+                if (generation !== _adminSessionGeneration) throw new DOMException('会话已改变', 'AbortError');
                 if (renewed) {
                     _adminRequests.delete(ac);
                     return apiCall(method, path, body, Object.assign({}, options, {

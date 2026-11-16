@@ -193,7 +193,7 @@ server.tool("admin_login", "登录 XTJ 管理后台", { username: z.string(), pa
 server.tool("admin_get_stats", "获取汇总统计数据", { start: z.string().optional(), end: z.string().optional() }, async (args) => {
   await ensureLoggedIn();
   let path = "/admin/stats";
-  const p = []; if (args.start) p.push(`start=${args.start}`); if (args.end) p.push(`end=${args.end}`); if (p.length) path += "?" + p.join("&");
+  const p = []; if (args.start) p.push(`start=${encodeURIComponent(args.start)}`); if (args.end) p.push(`end=${encodeURIComponent(args.end)}`); if (p.length) path += "?" + p.join("&");
   const data = await apiRequest("GET", path);
   return { content: [{ type: "text", text: formatStats(data) }] };
 });
@@ -201,7 +201,7 @@ server.tool("admin_get_stats", "获取汇总统计数据", { start: z.string().o
 server.tool("admin_get_daily_stats", "获取每日明细统计数据", { start: z.string().optional(), end: z.string().optional() }, async (args) => {
   await ensureLoggedIn();
   let path = "/admin/stats/daily";
-  const p = []; if (args.start) p.push(`start=${args.start}`); if (args.end) p.push(`end=${args.end}`); if (p.length) path += "?" + p.join("&");
+  const p = []; if (args.start) p.push(`start=${encodeURIComponent(args.start)}`); if (args.end) p.push(`end=${encodeURIComponent(args.end)}`); if (p.length) path += "?" + p.join("&");
   const data = await apiRequest("GET", path);
   if (!data.daily || !data.daily.length) return { content: [{ type: "text", text: "暂无每日统计" }] };
   let t = `📈 每日统计 (最近 ${data.daily.length} 天)\n━━━━━━━━━━━━━━━━━━━━━━━━━\n日期        | 访问 | 帖子 | 评论 | 点赞 | 新用户 | 攻击\n`;
@@ -331,7 +331,7 @@ server.tool("admin_ban_user", `封禁用户（永久操作需 confirm_permanent=
 
 server.tool("admin_unban_user", "解除封禁", { id: z.string() }, async ({ id }) => {
   await ensureLoggedIn();
-  await apiRequest("PUT", `/admin/ban/${id}/lift`);
+  await apiRequest("PUT", `/admin/ban/${encodeURIComponent(id)}/lift`);
   logAudit('unban_user', { banId: id });
   return { content: [{ type: "text", text: `✅ 封禁记录 ${id} 已解除` }] };
 });
@@ -365,7 +365,7 @@ server.tool("admin_mute_user", `禁言用户（永久操作需 confirm_permanent
 
 server.tool("admin_unmute_user", "解除禁言", { id: z.string() }, async ({ id }) => {
   await ensureLoggedIn();
-  await apiRequest("PUT", `/admin/mute/${id}/lift`);
+  await apiRequest("PUT", `/admin/mute/${encodeURIComponent(id)}/lift`);
   logAudit('unmute_user', { muteId: id });
   return { content: [{ type: "text", text: `✅ 禁言记录 ${id} 已解除` }] };
 });
@@ -398,7 +398,7 @@ server.tool("admin_add_blacklist", `加入黑名单（永久操作需 confirm_pe
 
 server.tool("admin_lift_blacklist", "解除黑名单", { id: z.string() }, async ({ id }) => {
   await ensureLoggedIn();
-  await apiRequest("PUT", `/admin/blacklist/${id}/lift`);
+  await apiRequest("PUT", `/admin/blacklist/${encodeURIComponent(id)}/lift`);
   logAudit('lift_blacklist', { blacklistId: id });
   return { content: [{ type: "text", text: `✅ 黑名单记录 ${id} 已解除` }] };
 });
@@ -415,13 +415,13 @@ server.tool("admin_get_reports", "获取举报列表", {}, async () => {
 
 server.tool("admin_update_report", "更新举报状态", { id: z.string(), status: z.enum(["pending","reviewed","actioned","dismissed"]) }, async ({ id, status }) => {
   await ensureLoggedIn();
-  await apiRequest("PUT", `/admin/report/${id}`, { status });
+  await apiRequest("PUT", `/admin/report/${encodeURIComponent(id)}`, { status });
   return { content: [{ type: "text", text: `✅ 举报 ${id} 状态已更新` }] };
 });
 
 server.tool("admin_respond_report", "回复举报", { id: z.string(), response: z.string() }, async ({ id, response }) => {
   await ensureLoggedIn();
-  await apiRequest("PUT", `/admin/report/${id}/respond`, { response });
+  await apiRequest("PUT", `/admin/report/${encodeURIComponent(id)}/respond`, { response });
   return { content: [{ type: "text", text: `✅ 举报 ${id} 已回复` }] };
 });
 
@@ -430,7 +430,7 @@ server.tool("admin_report_delete_post", `处理举报→删除帖子。${HIGH_RI
   assertHighRiskWritesEnabled();
   if (!confirm) return { content: [{ type: "text", text: `⚠️ 高危操作！举报 ${id} 对应内容将被删除。请在参数中传入 confirm=true 确认。` }] };
   await ensureLoggedIn();
-  await apiRequest("POST", `/admin/report/${id}/delete-post`);
+  await apiRequest("POST", `/admin/report/${encodeURIComponent(id)}/delete-post`);
   logAudit('report_delete_post', { reportId: id });
   return { content: [{ type: "text", text: `✅ 举报 ${id}: 被举报内容已删除` }] };
 });
@@ -445,7 +445,7 @@ server.tool("admin_report_ban_user", `处理举报→封禁用户（永久操作
     return { content: [{ type: "text", text: `🛑 举报 ${args.id} 对应账号将被【永久封禁】。\n请显式传入 duration_hours（小时数），或额外传入 confirm_permanent=true 确认。` }] };
   }
   await ensureLoggedIn();
-  await apiRequest("POST", `/admin/report/${args.id}/ban-user`, { duration_hours: args.duration_hours ?? 0 });
+  await apiRequest("POST", `/admin/report/${encodeURIComponent(args.id)}/ban-user`, { duration_hours: args.duration_hours ?? 0 });
   logAudit('report_ban_user', { reportId: args.id, durationHours: args.duration_hours ?? 0, permanent: isPermanent });
   return { content: [{ type: "text", text: `✅ 举报 ${args.id}: 被举报用户已处理` }] };
 });
@@ -479,7 +479,7 @@ server.tool("admin_update_alert_status", "更新安全提醒状态", { id: z.str
 server.tool("admin_get_login_events", "获取登录事件", { user_name: z.string().optional(), limit: z.number().optional() }, async (args) => {
   await ensureLoggedIn();
   let p = "/admin/login-events";
-  const q = []; if (args.user_name) q.push(`user_name=${encodeURIComponent(args.user_name)}`); if (args.limit) q.push(`limit=${args.limit}`); if (q.length) p += "?" + q.join("&");
+  const q = []; if (args.user_name) q.push(`user_name=${encodeURIComponent(args.user_name)}`); if (args.limit) q.push(`limit=${encodeURIComponent(args.limit)}`); if (q.length) p += "?" + q.join("&");
   const data = await apiRequest("GET", p);
   const events = data.data || [];
   let t = `🔐 登录事件 (共 ${events.length} 条)\n\n`;
@@ -495,7 +495,7 @@ server.tool("admin_get_audit_logs", "获取审计日志", {}, async () => {
 
 server.tool("admin_get_error_logs", "获取错误日志", { limit: z.number().optional() }, async (args) => {
   await ensureLoggedIn();
-  const data = await apiRequest("GET", `/admin/error-logs?limit=${args.limit||200}`);
+  const data = await apiRequest("GET", `/admin/error-logs?limit=${encodeURIComponent(args.limit||200)}`);
   return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
 });
 
@@ -533,7 +533,7 @@ server.tool("admin_cleanup_logs", "清理过期日志", {}, async () => {
 server.tool("admin_get_attack_details", "获取攻击详情", { type: z.string().optional(), limit: z.number().optional() }, async (args) => {
   await ensureLoggedIn();
   let p = "/admin/stats/attacks";
-  const q = []; if (args.type) q.push(`type=${encodeURIComponent(args.type)}`); if (args.limit) q.push(`limit=${args.limit}`); if (q.length) p += "?" + q.join("&");
+  const q = []; if (args.type) q.push(`type=${encodeURIComponent(args.type)}`); if (args.limit) q.push(`limit=${encodeURIComponent(args.limit)}`); if (q.length) p += "?" + q.join("&");
   const data = await apiRequest("GET", p);
   const atk = data.data||[];
   let t = `🛡️ 攻击详情 (共 ${atk.length} 条)\n\n`;

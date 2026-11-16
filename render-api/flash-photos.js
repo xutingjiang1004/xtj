@@ -53,7 +53,24 @@ function createFlashPhotos({express,supabase,sharp,authenticateUser,verifyToken,
    key=Buffer.from(claim.key,'base64');delete claim.key;
    const blob=await checked(store().download(claim.path));bytes=unseal(Buffer.from(await blob.arrayBuffer()),key,claim.iv,claim.tag);
    // Retain the sender's encrypted original. Only the recipient receipt consumes access.
-   res.set('Content-Type',claim.mime);res.set('X-Flash-Role',claim.role);res.set('X-Flash-Duration',claim.role==='sender'?'0':'3000');res.set('X-Content-Type-Options','nosniff');const erase=()=>bytes.fill(0);res.once('finish',erase);res.once('close',erase);res.send(bytes);
+   // 单次查看修复：图片字节一旦由服务端发出（finish），就由服务端强制标记消费，
+   // 不再依赖客户端回调 /viewed，堵住「不调 /viewed 或主动 /release 后反复 /open」的绕过。
+   // delivered 只在 res.send(bytes) 成功后置位：catch 分支（打开失败 / 走 dm_flash_release）
+   // 的 unavailable 响应同样触发 finish，此时绝不消费；sender 预览永不消费。
+   let delivered=false;
+   const erase=()=>bytes.fill(0);
+   res.set('Content-Type',claim.mime);res.set('X-Flash-Role',claim.role);res.set('X-Flash-Duration',claim.role==='sender'?'0':'3000');res.set('X-Content-Type-Options','nosniff');
+   res.once('finish',erase);res.once('close',erase);
+   res.once('finish',()=>{
+    if(!delivered||!claim||claim.role!=='recipient')return;
+    void checked(supabase.rpc('dm_flash_viewed',{p_actor:req.userName,p_message:message,p_view:view})).then(result=>{
+     if(!result||!result.ok||result.idempotent||!notifyConsumed)return;
+     void checked(supabase.from('posts').select('user_name,media_url').eq('id',message).maybeSingle())
+      .then(row=>{if(row)notifyConsumed(row.user_name,row.media_url);})
+      .catch(()=>console.warn('[flash] state notification will refresh on polling'));
+    }).catch(()=>console.warn('[flash] server-side consume will refresh on polling'));
+   });
+   res.send(bytes);delivered=true;
   }catch(_){if(claim&&claim.role==='recipient')await checked(supabase.rpc('dm_flash_release',{p_actor:req.userName,p_message:message,p_view:view})).catch(()=>{});unavailable(res);}
   finally{if(key)key.fill(0);if(bytes&&(res.writableFinished||res.destroyed))bytes.fill(0);}
  });

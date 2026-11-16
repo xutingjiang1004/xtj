@@ -3,7 +3,7 @@ const test=require('node:test'),assert=require('node:assert/strict'),crypto=requ
 const {createChatPush,validateSubscription,deriveVapid}=require('../render-api/chat-push');
 function subscription(host='web.push.apple.com'){const e=crypto.createECDH('prime256v1');e.generateKeys();return {endpoint:'https://'+host+'/qa-test-endpoint',keys:{p256dh:e.getPublicKey().toString('base64url'),auth:crypto.randomBytes(16).toString('base64url')}};}
 function fixture(){const rows=[],deliveries=[];let state={status:'ok'},failure=0;
- const supabase={rpc:async()=>({data:state,error:null}),from:()=>{let filters=[],remove=false,limit=Infinity;return {select(){return this;},eq(k,v){filters.push(r=>r[k]===v);return this;},limit(n){limit=n;return this;},delete(){remove=true;return this;},async upsert(row){const i=rows.findIndex(r=>r.endpoint_hash===row.endpoint_hash);if(i<0)rows.push(row);else rows[i]=row;return {error:null,data:null};},then(resolve){const found=rows.filter(r=>filters.every(f=>f(r))).slice(0,limit);if(remove)found.forEach(r=>rows.splice(rows.indexOf(r),1));return Promise.resolve({data:found,error:null}).then(resolve);}};}};
+ const supabase={rpc:async()=>({data:state,error:null}),from:()=>{let filters=[],remove=false,limit=Infinity,single=false;return {select(){return this;},eq(k,v){filters.push(r=>r[k]===v);return this;},limit(n){limit=n;return this;},maybeSingle(){single=true;return this;},delete(){remove=true;return this;},async upsert(row){const i=rows.findIndex(r=>r.endpoint_hash===row.endpoint_hash);if(i<0)rows.push(row);else rows[i]=row;return {error:null,data:null};},then(resolve){const found=rows.filter(r=>filters.every(f=>f(r))).slice(0,limit);if(remove)found.forEach(r=>rows.splice(rows.indexOf(r),1));const out=single?{data:found[0]||null,error:null}:{data:found,error:null};return Promise.resolve(out).then(resolve);}};}};
  const app=express();app.use(express.json());const push=createChatPush({express,supabase,secret:'runtime-test-secret',authenticateUser:(req,res,next)=>{if(!req.headers.authorization)return res.sendStatus(401);req.userName=req.headers.authorization;next();},transport:{async sendNotification(sub,payload,opts){deliveries.push({sub,payload:JSON.parse(payload),opts});if(failure)throw {statusCode:failure};}}});app.use('/push',push.router);
  return {app,push,rows,deliveries,setState(s){state=s;},setFailure(n){failure=n;}};
 }
@@ -14,6 +14,17 @@ test('subscriptions require authentication, public push endpoints and real key l
  const s=subscription();assert.ok(validateSubscription(s));assert.equal((await request(f.app).post('/push/subscribe').set('Authorization','actor').send({subscription:s})).status,200);
  assert.equal(f.rows[0].owner_name,'actor');assert.equal((await request(f.app).post('/push/unsubscribe').set('Authorization','other').send({endpoint:s.endpoint})).status,200);assert.equal(f.rows.length,1);
  assert.equal((await request(f.app).post('/push/unsubscribe').set('Authorization','actor').send({endpoint:s.endpoint})).status,200);assert.equal(f.rows.length,0);
+});
+test('★ 跨用户劫持：同一 endpoint 被他人订阅时拒绝，不覆盖原 owner',async()=>{
+ const f=fixture();const s=subscription();
+ assert.equal((await request(f.app).post('/push/subscribe').set('Authorization','alice').send({subscription:s})).status,200);
+ assert.equal(f.rows[0].owner_name,'alice');
+ // bob 用完全相同 endpoint 订阅：应 409 且不得改写 owner_name
+ assert.equal((await request(f.app).post('/push/subscribe').set('Authorization','bob').send({subscription:s})).status,409);
+ assert.equal(f.rows.length,1);assert.equal(f.rows[0].owner_name,'alice');
+ // 原 owner 本人重复订阅仍可成功（幂等）
+ assert.equal((await request(f.app).post('/push/subscribe').set('Authorization','alice').send({subscription:s})).status,200);
+ assert.equal(f.rows[0].owner_name,'alice');
 });
 test('notifications hide content, honor mute and delete state, and remove expired endpoints',async()=>{
  const f=fixture();await request(f.app).post('/push/subscribe').set('Authorization','actor').send({subscription:subscription()});

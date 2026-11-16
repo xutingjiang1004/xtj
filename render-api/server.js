@@ -5419,7 +5419,10 @@ async function aiSiteSearch(source, query, userName, limit, isAdmin, searchPlan)
     });
   } else if (source === 'photos') {
     if (!userName) return { results: [] };
-    var photoQuery = supabase.from('posts').select('id,user_name,content,media_url,created_at,visibility').eq('media_type', '__photo_wall__').or('is_deleted.is.null,is_deleted.eq.false');
+    // FIX: is_deleted 列为 NOT NULL DEFAULT false，用独立的 .eq() 过滤未删除照片。
+    // 原来的写法把它们塞进一个 .or() 里，会被下方关键词的 .or(photoOrParts...) 覆盖
+    // （PostgREST 的 .or() 是替换而非叠加），导致关键词命中时已删除照片也被搜出。
+    var photoQuery = supabase.from('posts').select('id,user_name,content,media_url,created_at,visibility').eq('media_type', '__photo_wall__').eq('is_deleted', false);
     var photoOrParts = keywords.map(function(k) { return 'content.ilike.' + pgrstQuote('%' + escapeLikeValue(k) + '%'); });
     keywords.forEach(function(k) {
       photoOrParts.push('user_name.ilike.' + pgrstQuote('%' + escapeLikeValue(k) + '%'));

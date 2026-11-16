@@ -27,7 +27,7 @@ const API_HOST = 'localhost';
 const API_PORT = 3000;
 const API_BASE = `http://${API_HOST}:${API_PORT}`;
 const SUPABASE_URL = 'https://ithowxqignlhkwaykglt.supabase.co';
-const REPO_ROOT = path.resolve(__dirname, '..');
+const REPO_ROOT = path.resolve(__dirname, '..', '..');
 
 let totalTests = 0;
 let passedTests = 0;

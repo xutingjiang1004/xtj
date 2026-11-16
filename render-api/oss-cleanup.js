@@ -151,16 +151,35 @@ async function referencedElsewhere(supabase, paths, postId) {
   return referenced;
 }
 
+// 单个删除的超时上限，对齐 oss-media.headObject 的 8s。OSS 端点挂起时，逐个
+// await remove 不能无限等待；超时按失败记账并继续下一个，删除对象集合与归属闸不变。
+const OSS_DELETE_TIMEOUT_MS = 8000;
+
 async function deleteOssObjects(paths, options) {
   const opts = options || {};
   const remove = opts.deleteObject || ossMedia.deleteObject;
   const enabled = opts.enabled || ossMedia.enabled;
   const log = opts.log || console;
   if (!Array.isArray(paths) || !paths.length || !enabled()) return { deleted: 0, failed: 0 };
+  const timeoutMs = Number(opts.timeoutMs) || OSS_DELETE_TIMEOUT_MS;
   let deleted = 0, failed = 0;
   for (const path of paths) {
-    try { await remove(path, opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : undefined); deleted += 1; }
-    catch (error) { failed += 1; log.warn('[oss-cleanup] 删除 OSS 对象失败（忽略）:', path, error && error.message || error); }
+    let timer;
+    try {
+      // remove 本身（oss-media.deleteObject）不接受 AbortSignal，故用 Promise.race
+      // 给每次调用兜底：超时后本函数及时返回，不再被挂起的端点无限拖住。
+      const call = remove(path, opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : undefined);
+      const timeout = new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error('oss_delete_timeout')), timeoutMs);
+      });
+      await Promise.race([call, timeout]);
+      deleted += 1;
+    } catch (error) {
+      failed += 1;
+      log.warn('[oss-cleanup] 删除 OSS 对象失败（忽略）:', path, error && error.message || error);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
   return { deleted, failed };
 }

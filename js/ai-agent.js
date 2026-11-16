@@ -13284,6 +13284,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
                   var _sgSt = _sgEl.querySelector('.ai-tool-step-status');
                   if (_sgSt) _sgSt.textContent = toolSucceeded ? '已完成' : '失败';
                   try { refreshOwningToolRound(_sgEl); } catch (eSgRound) {}
+                  // ★ 只收敛「本条/本次认领」的一条：保持与其他分支一致的 FIFO 单条推进，
+                  //   不可用循环批量关闭所有同名 .is-running，否则会误关其他正在执行的同名工具。
+                  break;
                 }
               } catch (eStraggler) {}
             }
@@ -13912,6 +13915,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         } else {
           hideAssistantTyping();
           preserveFailedTurn();
+          // ★ 与其他中止/失败分支保持一致：无内容中断时也要回填输入框原文与附件，
+          //   否则用户主动停止/超时后输入框内容丢失（preserveFailedTurn 只处理消息节点）。
+          restoreInputText();
           if (timedOut300) notify('请求超时，可点击继续');
         }
       }

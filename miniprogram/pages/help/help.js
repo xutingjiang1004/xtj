@@ -16,6 +16,7 @@ Page({
   },
 
   goIndex() {
-    wx.reLaunch({ url: '/pages/index/index' });
+    // 带 fromHelp 标记，index 识别后不再重定向回本页，打破来回跳转死循环
+    wx.reLaunch({ url: '/pages/index/index?fromHelp=1' });
   }
 });

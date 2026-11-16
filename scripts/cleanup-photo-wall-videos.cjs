@@ -160,6 +160,14 @@ async function main() {
   const confirmArg = process.argv.find((a) => a.indexOf('--confirm=') === 0);
   const confirmRef = confirmArg ? confirmArg.slice('--confirm='.length) : '';
   const repoHead = readRepoHead();
+  // fail-closed：请求真实删除时必须能解析到仓库 HEAD 做二次确认。
+  // 找不到 .git/HEAD（如运行目录错误、HEAD 无效）时直接报错退出，
+  // 绝不跳过校验继续执行清理，避免在错误目录误删数据。
+  if (APPLY && !repoHead) {
+    console.error('[ABORT] 无法解析仓库 HEAD（.git/HEAD 缺失或无效），拒绝在未确认仓库身份的情况下执行真实删除。');
+    process.exitCode = 1;
+    return;
+  }
   let confirmOk = APPLY && isCommitRef(confirmRef);
   if (repoHead && confirmOk) confirmOk = confirmRef === repoHead;
   if (!confirmOk) {

@@ -18,7 +18,7 @@ function createAttachmentStore(options={}) {
     const {decodeUpload}=require('./ai-workbench');
     const decoded=decodeUpload({name:attachment.name,dataUrl:attachment.data_url||attachment.dataUrl},50*1024*1024);
     const digest=createHash('sha256').update(decoded.buffer).digest('hex');prune();
-    for(const row of rows.values())if(row.owner===owner&&row.cid===cid&&row.digest===digest&&row.name===decoded.name){row.used=now();return publicRow(row);}
+    for(const row of rows.values())if(row.owner===owner&&row.cid===cid&&row.digest===digest&&row.name===decoded.name){row.used=now();row.expires=now()+ttl;return publicRow(row);}
     let own=0;for(const row of rows.values())if(row.owner===owner)own+=row.bytes;
     if(decoded.buffer.length>ownerBytes||decoded.buffer.length>maxBytes)throw failure('attachment_cache_full','附件超过复用缓存容量，请拆分文件',413);
     const sorted=Array.from(rows.values()).sort((a,b)=>a.used-b.used);
@@ -34,7 +34,7 @@ function createAttachmentStore(options={}) {
   function get(owner,cid,ref){
     prune();const row=rows.get(ref);
     if(!REF.test(String(ref||''))||!row||row.owner!==owner||row.cid!==cid)throw failure('attachment_ref_expired','附件复用已失效，请重新提交原文件',410);
-    row.used=now();return row;
+    row.used=now();row.expires=now()+ttl;return row;
   }
   function clear(owner){for(const [key,row] of rows)if(row.owner===owner)remove(key);}
   return {add,get,clear,stats(){prune();return {entries:rows.size,bytes};}};

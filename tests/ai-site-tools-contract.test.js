@@ -31,6 +31,18 @@ test('search scopes protect private records and direct messages', () => {
   assert.match(server, /readVisibleDmPosts\(userName/);
 });
 
+test('AI photo search keeps the not-deleted filter independent of keyword or()', () => {
+  // PostgREST 的 .or() 是替换而非叠加：把未删除条件放进 .or() 会被后面的关键词
+  // .or(photoOrParts) 覆盖，导致已删除照片被搜出。必须用独立 .eq() 过滤。
+  const photosStart = server.indexOf("} else if (source === 'photos') {");
+  const photosEnd = server.indexOf("} else if (source === 'dm') {", photosStart);
+  assert.ok(photosStart > 0 && photosEnd > photosStart, 'photos 分支定位失败');
+  const photosBranch = server.slice(photosStart, photosEnd);
+  assert.match(photosBranch, /\.eq\('is_deleted', false\)/);
+  assert.doesNotMatch(photosBranch, /\.or\('is_deleted\.is\.null,is_deleted\.eq\.false'\)/);
+  assert.match(photosBranch, /photoQuery\.or\(photoOrParts\.join\(','\)\)/);
+});
+
 test('new AI tables are RLS protected and service-role only', () => {
   ['ai_search_results', 'ai_drafts', 'ai_action_confirmations', 'ai_maintenance_tasks'].forEach((table) => {
     assert.match(migration, new RegExp(`ALTER TABLE public\\.${table} ENABLE ROW LEVEL SECURITY`));

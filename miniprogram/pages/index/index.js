@@ -5,8 +5,13 @@ Page({
     url: ''
   },
 
-  onLoad() {
+  onLoad(options) {
     if (!config.enableWebview) {
+      // 从帮助页「返回首页再试」回来时不再重定向，避免 index→help→index 来回跳转死循环
+      if (options && options.fromHelp) {
+        wx.showModal({ title: '网页功能未启用', content: '请先在 config.js 中开启 enableWebview 后再重试。', showCancel: false });
+        return;
+      }
       wx.reLaunch({ url: '/pages/help/help' });
       return;
     }

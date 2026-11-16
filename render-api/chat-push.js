@@ -35,6 +35,10 @@ function createChatPush({express,supabase,authenticateUser,rateLimit,secret,tran
       const endpointHash=crypto.createHash('sha256').update(subscription.endpoint).digest('hex');
       const rows=await result(supabase.from(table).select('endpoint_hash').eq('owner_name',req.userName));
       if(rows.length>=6 && !rows.some(r=>r.endpoint_hash===endpointHash))return res.status(409).json({ok:false,error:'最多开启 6 个设备的通知'});
+      // endpoint_hash 是全局主键：别的账号用同一个 push endpoint 订阅会覆盖 owner_name，
+      // 让原账号静默丢失订阅。先按 hash 查归属，属于他人则拒绝，绝不 upsert。
+      const existing=await result(supabase.from(table).select('owner_name').eq('endpoint_hash',endpointHash).maybeSingle());
+      if(existing && existing.owner_name && existing.owner_name!==req.userName)return res.status(409).json({ok:false,error:'该通知地址已被其他账号订阅'});
       await result(supabase.from(table).upsert({endpoint_hash:endpointHash,owner_name:req.userName,subscription,updated_at:new Date().toISOString()},{onConflict:'endpoint_hash'}));
       return res.json({ok:true});
     } catch(_){return res.status(503).json({ok:false,error:'通知设置暂时无法保存，请重试'});}

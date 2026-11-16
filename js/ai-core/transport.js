@@ -43,6 +43,7 @@
     if (fetchOptions && fetchOptions.signal) signal = fetchOptions.signal;
     var timeoutMs = Number(requestOptions.timeoutMs) || 0;
     var timer = null;
+    var externalAbortHandler = null;
     if (timeoutMs > 0 && typeof AbortController === 'function') {
       var controller = new AbortController();
       var external = signal;
@@ -50,12 +51,22 @@
       if (external) {
         if (external.aborted) { try { controller.abort(external.reason || 'aborted'); } catch (_) {} }
         else if (typeof external.addEventListener === 'function') {
-          external.addEventListener('abort', function () { try { controller.abort(external.reason || 'aborted'); } catch (_) {} }, { once: true });
+          // 具名 handler：请求结束（含成功/失败/超时）时必须解绑，避免外部 signal
+          // 长期存活时监听器累积、以及完成后再次触发 abort 造成重复中止。
+          externalAbortHandler = function () { try { controller.abort(external.reason || 'aborted'); } catch (_) {} };
+          external.addEventListener('abort', externalAbortHandler, { once: true });
         }
       }
       signal = controller.signal;
     }
-    function clearTimeoutTimer() { if (timer) { clearTimeout(timer); timer = null; } }
+    function clearTimeoutTimer() {
+      if (timer) { clearTimeout(timer); timer = null; }
+      if (externalAbortHandler) {
+        // 对齐 readSSEStream 的 cleanup：external 在上方 var 声明（函数作用域），此处仍可读。
+        try { external.removeEventListener('abort', externalAbortHandler); } catch (_) {}
+        externalAbortHandler = null;
+      }
+    }
 
     var gotResponse = false;
     return fetch(url, Object.assign({}, fetchOptions, { signal: signal })).then(function (resp) {
@@ -201,18 +212,19 @@
       if (/^data:/.test(line)) {
         var data = line.slice(5);
         if (data.charAt(0) === ' ') data = data.slice(1); // 支持 data: 无空格前缀
-        if (!sseState.currentEvent) sseState.currentEvent = { type: 'message', data: '' };
-        try {
-          var parsed = JSON.parse(data);
-          if (parsed && typeof parsed === 'object' && parsed.type) {
-            // Structured SSE event: { type: "answer_delta", data: { ... } }
-            // Object.assign 合并而非整体替换，避免丢失已累积的字段
-            Object.assign(sseState.currentEvent, parsed);
-          } else {
-            sseState.dataLines.push(data);
-          }
-        } catch (e) {
-          // Not JSON - treat as raw data
+        var parsed = null;
+        try { parsed = JSON.parse(data); } catch (e) {}
+        if (parsed && typeof parsed === 'object' && parsed.type) {
+          // 带 type 的 JSON 行是一个自包含事件（后端 writeSse 每事件仅一条 data 行）。
+          // 必须逐条独立派发，不可 Object.assign 合并到 currentEvent：同一事件内
+          // 多行同名 type/data 会互相覆盖，导致前一条事件被吞掉。
+          // 先丢弃可能由 event:/id:/原始 data 行累积的状态，避免空行再次派发空事件。
+          sseState.currentEvent = null;
+          sseState.dataLines = [];
+          try { onEvent(parsed); } catch (eDispatch) {}
+        } else {
+          // 非结构化数据按 SSE 规范累积，遇到空行/流结束时 join 后派发
+          if (!sseState.currentEvent) sseState.currentEvent = { type: 'message', data: '' };
           sseState.dataLines.push(data);
         }
       } else if (/^event:/.test(line)) {

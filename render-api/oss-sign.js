@@ -115,7 +115,16 @@ function installOssSign(app, { authenticateUser, rateLimit, banError, signQuota 
     const path = req.body && req.body.path;
     const contentType = String((req.body && req.body.content_type) || '').toLowerCase();
     if (!validMediaPath(path)) return res.status(400).json({ ok: false, code: 'invalid_media_path' });
+    // 签名时路径命名空间加固：posts/ 主媒体必须落在本人命名空间（前缀规则与
+    // render-api/oss-cleanup.js 的 ownerPrefix、前端 buildStorageUploadPath 的 userPart 一致）。
+    // 缩略图 posts/thumb_* 与 posters/ 是 aux 路径，靠 registerAuxUpload 登记表自带归属、格式固定无用户名，跳过此检查。
+    if (path.startsWith('posts/') && !auxMedia.isAuxPath(path)) {
+      const base = String(req.userName || '').trim().replace(/[^a-zA-Z0-9_\u4e00-\u9fff]/g, '_').slice(0, 32);
+      const prefix = base ? base + '_' : '';
+      if (!path.slice('posts/'.length).startsWith(prefix)) return res.status(400).json({ ok: false, code: 'invalid_media_path' });
+    }
     if (!TYPE_RE.test(contentType)) return res.status(400).json({ ok: false, code: 'invalid_media_type' });
+    if (/^image\/svg/i.test(contentType)) return res.status(400).json({ ok: false, code: 'invalid_media_type' });
     const size = req.body && req.body.size;
     if (!Number.isSafeInteger(size) || size <= 0) return res.status(400).json({ ok: false, code: 'invalid_media_size' });
     if (size > MAX_MEDIA_BYTES) return res.status(413).json({ ok: false, code: 'file_too_large', error: '每个文件不能超过50MB' });
@@ -125,13 +134,19 @@ function installOssSign(app, { authenticateUser, rateLimit, banError, signQuota 
       return res.status(429).json({ ok: false, code: 'oss_quota_exceeded', error: '上传量较大，请稍后再试', retryable: true });
     }
     // 缩略图/封面没有 prepare 登记：签名前记一笔（谁、哪个路径），发帖成功会标记已使用，
-    // 放弃发布留下的会被清理任务回收（aux-media.js）。登记失败不挡上传——最坏情况只是留下一个孤儿文件。
+    // 放弃发布留下的会被清理任务回收（aux-media.js）。登记失败必须拒绝签名，避免留下无归属的孤儿对象。
     if (supabase && auxMedia.isAuxPath(path)) {
       try {
         const registered = await auxMedia.registerAuxUpload(supabase, String(req.userName || ''), path);
         if (registered.conflict) return res.status(409).json({ ok: false, code: 'media_path_exists' });
-        if (registered.error) console.warn('[OSS] 缩略图/封面登记失败，仍然签名:', registered.error && registered.error.message || registered.error);
-      } catch (error) { console.warn('[OSS] 缩略图/封面登记异常，仍然签名:', error && error.message || error); }
+        if (registered.error) {
+          console.warn('[OSS] 缩略图/封面登记失败，拒绝签名:', registered.error && registered.error.message || registered.error);
+          return res.status(503).json({ ok: false, code: 'oss_register_failed', retryable: true });
+        }
+      } catch (error) {
+        console.warn('[OSS] 缩略图/封面登记异常，拒绝签名:', error && error.message || error);
+        return res.status(503).json({ ok: false, code: 'oss_register_failed', retryable: true });
+      }
     }
     try {
       const signed = ossMedia.presignedPutUrl(path, {

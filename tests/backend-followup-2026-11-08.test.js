@@ -245,7 +245,7 @@ function auxDb(options) {
   return { db, rows, log };
 }
 
-test('缩略图/封面签名前登记；已被别的账号登记的路径返回 409；登记出错也照常签名；原图路径不登记', async () => withOssEnv(async () => {
+test('缩略图/封面签名前登记；已被别的账号登记的路径返回 409；登记出错拒绝签名（fail-closed）；原图路径不登记', async () => withOssEnv(async () => {
   const { installOssSign } = require('../render-api/oss-sign');
   const pass = (req, res, next) => next();
   const call = async (supabase, user, body) => {
@@ -267,8 +267,14 @@ test('缩略图/封面签名前登记；已被别的账号登记的路径返回 
   assert.equal(poster.payload.ok, true); assert.equal(a.rows.length, 2);
   const original = await call(a.db, 'alice', { ...sign, path: 'posts/alice_1_abc_photo.jpg' });
   assert.equal(original.payload.ok, true); assert.equal(a.rows.length, 2, 'originals are registered by prepare, not here');
+  // ★ 安全加固：aux 登记失败必须拒绝签名（503 + oss_register_failed），
+  //   不再降级放行留下无归属的孤儿 OSS 对象。
   const broken = auxDb({ insertError: true });
-  assert.equal((await call(broken.db, 'alice', { ...sign, path: THUMB2 })).payload.ok, true, 'a registry hiccup never blocks an upload');
+  const brokenRes = await call(broken.db, 'alice', { ...sign, path: THUMB2 });
+  assert.equal(brokenRes.status, 503, 'registry failure must reject signing (fail-closed)');
+  assert.equal(brokenRes.payload.ok, false);
+  assert.equal(brokenRes.payload.code, 'oss_register_failed');
+  // 未配置 supabase 时无登记表可写，维持原行为（照常签名，兼容未接 DB 的部署）
   assert.equal((await call(undefined, 'alice', { ...sign, path: THUMB2 })).payload.ok, true);
 }));
 
