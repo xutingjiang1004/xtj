@@ -21680,11 +21680,11 @@ async function prepareAiHistoryMessage(message, budget, maxChars, allowVision) {
 
 function manageAiContextWindow(messages,historyCount,req,res,convId,signal){
   var contextWindow=require('./ai-context-window');
-  var history=messages.slice(1,historyCount+1),fixed=[messages[0]].concat(messages.slice(historyCount+1));
+  var historyStart=1;while(historyStart<messages.length&&messages[historyStart]&&messages[historyStart].role==='system')historyStart++;var history=messages.slice(historyStart,historyStart+historyCount),fixed=messages.slice(0,historyStart).concat(messages.slice(historyStart+historyCount));
   var result=contextWindow.prepareContext({history:history,fixed:fixed,tools:aiToolsForWorkMode(),
     conversationId:convId,memory:req.body&&req.body.context_memory,windowTokens:req.body&&req.body.context_window_tokens,signal:signal,
     onCompacting:function(){writeSse(res,{type:'context_status',stage:'compacting',message:'正在提取较早对话的关键内容，完整原文保留。'});}});
-  messages.splice(1,historyCount,...result.messages);
+  messages.splice(historyStart,historyCount,...result.messages);
   res._aiContextMemory=result.memory;res._aiContextBudget=result.budget;
   writeSse(res,{type:'meta',conversation_id:convId,context_budget:result.budget,context_memory:result.memory});
   writeSse(res,{type:'context_status',stage:result.budget.compaction_status==='compressed'?'compressed':'ready',receipt:result.budget.last_compaction});
@@ -24783,7 +24783,7 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, guestAwar
     var useTavilyCluster = thirdPartySearchOk && ((webSearchPref === true) || (webSearchPref === false && proactiveSearch));
     var webSearchEnabled = (webSearchPref === true);
     await runRequiredSearch({ enabled: webSearchEnabled && !nativeWebActive, text: searchCleanMessage || message, messages: messages, execute: executeToolCall, context: Object.assign(requestSearchCtx(req, userName), { signal: requestAbortCtrl.signal }), write: event => writeSse(res, event), normalizeItems: normalizeToolResultItems });
-    if(req.body.context_management===true){for(var managedIndex=0;managedIndex<histSlice.length;managedIndex++){messages[managedIndex+1].context_id=histSlice[managedIndex].context_id;messages[managedIndex+1].context_truncated=histSlice[managedIndex].context_truncated;}manageAiContextWindow(messages,histSlice.length,req,res,convId,requestAbortCtrl.signal);}
+    if(req.body.context_management===true){var _histStart=1;while(_histStart<messages.length&&messages[_histStart]&&messages[_histStart].role==='system')_histStart++;for(var managedIndex=0;managedIndex<histSlice.length;managedIndex++){messages[_histStart+managedIndex].context_id=histSlice[managedIndex].context_id;messages[_histStart+managedIndex].context_truncated=histSlice[managedIndex].context_truncated;}manageAiContextWindow(messages,histSlice.length,req,res,convId,requestAbortCtrl.signal);}
     if (aborted || res.writableEnded) return safeEnd();
     var useBuiltInSearch = !_visionEngaged && validatedModel === DEEPSEEK_RESPONSES_MODEL;
     try {
