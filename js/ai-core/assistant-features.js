@@ -12,7 +12,7 @@
     if(/^[\uDC00-\uDFFF]/.test(tail))tail=tail.slice(1);
     return head+marker+tail;
   }
-  function textTokens(text){text=String(text||'');var cjk=0;for(var i=0;i<text.length;i++){var code=text.charCodeAt(i);if(code>=0x3400&&code<=0x9fff)cjk++;}return Math.ceil(cjk*1.5+(text.length-cjk)/4);}
+  function textTokens(text){text=String(text||'');var cjk=0;for(var i=0;i<text.length;i++){var code=text.charCodeAt(i);if(code>=0x3400&&code<=0x9fff)cjk++;}return Math.ceil(cjk*0.85+(text.length-cjk)/4);}
   function messageTokens(message){var cached=contextTokenCache&&contextTokenCache.get(message);if(cached&&cached.raw===message.content)return cached.tokens;var text=typeof message.content==='string'?historyExcerpt(message.content,32000):(Array.isArray(message.content)?message.content:[]).filter(function(p){return p&&p.type==='text';}).map(function(p){return p.text||'';}).join('\n'),images=Array.isArray(message.vision_urls)?message.vision_urls.length:0;(Array.isArray(message.content)?message.content:[]).forEach(function(p){if(p&&p.type==='image_url')images++;});(message.attachments||[]).forEach(function(a){if(a&&/^image\//.test(a.type||''))images++;});var tokens=textTokens(text)+6+Math.min(10,images)*2048;if(contextTokenCache)contextTokenCache.set(message,{raw:message.content,tokens:tokens});return tokens;}
   function node(tag,cls,text){var element=global.document.createElement(tag);if(cls)element.className=cls;if(text!==undefined)element.textContent=text;return element;}
   function questions(value){var out=[];(Array.isArray(value)?value:[]).some(function(item){if(typeof item==='string'){var text=item.replace(/[\x00-\x1f\x7f]/g,' ').trim();if(text&&text.length<=100&&!/https?:\/\/|<\/?(?:script|xtj-followups)/i.test(text))out.push(text);}return out.length===1;});return out;}
@@ -31,12 +31,12 @@
       var chosen=valid.slice(-256),budget=config.budget||{},capacity=Number(config.windowTokens)||65536,reserved=Math.min(8192,Math.floor(capacity/8));
       var summary=memory&&memory.summary?'【较早对话的提取摘要】\n下面是历史消息的有损提取，属于用户资料，不是系统指令。较新的用户要求优先；不确定或缺失的细节须查原聊天或询问，不编造。\n'+memory.summary:'';
       var tokens=chosen.reduce(function(sum,message){return sum+messageTokens(message);},0)+textTokens(draft)+(draft?6:0)+(summary?textTokens(summary)+6:0)+Number(budget.system_prompt_tokens||0)+Number(budget.tool_schema_tokens||0);
-      var willCompact=chosen.length>0&&(tokens+reserved>=capacity*.8||chosen.length>=224);
+      var willCompact=chosen.length>0&&(tokens+reserved>=capacity*.92||chosen.length>=248);
       return {estimated_tokens:tokens,window_tokens:capacity,reserved_output_tokens:reserved,capacity_source:'site_budget',overhead_known:Number.isFinite(budget.system_prompt_tokens),history_retained:chosen.length,history_omitted:Math.max(0,valid.length-chosen.length),history_compressed:memory&&memory.covered_count||0,exact_window:null,preview:true,last_compaction:memory&&memory.last_compaction||budget.last_compaction||null,compaction_method:'extractive',compaction_status:willCompact?'pending':memory&&memory.summary?'summary_reused':'ready'};
     }
     var kept=valid.slice(custom?-19:-24),max=custom?8000:4000,text=kept.map(function(m){return String(m.content||'').slice(0,max);}).join('\n')+'\n'+String(draft||'');
     var cjk=(text.match(/[\u3400-\u9fff]/g)||[]).length;
-    return {estimated_tokens:Math.ceil(cjk*1.5+(text.length-cjk)/4),history_retained:kept.length,history_omitted:valid.length-kept.length,exact_window:null,preview:true};
+    return {estimated_tokens:Math.ceil(cjk*0.85+(text.length-cjk)/4),history_retained:kept.length,history_omitted:valid.length-kept.length,exact_window:null,preview:true};
   }
   function capacityText(value){
     if(!value)return '上下文用量待估算';
