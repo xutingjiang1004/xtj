@@ -19,7 +19,7 @@ function historyExcerpt(value, limit) {
 function estimateText(text) {
   text = String(text || '');
   let cjk=0;for(let i=0;i<text.length;i++){const code=text.charCodeAt(i);if(code>=0x3400&&code<=0x9fff)cjk++;}
-  return Math.ceil(cjk * 1.5 + (text.length - cjk) / 4);
+  return Math.ceil(cjk * 0.85 + (text.length - cjk) / 4);
 }
 function estimateMessages(messages) {
   let tokens = 0, images = 0;
@@ -116,23 +116,23 @@ function prepareContext(options) {
   }
   const before = total(kept, memory);
   let compressed = [], didCompact = false;
-  if ((before + reserved >= capacity * .8 || kept.length >= 224) && kept.length) {
+  if ((before + reserved >= capacity * .92 || kept.length >= 248) && kept.length) {
     didCompact = true;
     if (options.onCompacting) options.onCompacting();
-    const availableSummaryChars = Math.max(300, Math.min(8000, Math.floor((capacity - fixedEstimate.tokens - tools - reserved) * .18 / 1.5)));
+    const availableSummaryChars = Math.max(300, Math.min(8000, Math.floor((capacity - fixedEstimate.tokens - tools - reserved) * .18 / 0.85)));
     do {
       check();
-      const count = kept.length > 2 ? Math.min(kept.length - 2, Math.max(2, Math.ceil(kept.length / 3))) : 1;
+      const count = kept.length > 2 ? Math.min(kept.length - 2, Math.max(2, Math.ceil(kept.length / 4))) : 1;
       compressed.push(...kept.splice(0, count));
       // A summary of many short messages can otherwise be larger than those
       // messages. Bound the replacement by the source it actually replaces.
       const sourceTokens = compressed.reduce((sum,row)=>sum+estimates.get(row),0) + (previousMemory ? estimateMessages([memoryMessage(previousMemory)]).tokens : 0);
-      const summaryChars = Math.min(availableSummaryChars,Math.max(80,Math.floor(sourceTokens*.5/1.5)-120));
+      const summaryChars = Math.min(availableSummaryChars,Math.max(80,Math.floor(sourceTokens*.5/0.85)-120));
       memory = {v:1,conversation_id:options.conversationId,summary:summarize(previousMemory?previousMemory.summary:'', compressed, summaryChars,snippets),
         covered_ids:[...covered, ...compressed.map(messageKey)].slice(-1024),
         covered_count:(previousMemory?.covered_count||0)+compressed.length,
         revision:(previousMemory?.revision||0)+1};
-    } while (kept.length && total(kept, memory) + reserved > capacity * .65);
+    } while (kept.length && total(kept, memory) + reserved > capacity * .82);
   }
   let used = total(kept, memory);
   // If a recent exceptionally long turn still cannot fit, extract it too.
@@ -140,7 +140,7 @@ function prepareContext(options) {
   while (used + reserved > capacity && kept.length) {
     check(); if (!didCompact && options.onCompacting) options.onCompacting(); didCompact = true;
     compressed.push(kept.shift());
-    const maxChars = Math.max(300, Math.min(8000, Math.floor((capacity - fixedEstimate.tokens - tools - reserved) * .18 / 1.5)));
+    const maxChars = Math.max(300, Math.min(8000, Math.floor((capacity - fixedEstimate.tokens - tools - reserved) * .18 / 0.85)));
     memory = {v:1,conversation_id:options.conversationId,summary:summarize(previousMemory?.summary||'',compressed,maxChars,snippets),
       covered_ids:[...covered, ...compressed.map(messageKey)].slice(-1024),covered_count:(previousMemory?.covered_count||0)+compressed.length,revision:(previousMemory?.revision||0)+1};
     used = total(kept,memory);
