@@ -5422,7 +5422,7 @@ async function aiSiteSearch(source, query, userName, limit, isAdmin, searchPlan)
     // FIX: is_deleted 列为 NOT NULL DEFAULT false，用独立的 .eq() 过滤未删除照片。
     // 原来的写法把它们塞进一个 .or() 里，会被下方关键词的 .or(photoOrParts...) 覆盖
     // （PostgREST 的 .or() 是替换而非叠加），导致关键词命中时已删除照片也被搜出。
-    var photoQuery = supabase.from('posts').select('id,user_name,content,media_url,created_at,visibility').eq('media_type', '__photo_wall__').eq('is_deleted', false);
+    var photoQuery = supabase.from('posts').select('id,user_name,content,media_url,created_at,visibility').eq('media_type', '__photo_wall__').not('is_deleted', 'is', true);
     var photoOrParts = keywords.map(function(k) { return 'content.ilike.' + pgrstQuote('%' + escapeLikeValue(k) + '%'); });
     keywords.forEach(function(k) {
       photoOrParts.push('user_name.ilike.' + pgrstQuote('%' + escapeLikeValue(k) + '%'));
@@ -22936,7 +22936,7 @@ app.post('/api/agent/custom-chat/stream', guestOpenRouterAuth, aiChatConcurrency
   // sends the OpenRouter hint header but a different provider/base_url in the
   // body must not turn this route into an anonymous proxy for arbitrary hosts.
   // ★ 2026-11-13 限时开放 15 天：窗口内游客放开全部模型（provider 不再限 openrouter），窗口外保持；到期自动失效
-  if (req.guestAi && !guestAiPublicWindowOpen() && provider !== 'openrouter') {
+  if (req.guestAi && (!guestAiPublicWindowOpen() || provider !== 'openrouter')) {
     writeSse(res, { type: 'error', error: '请先登录后再使用第三方模型', code: 'auth_required' });
     return safeEnd();
   }
@@ -24741,7 +24741,7 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, guestAwar
     if (_visionEligible && _visionImageUrls.length) {
       _visionEngaged = true;
       usedModel = DEEPSEEK_MODEL_VISION;
-      var _visionTextPart = stripAttachmentNoiseForSearch(_visionRawText) || '（用户上传了一张图片，请查看并回答）';
+      var _visionTextPart = String(message || '').trim() || stripAttachmentNoiseForSearch(_visionRawText) || '（用户上传了一张图片，请查看并回答）';
       var _visionContent = [{ type: 'text', text: _visionTextPart }];
       for (var _vi = 0; _vi < _visionImageUrls.length; _vi++) {
         _visionContent.push({ type: 'image_url', image_url: { url: _visionImageUrls[_vi] } });
