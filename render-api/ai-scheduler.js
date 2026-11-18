@@ -78,7 +78,7 @@ function computeNextRun(task, now) {
     return new Date(zonedTimeToUtc(nextDay.getUTCFullYear(), nextDay.getUTCMonth() + 1, nextDay.getUTCDate(), dt.hour, dt.minute, tz));
   }
   if (kind === 'weekly') {
-    var days = Array.isArray(task.weekdays) && task.weekdays.length ? task.weekdays : [p.weekday];
+    var days = Array.isArray(task.weekdays) && task.weekdays.length ? task.weekdays.map(Number) : [p.weekday];
     for (var add = 0; add <= 7; add++) {
       var dayDate = new Date(Date.UTC(p.year, p.month - 1, p.day) + add * 86400000);
       var wd = new Date(dayDate.getTime() + (0)).getUTCDay();
@@ -142,7 +142,7 @@ function normalizeTaskInput(args, now) {
 // 人类可读的频率描述（前端列表与模型回复共用）。
 function describeSchedule(task) {
   var kind = task.schedule_kind;
-  if (kind === 'once') return '单次 · ' + String(task.run_at || '').replace('T', ' ').slice(0, 16);
+  if (kind === 'once') { var d = new Date(task.run_at); if (!task.run_at || isNaN(d.getTime())) return '单次'; var zp = zonedParts(d, task.timezone || 'Asia/Shanghai'); return '单次 · ' + zp.year + '-' + pad2(zp.month) + '-' + pad2(zp.day) + ' ' + pad2(zp.hour) + ':' + pad2(zp.minute); }
   if (kind === 'interval') {
     var m = task.interval_minutes;
     if (m % 1440 === 0) return '每 ' + (m / 1440) + ' 天一次';
@@ -187,8 +187,8 @@ function createScheduler(opts) {
       var rows = due.data || [];
       for (var i = 0; i < rows.length; i++) {
         var task = rows[i];
-        var next;
-        try { next = computeNextRun(task, now); }
+        var taskNow = nowFn(); var next;
+        try { next = computeNextRun(task, taskNow); }
         catch (e) {
           await supabase.from('ai_scheduled_tasks').update({ enabled: false, last_status: 'error', last_error: String(e.message).slice(0, 300) }).eq('id', task.id);
           continue;
@@ -196,16 +196,15 @@ function createScheduler(opts) {
         // 原子抢占：仅当 next_run_at 仍是扫描时的值才更新，其他实例/重复 tick 不会重复执行。
         var claim = await supabase.from('ai_scheduled_tasks').update({
           next_run_at: next ? next.toISOString() : null,
-          enabled: next ? true : false,
-          last_run_at: now.toISOString(),
-          updated_at: now.toISOString()
+          last_run_at: taskNow.toISOString(),
+          updated_at: taskNow.toISOString()
         }).eq('id', task.id).eq('next_run_at', task.next_run_at).select('id');
         if (claim.error || !claim.data || !claim.data.length) continue;
         ran++;
         try {
           var result = await runTask(task) || {};
           await supabase.from('ai_scheduled_tasks').update({
-            last_status: 'success', last_error: null,
+            last_status: 'success', last_error: null, enabled: next ? true : false,
             last_summary: String(result.summary || '').slice(0, 2000),
             conversation_id: result.conversation_id || task.conversation_id,
             updated_at: nowFn().toISOString()
