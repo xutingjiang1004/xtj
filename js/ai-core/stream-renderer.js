@@ -239,6 +239,7 @@
     var edit = streamEditTarget(tail);
     if (!edit) return false;
     if (next.charAt(i - 1) === '>') {
+      var openTag = /<([a-z0-9]+)(?:\s[^>]*)?>$/i.exec(next.slice(0, i)); if (openTag && openTag[1].toLowerCase() !== edit.tagName.toLowerCase()) return false;
       var created = document.createTextNode(added);
       edit.appendChild(created);
       if (ink) ink.record(created, 0, created.length);
@@ -382,11 +383,12 @@
           html = renderRich(block);
           if (blockCache.size < 64 && block.length <= 8192) blockCache.set(block, html);
         }
-        markup += html;
+        markup += (markup && html ? '\n' : '') + html;
         committed = breaks.lastIndex;
       }
       if (committed) prefix += tail.slice(0, committed);
-      var result = markup + tailAccel.render(tail.slice(committed));
+      var tailHtml = tailAccel.render(tail.slice(committed));
+      var result = markup + (markup && tailHtml ? '\n' : '') + tailHtml;
       if (!cacheVerified && prefix) {
         var full = renderRich(text);
         if (result !== full) { cacheDisabled = true; prefix = ''; markup = ''; blockCache.clear(); tailAccel.reset(); return full; }
