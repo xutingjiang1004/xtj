@@ -1,7 +1,7 @@
 'use strict';
 
 const CONVERSATION_ID = /^[A-Za-z0-9-]{6,128}$/;
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/;
 
 function aiConversationActorPattern(id) {
@@ -25,7 +25,8 @@ function applyAiHistoryCursor(query, cursor) {
 }
 async function queryAiHistoryPage(db, options) {
   const { userName, marker, convId, limit, parseMeta } = options;
-  const pageSize = Math.min(limit + 24, 100), visible = [];
+  const safeLimit = Math.max(1, Math.min(256, Math.floor(Number(limit) || 20)));
+  const pageSize = Math.min(safeLimit + 24, 100), visible = [];
   let cursor = options.cursor, exhausted = false;
   // Keep individual transfers small while stepping over old soft-deleted rows.
   // A budget failure is explicit, never a successful empty/partial history.
@@ -33,20 +34,20 @@ async function queryAiHistoryPage(db, options) {
     const query = db.from('posts').select('id,user_name,actor_key,content,media_url,created_at')
       .eq('user_name', userName).eq('media_type', marker)
       .filter('actor_key', 'like', aiConversationActorPattern(convId))
-      .order('created_at', { ascending: false }).order('id', { ascending: false }).limit(pageSize);
+      .or('media_url.is.null,media_url.not.like.%"deleted":true%').order('created_at', { ascending: false }).order('id', { ascending: false }).limit(pageSize);
     const result = await applyAiHistoryCursor(query, cursor);
     if (!result || result.error) throw result && result.error || new Error('history_unavailable');
     const rows = result.data || [];
     for (const row of rows) if (!(parseMeta(row) || {}).deleted) {
-      visible.push(row); if (visible.length > limit) break;
+      visible.push(row); if (visible.length > safeLimit) break;
     }
     exhausted = rows.length < pageSize;
-    if (visible.length > limit || exhausted) break;
+    if (visible.length > safeLimit || exhausted) break;
     const last = rows[rows.length - 1];
     if (!last || !UUID.test(last.id) || !TIME.test(last.created_at)) throw new Error('invalid_history_page');
     cursor = { at: last.created_at, id: last.id };
-    if (page === 63) throw new Error('history_scan_limit');
+    if (page === 63) return { rows: visible.slice(0, safeLimit), hasMore: true };
   }
-  return { rows: visible.slice(0, limit), hasMore: visible.length > limit || !exhausted };
+  return { rows: visible.slice(0, safeLimit), hasMore: visible.length > safeLimit || !exhausted };
 }
 module.exports = { aiConversationActorPattern, parseAiHistoryCursor, applyAiHistoryCursor, queryAiHistoryPage };
