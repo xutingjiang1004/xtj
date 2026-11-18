@@ -39,13 +39,16 @@ function computeBillableTokens(usage, opts) {
   if (total > 0 || sumParts > 0) {
     // An authoritative total includes reasoning as well. Internal aggregates
     // mark their flattened reasoning as a subset for providers omitting total.
-    return total > 0 ? Math.max(total, prompt + completion) : sumParts;
+    return total > 0 ? Math.max(total, usage.reasoning_included_in_completion !== true ? sumParts : prompt + completion) : sumParts;
   }
   // Fallback only when provider omitted usage entirely (should be rare).
   var msg = String(opts.message || '');
   var content = String(opts.content || '');
   var reasoningText = String(opts.reasoning || '');
-  var est = Math.ceil((msg.length + content.length + reasoningText.length) / 4);
+  var combined = msg + content + reasoningText;
+  var len = combined.length;
+  var cjk = (combined.match(/[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff\u3040-\u30ff\uac00-\ud7af]/g) || []).length;
+  var est = Math.ceil(cjk * 0.85 + (len - cjk) / 4);
   return Math.max(1, est);
 }
 
@@ -166,7 +169,7 @@ function createAiQuota(supabase) {
   // 多进程部署仍需 RPC 侧原子性，本互斥不构成安全边界。
   var quotaChains = Object.create(null); // userName -> pending tail Promise
   function runQuotaSerialized(userName, task) {
-    var key = String(userName || '');
+    var key = String(userName || '').trim().toLowerCase();
     var prev = quotaChains[key] || Promise.resolve();
     var next = prev.then(task, task);
     quotaChains[key] = next;
@@ -292,6 +295,7 @@ function createAiQuota(supabase) {
     var searchCount = Math.max(0, Math.floor(Number(options.search_count) || 0));
     // One chat turn that actually searched counts as 1 search credit.
     if (options.did_search && searchCount < 1) searchCount = 1;
+    if (options && options.search_already_claimed === true) searchCount = 0;
     if (billable <= 0 && searchCount <= 0) {
       // 审计 🟠：零扣费路径兜底——即使 provider 完全没返回 usage 且无文本可估算，
       // 也至少计 1 token，避免"只读额度不消费"让请求永远绕开扣费。
