@@ -87,7 +87,7 @@ function registerWorkbenchRoutes(app,deps) {
       }
     } finally { clearTimeout(timer);req.removeListener('aborted',onAbort);res.removeListener('close',onAbort); }
   }; }
-  app.post(prefix+'/tool',...guard,handle(async(req,signal,owner)=> {
+  app.post(prefix+'/tool',...guard, ...json, handle(async(req,signal,owner)=> {
     const input=validateToolInput(req.body);
     const context=Object.assign({},typeof deps.requestContext==='function'?deps.requestContext(req):{},owner,{signal});
     const result=input.name==='generate_pdf' && typeof deps.exportDocument==='function'
@@ -119,7 +119,7 @@ function registerWorkbenchRoutes(app,deps) {
       if (!record) throw Object.assign(new Error('not found'),{code:'asset_not_found'});
       return {record};
     }));
-    app.post(prefix+'/assets',...guard,handle(async(req,signal,owner)=>({record:await deps.assets.save(owner,validateAsset(req.body))})));
+    app.post(prefix+'/assets',...guard,...json, handle(async(req,signal,owner)=>({record:await deps.assets.save(owner,validateAsset(req.body))})));
     app.delete(prefix+'/assets/:id',...guard,handle(async(req,signal,owner)=> {
       if (!UUID.test(String(req.params.id||''))) throw inputError('成果标识无效');
       return {removed:await deps.assets.remove(owner,req.params.id)};
