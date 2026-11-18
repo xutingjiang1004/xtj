@@ -20441,24 +20441,30 @@ async function runScheduledTask(task) {
   var stSearchMeta = { count: stItems.length, query: stQueries[0], queries: stQueries, results: stItems, expires_at: Date.now() + 86400000 };
   var stNowTs = Date.now();
   var stReportFull = stSummary + (stItems.length ? '\n\n---\n来源：\n' + stItems.slice(0, 10).map(function(it, i) { return (i + 1) + '. ' + (it.title || it.url); }).join('\n') : '');
-  var stIns = await supabase.from('posts').insert([
-    {
-      user_name: stOwner,
-      content: ('【定时任务 · ' + (task.title || '自动执行') + '】' + stPrompt).slice(0, 4000),
-      media_type: AI_AGENT_MESSAGE_MARKER,
-      media_url: buildMsgMeta('user', stConvId, null, null, 1, null, null, { scheduled_task_id: task.id }),
-      actor_key: 'ai_msg_conv_' + stConvId + '_user_' + stOwner + '_' + stNowTs,
-      created_at: new Date(stNowTs).toISOString()
-    },
-    {
-      user_name: stOwner,
-      content: stReportFull,
-      media_type: AI_AGENT_MESSAGE_MARKER,
-      media_url: buildMsgMeta('assistant', stConvId, null, null, 2, stSearchMeta, null, { scheduled_task_id: task.id, scheduled_title: task.title || '' }),
-      actor_key: 'ai_msg_conv_' + stConvId + '_' + stNowTs,
-      created_at: new Date(stNowTs + 1).toISOString()
-    }
-  ]);
+  // 后台调度器没有 HTTP 请求的账号上下文；先解析任务所有者账号，再进入与
+  // 登录请求相同的隔离作用域，否则私有 AI 消息写入会抛 ai_account_required。
+  var stAccount = await readAccountIdentity(supabase, stOwner, ADMIN_USERNAME);
+  if (!stAccount || !stAccount.id) throw new Error('定时任务所属账号不存在或已注销');
+  var stIns = await require('./ai-private-data').runAsOwner(stOwner, stAccount.id, function() {
+    return supabase.from('posts').insert([
+      {
+        user_name: stOwner,
+        content: ('【定时任务 · ' + (task.title || '自动执行') + '】' + stPrompt).slice(0, 4000),
+        media_type: AI_AGENT_MESSAGE_MARKER,
+        media_url: buildMsgMeta('user', stConvId, null, null, 1, null, null, { scheduled_task_id: task.id }),
+        actor_key: 'ai_msg_conv_' + stConvId + '_user_' + stOwner + '_' + stNowTs,
+        created_at: new Date(stNowTs).toISOString()
+      },
+      {
+        user_name: stOwner,
+        content: stReportFull,
+        media_type: AI_AGENT_MESSAGE_MARKER,
+        media_url: buildMsgMeta('assistant', stConvId, null, null, 2, stSearchMeta, null, { scheduled_task_id: task.id, scheduled_title: task.title || '' }),
+        actor_key: 'ai_msg_conv_' + stConvId + '_' + stNowTs,
+        created_at: new Date(stNowTs + 1).toISOString()
+      }
+    ]);
+  });
   if (stIns && stIns.error) console.warn('[SCHEDULER] 写回会话失败:', stIns.error.message);
   return { summary: stSummary.slice(0, 1800), conversation_id: stConvId };
 }
@@ -24741,7 +24747,9 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, guestAwar
     if (_visionEligible && _visionImageUrls.length) {
       _visionEngaged = true;
       usedModel = DEEPSEEK_MODEL_VISION;
-      var _visionTextPart = stripAttachmentNoiseForSearch(_visionRawText) || '（用户上传了一张图片，请查看并回答）';
+      // ★ 修复：附件解析后的正文（PDF/Word/代码）已合并进 message。视觉分支
+      //   此前回退到未解析的 _visionRawText，会把文档内容整段丢掉。
+      var _visionTextPart = String(message || '').trim() || stripAttachmentNoiseForSearch(_visionRawText) || '（用户上传了一张图片，请查看并回答）';
       var _visionContent = [{ type: 'text', text: _visionTextPart }];
       for (var _vi = 0; _vi < _visionImageUrls.length; _vi++) {
         _visionContent.push({ type: 'image_url', image_url: { url: _visionImageUrls[_vi] } });

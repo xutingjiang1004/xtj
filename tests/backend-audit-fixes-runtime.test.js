@@ -5,7 +5,7 @@ const {createAttachmentStore}=require('../render-api/ai-request-features');
 const {classifySupabaseError}=require('../render-api/db-result');
 const {writeSse,endSse,MAX_SSE_BUFFER_BYTES}=require('../render-api/sse-write');
 const {createAiQuota}=require('../render-api/ai-quota');
-const {runAsAccount,bindAccount,bindPrivateAiData}=require('../render-api/ai-private-data');
+const {runAsAccount,runAsOwner,bindAccount,bindPrivateAiData}=require('../render-api/ai-private-data');
 const {createClient}=require('@supabase/supabase-js');
 const {createProfileRecords}=require('../render-api/profile-records');
 const accountId='11111111-1111-4111-8111-111111111111';
@@ -74,6 +74,13 @@ test('F7 actual Supabase query serialization scopes history/research/export/upda
  assert.throws(()=>db.from('posts').insert({user_name:'alice',media_type:'__ai_agent_msg__'}),/ai_account_required/);
  await runAsAccount({userName:'alice',accountId},()=>db.from('posts').select('*').eq('media_type','text'));
  assert.equal(requests.at(-1).url.searchParams.get('or'),null,'public posts stay available');
+});
+test('F7 background jobs enter the owner scope before writing private AI rows',async()=>{
+ const requests=[];const db=bindPrivateAiData(createClient('https://fixture.supabase.co','fixture-key',{global:{fetch:async(url,opts)=>{requests.push(opts.body?JSON.parse(opts.body):null);return new Response('[]',{status:200,headers:{'content-type':'application/json'}})}}}));
+ await runAsOwner('alice',accountId,()=>db.from('posts').insert({user_name:'alice',media_type:'__ai_agent_msg__',content:'scheduled'}));
+ assert.equal(requests.at(-1).ai_account_id,accountId);
+ assert.equal(requests.at(-1).user_name,'alice');
+ assert.throws(()=>runAsOwner('alice','',()=>{}),/ai_account_required/);
 });
 
 test('dependency regression: compressed trailing bytes cannot terminate the Express process',async()=>{

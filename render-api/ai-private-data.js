@@ -11,6 +11,12 @@ function bindAccount(callback) {
   const owner = accounts.getStore();
   return function(...args) { return accounts.run(owner, () => callback.apply(this, args)); };
 }
+// Background jobs (e.g. the scheduled-task runner) have no HTTP request to
+// capture the owner from. They must resolve the account first and then enter
+// the same scope, so private rows still receive ai_account_id.
+function runAsOwner(userName, accountId, next) {
+  return runAsAccount({ userName: userName, accountId: accountId }, next);
+}
 // The authenticated request captures identity once. Async continuations keep that
 // identity after disconnect/deletion; they must never look up a successor by name.
 function bindPrivateAiData(client) {
@@ -61,4 +67,4 @@ function bindPrivateAiData(client) {
     };
   } });
 }
-module.exports = { runAsAccount, bindAccount, bindPrivateAiData, PRIVATE_MARKERS };
+module.exports = { runAsAccount, runAsOwner, bindAccount, bindPrivateAiData, PRIVATE_MARKERS };
