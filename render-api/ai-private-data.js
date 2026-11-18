@@ -1,7 +1,7 @@
 'use strict';
 const { AsyncLocalStorage } = require('node:async_hooks');
 const accounts = new AsyncLocalStorage();
-const PRIVATE_MARKERS = new Set(['__ai_agent_msg__', '**ai_agent_conv_summary**', '__ai_agent_profile__', '__ai_agent_memory__']);
+const PRIVATE_MARKERS = new Set(['__ai_agent_msg__', '__ai_agent_conv_summary__', '__ai_agent_profile__', '__ai_agent_memory__']);
 const OWNER_RPCS = new Set(['list_ai_conversations', 'list_ai_research_records', 'soft_delete_ai_conversation', 'save_ai_tool_retry_result']);
 function runAsAccount(req, next) {
   if (!req.userName || !req.accountId) throw Error('ai_account_required');
@@ -35,7 +35,7 @@ function bindPrivateAiData(client) {
             if (['insert','upsert'].includes(method) && (table === 'posts' || table === 'ai_search_results')) {
               const stamp = row => {
                 if (table === 'posts' && !PRIVATE_MARKERS.has(row.media_type)) return row;
-                if (!owner || (table === 'posts' ? row.user_name : row.owner_name) !== owner.userName) throw Error('ai_account_required');
+                if (!owner) { if (!(table === 'posts' && row.ai_account_id)) throw Error('ai_account_required'); } else if ((table === 'posts' ? row.user_name : row.owner_name) !== owner.userName) { throw Error('ai_account_required'); }
                 return { ...row, ai_account_id: owner.id };
               };
               args[0] = Array.isArray(args[0]) ? args[0].map(stamp) : stamp(args[0]);
