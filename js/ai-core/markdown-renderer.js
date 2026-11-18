@@ -175,22 +175,23 @@
     // 避免"正在输出的代码块"内容原样注入 HTML；要求 ``` 后紧跟换行，
     // 防止正文中孤立 ``` 吞掉后续整段（子代理修复）
     s = s.replace(/```(\w*)\n([\s\S]*)$/g, fencedCodeToPlaceholder);
-
+      var inlineStore = [];
+    function stashInline(html) { var idx = inlineStore.length; inlineStore.push(html); return '\x00INLINE' + idx + '\x00'; }
+    
     // 2. Inline code: `code`
     s = s.replace(/`([^`]+)`/g, function (_, code) {
-      return '<code>' + _escapeHtml(code) + '</code>';
+      return stashInline('<code>' + _escapeHtml(code) + '</code>');
     });
-
+  /// 5. Links: [text](url)
+    function safeHref(rawUrl, allowDataImage) { var u = String(rawUrl || '').trim(); var scheme = (u.match(/^([a-zA-Z][a-zA-Z0-9+.-]*):/) || [])[1]; if (!scheme) { if (/^\/\//.test(u)) return { ok: false, url: u }; return { ok: true, url: u }; } var s = scheme.toLowerCase(); if (s === 'http' || s === 'https' || s === 'mailto') return { ok: true, url: u }; if (allowDataImage && s === 'data' && /^data:image\/(?!svg\b)/i.test(u)) return { ok: true, url: u }; return { ok: false, url: u }; }
+    // 6. Images: ![alt](url)
+    s = s.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, function (_, alt, url) { var h = safeHref(url, true); if (!h.ok) return _escapeHtml(alt || '图片'); return stashInline('<img src="' + _escapeHtml(h.url) + '" alt="' + _escapeHtml(alt).replace(/"/g, '&quot;') + '" loading="lazy" />'); });
+    s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function (_, text, url) { var h = safeHref(url, false); if (!h.ok) return stashInline('<span title="' + _escapeHtml(h.url) + '">' + _escapeHtml(text) + '</span>'); return stashInline('<a href="' + _escapeHtml(h.url) + '" target="_blank" rel="noopener noreferrer">' + _escapeHtml(text) + '</a>'); });
+    
     // 3. Bold: **text** / __text__；Italic: *text* / _text_；Bold+Italic: ***text*** / ___text___
     // ★ 修复（AI 回复出现字面量 </strong>）：加粗/斜体先替换成占位符、最后统一还原，
     //   避免斜体步骤把加粗步骤产出的 <strong> 当作内容再次转义（例如 ***重要***
     //   会被渲染成字面量 <strong>重要</strong>，界面上出现 </strong> 残留）。
-    var inlineStore = [];
-    function stashInline(html) {
-      var idx = inlineStore.length;
-      inlineStore.push(html);
-      return '\x00INLINE' + idx + '\x00';
-    }
     s = s.replace(/\*\*\*([^*]+)\*\*\*/g, function (_, t) { return stashInline('<strong><em>' + _escapeHtml(t) + '</em></strong>'); });
     s = s.replace(/___([^_]+)___/g, function (_, t) { return stashInline('<strong><em>' + _escapeHtml(t) + '</em></strong>'); });
     s = s.replace(/\*\*([^*]+)\*\*/g, function (_, t) { return stashInline('<strong>' + _escapeHtml(t) + '</strong>'); });
@@ -198,36 +199,6 @@
     s = s.replace(/\*([^*]+)\*/g, function (_, t) { return stashInline('<em>' + _escapeHtml(t) + '</em>'); });
     s = s.replace(/_([^_]+)_/g, function (_, t) { return stashInline('<em>' + _escapeHtml(t) + '</em>'); });
 
-    // 5. Links: [text](url)
-    // ★ 修复（XSS）：协议白名单 + 实体转义。原实现只转义双引号，`[x](jav&#x61;script:alert(1))`
-    // 这类实体编码协议可绕过 sanitizeHtml 的 JS_URL_RE（仅匹配字面 javascript/vbscript），
-    // 浏览器解析实体后点击即执行。此处统一校验 scheme，非 http/https/mailto 一律降级为纯文本。
-    function safeHref(rawUrl, allowDataImage) {
-      var u = String(rawUrl || '').trim();
-      var scheme = (u.match(/^([a-zA-Z][a-zA-Z0-9+.-]*):/) || [])[1];
-      if (!scheme) {
-        // 相对路径/锚点放行；但协议相对 URL（//evil.com）会跳到外部站点，收紧拒绝
-        if (/^\/\//.test(u)) return { ok: false, url: u };
-        return { ok: true, url: u };
-      }
-      var s = scheme.toLowerCase();
-      if (s === 'http' || s === 'https' || s === 'mailto') return { ok: true, url: u };
-      // data: 仅放行非 SVG 的图片（SVG 可内嵌脚本/外链，收紧）
-      if (allowDataImage && s === 'data' && /^data:image\/(?!svg\b)/i.test(u)) return { ok: true, url: u };
-      return { ok: false, url: u };
-    }
-    // 6. Images: ![alt](url)
-    s = s.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, function (_, alt, url) {
-      var h = safeHref(url, true);
-      if (!h.ok) return _escapeHtml(alt || '图片');
-      return stashInline('<img src="' + _escapeHtml(h.url) + '" alt="' + _escapeHtml(alt).replace(/"/g, '&quot;') + '" loading="lazy" />');
-    });
-
-    s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function (_, text, url) {
-      var h = safeHref(url, false);
-      if (!h.ok) return '<span title="' + _escapeHtml(h.url) + '">' + _escapeHtml(text) + '</span>';
-      return '<a href="' + _escapeHtml(h.url) + '" target="_blank" rel="noopener noreferrer">' + _escapeHtml(text) + '</a>';
-    });
 
     // 7. Tables: | col1 | col2 |
     s = s.replace(/(^\|.+\|$\n^\|[-: |]+\|$\n(?:^\|.+\|$\n?)+)/gm, function (table) {
