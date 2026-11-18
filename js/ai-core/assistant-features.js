@@ -248,7 +248,7 @@
       var original;try{original=JSON.parse(init.body);}catch(_){return options.fetch(url,init);}
       var hasFiles=function(message){return message&&Array.isArray(message.attachments)&&message.attachments.some(function(a){return a&&(a.data_url||a.dataUrl);})||message&&Array.isArray(message.vision_urls)&&message.vision_urls.some(function(a){return typeof a==='string'&&a.indexOf('data:')===0;});};
       if(!hasFiles(original)&&!['messages','history'].some(function(key){return Array.isArray(original[key])&&original[key].some(hasFiles);}))return options.fetch(url,init);
-      var cid=/^[A-Za-z0-9-]{6,100}$/.test(original.conversation_id||'')?original.conversation_id:global.crypto.randomUUID();
+      var cid=/^[A-Za-z0-9_-]{6,100}$/.test(original.conversation_id||'')?original.conversation_id:global.crypto.randomUUID();
       var endpoint=String(url).replace(/\/(?:chat(?:\/stream)?|custom-chat\/(?:stream|deep-stream)|research\/stream)$/,'/attachments');
       async function reference(attachment){
         var data=attachment&&(attachment.data_url||attachment.dataUrl);if(typeof data!=='string'||data.indexOf('data:')!==0)return attachment;
