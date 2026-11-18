@@ -1785,6 +1785,10 @@ function renderProfileActivityList(kind) {
                     if (!resp.ok) {
                         var errMsg = payload.message || payload.error || '重试失败';
                         showCatAiStatus(commentIdStr, errMsg, true);
+                        // ★ 修复：重试失败后把按钮补回来，否则状态条只剩文字、无法再次重试。
+                        // 仅对可重试的失败（限流/服务端/网络）注入；blocked 等不可重试状态不注入。
+                        var retryable = resp.status === 429 || resp.status >= 500 || payload.retryable === true;
+                        if (retryable) retryBtnSetup(commentIdStr, postId);
                         return;
                     }
                     if (payload.status === 'completed') {
@@ -1797,6 +1801,7 @@ function renderProfileActivityList(kind) {
                     }
                     if (payload.status === 'rate_limited') {
                         showCatAiStatus(commentIdStr, payload.message || '调用过于频繁，请稍后再试', true);
+                        retryBtnSetup(commentIdStr, postId);
                         return;
                     }
                     // pending/processing - 开始轮询
@@ -1805,6 +1810,7 @@ function renderProfileActivityList(kind) {
                 } catch (e) {
                     console.error('[CatAI] retry failed:', e);
                     showCatAiStatus(commentIdStr, '重试失败，请检查网络后重试', true);
+                    retryBtnSetup(commentIdStr, postId);
                 }
             };
 
@@ -1847,16 +1853,23 @@ function renderProfileActivityList(kind) {
                     // ★ 插入失败：定向重渲染对应帖子
                     if (result.reason === 'source_comment_missing') {
                         try {
-                            // 尝试对对应 postId 执行一次定向帖子重渲染
+                            // 尝试对对应 postId 执行一次定向帖子重渲染。
+                            // ★ 修复：旧代码只传 { id: postId }，重绘出来的是没有作者、
+                            //   正文和图片的空壳卡片，会把原帖直接抹掉。必须用真实帖子数据。
                             var postEl = document.querySelector('.post[data-post-id="' + String(postId) + '"]');
-                            if (postEl && typeof renderPostCardSafely === 'function') {
+                            var postData = null;
+                            (feedAllPosts || []).some(function(item) {
+                                if (String(item && item.id) === String(postId)) { postData = item; return true; }
+                                return false;
+                            });
+                            if (postEl && postData && typeof renderPostCardSafely === 'function') {
                                 // 查找该帖子的评论数据
                                 var postComms = (feedAllComments || []).filter(function(c) {
                                     return String(c.post_id) === String(postId);
                                 });
                                 var maps = buildPostMaps([], postComms);
                                 var template = document.createElement('template');
-                                template.innerHTML = renderPostCardSafely({ id: postId }, maps.commentMap, maps.likeMap, maps.likeUserMap);
+                                template.innerHTML = renderPostCardSafely(postData, maps.commentMap, maps.likeMap, maps.likeUserMap);
                                 var newPost = template.content.firstElementChild;
                                 if (newPost && postEl.parentNode) {
                                     postEl.parentNode.replaceChild(newPost, postEl);

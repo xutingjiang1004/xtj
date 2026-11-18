@@ -92,11 +92,11 @@
          DCL 因此推迟到 4s 量级。preload 只提前「下载」，不改变执行顺序
          （defer 仍按文档顺序执行），构建脚本会同步刷新 ?v= 指纹。 -->
     <link rel="preload" as="script" href="js/vendor/supabase.min.js?v=e8c548fa1b" />
-    <link rel="preload" as="script" href="js/core.min.js?v=d722d16765" />
+    <link rel="preload" as="script" href="js/core.min.js?v=b00665cdbc" />
     <!-- 小猫 AI 模块按需加载，但实测它会被首屏图片请求挤在连接队列里几十秒，
          用户点开只看到「正在加载 AI 模块」且无法返回。这里在第一波就把它取下来，
          执行时机仍由模块加载器决定（不会提前执行）。 -->
-    <link rel="preload" as="script" href="js/ai-agent.min.js?v=9d480159a1" />
+    <link rel="preload" as="script" href="js/ai-agent.min.js?v=870b9c6950" />
     <!-- 照片墙与图片预览同样是按需模块。实测它们会被首屏图片请求挤住，
          表现为「点照片墙没反应」「点开照片几秒后黑屏」。这几个模块合计约 130KB
          （gzip 后 30KB 上下），提前取下来比让用户卡在空面板里划算。 -->
@@ -108,7 +108,7 @@
     <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=dbfb3cb4d3">
     <meta name="xtj-module-ai-reading-style" content="css/ai-reading.min.css?v=69f38f78de">
     <meta name="xtj-module-ai-features-style" content="css/ai-assistant-features.min.css?v=73be28d6e6">
-    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=9d480159a1">
+    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=870b9c6950">
     <meta name="xtj-module-photo-preview-style" content="css/photo-preview.min.css?v=897c087f70">
     <meta name="xtj-module-photo-preview" content="js/photo-wall/preview.min.js?v=6a48de6e2d">
     <meta name="xtj-module-photo-preview-hotfix" content="js/photo-wall/preview-hotfix.min.js?v=150b755e22">
@@ -1272,12 +1272,12 @@
     <script defer src="js/ai-core/errors.min.js?v=8b6848b214"></script>
     <script defer src="js/ai-core/request-controller.min.js?v=b064f8e5bf"></script>
     <script defer src="js/ai-core/transport.min.js?v=777765595a"></script>
-    <script defer src="js/ai-core/markdown-renderer.min.js?v=f0f2c7ab87"></script>
+    <script defer src="js/ai-core/markdown-renderer.min.js?v=95f86c5b1b"></script>
     <script defer src="js/ai-core/scroll-controller.min.js?v=34059556ba"></script>
     <script defer src="js/ai-core/stream-renderer.min.js?v=eed391db66"></script>
     <script defer src="js/ai-core/telemetry.min.js?v=3a5ac455ac"></script>
     <script defer src="js/ai-core/reading-tools.min.js?v=e729f4fc29"></script>
-    <script defer src="js/ai-core/assistant-features.min.js?v=10a2b87030"></script>
+    <script defer src="js/ai-core/assistant-features.min.js?v=2dbdcc2eb2"></script>
     <script defer src="js/ai-core/voice-conversation.min.js?v=fbe120183b"></script>
     <!-- Keep the database SDK on the same origin. The former public-CDN request
          was a single point of failure on restricted/mobile networks and could
@@ -1302,7 +1302,7 @@
     <script defer src="js/core-utils.min.js?v=a376d5219e"></script>
     <script defer src="js/photo-wall/story.min.js?v=a07892bc45"></script>
     <script defer src="js/voice-transcription.min.js?v=5cb3011971"></script>
-    <script defer src="js/core.min.js?v=d722d16765"></script>
+    <script defer src="js/core.min.js?v=b00665cdbc"></script>
     <script defer src="js/login-device.min.js?v=7f402fc787"></script>
     <script defer src="js/theme-toggle.min.js?v=f67dfa81a9"></script>
     <script defer src="js/desktop-shell.min.js?v=8420dc4713"></script>

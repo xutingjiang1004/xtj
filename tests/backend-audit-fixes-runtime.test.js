@@ -82,6 +82,13 @@ test('F7 background jobs enter the owner scope before writing private AI rows',a
  assert.equal(requests.at(-1).user_name,'alice');
  assert.throws(()=>runAsOwner('alice','',()=>{}),/ai_account_required/);
 });
+test('F10 adjacent event-handler attributes are stripped without leaving the second one behind',()=>{
+ const {sanitizeAssistantVisibleText}=require('../render-api/ai-sanitize');
+ for(const input of ['<img src=x onload="1"onerror="alert(1)">','<img/onerror=alert(1)>','<svg onload=alert(1)>']){
+  const output=sanitizeAssistantVisibleText(input);
+  assert.doesNotMatch(output,/on(?:load|error)\s*=/i);
+ }
+});
 
 test('dependency regression: compressed trailing bytes cannot terminate the Express process',async()=>{
  const zlib=require('node:zlib'),app=express();app.use(express.json());app.post('/body',(req,res)=>res.json({ok:true}));app.get('/health',(req,res)=>res.sendStatus(200));app.use((error,req,res,next)=>res.status(error.status||400).json({ok:false}));

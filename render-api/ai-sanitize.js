@@ -35,7 +35,14 @@ function sanitizeAssistantVisibleText(text, options) {
   // ★ 修复：`\S{0,64}` 在无空白超长正文上仍会退化成 O(n²) 回溯（每个起点把
   //   剩余文本吃进量词再逐字符回退找 "on"）。改为固定边界的前缀 + 有界属性值，
   //   单次匹配代价为常数级；用捕获组保留分隔符，避免误删前面的 `/` 或引号。
-  s = s.replace(/(^|[^\w-])on[a-z]{1,20}\s*=\s*(?:"[^"]{0,512}"|'[^']{0,512}'|[^\s>]{1,512})/gi, '$1 ');
+  // ★ 循环清理：相邻写法 `onload="1"onerror="alert(1)"` 中，第一次匹配会吃掉
+  //   前一个属性的闭合引号，紧随其后的 onerror 在同一轮没有可用的边界字符；
+  //   多跑几轮即可把紧邻的事件属性全部剥离。
+  for (var attrPass = 0; attrPass < 4; attrPass++) {
+    var strippedAttrs = s.replace(/(^|[^\w-])on[a-z]{1,20}\s*=\s*(?:"[^"]{0,512}"|'[^']{0,512}'|[^\s>]{1,512})/gi, '$1 ');
+    if (strippedAttrs === s) break;
+    s = strippedAttrs;
+  }
   // Neutralize dangerous URL protocols that survive markdown rendering.
   // ① 实体编码 scheme 绕过（javascript&#58; / javascript&#x3a;）：markdown 链接
   // `[x](javascript&#58;alert(1))` 渲染后浏览器解码属性值为 javascript: 即恢复执行。

@@ -127,10 +127,15 @@
     // Strip dangerous tags
     s = s.replace(BLOCKED_TAGS_RE, '');
     // Strip event handlers / style attrs (quoted and unquoted values, incl. no-space boundary)
-    // 保留边界字符：避免 <img src="x"onerror="a"onload="b"> 时连边界一起删导致相邻属性存活
-    s = s.replace(BLOCKED_ATTRS_RE, function (m, p1) { return p1 || ''; });
-    // Strip entity-encoded event handler attribute names（同样保留边界字符）
-    s = s.replace(BLOCKED_ATTRS_ENTITY_RE, function (m, p1) { return p1 || ''; });
+    // 保留边界字符：避免 <img src="x"onerror="a"onload="b"> 时连边界一起删导致相邻属性存活。
+    // 相邻属性会消费掉前一个属性的闭合引号，因此循环清理直到稳定。
+    for (var attrPass = 0; attrPass < 4; attrPass++) {
+      var beforeAttrs = s;
+      s = s.replace(BLOCKED_ATTRS_RE, function (m, p1) { return p1 || ''; });
+      // Strip entity-encoded event handler attribute names（同样保留边界字符）
+      s = s.replace(BLOCKED_ATTRS_ENTITY_RE, function (m, p1) { return p1 || ''; });
+      if (s === beforeAttrs) break;
+    }
     // 统一校验 href/src 值：先解码 HTML 实体（&#x61; → a），再剥离空白
     // （java&#x09;script → javascript），最后用 new URL 取 protocol 做白名单判定，
     // 非 http/https/mailto（及 data:image 非 svg）一律降级为 '#'
@@ -177,28 +182,20 @@
     s = s.replace(/```(\w*)\n([\s\S]*)$/g, fencedCodeToPlaceholder);
 
     // 2. Inline code: `code`
-    s = s.replace(/`([^`]+)`/g, function (_, code) {
-      return '<code>' + _escapeHtml(code) + '</code>';
-    });
-
-    // 3. Bold: **text** / __text__；Italic: *text* / _text_；Bold+Italic: ***text*** / ___text___
-    // ★ 修复（AI 回复出现字面量 </strong>）：加粗/斜体先替换成占位符、最后统一还原，
-    //   避免斜体步骤把加粗步骤产出的 <strong> 当作内容再次转义（例如 ***重要***
-    //   会被渲染成字面量 <strong>重要</strong>，界面上出现 </strong> 残留）。
+    //    ★ 修复：行内代码与链接/图片一样先收进占位符。否则后续列表/表格/
+    //    标题/引用的 _escapeHtml 会把 <code> 二次转义成字面量 &lt;code&gt;，
+    //    加粗/斜体也会改写已经生成的代码内容。
     var inlineStore = [];
     function stashInline(html) {
       var idx = inlineStore.length;
       inlineStore.push(html);
       return '\x00INLINE' + idx + '\x00';
     }
-    s = s.replace(/\*\*\*([^*]+)\*\*\*/g, function (_, t) { return stashInline('<strong><em>' + _escapeHtml(t) + '</em></strong>'); });
-    s = s.replace(/___([^_]+)___/g, function (_, t) { return stashInline('<strong><em>' + _escapeHtml(t) + '</em></strong>'); });
-    s = s.replace(/\*\*([^*]+)\*\*/g, function (_, t) { return stashInline('<strong>' + _escapeHtml(t) + '</strong>'); });
-    s = s.replace(/__([^_]+)__/g, function (_, t) { return stashInline('<strong>' + _escapeHtml(t) + '</strong>'); });
-    s = s.replace(/\*([^*]+)\*/g, function (_, t) { return stashInline('<em>' + _escapeHtml(t) + '</em>'); });
-    s = s.replace(/_([^_]+)_/g, function (_, t) { return stashInline('<em>' + _escapeHtml(t) + '</em>'); });
+    s = s.replace(/`([^`]+)`/g, function (_, code) {
+      return stashInline('<code>' + _escapeHtml(code) + '</code>');
+    });
 
-    // 5. Links: [text](url)
+    // 3. Links / images 先于加粗斜体解析，避免 URL 里的 _xxx_ 被当成斜体拆坏。
     // ★ 修复（XSS）：协议白名单 + 实体转义。原实现只转义双引号，`[x](jav&#x61;script:alert(1))`
     // 这类实体编码协议可绕过 sanitizeHtml 的 JS_URL_RE（仅匹配字面 javascript/vbscript），
     // 浏览器解析实体后点击即执行。此处统一校验 scheme，非 http/https/mailto 一律降级为纯文本。
@@ -216,18 +213,30 @@
       if (allowDataImage && s === 'data' && /^data:image\/(?!svg\b)/i.test(u)) return { ok: true, url: u };
       return { ok: false, url: u };
     }
-    // 6. Images: ![alt](url)
+    // 4. Images: ![alt](url)
     s = s.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, function (_, alt, url) {
       var h = safeHref(url, true);
       if (!h.ok) return _escapeHtml(alt || '图片');
       return stashInline('<img src="' + _escapeHtml(h.url) + '" alt="' + _escapeHtml(alt).replace(/"/g, '&quot;') + '" loading="lazy" />');
     });
 
+    // 5. Links: [text](url)
     s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function (_, text, url) {
       var h = safeHref(url, false);
-      if (!h.ok) return '<span title="' + _escapeHtml(h.url) + '">' + _escapeHtml(text) + '</span>';
-      return '<a href="' + _escapeHtml(h.url) + '" target="_blank" rel="noopener noreferrer">' + _escapeHtml(text) + '</a>';
+      if (!h.ok) return stashInline('<span title="' + _escapeHtml(h.url) + '">' + _escapeHtml(text) + '</span>');
+      return stashInline('<a href="' + _escapeHtml(h.url) + '" target="_blank" rel="noopener noreferrer">' + _escapeHtml(text) + '</a>');
     });
+
+    // 6. Bold: **text** / __text__；Italic: *text* / _text_；Bold+Italic: ***text*** / ___text___
+    // ★ 修复（AI 回复出现字面量 </strong>）：加粗/斜体先替换成占位符、最后统一还原，
+    //   避免斜体步骤把加粗步骤产出的 <strong> 当作内容再次转义（例如 ***重要***
+    //   会被渲染成字面量 <strong>重要</strong>，界面上出现 </strong> 残留）。
+    s = s.replace(/\*\*\*([^*]+)\*\*\*/g, function (_, t) { return stashInline('<strong><em>' + _escapeHtml(t) + '</em></strong>'); });
+    s = s.replace(/___([^_]+)___/g, function (_, t) { return stashInline('<strong><em>' + _escapeHtml(t) + '</em></strong>'); });
+    s = s.replace(/\*\*([^*]+)\*\*/g, function (_, t) { return stashInline('<strong>' + _escapeHtml(t) + '</strong>'); });
+    s = s.replace(/__([^_]+)__/g, function (_, t) { return stashInline('<strong>' + _escapeHtml(t) + '</strong>'); });
+    s = s.replace(/\*([^*]+)\*/g, function (_, t) { return stashInline('<em>' + _escapeHtml(t) + '</em>'); });
+    s = s.replace(/_([^_]+)_/g, function (_, t) { return stashInline('<em>' + _escapeHtml(t) + '</em>'); });
 
     // 7. Tables: | col1 | col2 |
     s = s.replace(/(^\|.+\|$\n^\|[-: |]+\|$\n(?:^\|.+\|$\n?)+)/gm, function (table) {

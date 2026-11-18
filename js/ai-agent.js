@@ -1093,9 +1093,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
    * 因为"漏了一条规则"而被绕过。
    */
   var SVG_ALLOWED_TAGS = {
-    svg: 1, g: 1, rect: 1, circle: 1, ellipse: 1, line: 1, polyline: 1, polygon: 1,
-    path: 1, text: 1, tspan: 1, title: 1, desc: 1, defs: 1,
-    linearGradient: 1, radialGradient: 1, stop: 1, clipPath: 1
+    svg: 'svg', g: 'g', rect: 'rect', circle: 'circle', ellipse: 'ellipse', line: 'line', polyline: 'polyline', polygon: 'polygon',
+    path: 'path', text: 'text', tspan: 'tspan', title: 'title', desc: 'desc', defs: 'defs',
+    lineargradient: 'linearGradient', radialgradient: 'radialGradient', stop: 'stop', clippath: 'clipPath'
   };
   var SVG_ALLOWED_ATTRS = {
     xmlns: 1, viewBox: 1, width: 1, height: 1, x: 1, y: 1, x1: 1, y1: 1, x2: 1, y2: 1,
@@ -1125,7 +1125,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   }
   function copySvgNode(src, dest) {
     var tag = String(src.nodeName || '').toLowerCase();
-    if (!SVG_ALLOWED_TAGS[tag]) return;
+    var canonicalTag = SVG_ALLOWED_TAGS[tag];
+    if (!canonicalTag) return;
     // 属性白名单：只复制呈现类属性，任何 on* 与 href/xlink:href 一律丢弃
     for (var i = 0; i < src.attributes.length; i++) {
       var attr = src.attributes[i];
@@ -1148,8 +1149,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         dest.appendChild(textNode);
       } else if (child.nodeType === 1) {
         var childTag = String(child.nodeName || '').toLowerCase();
-        if (!SVG_ALLOWED_TAGS[childTag]) continue;
-        var childEl = document.createElementNS('http://www.w3.org/2000/svg', childTag);
+        var canonicalChild = SVG_ALLOWED_TAGS[childTag];
+        if (!canonicalChild) continue;
+        var childEl = document.createElementNS('http://www.w3.org/2000/svg', canonicalChild);
         copySvgNode(child, childEl);
         dest.appendChild(childEl);
       }
@@ -1680,7 +1682,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // Some providers flatten Markdown blocks into one line. Repair only clear
     // block boundaries; fenced and inline code keep their literal contents.
     var inlineCode = [];
-    s = s.replace(/`[^`\n]*`/g, function(code) { inlineCode.push(code); return '\x00XIC' + (inlineCode.length - 1) + '\x00'; });
+    // ★ 只暂存代码正文（不含反引号）。占位符要一直保留到块级语法处理完，
+    //   否则代码里的 *、|、_ 会被加粗/斜体/表格拆分改写。
+    s = s.replace(/`[^`\n]*`/g, function(code) { inlineCode.push(code.slice(1, -1)); return '\x00XIC' + (inlineCode.length - 1) + '\x00'; });
     s = s.replace(/([^\n])[ \t]+(#{1,6})[ \t]+/g, '$1\n\n$2 ');
     s = s.replace(/[^\n]+/g, function(line) {
       if (!/\|[ \t]*:?-{3,}:?[ \t]*\|/.test(line) || !/\|[ \t]+\|/.test(line)) return line;
@@ -1691,7 +1695,6 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (separatorIndex !== 1 || rows.length < 3) return line;
       return (prefix ? prefix + '\n\n' : '\n\n') + rows.map(function(row) { return '|' + row.trim().replace(/^\|/, '').replace(/\|$/, '') + '|'; }).join('\n') + '\n\n' + suffix;
     });
-    s = s.replace(/\x00XIC(\d+)\x00/g, function(_, index) { return inlineCode[Number(index)] || ''; });
     // ★ 普通正文：HTML 转义
     s = s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
@@ -1771,6 +1774,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     });
     // ★ 恢复代码块
     s = s.replace(/\x00XCB(\d+)\x00/g, function(m, idx) { return codeBlocks[parseInt(idx)] || ''; });
+    // ★ 块级语法处理完再还原行内代码：此时代码正文只转义一次，且不会被
+    //   加粗/斜体/表格/列表改写。
+    s = s.replace(/\x00XIC(\d+)\x00/g, function(_, index) {
+      return '<code>' + escapeHtml(inlineCode[Number(index)] || '') + '</code>';
+    });
     // Parse only the already-escaped markup. Paragraph boundaries belong to
     // layout, rather than extra <br> rows around headings, lists and code.
     var holder = document.createElement('div'); holder.innerHTML = s;
