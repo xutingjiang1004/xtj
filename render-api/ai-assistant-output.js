@@ -43,7 +43,7 @@ function contextEstimate(messages, details={}) {
     else for(const part of Array.isArray(message.content)?message.content:[]){if(part.type==='text')text+=String(part.text||'');else if(part.type==='image_url')images++;}
   }
   const cjk=(text.match(/[\u3400-\u9fff]/g)||[]).length;
-  return {estimated_tokens:Math.ceil(cjk*1.5+(text.length-cjk)/4),text_characters:text.length,image_count:images,
+  return {estimated_tokens:Math.ceil(cjk*0.85+(text.length-cjk)/4)+images*2048,text_characters:text.length,image_count:images,
     history_retained:Number(details.retained)||0,history_omitted:Math.max(0,(Number(details.supplied)||0)-(Number(details.retained)||0)),
     exact_window:null,includes_system_prompt:true,additional_tool_context:true};
 }
@@ -88,7 +88,7 @@ function createSafeAssistantStream(options = {}) {
       const suffix = text.slice(index).toLowerCase().replace(/[\s|｜]/g, '');
       const before = published + text.slice(0, index);
       const inCode = insideFence(before);
-      if (inCode && (FOLLOWUP_OPEN.startsWith(suffix) || FOLLOWUP_CLOSE.startsWith(suffix) || suffix.startsWith('<xtj-followups') || suffix.startsWith('</xtj-followups'))) continue;
+      if (inCode) continue;
       if (suffix === '<' || suffix === '</' || heads.some(head => head.startsWith(suffix) || suffix.startsWith(head))) return index;
     }
     return -1;
