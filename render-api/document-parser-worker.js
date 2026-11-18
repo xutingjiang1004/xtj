@@ -35,12 +35,12 @@ function validateOfficeZip(buffer) {
   } catch (error) {
     // No ZIP signature at byte 0: let legacy .xls through; a real ZIP with a
     // broken central directory is rejected.
-    if (!looksZip) return;
+    const isOle2 = buffer.length >= 4 && buffer.readUInt32LE(0) === 0xe011cfd0; const isZipBomb = error && (error.message === 'document_expansion_limit' || error.message === 'invalid_zip_size'); if (workerData.kind === 'xlsx' && isOle2 && !isZipBomb) return;
     throw error;
   }
 }
 async function parse() {
-  const buffer = Buffer.from(workerData.bytes);
+  const buffer = Buffer.from(workerData.bytes.buffer, workerData.bytes.byteOffset, workerData.bytes.byteLength);
   if (workerData.kind === 'pdf') {
     const library = require('pdf-parse');
     if (typeof library === 'function') return library(buffer);
