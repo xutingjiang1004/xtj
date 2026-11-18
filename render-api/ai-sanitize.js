@@ -35,7 +35,7 @@ function sanitizeAssistantVisibleText(text, options) {
   // ★ 修复：`\S{0,64}` 在无空白超长正文上仍会退化成 O(n²) 回溯（每个起点把
   //   剩余文本吃进量词再逐字符回退找 "on"）。改为固定边界的前缀 + 有界属性值，
   //   单次匹配代价为常数级；用捕获组保留分隔符，避免误删前面的 `/` 或引号。
-  s = s.replace(/(^|[^\w-])on[a-z]{1,20}\s*=\s*(?:"[^"]{0,512}"|'[^']{0,512}'|[^\s>]{1,512})/gi, '$1 ');
+  var prev; do { prev = s; s = s.replace(/(^|[^\w-])on[a-z]{1,32}\s*=\s*(?:"[^"]*"|'[^']*'|`[^`]*`|[^\s>]+)/gi, '$1 '); } while (s !== prev);
   // Neutralize dangerous URL protocols that survive markdown rendering.
   // ① 实体编码 scheme 绕过（javascript&#58; / javascript&#x3a;）：markdown 链接
   // `[x](javascript&#58;alert(1))` 渲染后浏览器解码属性值为 javascript: 即恢复执行。
@@ -52,7 +52,7 @@ function sanitizeAssistantVisibleText(text, options) {
   // 1. Drop standalone parenthetical lines (full/half width / square brackets, ≥3 chars).
   //    Whitelist lines that look like API notes, prices, versions, links, etc.
   s = s.split(/\r?\n/).map(function(line) {
-    var m = line.match(/^\s*[（(【][^）)】]{3,200}[）)】]\s*$/);
+    var m = line.match(/^\s*[（(][^）)]{3,200}[）)]\s*$/);
     if (!m) return line;
     var inner = m[0].replace(/[（(【）)】\s]/g, '');
     if (/^(?:api|v\d|http|https|www|价格|元|美元|欧元|港元|台币|万|亿|GB|MB|KB|版|号|年|月|日|周)/i.test(inner) || /[0-9]/.test(inner)) return line;
@@ -61,7 +61,7 @@ function sanitizeAssistantVisibleText(text, options) {
 
   // 2-3. Split action regexes to avoid a single catastrophic pattern (ReDoS).
   var actionSets = [
-    '屏幕[上中前里]|镜头[拉推切]|背景[音乐音效]|空气[里中]?[仿佛凝]|灯光[暗亮闪]|白芒|光芒[闪四]',
+    '屏幕[中前]|镜头[拉推切]|背景[音乐音效]|空气[里中]?[仿佛凝]|灯光[暗亮闪]|白芒|光芒[闪四]',
     '低声[说笑]|笑了笑|轻轻一笑|轻笑[着]?[道说]?|苦笑[着]?[道说]?|沉默[了半片]|叹了[口]?气|叹道|叹了口气',
     '抬起头|低下头|偏了偏头|歪了歪头|侧了侧头|扭了扭头|转过头|转过身|伸出手|伸出爪|缩回[了手成]|抖了抖|晃了晃',
     '点了点头|摇了摇头|摆了摆手|挥了挥手|站起[身来]?|坐[了下]?下|趴[了下]?下|蹲[了下]?下',
@@ -69,7 +69,7 @@ function sanitizeAssistantVisibleText(text, options) {
     '摇了摇[头尾]|甩了甩[头尾]|敲了敲|靠在[了]?[床头墙椅]?|抱着[了]?[手臂胸]?|搂着[了]?',
     '发出[一]?[阵阵声]|传来[一]?[阵阵声]|响起[一]?[阵阵声]|回荡[着在]|充满[了]?|浮现[出在]',
     '感到[一]?[阵阵]?|仿佛[一]?[股阵道]|猛[地然]|瞬间[间]?|顿[了]?[顿]?|愣[了]?[愣]?|怔[了]?[怔]?|呆[了]?[呆]?',
-    '张[了]?[嘴口]|闭[了]?[嘴眼]|合[了]?[上眼]|按下[了]?|周[围的环境]|四[周环]|窗[外口]|门[外口]',
+    '张[了]?[嘴口]|闭[了]?[嘴眼]|合[了]?[上眼]|周[围的环境]|四[周环]|窗[外口]|门[外口]',
     '不再[说言语]|再也[不没]|终于[还]|仍然[还]|依然[还]|瞥[了]?[一]?眼|盯[着]?[了]?',
     '扯[了]?[嘴嘴角]?|勾[了]?[嘴角]?|扬[了]?[眉嘴角]?|挑[了]?[眉]?|皱[了]?[眉]?',
     '呼出[一]?[口气]?|深吸[一]?[口气]?|爪子[轻挠挠]|猫耳[竖抖]|毛茸茸[的尾巴脑袋]?|尾巴[轻晃摇]'
