@@ -80,7 +80,7 @@ function clip(value, max) {
 function stripHtml(html) {
   // Block-level tags become line breaks; inline tags (code, b, i, a ...) vanish without leaving stray spaces.
   return decodeEntities(String(html == null ? '' : html).replace(/<(script|style)[\s\S]*?<\/\1>/gi, ' ').replace(/<br\s*\/?>|<\/(p|li|pre|div|h[1-6]|tr|blockquote)>/gi, '\n').replace(/<[^>]+>/g, ''))
-    .replace(/[ \t\f\v]+/g, ' ').replace(/ ?\n ?/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+    .replace(/<(script|style)[\s\S]*?<\/\1>/gi, ' ').replace(/<[^>]+>/g, '').replace(/[ \t\f\v]+/g, ' ').replace(/ ?\n ?/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 // Like clip(), but keeps line breaks (answers and READMEs read better with their paragraphs).
 function clipText(value, max) {
@@ -365,7 +365,7 @@ function createKnowledgeTools(options) {
     const repo = repoOf(args.repo); if (!repo) return plainError('github_repo', '请给出 owner/name 形式的仓库，如 nodejs/node');
     const base = 'https://api.github.com/repos/' + enc(repo.owner) + '/' + enc(repo.name);
     try {
-      const info = await getJson('github_repo', base, { headers: ghHeaders() });
+      const info = await getJson('github_repo', base, { headers: ghHeaders() }); if (!info || info.private || info.visibility === 'private') return plainError('github_repo', '没有找到这个公开仓库');
       const [release, readme] = await Promise.all([
         getJson('github_repo', base + '/releases/latest', { headers: ghHeaders() }).catch(() => null),
         args.include_readme === false ? Promise.resolve(null) : get(base + '/readme', { headers: ghHeaders('application/vnd.github.raw+json'), maxBytes: 600 * 1024 }).then(r => r.ok ? r.text : null).catch(() => null)
@@ -389,7 +389,7 @@ function createKnowledgeTools(options) {
     const limit = count(args.limit, 6, 1, 10);
     const q = ['repo:' + repo.owner + '/' + repo.name, kind === 'issue' ? 'is:issue' : kind === 'pr' ? 'is:pr' : '', state === 'all' ? '' : 'is:' + state, searchText(args.query)].filter(Boolean).join(' ');
     try {
-      const data = await getJson('github_issues', 'https://api.github.com/search/issues?q=' + enc(q) + '&per_page=' + limit + '&sort=updated&order=desc', { headers: ghHeaders() });
+      if (args.repo) { const info = await getJson('github_issues', 'https://api.github.com/repos/' + enc(repo.owner) + '/' + enc(repo.name), { headers: ghHeaders() }); if (!info || info.private || info.visibility === 'private') return plainError('github_issues', '没有找到这个公开仓库'); } const data = await getJson('github_issues', 'https://api.github.com/search/issues?q=' + enc(q) + '&per_page=' + limit + '&sort=updated&order=desc', { headers: ghHeaders() });
       const items = (data.items || []).map(i => ({ title: i.title, url: i.html_url, snippet: clip(i.body, 160), meta: (i.pull_request ? 'PR' : 'issue') + ' #' + i.number + ' · ' + i.state + ' · ' + (i.user && i.user.login) + ' · ' + i.comments + ' 评论 · 更新 ' + String(i.updated_at || '').slice(0, 10) }));
       if (!items.length) return { tool_name: 'github_issues', query: q, results_count: 0, content: '没有匹配的 issue / PR。' };
       return { tool_name: 'github_issues', query: q, results_count: items.length, content: '共匹配 ' + (data.total_count || items.length) + ' 条，显示 ' + items.length + ' 条：\n' + items.map((i, n) => (n + 1) + '. ' + i.title + '｜' + i.meta + (i.snippet ? '\n   ' + i.snippet : '') + '\n   ' + i.url).join('\n'),
