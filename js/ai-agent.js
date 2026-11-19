@@ -861,7 +861,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   }
 
   async function fetchAiQuota(force) {
-    if (!window.currentUser) return S.quota;
+    
     if (!force && S.quota && (Date.now() - S.quotaFetchedAt) < 20000 && S._quotaInflight) {
       return S._quotaInflight;
     }
@@ -927,7 +927,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   function canSendWithQuota() {
     var q = S.quota;
     // 访客没有账号额度；是否放行由 ensureUserAuthOrNotify 按后台开关决定。
-    if (!readUserName()) return { ok: true };
+    
     if (!q) {
       // 额度信息缺失（拉取失败/未完成）：开启搜索时一律不放行，避免绕过第三方搜索次数限制
       if (S.webSearchEnabled) {
@@ -940,10 +940,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // 「已用完」而拦截，导致兑换无限额邀请码后仍提示额度不足。改为以 can_chat 为主，
     // 仅在非无限时再判 remaining<=0。
     var _tokUnlimited = q.tokens_unlimited === true || Number(q.tokens_limit) === -1;
-    if (q.can_chat === false ||
-        (!_tokUnlimited && typeof q.tokens_remaining === 'number' && q.tokens_remaining <= 0)) {
-      return { ok: false, reason: 'token_limit', message: '今日 AI 额度已用完，开通 Pro 可获得 10 倍额度' };
-    }
+    if (q.exhausted_window === 'week' || (!_tokUnlimited && typeof q.window_week_remaining === 'number' && q.window_week_remaining <= 0)) { return { ok: false, reason: 'token_limit_week', message: '本周 AI 额度已用完（周一 00:00 重置），开通 Pro 可获得 10 倍额度' }; } if (q.can_chat === false || (!_tokUnlimited && typeof q.tokens_remaining === 'number' && q.tokens_remaining <= 0)) { var _cd = ''; if (q.window_5h_reset_at) { var _diffMs = Math.max(0, new Date(q.window_5h_reset_at).getTime() - Date.now()); var _mins = Math.ceil(_diffMs / 60000); if (_mins > 0) { var _h = Math.floor(_mins / 60), _m = _mins % 60; _cd = _h > 0 ? (_m > 0 ? _h + ' 小时 ' + _m + ' 分钟' : _h + ' 小时') : (_m + ' 分钟'); } } return { ok: false, reason: 'token_limit_5h', message: _cd ? '5 小时 AI 额度已用完（约 ' + _cd + ' 后恢复），开通 Pro 可获得 10 倍额度' : '5 小时 AI 额度已用完，开通 Pro 可获得 10 倍额度' }; }
     if (S.webSearchEnabled && searchQuotaExhausted(q)) {
       return { ok: false, reason: 'search_limit', message: '今日网页搜索次数已达上限，开通 Pro 可无限搜索' };
     }
@@ -15934,14 +15931,7 @@ function showChatMessages() {
     }
     function renderQuotaUI() {
       var q = S.quota || defaultQuotaShape();
-      var used = Math.max(0, Number(q.tokens_used) || 0);
-      // tokens_limit: -1 = 无限（与 search 的 -1 语义一致）
-      var tokensUnlimited = Number(q.tokens_limit) === -1;
-      var limit = tokensUnlimited ? -1 : Math.max(1, Number(q.tokens_limit) || FREE_TOKEN_DEFAULT);
-      var pct = tokensUnlimited ? 0
-        : (typeof q.tokens_percent === 'number'
-          ? Math.min(100, Math.max(0, q.tokens_percent))
-          : Math.min(100, Math.round((used * 1000) / limit) / 10));
+      function fmtReset(iso) { if (!iso) return ''; var ms = Math.max(0, new Date(iso).getTime() - Date.now()); if (!isFinite(ms) || ms <= 0) return ''; var mins = Math.ceil(ms / 60000); var h = Math.floor(mins / 60), m = mins % 60; return (h > 0 ? (m > 0 ? h + 'h ' + m + 'm' : h + 'h') : (m + 'm')) + '后重置'; } var _rawUsed5h = q.window_5h_used != null ? q.window_5h_used : q.tokens_used; var _rawLimit5h = q.window_5h_limit != null ? q.window_5h_limit : q.tokens_limit; var used = Math.max(0, Number(_rawUsed5h) || 0); var tokensUnlimited = Number(_rawLimit5h) === -1; var limit = tokensUnlimited ? -1 : Math.max(1, Number(_rawLimit5h) || FREE_TOKEN_DEFAULT); var _rawPct5h = typeof q.window_5h_percent === 'number' ? q.window_5h_percent : q.tokens_percent; var pct = tokensUnlimited ? 0 : (typeof _rawPct5h === 'number' ? Math.min(100, Math.max(0, _rawPct5h)) : Math.min(100, Math.round((used * 1000) / limit) / 10));
       var fill = panelShell.querySelector('#aiQuotaBarFill');
       var tokenText = panelShell.querySelector('#aiQuotaTokenText');
       var pctText = panelShell.querySelector('#aiQuotaPercentText');
@@ -15955,12 +15945,7 @@ function showChatMessages() {
         fill.classList.toggle('is-warn', pct >= 70 && pct < 92);
         fill.classList.toggle('is-danger', pct >= 92);
       }
-      if (tokenText) {
-        tokenText.textContent = tokensUnlimited
-          ? formatTokenCount(used) + ' / 无限 tokens'
-          : formatTokenCount(used) + ' / ' + formatTokenCount(limit) + ' tokens';
-      }
-      if (pctText) pctText.textContent = pct + '%';
+      if (tokenText) { var _r5 = fmtReset(q.window_5h_reset_at); tokenText.textContent = (tokensUnlimited ? ('5小时: ' + formatTokenCount(used) + ' / 无限') : ('5小时: ' + formatTokenCount(used) + ' / ' + formatTokenCount(limit))) + (_r5 ? '（' + _r5 + '）' : ''); } if (pctText) pctText.textContent = pct + '%'; var _barTrack = fill && fill.parentElement; var _weekWrap = panelShell.querySelector('#aiQuotaWeekWrap'); if (!_weekWrap && _barTrack && _barTrack.parentElement) { _weekWrap = document.createElement('div'); _weekWrap.id = 'aiQuotaWeekWrap'; _weekWrap.style.marginTop = '8px'; _weekWrap.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;margin-bottom:4px;opacity:.9;"><span id="aiQuotaWeekText"></span><span id="aiQuotaWeekPercentText"></span></div><div class="' + (_barTrack.className || '') + '"><div id="aiQuotaWeekBarFill" class="' + (fill ? fill.className.replace(/\bis-(warn|danger)\b/g, '').trim() : '') + '"></div></div>'; _barTrack.parentElement.insertBefore(_weekWrap, _barTrack.nextSibling); } if (_weekWrap) { var _wUsed = Math.max(0, Number(q.window_week_used) || 0); var _wRawLimit = q.window_week_limit != null ? q.window_week_limit : (tokensUnlimited ? -1 : limit * 10); var _wUnlimited = Number(_wRawLimit) === -1; var _wLimit = _wUnlimited ? -1 : Math.max(1, Number(_wRawLimit) || (limit * 10)); var _wPct = _wUnlimited ? 0 : (typeof q.window_week_percent === 'number' ? Math.min(100, Math.max(0, q.window_week_percent)) : Math.min(100, Math.round((_wUsed * 1000) / _wLimit) / 10)); var _wFill = _weekWrap.querySelector('#aiQuotaWeekBarFill'); var _wText = _weekWrap.querySelector('#aiQuotaWeekText'); var _wPctText = _weekWrap.querySelector('#aiQuotaWeekPercentText'); if (_wFill) { _wFill.style.width = _wPct + '%'; _wFill.classList.toggle('is-warn', _wPct >= 70 && _wPct < 92); _wFill.classList.toggle('is-danger', _wPct >= 92); } if (_wText) _wText.textContent = _wUnlimited ? ('本周: ' + formatTokenCount(_wUsed) + ' / 无限（周一00:00重置 · V4 Pro 3×）') : ('本周: ' + formatTokenCount(_wUsed) + ' / ' + formatTokenCount(_wLimit) + '（周一00:00重置 · V4 Pro 3×）'); if (_wPctText) _wPctText.textContent = _wPct + '%'; }
       // 搜索额度：只看 search_unlimited / search_limit，不要用 is_pro 一刀切成「无限」
       // （邀请码可给 Pro + 自定义每日搜索次数，例如 10 次/天）
       var searchUsed = Math.max(0, Number(q.search_used) || 0);
@@ -15976,7 +15961,7 @@ function showChatMessages() {
         }
       }
       if (planBadge) {
-        planBadge.textContent = q.is_pro ? 'Pro' : '免费';
+        planBadge.textContent = q.is_pro ? 'Pro' : ((q.is_guest || !window.currentUser) ? '游客' : '免费');
         planBadge.classList.toggle('is-pro', !!q.is_pro);
       }
       if (proTitle) proTitle.textContent = q.is_pro ? 'Pro 会员' : '开通 Pro';
