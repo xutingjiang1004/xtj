@@ -4898,6 +4898,7 @@ app.use(function(req, res, next) {
 
   next();
 });
+app.get('/e2e941d43e7939bcf08fba3d23de854a.txt', function(req, res) { return res.type('text/plain').send('fcd3063715a122ced73ffda7d5395097dec75b09'); });
 
 // 阻止敏感路径被静态文件服务泄露
 // ★ C-1 修复：req.path 不解码百分号编码，黑名单必须先用解码后的路径匹配，
