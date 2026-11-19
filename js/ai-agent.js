@@ -15561,7 +15561,7 @@ function showChatMessages() {
         '<div class="ai-panel-page is-active" id="aiPanelPrimary" data-page="primary">' +
           '<div class="ai-quota-card" id="aiQuotaCard" role="status" aria-live="polite">' +
             '<div class="ai-quota-card-head">' +
-              '<span class="ai-quota-card-title">今日额度</span>' +
+              '<span class="ai-quota-card-title">AI 额度</span>' +
               '<span class="ai-quota-plan-badge" id="aiQuotaPlanBadge">免费</span>' +
             '</div>' +
             '<div class="ai-quota-bar" aria-hidden="true"><i id="aiQuotaBarFill"></i></div>' +
