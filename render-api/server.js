@@ -4194,7 +4194,7 @@ async function finishStream(res, opt) {
   // 精确扣减 token（输入 + 思考 + 输出）与搜索次数
   var doneUsage = opt.usage && typeof opt.usage === 'object' && Object.keys(opt.usage).length ? opt.usage : null;
   var quotaAfter = null;
-  if (hasContent && opt.userName) {
+  if (hasContent && (opt.quotaCtx || opt.userName)) {
     try {
       var searchHits = 0;
       // F-1: 优先使用 handler 传入的请求级真实搜索 API 调用次数，
@@ -4206,7 +4206,7 @@ async function finishStream(res, opt) {
       } else if (searchMeta && Array.isArray(searchMeta.results) && searchMeta.results.length) {
         searchHits = 1;
       }
-      quotaAfter = await recordAiTurnUsage(opt.userName, doneUsage, {
+      var _finishMeta = {
         conversation_id: opt.convId,
         model: usedModel,
         source: 'chat_stream',
@@ -4215,7 +4215,7 @@ async function finishStream(res, opt) {
         reasoning: reasoning,
         search_count: searchHits,
         did_search: searchHits > 0
-      });
+      }; quotaAfter = opt.quotaCtx ? await recordAiTurnUsageForContext(opt.quotaCtx, doneUsage, _finishMeta) : await recordAiTurnUsage(opt.userName, doneUsage, _finishMeta);
     } catch (eQuota) {
       console.error('[AI-QUOTA] finishAgentStream record failed:', eQuota && eQuota.message);
     }
@@ -4274,7 +4274,7 @@ async function finishStream(res, opt) {
 //   避免出现两套统计。调用方需保证：仅在确实发生过上游调用时才调用（避免空扣）。
 async function recordAbortedStreamUsage(userName, opt) {
   try {
-    if (!userName) return null;
+    if (!userName && !(opt && opt.quotaCtx)) return null;
     opt = opt || {};
     var usage = (opt.usage && typeof opt.usage === 'object' && Object.keys(opt.usage).length) ? opt.usage : null;
     var content = String(opt.content || '');
@@ -4288,7 +4288,7 @@ async function recordAbortedStreamUsage(userName, opt) {
     } else if (opt.searchMeta && typeof opt.searchMeta.count === 'number' && opt.searchMeta.count > 0) {
       searchHits = opt.searchMeta.count;
     }
-    return await recordAiTurnUsage(userName, usage, {
+    var _abortMeta = {
       conversation_id: opt.convId || null,
       model: normalizeDeepSeekUsageModel(opt.usedModel || DEEPSEEK_MODEL_REASONER, opt.usedModel || DEEPSEEK_MODEL_REASONER),
       source: opt.source || 'chat_stream_aborted',
@@ -4298,7 +4298,7 @@ async function recordAbortedStreamUsage(userName, opt) {
       search_count: searchHits,
       did_search: searchHits > 0,
       aborted: true
-    });
+    }; return opt.quotaCtx ? await recordAiTurnUsageForContext(opt.quotaCtx, usage, _abortMeta) : await recordAiTurnUsage(userName, usage, _abortMeta);
   } catch (e) {
     console.error('[AI-QUOTA] recordAbortedStreamUsage failed:', e && e.message);
     return null;
@@ -8879,7 +8879,7 @@ async function callDeepSeek(messages, options) {
               totalUsage.completion_tokens += sJson.usage.completion_tokens || 0;
               totalUsage.total_tokens += sJson.usage.total_tokens || 0;
               if (typeof sJson.usage.prompt_cache_hit_tokens === 'number') totalUsage.prompt_cache_hit_tokens += sJson.usage.prompt_cache_hit_tokens;
-              if (typeof sJson.usage.prompt_cache_miss_tokens === 'number') totalUsage.prompt_cache_miss_tokens += sJson.usage.prompt_cache_miss_tokens;
+              if (typeof sJson.usage.prompt_cache_miss_tokens === 'number') totalUsage.prompt_cache_miss_tokens += sJson.usage.prompt_cache_miss_tokens; if (sJson.usage.prompt_tokens_details && typeof sJson.usage.prompt_tokens_details.cached_tokens === 'number') totalUsage.cached_tokens = (totalUsage.cached_tokens || 0) + sJson.usage.prompt_tokens_details.cached_tokens; var _rTok = (sJson.usage.completion_tokens_details && typeof sJson.usage.completion_tokens_details.reasoning_tokens === 'number') ? sJson.usage.completion_tokens_details.reasoning_tokens : (typeof sJson.usage.reasoning_tokens === 'number' ? sJson.usage.reasoning_tokens : 0); if (_rTok > 0) totalUsage.reasoning_tokens = (totalUsage.reasoning_tokens || 0) + _rTok; totalUsage.reasoning_included_in_completion = true;
             }
             if (!sJson.choices || !sJson.choices[0]) continue;
             var sChoice = sJson.choices[0];
@@ -11320,7 +11320,7 @@ async function checkAiUserRateLimit(userName) {
  * @param {string} userName
  * @param {{ needSearch?: boolean }} [opts]
  */
-async function enforceAiChatAccess(userName, opts) {
+const GUEST_IP_OVERRIDE_LIMITS = { free5h: aiQuota.FREE_5H_TOKEN_LIMIT * 3, freeWeek: aiQuota.FREE_WEEK_TOKEN_LIMIT * 3 }; function getGuestCookieSecret() { return process.env.GUEST_COOKIE_SECRET || API_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || 'xtj-guest-quota-v1'; } function signGuestId(id) { return id + '.' + crypto.createHmac('sha256', getGuestCookieSecret()).update(String(id)).digest('hex'); } function verifyGuestCookie(raw) { if (!raw || typeof raw !== 'string') return ''; var idx = raw.lastIndexOf('.'); if (idx <= 0) return ''; var id = raw.slice(0, idx), sig = raw.slice(idx + 1); if (!/^[a-f0-9]{32}$/i.test(id) || !/^[a-f0-9]{64}$/i.test(sig)) return ''; var expected = crypto.createHmac('sha256', getGuestCookieSecret()).update(id).digest('hex'); try { return crypto.timingSafeEqual(Buffer.from(sig, 'hex'), Buffer.from(expected, 'hex')) ? id : ''; } catch (_) { return ''; } } function parseCookieMap(h) { var m = {}; if (!h || typeof h !== 'string') return m; h.split(';').forEach(function(p) { var eq = p.indexOf('='); if (eq > 0) m[p.slice(0, eq).trim()] = decodeURIComponent(p.slice(eq + 1).trim()); }); return m; } function resolveQuotaContext(req, res) { if (req && req.userName) return { isGuest: false, userName: req.userName, primarySubject: 'user:' + String(req.userName).toLowerCase(), ipSubject: null }; var cookies = parseCookieMap(req && req.headers && req.headers.cookie); var guestId = verifyGuestCookie(cookies.xtj_guest_id); if (!guestId) { guestId = crypto.randomBytes(16).toString('hex'); if (res && !res.headersSent) { var isHttps = !!(req && (req.secure || String((req.headers && req.headers['x-forwarded-proto']) || '').split(',')[0].trim() === 'https')); var cv = 'xtj_guest_id=' + encodeURIComponent(signGuestId(guestId)) + '; Path=/; Max-Age=2592000; HttpOnly; ' + (isHttps ? 'SameSite=None; Secure' : 'SameSite=Lax'); if (typeof res.append === 'function') res.append('Set-Cookie', cv); else res.setHeader('Set-Cookie', cv); } } var ipHash = crypto.createHmac('sha256', getGuestCookieSecret()).update(String(getClientIp(req) || 'unknown')).digest('hex').slice(0, 24); return { isGuest: true, userName: '', primarySubject: 'guest:' + guestId, ipSubject: 'ip:' + ipHash }; } async function getEffectiveQuotaForContext(ctx) { if (!ctx || !ctx.isGuest) return await aiQuota.getQuotaBySubject(ctx.primarySubject); var r = await Promise.all([aiQuota.getQuotaBySubject(ctx.primarySubject), aiQuota.getQuotaBySubject(ctx.ipSubject, GUEST_IP_OVERRIDE_LIMITS)]); var gQ = r[0], ipQ = r[1]; if (!ipQ) return gQ; if (!gQ) return ipQ; var g5 = Number(gQ.tokens_remaining_5h), ip5 = Number(ipQ.tokens_remaining_5h), gW = Number(gQ.tokens_remaining_week), ipW = Number(ipQ.tokens_remaining_week); return Object.assign({}, gQ, { tokens_remaining_5h: (Number.isFinite(g5) && Number.isFinite(ip5)) ? Math.min(g5, ip5) : gQ.tokens_remaining_5h, tokens_remaining_week: (Number.isFinite(gW) && Number.isFinite(ipW)) ? Math.min(gW, ipW) : gQ.tokens_remaining_week, tokens_remaining: (Number.isFinite(Number(gQ.tokens_remaining)) && Number.isFinite(Number(ipQ.tokens_remaining))) ? Math.min(Number(gQ.tokens_remaining), Number(ipQ.tokens_remaining)) : gQ.tokens_remaining }); } async function enforceAiChatAccessForContext(ctx, opts) { opts = opts || {}; if (!ctx || !ctx.isGuest) { var results = await Promise.all([aiQuota.checkBeforeChatBySubject(ctx.primarySubject, !!opts.needSearch).catch(function() { return { allowed: false, reason: 'quota_unavailable', quota: null }; }), checkAiUserRateLimit(ctx.userName).catch(function() { return { allowed: false, reason: 'quota_unavailable' }; })]); var tokenGate = results[0] || {}, rl = results[1] || {}; if (tokenGate.allowed && opts.promptChars > 0) { var _q = tokenGate.quota || {}, _remain = Number(_q.tokens_remaining), _est = Math.ceil(Number(opts.promptChars) / 2); if (Number.isFinite(_remain) && _remain >= 0 && _est > _remain) return { allowed: false, reason: 'token_limit', quota: _q }; } if (!tokenGate.allowed) return tokenGate; if (!rl.allowed) return { allowed: false, reason: rl.reason || 'hourly_limit', quota: tokenGate.quota }; return { allowed: true, reason: null, quota: tokenGate.quota }; } var gates = await Promise.all([aiQuota.checkBeforeChatBySubject(ctx.primarySubject, !!opts.needSearch).catch(function() { return { allowed: false, reason: 'quota_unavailable', quota: null }; }), aiQuota.checkBeforeChatBySubject(ctx.ipSubject, !!opts.needSearch, GUEST_IP_OVERRIDE_LIMITS).catch(function() { return { allowed: false, reason: 'quota_unavailable', quota: null }; })]); if (!gates[0].allowed) return gates[0]; if (!gates[1].allowed) return gates[1]; return gates[0]; } async function recordAiTurnUsageForContext(ctx, usage, opts) { if (!ctx || !ctx.isGuest) return await aiQuota.recordUsageBySubject(ctx.primarySubject, usage, opts); var r = await Promise.all([aiQuota.recordUsageBySubject(ctx.primarySubject, usage, opts), aiQuota.recordUsageBySubject(ctx.ipSubject, usage, opts, GUEST_IP_OVERRIDE_LIMITS).catch(function() { return null; })]); return r[0]; } async function enforceAiChatAccess(userName, opts) {
   opts = opts || {};
   // ★ 2026-09-22 首包延迟优化（用户反馈「发消息到开始思考这段有点慢」）：
   //   旧实现是**串行的两次往返**：
@@ -11410,7 +11410,7 @@ async function recordAiTurnUsage(userName, usage, options) {
   return null;
 }
 
-function getAiQuotaErrorMessage(reason) {
+function getAiQuotaErrorMessage(reason, quota) { if ((reason === 'token_limit' || reason === 'token_limit_5h' || reason === 'token_limit_week' || reason === 'search_limit') && aiQuota && typeof aiQuota.getTokenQuotaErrorMessage === 'function') { return aiQuota.getTokenQuotaErrorMessage(reason, quota); }
   if (reason === 'token_limit' || reason === 'search_limit') {
     return getTokenQuotaErrorMessage(reason);
   }
@@ -20587,9 +20587,9 @@ app.get('/api/agent/profile', authenticateUser, async (req, res) => {
   }});
 
 // GET /api/agent/quota — 今日 token / 搜索额度 + Pro 状态（前端 1–2 分钟轮询）
-app.get('/api/agent/quota', authenticateUser, async (req, res) => {
+app.get('/api/agent/quota', guestAiAuth, async (req, res) => {
   try {
-    var quota = await aiQuota.getQuota(req.userName);
+    var quotaCtx = resolveQuotaContext(req, res); var quota = await getEffectiveQuotaForContext(quotaCtx);
     if (quota && quota.ok === false) {
       return res.status(503).json({ ok: false, error: '额度服务暂不可用' });
     }
@@ -22446,7 +22446,7 @@ app.post('/api/agent/chat', guestAiAuth, aiChatConcurrencyGate, guestAwareChatRa
   //   防止凭猜到的 file_id 引用全站共享账号下他人上传的私有文档。
   aiFileOwnership.stripForeignFileIds(req.body, req);
   // ★ 2026-11-13 限时开放 15 天：窗口内游客不限额度、不查账号级额度 RPC、不写 posts/不记账；到期自动失效
-  var guestWindow = !!(req.guestAi && guestAiPublicWindowOpen());
+  var quotaCtx = resolveQuotaContext(req, res);
   var aborted = false;
   // 客户端断开时 abort 底层 DeepSeek 调用，避免请求结束后仍占用 3-5 分钟资源
   var requestAbortCtrl = new AbortController();
@@ -22464,10 +22464,10 @@ app.post('/api/agent/chat', guestAiAuth, aiChatConcurrencyGate, guestAwareChatRa
   async function recordChatTurnOnce(usageArg, optsArg) {
     if (_chatUsageRecorded) return null;
     // ★ 2026-11-13 限时开放 15 天：窗口内游客不记账（跳过 recordAiTurnUsage）；到期自动失效
-    if (guestWindow) return null;
+    // quotaCtx tracked
     _chatUsageRecorded = true;
     try {
-      return await recordAiTurnUsage(userName, usageArg || {}, optsArg || {});
+      return await recordAiTurnUsageForContext(quotaCtx, usageArg || {}, optsArg || {});
     } catch (e) {
       console.error('[AI-QUOTA] chat turn record failed:', e && e.message);
       return null;
@@ -22493,7 +22493,7 @@ app.post('/api/agent/chat', guestAiAuth, aiChatConcurrencyGate, guestAwareChatRa
     // 2. 用户级 token + 请求次数兜底。
     // 搜索额度只约束第三方搜索，不因 search_limit 整段拒绝聊天（额度用尽后仍走内置 web_search）。
     // ★ 2026-11-13 限时开放 15 天：窗口内游客不限额度，跳过会拒绝空用户名（no_user）的 enforceAiChatAccess；到期自动失效
-    var rl = guestWindow ? { allowed: true, reason: null, quota: null } : await enforceAiChatAccess(userName, { needSearch: false, promptChars: String(messageEarly || '').length });
+    var rl = await enforceAiChatAccessForContext(quotaCtx, { needSearch: false, promptChars: String(messageEarly || '').length });
     if (!rl.allowed) {
       return res.status(429).json({
         error: getAiQuotaErrorMessage(rl.reason),
@@ -22977,7 +22977,7 @@ app.post('/api/agent/custom-chat/stream', guestOpenRouterAuth, aiChatConcurrency
   // ★ 2026-10-27 限时公开 + 无限免费：站长公开的 OpenRouter 免费模型对所有用户
   //   （含未登录游客）完全免费 —— 不走 token 日额度门禁、也不落账扣 token。
   //   免费模型走 freeOnly 路径（禁用全部付费搜索 provider），仅使用免费搜索源。
-  if (req.userName && req.userName !== ADMIN_USERNAME && provider !== 'openrouter') {
+  if (/* BYOK skips enforceAiChatAccess */ false && req.userName && req.userName !== ADMIN_USERNAME && provider !== 'openrouter') {
     // ★ 2026-11-13 限时开放 15 天：窗口内游客不限额度，跳过会拒绝空用户名（no_user）的 enforceAiChatAccess；到期自动失效
     var customGate = guestWindow ? { allowed: true, reason: null, quota: null } : await enforceAiChatAccess(req.userName, { needSearch: false });
     if (!customGate.allowed) {
@@ -23541,7 +23541,7 @@ app.post('/api/agent/custom-chat/stream', guestOpenRouterAuth, aiChatConcurrency
     //   search_count 取自 toolContext.searchConsumed —— 与门禁 measureSearchQuota
     //   同一计数源，因此落账后 search_used 才会真正增长，第三方搜索额度才有效。
     // ★ 2026-10-27 限时公开：OpenRouter 免费模型不落账（无限免费）。
-    if ((_customGatePassed || _customUpstreamUsed) && req.userName && provider !== 'openrouter') {
+    if (/* BYOK skips recordAiTurnUsage */ false && (_customGatePassed || _customUpstreamUsed) && req.userName && provider !== 'openrouter') {
       try {
         await recordAiTurnUsage(req.userName, Object.assign({model:chosenModel},customUsage), {
           model: chosenModel,
@@ -24442,6 +24442,7 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, guestAwar
     //   所以提前 flush 不会改变任何错误路径的行为。
     //   调整后顺序：headers → meta/early reasoning_start → await 额度校验。
     //   额度不足时 terminateWithError 依然能正常下发（headers 已 flush，SSE 已开）。
+    var quotaCtx = resolveQuotaContext(req, res);
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
@@ -24490,19 +24491,19 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, guestAwar
       allowVision: _visionEligibleEarly,
       skipDb: !!req.guestAi
     });
-    var quotaPromise = req.guestAi
-      ? null
-      : enforceAiChatAccess(userName, { needSearch: false, promptChars: String((req.body && req.body.message) || '').length });
+    var quotaPromise =
+      /* */
+      enforceAiChatAccessForContext(quotaCtx, { needSearch: false, promptChars: String((req.body && req.body.message) || '').length });
     // Preparation already started; make sure a quota rejection path cannot leave
     // it as an unhandled rejection when we return early below.
     attachPromise.catch(function() {});
     configPromise.catch(function() {});
     ctxPromise.catch(function() {});
-    var rl = req.guestAi ? { allowed: true, quota: null } : await quotaPromise;
+    var rl = await quotaPromise;
     if (!rl.allowed) {
       return terminateWithError({
         type: 'error',
-        error: getAiQuotaErrorMessage(rl.reason),
+        error: getAiQuotaErrorMessage(rl.reason, rl.quota),
         code: rl.reason || 'rate_limited',
         quota: rl.quota || null
       });
@@ -25150,9 +25151,9 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, guestAwar
       }
 
       var responsesQuota = null;
-      if (!req.guestAi) {
+      if (true) {
         try {
-          responsesQuota = await recordAiTurnUsage(userName, responsesUsage, {
+          responsesQuota = await recordAiTurnUsageForContext(quotaCtx, responsesUsage, {
             conversation_id: convId,
             model: usedModel,
             source: 'chat_stream_responses',
@@ -25473,7 +25474,8 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, guestAwar
           searchApiCount: req._searchApiCalls ? req._searchApiCalls.n : 0,
           siteCards: siteToolCards,
           roleplayEnabled: roleplayEnabled,
-          startTime: T0
+          startTime: T0,
+          quotaCtx: quotaCtx
         });
       }
       return safeEnd();
@@ -25781,6 +25783,7 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, guestAwar
     var totalTimer = setTimeout(function() { aborted = true; try { controller && controller.abort(); } catch (e) {} }, 1800000);
     _totalTimer = totalTimer;
 
+   var usageInStream = null;
     while (toolRound < MAX_TOOL_ROUNDS && !aborted) {
 
     // 本轮开始前的 contentBuffer 长度：contentBuffer 跨轮累积，而 role:'assistant'
@@ -25855,7 +25858,7 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, guestAwar
     _reader = reader;
     var decoder = new TextDecoder();
     var buffer = '';
-    var usageInStream = null;
+    // var usageInStream = null;
     var hasReasoningContent = false;
     // ★ H-3 修复：多轮工具调用之间正文必须累积。contentBuffer 已移到 while
     //   循环之前初始化（var 声明提升到函数作用域，但初始化赋值必须只执行一次），
@@ -25946,7 +25949,7 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, guestAwar
             convId: convId, usedModel: usedModel, source: 'chat_stream_aborted',
             message: message, content: contentBuffer, reasoning: persistentReasoning || reasoningBuffer,
             usage: usageInStream || null,
-            searchApiCount: (req._searchApiCalls && req._searchApiCalls.n) || 0
+            searchApiCount: (req._searchApiCalls && req._searchApiCalls.n) || 0, quotaCtx: quotaCtx
           });
         } catch (eAbortedBill) {}
         return safeEnd();
@@ -25979,7 +25982,7 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, guestAwar
                   ctx: ctx,
                   reasoningStartedAt: reasoningStartedAt,
                   roleplayEnabled: roleplayEnabled,
-                  startTime: T0
+                  startTime: T0, quotaCtx: quotaCtx
             });
           } else {
             // ★ 2026-09-17：超时且无任何内容——补发终结 done，避免前端误判连接中断
@@ -26006,7 +26009,7 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, guestAwar
           if (!aborted) {
             var pc = contentBuffer && contentBuffer.length > 0;
             if (pc) {
-              await finishStream(res, { reqWorkMode: req._workMode === true, contentBuffer: contentBuffer, reasoningBuffer: reasoningBuffer, thinkingMode: thinkingMode, useThinking: useThinking, usedModel: usedModel, usage: usageInStream || null, searchMeta: _toolSearchMeta || _sharedSearchMeta, searchApiCount: req._searchApiCalls ? req._searchApiCalls.n : 0, siteCards: siteToolCards, finishReason: 'idle_timeout', userName: userName, convId: convId, message: message, streamSeq: streamSeq, ctx: ctx, reasoningStartedAt: reasoningStartedAt, roleplayEnabled: roleplayEnabled, startTime: T0 });
+              await finishStream(res, { reqWorkMode: req._workMode === true, contentBuffer: contentBuffer, reasoningBuffer: reasoningBuffer, thinkingMode: thinkingMode, useThinking: useThinking, usedModel: usedModel, usage: usageInStream || null, searchMeta: _toolSearchMeta || _sharedSearchMeta, searchApiCount: req._searchApiCalls ? req._searchApiCalls.n : 0, siteCards: siteToolCards, finishReason: 'idle_timeout', userName: userName, convId: convId, message: message, streamSeq: streamSeq, ctx: ctx, reasoningStartedAt: reasoningStartedAt, roleplayEnabled: roleplayEnabled, startTime: T0, quotaCtx: quotaCtx });
             } else {
               // ★ 2026-09-17：chunk 超时且无内容——补发终结 done
               return terminateWithError({ type: 'error', error: 'AI 回复超时，请重试' });
@@ -26040,11 +26043,12 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, guestAwar
         var jsonStr = line.slice(6);
         var chunk;
         try { chunk = JSON.parse(jsonStr); } catch (e) { continue; }
+        if (chunk && chunk.usage) { if (!usageInStream) usageInStream = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, prompt_cache_hit_tokens: 0, prompt_cache_miss_tokens: 0, cached_tokens: 0, reasoning_tokens: 0, reasoning_included_in_completion: true }; var u = chunk.usage; usageInStream.prompt_tokens += (u.prompt_tokens || 0); usageInStream.completion_tokens += (u.completion_tokens || 0); usageInStream.total_tokens += (u.total_tokens || 0); usageInStream.prompt_cache_hit_tokens += (u.prompt_cache_hit_tokens || 0); usageInStream.prompt_cache_miss_tokens += (u.prompt_cache_miss_tokens || 0); usageInStream.cached_tokens += ((u.prompt_tokens_details && u.prompt_tokens_details.cached_tokens) || u.cached_tokens || 0); usageInStream.reasoning_tokens += ((u.completion_tokens_details && u.completion_tokens_details.reasoning_tokens) || u.reasoning_tokens || 0); usageInStream.reasoning_included_in_completion = true; }
         if (!chunk || !chunk.choices || !chunk.choices[0]) continue;
         
         var delta = chunk.choices[0].delta || {};
         var finish = chunk.choices[0].finish_reason;
-        usageInStream = chunk.usage || usageInStream;
+        // usageInStream = chunk.usage || usageInStream;
         
         if (delta.reasoning_content) {
           if (!flushContentCoalesce()) { aborted = true; break; }
@@ -26166,7 +26170,7 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, guestAwar
           ctx: ctx,
           reasoningStartedAt: reasoningStartedAt,
           roleplayEnabled: roleplayEnabled,
-          startTime: T0
+          startTime: T0, quotaCtx: quotaCtx
         });
         return safeEnd();
       }
@@ -26365,7 +26369,7 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, guestAwar
           ctx: ctx,
           reasoningStartedAt: reasoningStartedAt,
           roleplayEnabled: roleplayEnabled,
-          startTime: T0
+          startTime: T0, quotaCtx: quotaCtx
         });
       }
     }
@@ -26377,7 +26381,7 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, guestAwar
           convId: convId, usedModel: usedModel, source: 'chat_stream_aborted',
           message: message, content: contentBuffer, reasoning: persistentReasoning || reasoningBuffer,
           usage: usageInStream || null,
-          searchApiCount: (req._searchApiCalls && req._searchApiCalls.n) || 0
+          searchApiCount: (req._searchApiCalls && req._searchApiCalls.n) || 0, quotaCtx: quotaCtx
         });
       } catch (eAbortedBill2) {}
     }
@@ -26389,7 +26393,8 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, guestAwar
     // toolRound 超限兜底：若前序轮次已累积有正文回复，优先交还用户，避免整条作废
     if (!aborted) {
       if (contentBuffer && contentBuffer.trim().length > 0) {
-        return safeEnd();
+        try { await recordAiTurnUsageForContext(quotaCtx, usageInStream || null, { conversation_id: convId, model: usedModel, source: 'chat_stream_max_rounds', message, content: contentBuffer, reasoning: persistentReasoning || reasoningBuffer, search_count: (req._searchApiCalls && req._searchApiCalls.n) || 0, did_search: ((req._searchApiCalls && req._searchApiCalls.n) || 0) > 0 }); } catch (eMaxRoundsBill) {}
+      return safeEnd();
       }
       return terminateWithError({ type: 'error', error: 'AI 工具调用次数过多，请简化后重试' });
     }
@@ -26406,7 +26411,7 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, guestAwar
         convId: convId, usedModel: usedModel, source: 'chat_stream_aborted',
         message: message, content: contentBuffer, reasoning: persistentReasoning || reasoningBuffer,
         usage: usageInStream || null,
-        searchApiCount: (req._searchApiCalls && req._searchApiCalls.n) || 0
+        searchApiCount: (req._searchApiCalls && req._searchApiCalls.n) || 0, quotaCtx: quotaCtx
       });
       return safeEnd();
     }
@@ -26435,7 +26440,7 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, guestAwar
           ctx: ctx,
           reasoningStartedAt: reasoningStartedAt,
           roleplayEnabled: roleplayEnabled,
-          startTime: T0
+          startTime: T0, quotaCtx: quotaCtx
         });
       } catch (finishErr) {
         console.error('[AGENT-STREAM] finishStream after stream error failed:', finishErr && finishErr.message);
