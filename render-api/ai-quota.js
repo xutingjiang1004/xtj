@@ -12,11 +12,29 @@ var FREE_TOKEN_LIMIT = Math.max(1000, parseInt(process.env.AI_FREE_TOKEN_DAILY |
 var PRO_TOKEN_LIMIT = Math.max(FREE_TOKEN_LIMIT, parseInt(process.env.AI_PRO_TOKEN_DAILY || '1000000', 10) || 1000000);
 var configuredSearchLimit = parseInt(process.env.AI_FREE_SEARCH_DAILY, 10);
 var FREE_SEARCH_LIMIT = Number.isFinite(configuredSearchLimit) ? Math.max(0, configuredSearchLimit) : 10;
+var FREE_5H_TOKEN_LIMIT = FREE_TOKEN_LIMIT;
+var FREE_WEEK_TOKEN_LIMIT = Math.max(FREE_5H_TOKEN_LIMIT, parseInt(process.env.AI_FREE_TOKEN_WEEKLY || '1000000', 10) || 1000000);
+var PRO_5H_TOKEN_LIMIT = PRO_TOKEN_LIMIT;
+var PRO_WEEK_TOKEN_LIMIT = Math.max(PRO_5H_TOKEN_LIMIT, parseInt(process.env.AI_PRO_TOKEN_WEEKLY || '10000000', 10) || 10000000);
+var V4_PRO_TOKEN_MULTIPLIER = Math.max(1, Number(process.env.AI_PRO_MODEL_MULTIPLIER) || 3);
+  
+function getModelTokenMultiplier(model) {
+  return /pro/i.test(String(model || '')) ? V4_PRO_TOKEN_MULTIPLIER : 1;
+  var m = String(model || '').toLowerCase();
+  if (!m) return 1;
+  if (m.indexOf('pro') >= 0) return V4_PRO_TOKEN_MULTIPLIER;
+  return 1;
+}
 
 function limits() {
   return {
     free_token_limit: FREE_TOKEN_LIMIT,
     pro_token_limit: PRO_TOKEN_LIMIT,
+    free_5h_token_limit: FREE_5H_TOKEN_LIMIT,
+    free_week_token_limit: FREE_WEEK_TOKEN_LIMIT,
+    pro_5h_token_limit: PRO_5H_TOKEN_LIMIT,
+    pro_week_token_limit: PRO_WEEK_TOKEN_LIMIT,
+    v4_pro_multiplier: V4_PRO_TOKEN_MULTIPLIER,
     free_search_limit: FREE_SEARCH_LIMIT
   };
 }
@@ -31,16 +49,19 @@ function computeBillableTokens(usage, opts) {
   var prompt = Math.max(0, Math.floor(Number(usage.prompt_tokens) || Number(usage.input_tokens) || 0));
   var completion = Math.max(0, Math.floor(Number(usage.completion_tokens) || Number(usage.output_tokens) || 0));
   // Details are a subset of completion/output, not an extra billable category.
-  // Keep the legacy independent top-level reasoning field supported.
-  var reasoning = usage.reasoning_included_in_completion === true ? 0
-    : Math.max(0, Math.floor(Number(usage.reasoning_tokens) || 0));
+  // Keep the legacy independent top-level reasoning field supported
   var total = Math.max(0, Math.floor(Number(usage.total_tokens) || 0));
+  var total = Math.max(0, Math.floor(Number(usage.total_tokens) || 0));
+  var reasoningIncluded = usage.reasoning_included_in_completion === true || (total > 0 && prompt + completion === total);
+  var reasoning = reasoningIncluded ? 0 : Math.max(0, Math.floor(Number(usage.reasoning_tokens) || 0));
   var sumParts = prompt + completion + reasoning;
   if (total > 0 || sumParts > 0) {
-    // An authoritative total includes reasoning as well. Internal aggregates
+  var mult = getModelTokenMultiplier(opts.model || usage.model);
     // mark their flattened reasoning as a subset for providers omitting total.
-    return total > 0 ? Math.max(total, usage.reasoning_included_in_completion !== true ? sumParts : prompt + completion) : sumParts;
+    var rawTokens = total > 0 ? Math.max(total, !reasoningIncluded ? sumParts : prompt + completion) : sumParts;
+    return Math.ceil(rawTokens * mult);
   }
+}
   // Fallback only when provider omitted usage entirely (should be rare).
   var msg = String(opts.message || '');
   var content = String(opts.content || '');
@@ -49,7 +70,7 @@ function computeBillableTokens(usage, opts) {
   var len = combined.length;
   var cjk = (combined.match(/[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff\u3040-\u30ff\uac00-\ud7af]/g) || []).length;
   var est = Math.ceil(cjk * 0.85 + (len - cjk) / 4);
-  return Math.max(1, est);
+  return Math.ceil(Math.max(1, est) * getModelTokenMultiplier(opts.model || usage.model));
 }
 
 function normalizeQuotaPayload(raw) {
@@ -114,12 +135,26 @@ function normalizeQuotaPayload(raw) {
     // 消费结果透传（recordUsage 后前端可知道实际扣了多少，尤其被 045/048 截断时）
     consumed_tokens: typeof raw.consumed_tokens === 'number' ? Number(raw.consumed_tokens) : null,
     consumed_search: typeof raw.consumed_search === 'number' ? Number(raw.consumed_search) : null,
-    limits: limits()
+    limits: limits(),
+    subject_key: raw.subject_key || null,
+    is_guest: raw.is_guest === true,
+    week_key: raw.week_key || null,
+    window_5h_used: raw.window_5h_used != null ? Math.max(0, Number(raw.window_5h_used) || 0) : null,
+    window_5h_limit: raw.window_5h_limit != null ? Number(raw.window_5h_limit) : null,
+    window_5h_remaining: raw.window_5h_remaining != null ? Number(raw.window_5h_remaining) : null,
+    window_5h_percent: (Number(raw.window_5h_limit) > 0) ? Math.min(100, Math.round((Math.max(0, Number(raw.window_5h_used) || 0) * 1000) / Number(raw.window_5h_limit)) / 10) : (typeof raw.window_5h_percent === 'number' ? Math.min(100, Number(raw.window_5h_percent)) : null),
+    window_5h_reset_at: raw.window_5h_reset_at || null,
+    window_week_used: raw.window_week_used != null ? Math.max(0, Number(raw.window_week_used) || 0) : null,
+    window_week_limit: raw.window_week_limit != null ? Number(raw.window_week_limit) : null,
+    window_week_percent: (Number(raw.window_week_limit) > 0) ? Math.min(100, Math.round((Math.max(0, Number(raw.window_week_used) || 0) * 1000) / Number(raw.window_week_limit)) / 10) : (typeof raw.window_week_percent === 'number' ? Math.min(100, Number(raw.window_week_percent)) : null),
+    window_week_reset_at: raw.window_week_reset_at || null,
+    exhausted_window: raw.exhausted_window || null
   };
 }
 
-function getTokenQuotaErrorMessage(reason) {
-  if (reason === 'token_limit') return '今日 AI 额度已用完，开通 Pro 可获得 10 倍额度';
+function getTokenQuotaErrorMessage(reason, quota) {
+  if (reason === 'token_limit_week') return '本周 AI 额度已用完，开通 Pro 可获得更高每周额度';
+  if (reason === 'token_limit_5h') return '当前 5 小时 AI 额度已用完，请稍后再试或开通 Pro 获得更高额度';
   if (reason === 'search_limit') return '今日第三方网页搜索次数已达上限，仍可用模型内置搜索；开通 Pro 可无限第三方搜索';
   if (reason === 'quota_unavailable') return '额度服务暂不可用，请稍后重试';
   if (reason === 'no_user') return '请先登录后再使用小猫 AI';
@@ -138,7 +173,7 @@ function getTokenQuotaErrorMessage(reason) {
 //      都用不了），等于把用户锁死而不是回退默认。
 //   2) Number(true) === 1 → 布尔 true 变成"每天 1 token"。
 //   3) Number('0x10') === 16、Number('1e5') === 100000 → 非十进制字面量被当合法数字。
-//   现改为：仅接受 number 类型或**纯十进制数字字符串**；其余一律 null（用默认额度）。
+//   现改为：仅接受 nu, subject_key: raw.subject_key || null, is_guest: raw.is_guest === true, week_key: raw.week_key || null, window_5h_used: raw.window_5h_used != null ? Math.max(0, Number(raw.window_5h_used) || 0) : tokensUsed, window_5h_limit: raw.window_5h_limit != null ? Number(raw.window_5h_limit) : tokensLimit, window_5h_remaining: raw.window_5h_remaining != null ? Number(raw.window_5h_remaining) : tokensRemaining, window_5h_reset_at: raw.window_5h_reset_at || null, window_week_used: raw.window_week_used != null ? Math.max(0, Number(raw.window_week_used) || 0) : tokensUsed, window_week_limit: raw.window_week_limit != null ? Number(raw.window_week_limit) : (isPro ? PRO_WEEK_TOKEN_LIMIT : FREE_WEEK_TOKEN_LIMIT), window_week_remaining: raw.window_week_remaining != null ? Number(raw.window_week_remaining) : (tokensUnlimited ? -1 : Math.max(0, (isPro ? PRO_WEEK_TOKEN_LIMIT : FREE_WEEK_TOKEN_LIMIT) - tokensUsed)), window_week_reset_at: raw.window_week_reset_at || null, exhausted_window: raw.exhausted_window || nullmber 类型或**纯十进制数字字符串**；其余一律 null（用默认额度）。
 //   保留 0 与 -1 两个语义值：search 的 0 = 禁用搜索、-1 = 无限（054 迁移语义）。
 function normalizeDailyLimit(value) {
   if (value === null || value === undefined) return null;
@@ -231,8 +266,105 @@ function createAiQuota(supabase) {
       return quota;
     }
   }
-
-  async function getQuota(userName) {
+  function isMissingRpcError(err) {
+    var m = String(err && err.message || '');
+    return /get_ai_window_quota|consume_ai_window_usage|does not exist|Could not find the function/i.test(m);
+  }
+  async function getQuotaBySubject(subjectKey, userName, overrideLimits) {
+    var key = String(subjectKey || '').trim().toLowerCase();
+    var u = String(userName || '').trim();
+    var lim5h = (overrideLimits && overrideLimits.free5h) || FREE_5H_TOKEN_LIMIT;
+    var limWk = (overrideLimits && overrideLimits.freeWeek) || FREE_WEEK_TOKEN_LIMIT;
+    try {
+      var result = await supabase.rpc('get_ai_window_quota', {
+        p_subject_key: key,
+        p_user_name: u || null,
+        p_free_5h_limit: lim5h,
+        p_free_week_limit: limWk,
+        p_pro_5h_limit: PRO_5H_TOKEN_LIMIT,
+        p_pro_week_limit: PRO_WEEK_TOKEN_LIMIT,
+        p_free_search_limit: FREE_SEARCH_LIMIT
+      });
+      if (result.error && isMissingRpcError(result.error)) {
+        if (u) return await getLegacyQuota(u);
+        return normalizeQuotaPayload({ ok: true, subject_key: key, is_guest: true, plan: 'free', is_pro: false, window_5h_used: 0, window_5h_limit: lim5h, window_5h_remaining: lim5h, window_week_used: 0, window_week_limit: limWk, window_week_remaining: limWk, tokens_used: 0, tokens_limit: lim5h, tokens_remaining: lim5h, search_used: 0, search_limit: FREE_SEARCH_LIMIT, search_remaining: FREE_SEARCH_LIMIT, can_chat: true, can_search: true });
+      }
+      if (result.error || !result.data) {
+        console.error('[AI-QUOTA] window get unavailable:', result.error && result.error.message);
+        return normalizeQuotaPayload({ ok: false, reason: 'quota_unavailable' });
+      }
+      return normalizeQuotaPayload(result.data);
+    } catch (e) {
+      console.error('[AI-QUOTA] window get exception:', e && e.message);
+      return normalizeQuotaPayload({ ok: false, reason: 'quota_unavailable' });
+    }
+  }
+  async function checkBeforeChatBySubject(subjectKey, userName, needSearch, overrideLimits) {
+    var key = String(subjectKey || '').trim().toLowerCase();
+    return runQuotaSerialized(key, async function() {
+      var q = await getQuotaBySubject(key, userName, overrideLimits);
+      if (!q || q.ok === false) return { allowed: false, reason: 'quota_unavailable', quota: normalizeQuotaPayload(null) };
+      var allowed = q.can_chat !== false;
+      if (allowed && !!needSearch && q.can_search === false) allowed = false;
+      var reason = null;
+      if (!allowed) {
+        if (q.can_search === false && !!needSearch) reason = 'search_limit';
+        else if (q.exhausted_window === 'week') reason = 'token_limit_week';
+        else reason = 'token_limit_5h';
+      }
+      return { allowed: allowed, reason: reason, quota: q };
+    });
+  }
+  async function recordUsageBySubject(subjectKey, userName, usage, options) {
+    var key = String(subjectKey || '').trim().toLowerCase();
+    var u = String(userName || '').trim();
+    options = options || {};
+    var billable = computeBillableTokens(usage, options);
+    var searchCount = Math.max(0, Math.floor(Number(options.search_count) || 0));
+    if (options.did_search && searchCount < 1) searchCount = 1;
+    if (options && options.search_already_claimed === true) searchCount = 0;
+    if (billable <= 0 && searchCount <= 0) billable = 1;
+    var prompt = Math.max(0, Math.floor(Number(usage && usage.prompt_tokens) || Number(usage && usage.input_tokens) || 0));
+    var completion = Math.max(0, Math.floor(Number(usage && usage.completion_tokens) || Number(usage && usage.output_tokens) || 0));
+    var reasoning = Math.max(0, Math.floor(Number(usage && usage.reasoning_tokens) || Number(usage && usage.completion_tokens_details && usage.completion_tokens_details.reasoning_tokens) || 0));
+    var lim5h = (options.overrideLimits && options.overrideLimits.free5h) || FREE_5H_TOKEN_LIMIT;
+    var limWk = (options.overrideLimits && options.overrideLimits.freeWeek) || FREE_WEEK_TOKEN_LIMIT;
+    return runQuotaSerialized(key, async function() {
+      try {
+        var result = await supabase.rpc('consume_ai_window_usage', {
+          p_subject_key: key,
+          p_user_name: u || null,
+          p_tokens: billable,
+          p_search_count: searchCount,
+          p_prompt_tokens: prompt,
+          p_completion_tokens: completion,
+          p_reasoning_tokens: reasoning,
+          p_model: options.model || null,
+          p_source: options.source || 'chat',
+          p_conversation_id: options.conversation_id || null,
+          p_free_5h_limit: lim5h,
+          p_free_week_limit: limWk,
+          p_pro_5h_limit: PRO_5H_TOKEN_LIMIT,
+          p_pro_week_limit: PRO_WEEK_TOKEN_LIMIT,
+          p_free_search_limit: FREE_SEARCH_LIMIT
+        });
+        if (result.error && isMissingRpcError(result.error)) {
+          if (u) return await recordLegacyUsage(u, usage, options, billable, searchCount, prompt, completion, reasoning);
+          return normalizeQuotaPayload({ ok: true, subject_key: key, is_guest: true, can_chat: true, can_search: true });
+        }
+        if (result.error || !result.data) {
+          console.error('[AI-QUOTA] window consume unavailable:', result.error && result.error.message);
+          return normalizeQuotaPayload({ ok: false, reason: 'quota_unavailable' });
+        }
+        return normalizeQuotaPayload(result.data);
+      } catch (e) {
+        console.error('[AI-QUOTA] window consume exception:', e && e.message);
+        return normalizeQuotaPayload({ ok: false, reason: 'quota_unavailable' });
+      }
+    });
+  }
+  
+  async function getLegacyQuota(userName) {
     try {
       var result = await supabase.rpc('get_ai_user_quota', {
         p_user_name: String(userName || ''),
@@ -288,8 +420,11 @@ function createAiQuota(supabase) {
       }
     });
   }
-
-  async function recordUsage(userName, usage, options) {
+  function getQuota(userName) { return getQuotaBySubject('user:' + String(userName || '').trim().toLowerCase(), userName); }
+  function checkBeforeChat(userName, needSearch) { return checkBeforeChatBySubject('user:' + String(userName || '').trim().toLowerCase(), userName, needSearch); }
+  function recordUsage(userName, usage, options) { return recordUsageBySubject('user:' + String(userName || '').trim().toLowerCase(), userName, usage, options); }
+  
+    async function recordLegacyUsage(userName, usage, options, billable, searchCount, prompt, completion, reasoning) {
     options = options || {};
     var billable = computeBillableTokens(usage, options);
     var searchCount = Math.max(0, Math.floor(Number(options.search_count) || 0));
@@ -383,6 +518,9 @@ function createAiQuota(supabase) {
     getQuota: getQuota,
     checkBeforeChat: checkBeforeChat,
     recordUsage: recordUsage,
+getQuotaBySubject: getQuotaBySubject,
+checkBeforeChatBySubject: checkBeforeChatBySubject,
+recordUsageBySubject: recordUsageBySubject,
     setPro: setPro
   };
 }
@@ -391,6 +529,12 @@ module.exports = {
   FREE_TOKEN_LIMIT: FREE_TOKEN_LIMIT,
   PRO_TOKEN_LIMIT: PRO_TOKEN_LIMIT,
   FREE_SEARCH_LIMIT: FREE_SEARCH_LIMIT,
+  FREE_5H_TOKEN_LIMIT: FREE_5H_TOKEN_LIMIT,
+  FREE_WEEK_TOKEN_LIMIT: FREE_WEEK_TOKEN_LIMIT,
+  PRO_5H_TOKEN_LIMIT: PRO_5H_TOKEN_LIMIT,
+  PRO_WEEK_TOKEN_LIMIT: PRO_WEEK_TOKEN_LIMIT,
+  V4_PRO_TOKEN_MULTIPLIER: V4_PRO_TOKEN_MULTIPLIER,
+  getModelTokenMultiplier: getModelTokenMultiplier,
   limits: limits,
   computeBillableTokens: computeBillableTokens,
   normalizeQuotaPayload: normalizeQuotaPayload,
