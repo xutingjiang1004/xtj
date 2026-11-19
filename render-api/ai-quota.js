@@ -61,7 +61,7 @@ function computeBillableTokens(usage, opts) {
     var rawTokens = total > 0 ? Math.max(total, !reasoningIncluded ? sumParts : prompt + completion) : sumParts;
     return Math.ceil(rawTokens * mult);
   }
-}
+
   // Fallback only when provider omitted usage entirely (should be rare).
   var msg = String(opts.message || '');
   var content = String(opts.content || '');
