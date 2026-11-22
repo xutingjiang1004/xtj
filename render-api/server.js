@@ -24768,15 +24768,33 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, guestAwar
     //   （原实现最长阻塞 12s）；卡片在 prefetch 完成后异步推送，失败仅 console.warn。
     var linkPrefetch = { messagesInject: [], cards: [] };
     if (!aborted && extractHttpsUrlsFromMessage(message).length) {
-      prefetchUserLinks(message).then(function(_pfResult) {
-        if (_pfResult && _pfResult.cards && _pfResult.cards.length) {
-          _pfResult.cards.forEach(function(card) {
-            try { writeSse(res, { type: 'card', card: card }); } catch (_) {}
-          });
-        }
-      }).catch(function(eLink) {
-        try { console.warn('[AGENT-STREAM] link prefetch error:', eLink && eLink.message); } catch (_) {}
+      // 修复(bug6a)：旧实现纯 fire-and-forget，linkPrefetch.messagesInject 永远是初始空数组，
+      // 后面的注入代码（messages.push）从不执行 → 模型读不到用户贴的网页链接正文。
+      // 改为限定超时（默认 4s）的 await：快速返回则正文注入 messages；超时则放弃正文但
+      // 仍异步推送卡片，不重新引入原先最长 12s 的阻塞。
+      var _pfPromise = prefetchUserLinks(message);
+      var _pfTimeoutMs = Math.max(1000, Math.min(8000, Number(process.env.LINK_PREFETCH_TIMEOUT_MS) || 4000));
+      var _pfTimeoutId = null;
+      var _pfTimeoutPromise = new Promise(function(_resolve) {
+        _pfTimeoutId = setTimeout(function() { _resolve(null); }, _pfTimeoutMs);
       });
+      try {
+        var _pfResult = await Promise.race([_pfPromise, _pfTimeoutPromise]);
+        if (_pfTimeoutId) { clearTimeout(_pfTimeoutId); _pfTimeoutId = null; }
+        if (_pfResult) {
+          linkPrefetch = _pfResult || linkPrefetch;
+        } else {
+          // 超时：正文放弃，卡片仍异步补齐
+          _pfPromise.then(function(_late) {
+            if (_late && _late.cards && _late.cards.length) {
+              _late.cards.forEach(function(card) { try { writeSse(res, { type: 'card', card: card }); } catch (_) {} });
+            }
+          }).catch(function(){});
+        }
+      } catch (eLink) {
+        if (_pfTimeoutId) { clearTimeout(_pfTimeoutId); _pfTimeoutId = null; }
+        try { console.warn('[AGENT-STREAM] link prefetch error:', eLink && eLink.message); } catch (_) {}
+      }
     }
 
     // ★ 修复：角色扮演默认开启，后端不干预扮演行为。

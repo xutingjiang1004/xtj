@@ -272,9 +272,23 @@
       if (!p) return '';
       // Skip if already wrapped in a block element
       if (/^<(h[1-6]|ul|ol|li|table|blockquote|pre|hr|div)\b/.test(p)) {
-        // M58：块级段落不再“原样短路透传”，先做白名单重建再放行，
-        // 使这类内容同样经过本文件的转义/清理管线，安全不再只押在 sanitizeHtml 正则上。
-        return cleanPassthroughHtml(p);
+        // 修复(bug3)：仅对「整段都是块级标签」的段落做 cleanPassthroughHtml 透传。
+        // 若块级标签后用单换行紧跟普通文本（如 `Array<string>` / `<URL>` / 中文说明），
+        // 整段喂给 template 会把尖括号文本解析成未知标签，walkPassthrough 命中
+        // `!PASSTHROUGH_TAGS[tag]` 后整棵子树丢弃 → 后半句凭空消失且丢换行。
+        // 段内按单换行切行，只要存在「非块级开头的普通文本行」，就走下方的
+        // stash + _escapeHtml + <br> 流程，让普通文本里的尖括号被安全转义。
+        var _lines = String(p).split('\n');
+        var _allBlock = _lines.every(function (ln) {
+          var _t = String(ln).trim();
+          return !_t || /^<\/?(h[1-6]|ul|ol|li|table|thead|tbody|tfoot|tr|th|td|blockquote|pre|hr|div|p)\b/i.test(_t);
+        });
+        if (_allBlock) {
+          // M58：纯块级段落先做白名单重建再放行，
+          // 使这类内容同样经过本文件的转义/清理管线，安全不再只押在 sanitizeHtml 正则上。
+          return cleanPassthroughHtml(p);
+        }
+        // 混合段落（块级标签 + 普通文本行）：落到下方通用流程处理。
       }
       p = p.replace(PARAGRAPH_HTML_RE, stashParagraphHtml);
       p = _escapeHtml(p).replace(/\n/g, '<br>');

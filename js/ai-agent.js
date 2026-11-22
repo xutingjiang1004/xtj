@@ -4183,7 +4183,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       // 只有「已经写出过渡句」时，顶部按钮才用来开合整条时间轴。
       // 还没有过渡句（可能只有几行搜索）时，它展开的是已经到达的思考原文，
       // 搜索行留在原处不动 —— 否则这段时间里思考原文没有任何入口。
-      var railHas = !!(rail && rail.querySelector('.ai-rail-beat:not(.no-sentence)'));
+      // 修复(bug4)：折叠判定要用与收尾/settleRunningProcess 相同的选择器
+      // （'.ai-rail-beat, .ai-tool-step'）。旧逻辑只认 :not(.no-sentence) 的过渡句，
+      // 当时间轴里只有工具步骤时 railHas=false，点「已思考 Xs」走的是展开思考原文分支，
+      // 永远打不开已折叠的工具时间轴。
+      var railHas = !!(rail && rail.querySelector('.ai-rail-beat, .ai-tool-step'));
       if (railHas) {
         var next = rail.classList.contains('is-folded');
         rail.classList.toggle('is-folded', !next);
@@ -8248,7 +8252,20 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   // Tavily 深入研究完整流程: 研究卡状态机 + 报告/来源展示
   //   返回 'done' = 流程已终结(成功/取消/超时); 'fallback' = 回退到原有深入研究流程
   async function runTavilyResearchFlow(opts) {
-    var flowIdentity = customModelIdentity(), flowLifecycle = S.dtLifecycleId, flowConversationId = S.dtConversationId;
+    // ★ 方案B(全网深搜)：chatMode=true 时在普通对话里运行，复用同一研究流与卡片渲染，
+    //   但不依赖深研页专属状态（S.dtConversationId / panelDeepThink / _dtCurrentReqId）。
+    var chatMode = opts.chatMode === true;
+    var flowIdentity = customModelIdentity();
+    var flowLifecycle = chatMode ? (S.lifecycleId || 0) : S.dtLifecycleId;
+    var flowConversationId = chatMode ? S.conversationId : S.dtConversationId;
+    var flowReqId = function() { return chatMode ? S._currentReqId : S._dtCurrentReqId; };
+    var flowAlive = function() {
+      if (chatMode) {
+        return document.getElementById('panelDeepThink') ? true : true; // 普通对话无深研页关闭态
+      }
+      var p = document.getElementById('panelDeepThink');
+      return !(p && p._dtClosed);
+    };
     var dtMessagesEl = opts.messagesEl;
     var text = opts.text;
     var originalUserText = opts.originalUserText;
@@ -8364,7 +8381,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // per display frame, preserving the completed prefix and live node identity.
     function appendStreamChunk(chunk, receivedAt) {
       if(dtMessagesEl._newContentButton&&dtMessagesEl._aiFollow===false)dtMessagesEl._newContentButton.hidden=false;
-      if (!chunk || !isResearchCard(progressCard) || S._dtCurrentReqId !== reqId || !customModelIdentityCurrent(flowIdentity) || !progressCard.isConnected) return;
+      if (!chunk || !isResearchCard(progressCard) || flowReqId() !== reqId || !customModelIdentityCurrent(flowIdentity) || !progressCard.isConnected) return;
       var answerEl = progressCard.querySelector('.ai-think-answer');
       if (!answerEl) return;
       if (!answerRenderer) answerRenderer = createSmoothTextRenderer(answerEl, {
@@ -8390,9 +8407,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     try {
       progressCard = buildDeepThinkProgressCard({
         variant: 'research',
-        cancelFn: function() { cancelDeepThink(S.dtConversationId); },
-        retryFn: function() { handleDeepThinkPageSend(originalUserText, fileData); }
+        cancelFn: chatMode
+          ? function() { try { if (controller) controller.abort('cancel'); } catch (_) {} S.currentStreamAborted = true; }
+          : function() { cancelDeepThink(S.dtConversationId); },
+        retryFn: chatMode
+          ? function() { /* 全网深搜在当前对话重试：由上层发送链路处理 */ }
+          : function() { handleDeepThinkPageSend(originalUserText, fileData); }
       });
+      if (chatMode) progressCard._chatModeResearch = true;
       progressCard._usesRealProgress=true;progressCard.classList.add('dt-animate-in');updateResearchProgress(progressCard,0);progressCard._researchQuery=originalUserText;
       // 研究一开始就允许展开思考过程（不再锁死 0 步）
       if (progressCard._researchState) {
@@ -8409,18 +8431,24 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       // Reuse the ordinary lifecycle so refresh owns its controller, send lock
       // and pause button. The previous report and current draft remain intact.
       progressCard._researchRefreshFn = function() {
-        if (!progressCard.isConnected || !customModelIdentityCurrent(flowIdentity) || S.dtConversationId !== flowConversationId || document.getElementById('panelDeepThink')._dtClosed) return Promise.resolve(false);
+        if (!progressCard.isConnected || !customModelIdentityCurrent(flowIdentity)) return Promise.resolve(false);
+        if (chatMode) return Promise.resolve(false); // 普通对话的全网深搜不走深研页刷新
+        if (S.dtConversationId !== flowConversationId || !flowAlive()) return Promise.resolve(false);
         return handleDeepThinkPageSend(originalUserText, fileData, { refresh: true, preserveDraft: true });
       };
 
       controller = new AbortController();
-      // ★ 修复：Tavily 深页流程也走深页独立通道
+      // ★ 修复：Tavily 深页流程也走深页独立通道；chatMode 复用普通流的取消通道。
       S._dtAbortController = controller;
       S.deepThinkJob = controller;
+      if (chatMode && S.abortController && S.abortController.signal) {
+        // 让普通发送的 abortController 与深搜 controller 联动
+        try { S.abortController.signal.addEventListener('abort', function(){ try { controller.abort('cancel'); } catch(_){} }, { once: true }); } catch (_) {}
+      }
       S.currentStreamAborted = false;
 
       var researchPromise = runTavilyResearch(opts.attachments&&opts.attachments.length?(originalUserText||'请对照所有文件，逐项比较事实、数据、相同点、差异与矛盾，并给出带文件段落引用的结论。'):text, function(prog) {
-        if (S._dtCurrentReqId !== reqId) {
+        if (flowReqId() !== reqId) {
           try { if (researchPromise && researchPromise.cancel) researchPromise.cancel(); } catch (e) {}
           return;
         }
@@ -8448,9 +8476,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           }
         }
         if (prog.sources) { sources = prog.sources; setResearchCardSources(progressCard, sources); }
-      }, { model: researchModel, researchModel: opts.researchModel, mode: opts.mode || 'hybrid', rewrite: opts.rewrite !== false, controller: controller, refresh: opts.refresh === true, requestId: reqId, checkpointId: opts.checkpointId,attachments:opts.attachments,webSearch:opts.webSearch,networkMode:opts.networkMode });
+      }, { model: researchModel, researchModel: opts.researchModel, mode: opts.mode || 'hybrid', rewrite: opts.rewrite !== false, controller: controller, refresh: opts.refresh === true, requestId: reqId, conversationId: chatMode ? S.conversationId : undefined, checkpointId: opts.checkpointId,attachments:opts.attachments,webSearch:opts.webSearch,networkMode:opts.networkMode });
       var result = await researchPromise;
-      if (S._dtCurrentReqId !== reqId || !customModelIdentityCurrent(flowIdentity) || S.dtLifecycleId !== flowLifecycle) return 'done';
+      if (flowReqId() !== reqId || !customModelIdentityCurrent(flowIdentity) || flowLifecycle !== (chatMode ? (S.lifecycleId || 0) : S.dtLifecycleId)) return 'done';
       answer = (result && result.answer) || '';
       sources = (result && Array.isArray(result.sources)) ? result.sources : sources;
       if(result&&result.board){progressCard._researchBoard=result.board;}
@@ -8458,11 +8486,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       renderResearchResult();
       if (answer.trim() && progressCard.isConnected && !controller.signal.aborted && window.XTJHaptics) window.XTJHaptics.play('success');
       if (result && result.quota) applyQuota(result.quota);
-      if (result && result.conversation_id && !S.dtConversationId) { S.dtConversationId = result.conversation_id; saveDtConvId(); }
+      if (!chatMode && result && result.conversation_id && !S.dtConversationId) { S.dtConversationId = result.conversation_id; saveDtConvId(); }
       if (result && result.saved === false) markResearchCardOutcome(progressCard, 'interrupted', '报告已生成，但聊天记录未保存，请复制保留后重试');
       return 'done';
     } catch (err) {
-      if (!customModelIdentityCurrent(flowIdentity) || S.dtLifecycleId !== flowLifecycle) return 'done';
+      if (!customModelIdentityCurrent(flowIdentity) || flowLifecycle !== (chatMode ? (S.lifecycleId || 0) : S.dtLifecycleId)) return 'done';
       if (err && err.partialAnswer) { answer = err.partialAnswer; sources = err.partialSources || sources; preserveResearchAnswer(progressCard, answer); }
       var errMsg = (err && err.message) || '研究失败';
       var cardState = (progressCard && progressCard._researchState) ? progressCard._researchState.state : null;
@@ -11229,6 +11257,52 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     scrollToBottom(messagesEl, true);
     playUserSendFlight(userNode, sendFlightFrom);
 
+    // ★★★ 方案B（全网深搜）：当联网开关处于第三态 required（已改文案为「全网深搜」）时，
+    //   在【当前对话】里复用研究流：chatMode 让 runTavilyResearchFlow 脱离深研页状态，
+    //   研究卡 + 带来源报告直接渲染在 messagesEl。额度明确耗尽时降级为普通联网聊天。
+    if (sendSettings.networkMode === 'required' && !sendCustomCfg) {
+      var _deepSearchQuotaOK = !S.quota || !searchQuotaExhausted(S.quota);
+      if (!_deepSearchQuotaOK) {
+        notify('今日网页搜索次数已达上限，已按普通联网回复');
+      } else {
+        var _deepOutcome;
+        try {
+          _deepOutcome = await runTavilyResearchFlow({
+            chatMode: true,
+            messagesEl: messagesEl,
+            text: text,
+            originalUserText: displayText,
+            fileData: fileData,
+            attachments: attachmentPayload,
+            reqId: reqId,
+            model: S.selectedModel,
+            researchModel: 'pro',
+            webSearch: true,
+            networkMode: 'required'
+          });
+        } catch (eDeepSearch) {
+          console.warn('[AI] 全网深搜失败，回退普通联网:', eDeepSearch && eDeepSearch.message);
+          _deepOutcome = 'fallback';
+        }
+        if (S._currentReqId !== reqId || !customModelIdentityCurrent(sendIdentity)) return;
+        if (_deepOutcome !== 'fallback') {
+          // 研究卡已自行收尾（报告/来源/历史由后端按 conversation_id 落库）
+          resetSendingIfCurrent();
+          if (_isTouchMobile) { try { input.blur(); } catch (_) {} }
+          updateInputMetrics();
+          scrollToBottom(messagesEl, false);
+          return;
+        }
+        // 回退：移除深搜可能残留的研究卡，继续下方普通联网聊天
+        try {
+          var _dsCards = messagesEl.querySelectorAll('.ai-research-card, .ai-research-intro');
+          for (var _dsi = 0; _dsi < _dsCards.length; _dsi++) {
+            if (_dsCards[_dsi].dataset && _dsCards[_dsi].dataset.reqId === reqId) _dsCards[_dsi].remove();
+          }
+        } catch (_) {}
+      }
+    }
+
     // P5 修复: 创建单一助手节点，typing dots 放在节点内部
     // 从发送到完成，始终使用同一个 DOM 节点
     // ★ 优化：发送后立刻展示「思考中」占位，不等服务端首包（降低感知延迟）
@@ -11479,7 +11553,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         thinking_max: sendSettings.thinkMax === true,
         work_mode: sendSettings.workMode === true,
         web_search: sendSettings.webSearch === true,network_mode:sendSettings.networkMode,
-        tools_enabled: (sendSettings.webSearch === true || sendSettings.thinkMax === true || sendSettings.workMode === true),
+        // 修复(bug5)：auto 模式（network_mode!=='off'）下也要给自定义模型挂载工具，
+        // 否则自动联网工具永远不触发（旧逻辑只有 required/webSearch=true 才 tools_enabled）。
+        tools_enabled: (sendSettings.networkMode !== 'off' || sendSettings.webSearch === true || sendSettings.thinkMax === true || sendSettings.workMode === true),
         study: sendSettings.study,
         // ★ 修复：自定义模型通道此前漏发 attachments，文件内容无法传给模型
         attachments: attachmentPayload || undefined,
@@ -11657,6 +11733,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var streamWorkMode = sendSettings.workMode;
       var streamToolCount = 0;
       var streamSiteCards = [];
+      // 修复(bug5)：DeepSeek 原生联网 sources 事件累积，收尾写入 aiMsg.search_results，
+      // 使来源卡片在刷新/切会话后仍能从历史恢复（旧逻辑只插 DOM，刷新即丢）。
+      var streamSourceItems = [];
+      var _searchStatusSettled = false; // 搜索状态条是否已收敛为完成态（防晚到事件覆盖）
       var streamConvId = null;
       var doneReceived = false;
       var _eofReached = false; // ★ 修复：SSE EOF flush 前置标志此前未声明（严格模式下 EOF 即抛 ReferenceError）
@@ -11897,8 +11977,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         var stoppedEarly = !!(evt && evt.interrupted === true);
         var fallbackText = hasThinking ? 'AI 只返回了思考过程，没有生成正文回复。' : 'AI 暂无回复，请重试。';
         if (!hasContent && assistantBubble) {
-          var keptBubble = String(assistantBubble.textContent || '').trim();
-          if (keptBubble && keptBubble !== '正在回复…' && keptBubble !== '正在思考中') {
+          // 修复(bug1)：ai-empty-fallback 是 contentRenderer.finish('') 写入的降级文案，
+          // 不是模型真实正文；回读它会导致纯思考轮次多出一个「AI 暂无回复」错误气泡。
+          var keptBubble = assistantBubble.classList.contains('ai-empty-fallback')
+            ? '' : String(assistantBubble.textContent || '').trim();
+          if (keptBubble && keptBubble !== '正在回复…' && keptBubble !== '正在思考中'
+              && keptBubble !== 'AI 暂无回复，请重试。' && keptBubble !== 'AI 暂无回复。') {
             content = keptBubble;
             hasContent = true;
           }
@@ -11979,7 +12063,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             setThinkingExpanded(rNode, thinkingOpen, messagesEl);
             if (railHasSteps) {
               rNode.__processSettled = true;
-              rNode.__userCollapsed = !thinkingOnly;
+              // 修复(bug4)：用户流式期间手动点开（__userCollapsed===false）时保持展开，
+              // 不被无条件 !thinkingOnly 拍扁。
+              if (typeof rNode.__userCollapsed !== 'boolean' || rNode.__userCollapsed !== false) {
+                rNode.__userCollapsed = !thinkingOnly;
+              }
               // 回复结束：时间轴和思考一起折叠；有工具失败时保持展开，失败明细默认可见。
               var railKeepOpen = !!(node && node.querySelector('.ai-tool-step.is-error'));
               rNode.classList.toggle('is-rail-open', railKeepOpen);
@@ -12016,6 +12104,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         var searchCount = evt ? evt.search_count : 0;
         var searchQuery = evt ? evt.search_query : '';
         var searchResults = evt && Array.isArray(evt.search_results) ? evt.search_results : null;
+        // 修复(bug5)：DeepSeek 原生联网的 sources 事件没有随 done 回传，这里用流式累积的来源补齐。
+        if ((!searchResults || !searchResults.length) && streamSourceItems.length) searchResults = streamSourceItems.slice(0, 50);
         var searchExpiresAt = evt && typeof evt.search_expires_at === 'number' ? evt.search_expires_at : 0;
         userMsg._pendingSync = !(evt && evt.saved === true);
         userMsg._historyRequestAtCommit = S.historyRequestId;
@@ -12244,8 +12334,18 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           }
         }
         if (thinking) {
-          thinking.__userCollapsed = true;
-          setThinkingExpanded(thinking, false, messagesEl);
+          // 修复(bug4)：尊重用户流式期间手动点开的思考面板（__userCollapsed===false），
+          // 以及工具报错需保持展开的状态。旧逻辑无条件写死 true，会把用户手动展开的面板
+          // 在 done 收尾时强行拍扁。
+          var railHasStepsEarly = !!(rail && rail.querySelector('.ai-rail-beat, .ai-tool-step'));
+          var toolFailedEarly = !!assistantNode.querySelector('.ai-tool-step.is-error');
+          var shouldCollapse = thinking.__userCollapsed !== false && !(toolFailedEarly && !railHasStepsEarly);
+          if (shouldCollapse) {
+            thinking.__userCollapsed = true;
+            setThinkingExpanded(thinking, false, messagesEl);
+          } else {
+            setThinkingExpanded(thinking, true, messagesEl);
+          }
         }
         var railHasSteps = !!(rail && rail.querySelector('.ai-rail-beat, .ai-tool-step'));
         var keepOpen = railHasSteps && !!assistantNode.querySelector('.ai-tool-step.is-error');
@@ -12736,17 +12836,30 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           if (evt.type === 'search_status') {
             // DeepSeek 内置 web_search 状态（黑盒：结果不外吐，仅提示状态）
             var stBar = assistantNode.querySelector('.ai-search-status');
-            var stText = evt.status === 'completed' ? '已联网' : '联网中…';
-            var stFresh = buildSearchStatusBar({ statusText: stText, simple: true });
-            // ★ 修复：区分运行态/完成态，供 settleSearchStatus 判断是否还需收敛。
-            //   completed 时直接标记 is-settled（动画停止），in_progress 时标 is-running。
-            if (evt.status === 'completed') {
-              stFresh.classList.add('is-settled');
+            var isCompleted = evt.status === 'completed';
+            // 修复(bug5)：completed 时不再把已有的状态条整条替换成 simple 空壳
+            // （会丢掉 tool_result 阶段填入的来源数/结果数），而是就地收敛为终态保留信息。
+            // 只有不存在状态条时才新建一个 simple 终态条。
+            if (isCompleted) {
+              _searchStatusSettled = true;
+              if (stBar && stBar.parentNode) {
+                try { settleOneStatusBar(stBar, { doneText: '已联网' }); } catch (_eSettleBar) {}
+              } else {
+                var stDone = buildSearchStatusBar({ statusText: '已联网', simple: true });
+                stDone.classList.add('is-settled');
+                assistantNode.insertBefore(stDone, assistantBubble);
+              }
             } else {
-              stFresh.classList.add('is-running');
+              // 运行态：若无条则插 running 条；已有则复用，不乱序覆盖
+              if (stBar && stBar.parentNode) {
+                stBar.classList.add('is-running');
+                stBar.classList.remove('is-settled');
+              } else {
+                var stRun = buildSearchStatusBar({ statusText: '联网中…', simple: true });
+                stRun.classList.add('is-running');
+                assistantNode.insertBefore(stRun, assistantBubble);
+              }
             }
-            if (stBar && stBar.parentNode) stBar.parentNode.replaceChild(stFresh, stBar);
-            else assistantNode.insertBefore(stFresh, assistantBubble);
             continue;
           }
 
@@ -12766,6 +12879,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               if (!/^https?:\/\//i.test(srcUrl) || srcWrap._seen[srcUrl]) return;
               if (srcWrap.querySelectorAll('.ai-source-item').length >= 8) return;
               srcWrap._seen[srcUrl] = 1;
+              // 修复(bug5)：累积到结构化来源数组（与展示去重一致），收尾落进历史。
+              if (!streamSourceItems.some(function(s) { return String((s && s.url) || '') === srcUrl; })) {
+                streamSourceItems.push({ title: String((item && item.title) || srcUrl), url: srcUrl });
+              }
               var host = '';
               try { host = new URL(srcUrl).hostname.replace(/^www\./, ''); } catch (_) {}
               var link = el('a', { class: 'ai-source-item', href: srcUrl, target: '_blank', rel: 'noopener noreferrer' });
@@ -13419,7 +13536,16 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             //   ① 收敛所有搜索状态条为终态（停动画、保留信息）；
             //   ② 把所有残留 is-running 的 tool step 置为完成态
             //      （含无 data-tool-name 的 pending 占位步骤）。
-            try { settleSearchStatus(assistantNode, { doneText: '联网完成' }); } catch (eSettleNow) {}
+            // 修复(bug5)：只有搜索类工具结果才收敛搜索状态条；非搜索工具（天气/时间/代码等）
+            // 不应把「联网中」提前拍成「联网完成」；并行工具未全部返回时也不提前收敛。
+            // 同时尊重已完成状态，避免晚到的 search_status:completed 把带结果数的条子覆盖成空壳。
+            var _toolNameNow = String((evt && (evt.tool_name || evt.name)) || '').toLowerCase();
+            var _isSearchToolNow = /search|web|tavily|bing|serper|brave|searx|联网|检索/.test(_toolNameNow);
+            var _runningToolsLeft = assistantNode.querySelectorAll('.ai-tool-step.is-running');
+            if (_isSearchToolNow && toolSucceeded && !_searchStatusSettled && _runningToolsLeft.length <= 1) {
+              _searchStatusSettled = true;
+              try { settleSearchStatus(assistantNode, { doneText: '联网完成' }); } catch (eSettleNow) {}
+            }
             // ★★★ 2026-09-17 修正（并行工具场景的关键 bug）：
             //   旧实现把**所有** is-running 的步骤一律置为完成。并行调用 5 个工具时，
             //   第 1 个工具返回就会把其余 4 个"还没返回"的步骤也标成完成 ——
@@ -13707,10 +13833,31 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
               if (typeof evt.work_mode === 'boolean') streamWorkMode = evt.work_mode;
               // sanitized_content 优先：后端清洗后的正文
               if (evt.sanitized_content || evt.content) {
-                var fullAnswer = evt.sanitized_content || evt.content;
+                var fullAnswer = String(evt.sanitized_content || evt.content);
                 var sealedPrefix = sealedContents.join('');
-                if (sealedPrefix && String(fullAnswer).indexOf(sealedPrefix) === 0) aiContent = String(fullAnswer).slice(sealedPrefix.length);
-                else aiContent = fullAnswer;
+                var streamedBody = String(aiContent || '');
+                if (!sealedPrefix) {
+                  // 无封存段：直接用后端清洗后的完整正文
+                  aiContent = fullAnswer;
+                } else if (streamedBody.trim()) {
+                  // 修复(bug2)：有封存段且流式期间已累积本段增量时，这个增量与
+                  // sealedContents 天然不重复，是最终正文的准确后半段。绝不能整段覆写
+                  // 成 fullAnswer——后端 sanitized_content 常对前段做空白裁剪/DSML清洗，
+                  // 严格 indexOf(sealedPrefix)===0 一旦失配就会整段覆写，导致
+                  // sealedContents.join('')+aiContent 把同一段正文显示并存历史两遍。
+                  // 保留流式增量即可（它与封存段配套）。
+                } else {
+                  // 有封存段但流式无增量：后端答案里去掉已封存段作为增量；
+                  // 去空白对齐前缀，避免裁剪差异导致整段残留造成重复。
+                  var normFull0 = fullAnswer.replace(/\s+/g, '');
+                  var normSealed0 = sealedPrefix.replace(/\s+/g, '');
+                  if (normFull0.indexOf(normSealed0) === 0) {
+                    aiContent = fullAnswer.slice(sealedPrefix.length); // 保守保留后缀
+                    if (!aiContent.trim()) aiContent = '';
+                  } else {
+                    aiContent = ''; // 完全对不上且流式无内容：封存段即全部正文，避免重复
+                  }
+                }
               }
               // 搜索路径若流式 reasoning 丢失，done 包里仍可能带完整 reasoning
               if (typeof evt.reasoning === 'string' && (!aiReasoning.trim() || evt.reasoning.indexOf(aiReasoning) === 0)) {
@@ -13734,11 +13881,18 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             //   evt.saved 仍由 userMsg._pendingSync 正常消费，这里只去掉可见提示。
             
             if (assistantNode) {
-              ensureAssistantBubbleReady();
               clearInterval(_idleCheckTimer);
               var drained = true;
-              if (aiContent && !contentRenderer) ensureAssistantBubbleReady();
-              if (contentRenderer) drained = await contentRenderer.drain(aiContent, controller.signal);
+              // 修复(bug1)：仅当确有正文时才准备气泡并 drain。旧逻辑无条件执行，
+              // 空正文时 drain('') → contentRenderer.finish('') → 写入「AI 暂无回复，请重试。」
+              // 兜底文案并打上 ai-empty-fallback，随后 finishAiMessage 的 keptBubble 回读
+              // 把这段兜底文案误当成真实正文，导致纯思考/工具后无正文时多出发错气泡、
+              // 思考被收起且污染历史。无正文时交给 finishAiMessage 的 thinkingOnly 分支处理。
+              if (String(aiContent || '').trim()) {
+                ensureAssistantBubbleReady();
+                if (!contentRenderer) ensureAssistantBubbleReady();
+                if (contentRenderer) drained = await contentRenderer.drain(aiContent, controller.signal);
+              }
               if (S._currentReqId !== reqId || !customModelIdentityCurrent(sendIdentity)) {
                 // Superseded while draining: release this request's controller and
                 // reader even though another turn owns the UI now.
@@ -15663,7 +15817,7 @@ function showChatMessages() {
                   '<span class="ai-panel-row-trail" aria-hidden="true">' + ICO.chev + '</span>'
                 ) +
               '</button>' +
-              '<button type="button" class="ai-panel-row" data-action="search" title="点击切换：自动判断、必须检索、仅当前资料">' +
+              '<button type="button" class="ai-panel-row" data-action="search" title="点击切换：自动判断、全网深搜、仅当前资料">' +
                 '<span class="ai-panel-row-icon ai-panel-row-icon--search" aria-hidden="true">' + ICO.search + '</span>' +
                 '<span class="ai-panel-row-title">网页搜索</span>' +
                 rowEnd(
@@ -15675,7 +15829,7 @@ function showChatMessages() {
                 '<span class="ai-network-indicator" aria-hidden="true"></span>' +
                 '<button type="button" role="radio" aria-checked="false" tabindex="-1" data-network-mode="off" aria-label="仅使用当前资料">仅资料</button>' +
                 '<button type="button" role="radio" aria-checked="true" tabindex="0" data-network-mode="auto" aria-label="自动判断是否检索">自动</button>' +
-                '<button type="button" role="radio" aria-checked="false" tabindex="-1" data-network-mode="required" aria-label="必须实际检索">联网</button>' +
+                '<button type="button" role="radio" aria-checked="false" tabindex="-1" data-network-mode="required" aria-label="全网深入搜索">深搜</button>' +
               '</div>' +
               '<p class="ai-network-note" aria-live="polite"></p>' +
             '</div>' +
@@ -15910,7 +16064,9 @@ function showChatMessages() {
 
     var networkRail = null;
     function setNetworkMode(next) {
-      if (next === 'required' && (!S.quota || searchQuotaExhausted(S.quota))) {
+      // 修复(bug5)：仅当「明确查到额度耗尽」时才拦截；S.quota 尚未返回（null）
+      // 或额度接口报错时应放行，由后端按 fail-open 处理，否则用户点联网会被无故打回。
+      if (next === 'required' && S.quota && searchQuotaExhausted(S.quota)) {
         notify('当前搜索额度不可用，可以使用自动判断或仅当前资料');
         return;
       }
@@ -15947,7 +16103,7 @@ function showChatMessages() {
       var btn = panelShell.querySelector('[data-action="search"]');
       var hint = panelShell.querySelector('#aiSearchRemainHint');
       var q = S.quota;
-      var mode=networkSettings().networkMode,label={auto:'自动',required:'必须检索',off:'仅当前资料'}[mode];
+      var mode=networkSettings().networkMode,label={auto:'自动',required:'全网深搜',off:'仅当前资料'}[mode];
       if(st){st.textContent=label;st.classList.toggle('on',mode==='required');}
       if(btn){btn.setAttribute('aria-label','网页搜索：'+label+'，点击切换');btn.classList.toggle('is-selected',mode==='required');btn.removeAttribute('aria-checked');btn.removeAttribute('aria-disabled');btn.classList.remove('is-disabled');}
       if (networkControl) {
@@ -17139,8 +17295,8 @@ function showChatMessages() {
       }
       if (action === 'search') {
         var mode=networkSettings().networkMode,next=mode==='auto'?'required':mode==='required'?'off':'auto';
-        if(next==='required'&&(!S.quota||searchQuotaExhausted(S.quota))){
-          // Always allow the safe local-only choice even when quota is exhausted.
+        // 修复(bug5)：仅在明确查到额度耗尽时回退；额度未拉到(null)/接口报错时放行。
+        if(next==='required'&&S.quota&&searchQuotaExhausted(S.quota)){
           next='off';notify('当前搜索额度不可用，已切换为仅当前资料');
         }
         setNetworkMode(next);
