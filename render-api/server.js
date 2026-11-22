@@ -22058,7 +22058,9 @@ async function handleDeepThinkChat(req, res) {
 
     // 4. 读取配置和上下文
     var config = await getAiConfig();
-    var ctx = await loadAiContext(userName, convId);
+    // ★ 2026-11-22 修复：游客窗口内必须跳过查库读历史，否则数据库受限(402 exceed_egress_quota)
+    // 时深研回退链路会抛出裸错误码。与 /chat/stream(24488) 保持一致：传 skipDb。
+    var ctx = await loadAiContext(userName, convId, undefined, { skipDb: !!req.guestAi });
     var requestedDeepModel = normalizeDeepSeekModelName(req.body && req.body.model);
     var selectedDeepModel = [DEEPSEEK_MODEL_FLASH, DEEPSEEK_MODEL_PRO, DEEPSEEK_MODEL_REASONER].indexOf(requestedDeepModel) >= 0
       ? requestedDeepModel : DEEPSEEK_MODEL_REASONER;
@@ -22522,7 +22524,9 @@ app.post('/api/agent/chat', guestAiAuth, aiChatConcurrencyGate, guestAwareChatRa
     var config = await getAiConfig();
 
     // 5. 读取上下文（按 conversation_id 过滤）
-    var ctx = await loadAiContext(userName, convId);
+    // ★ 2026-11-22 修复：游客窗口内必须跳过查库读历史，否则数据库受限(402 exceed_egress_quota)
+    // 时深研回退链路会抛出裸错误码。与 /chat/stream(24488) 保持一致：传 skipDb。
+    var ctx = await loadAiContext(userName, convId, undefined, { skipDb: !!req.guestAi });
 
     // 5b. 当前时间
     var _now = new Date();
