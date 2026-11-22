@@ -51,17 +51,19 @@
     var button = byId(
       kind === "cover" ? "profileOwnCover" : "profileOwnBackground",
     );
+    if (!button) return;
     var img = button.querySelector("img"),
       url = safeUrl(value);
+    if (!img) return;
     if (url && img.getAttribute("src") !== url) img.src = url;
     if (!url) img.removeAttribute("src");
     img.hidden = !url;
-    button.querySelector("[data-image-label]").textContent = url
-      ? "更换"
-      : "设置";
+    var labelEl = button.querySelector("[data-image-label]");
+    if (labelEl) labelEl.textContent = url ? "更换" : "设置";
   }
   function apply(settings) {
     applying = true;
+    try {
     var root = document.documentElement,
       url = safeUrl(settings.background_url);
     root.classList.toggle("profile-custom-background", !!url);
@@ -71,8 +73,12 @@
     );
     image("cover", settings.cover_url);
     image("background", settings.background_url);
-    byId("profileOwnSignature").textContent = settings.signature || "";
-    byId("profileOwnSignature").hidden = !settings.signature;
+    // 判空：节点缺失时跳过，避免中断整个 apply
+    var sig = byId("profileOwnSignature");
+    if (sig) {
+      sig.textContent = settings.signature || "";
+      sig.hidden = !settings.signature;
+    }
     if (window.XTJThemeController && settings.theme)
       window.XTJThemeController.setMode(settings.theme);
     var id = identity();
@@ -98,7 +104,10 @@
     var visibility = byId("postVisibility");
     if (visibility && !byId("postInp")?.value)
       visibility.value = window.__xtjDefaultPostVisibility;
-    applying = false;
+    } finally {
+      // 修复：任何异常都要复位 applying，否则设置界面永久锁定无法保存
+      applying = false;
+    }
   }
   function render(s, preserveInput) {
     var settings = view(s);
@@ -213,7 +222,7 @@
               timeoutMs: 45000,
               headers: {
                 "Content-Type": upload
-                  ? "application/octet-stream"
+                  ? (upload.file && upload.file.type) || "application/octet-stream"
                   : "application/json",
               },
               body: upload ? upload.file : JSON.stringify(patch),

@@ -118,7 +118,7 @@
 @keyframes aw-reveal { from { opacity: 0; } to { opacity: 1; } }
 @keyframes aw-rise { from { opacity: .6; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 @media (max-width: 650px) {
-  .aw-overlay { padding: 7px; }
+  .aw-overlay { padding: 7px; padding-bottom: max(7px, env(safe-area-inset-bottom, 0px)); }
   .aw-panel { height: calc(var(--aw-vh, 100dvh) - 14px); border-radius: 18px; }
   .aw-header { padding: 12px 13px 5px; }
   .aw-header h2 { font-size: 17px; }

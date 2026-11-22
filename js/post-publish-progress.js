@@ -11,6 +11,8 @@
       var label = document.createElement('span'); label.className = 'post-publish-progress-label';
       var track = document.createElement('span'); track.className = 'post-publish-progress-track';
       track.setAttribute('role', 'progressbar'); track.setAttribute('aria-label', '帖子发布进度'); track.setAttribute('aria-valuemin', '0'); track.setAttribute('aria-valuemax', '100');
+      // 修复：缓存按钮原始子节点，cancel() 时恢复（避免取消后按钮永久显示进度条）
+      var originalNodes = button ? Array.prototype.slice.call(button.childNodes) : [];
       var fill = document.createElement('span'); track.appendChild(fill); copy.append(label, track); host.appendChild(copy); button.replaceChildren(host);
       function update(value, stage) {
         if (stopped || !isCurrent()) return;
@@ -35,13 +37,14 @@
           }
           xhr.open('POST', String(input), true); xhr.timeout = 10 * 60 * 1000;
           new Headers(options.headers || {}).forEach(function (value, key) { xhr.setRequestHeader(key, value); });
+          function fileSize() { return (files[index] && files[index].size) || 0; }
           function progress(bytes) {
-            if (stopped || !isCurrent()) { xhr.abort(); return; }
-            loaded[index] = Math.max(loaded[index], Math.min(files[index].size, bytes));
+            if (stopped || !isCurrent() || !files[index]) { xhr.abort(); return; }
+            loaded[index] = Math.max(loaded[index] || 0, Math.min(fileSize(), bytes));
             update(total ? loaded.reduce(function (sum, value) { return sum + value; }, 0) / total * 90 : 0, '上传中');
           }
-          xhr.upload.onprogress = function (event) { if (event.lengthComputable && event.total) progress(files[index].size * event.loaded / event.total); };
-          xhr.upload.onload = function () { progress(files[index].size); };
+          xhr.upload.onprogress = function (event) { if (files[index] && event.lengthComputable && event.total) progress(fileSize() * event.loaded / event.total); };
+          xhr.upload.onload = function () { if (files[index]) progress(fileSize()); };
           xhr.onload = function () {
             if (stopped || !isCurrent()) { finish(abortError()); return; }
             var headers = new Headers();
@@ -93,6 +96,10 @@
           stopped = true;
           Array.from(requests).forEach(function (xhr) { try { xhr.abort(); } catch (_) {} }); requests.clear();
           Array.from(controllers).forEach(function (controller) { try { controller.abort(); } catch (_) {} }); controllers.clear();
+          // 恢复按钮原始内容（若调用方未在 catch/finally 自行重置 textContent）
+          if (button && host.parentNode === button && originalNodes.length) {
+            try { button.replaceChildren.apply(button, originalNodes); } catch (_) {}
+          }
         }
       };
     }

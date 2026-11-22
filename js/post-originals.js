@@ -8,14 +8,17 @@
   }
   function valid(state) { return pending.get(state.remote) === state && state.owner === window.currentUser && state.epoch === authEpoch(); }
   function release(state) {
-    if (!pending.has(state.remote)) return;
+    // 修复：必须校验登记项正是本 state，避免旧 state 误删新 state 的 blob lease
+    if (pending.get(state.remote) !== state) return;
     clearTimeout(state.timer); pending.delete(state.remote); bytes -= state.bytes; state.lease.release();
   }
   function clear() { Array.from(pending.values()).forEach(release); }
   function handoff(state, item, lease) {
     if (!valid(state)) return;
     var images = Array.from(document.images).filter(function (img) { return img.getAttribute('src') === lease.url; });
-    if (!images.length) { release(state); return; }
+    // 修复：stored===true 立即 handoff 时新帖 DOM 可能尚未渲染；找不到匹配图片
+    // 不要立刻 release 撤销 blob，改走 scheduleHandoff 延迟兜底窗口再试。
+    if (!images.length) { scheduleHandoff(state, item, lease); return; }
     images.forEach(function (img) { img.src = item.media_url; });
     Promise.all(images.map(function (img) { return img.decode ? img.decode().catch(function () {}) : Promise.resolve(); }))
       .then(function () { if (valid(state)) release(state); });

@@ -22,8 +22,11 @@
     async function request(path, init) {
         if (typeof window.xtjProtectedFetch !== 'function') throw new Error('登录状态不可用');
         var response = await window.xtjProtectedFetch(path, Object.assign({ timeoutMs: 30000, background: true }, init));
-        var value = await response.json();
-        if (!response.ok || !value.ok) throw new Error(value.error || '请求失败，请重试');
+        // ★ 修复：网关 502/503 返回 HTML 或空响应体时 response.json() 抛原生 SyntaxError，
+        //   绕过中文错误兜底；此处捕获后统一走下面的中文提示。
+        var value = null;
+        try { value = await response.json(); } catch (_) { value = null; }
+        if (!response.ok || !value || !value.ok) throw new Error((value && value.error) || '请求失败，请重试');
         return value;
     }
     // 服务端识别（大模型，准确得多）。available: null 还没问过，true/false 是服务端的回答。

@@ -338,6 +338,8 @@
     var img = previewImage();
     var root = overlay();
     if (!img || !root) return;
+    // 清掉可能残留的 inline transform，确保下方的 CSS 变量变换真正生效
+    if (img.style.transform) img.style.transform = '';
     setPreviewVars({
       '--pp-img-x': state.tx + 'px',
       '--pp-img-y': state.ty + 'px',
@@ -1158,6 +1160,8 @@
         img.style.opacity = '';
         img.style.borderRadius = '';
         img.style.transformOrigin = '';
+        // 修复(P1-38)：入场动画(220ms)被打断时会残留 inline transform，导致下次打开错位
+        img.style.transform = '';
         img.classList.remove('zoomed', 'pp-placeholder');
       }
 

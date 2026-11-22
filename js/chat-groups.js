@@ -743,10 +743,12 @@
       '<span class="grp-time">' + esc(clock(msg.created_at)) + '</span></div></div></div>' +
       (mine ? '<span class="grp-msg-avatar is-self">' + avatarHtml(msg.sender) + '</span>' : '') + '</div>';
   }
+  function roleClass(role) { return role === 'owner' ? 'owner' : role === 'admin' ? 'admin' : 'member'; }
   function roleBadge(conv, userName) {
     var member = conv.detail && conv.detail.members.find(function (m) { return m.user_name === userName; });
     if (!member || member.role === 'member') return '';
-    return '<em class="grp-role is-' + member.role + '">' + (member.role === 'owner' ? '群主' : '管理员') + '</em>';
+    var rc = roleClass(member.role);
+    return '<em class="grp-role is-' + rc + '">' + (rc === 'owner' ? '群主' : '管理员') + '</em>';
   }
 
   function buildMessageNode(conv, msg, animateIn) {
@@ -934,7 +936,8 @@
     var list = Array.prototype.slice.call(files || [], 0, 9);
     for (var i = 0; i < list.length; i++) {
       var file = list[i];
-      if (!/^image\//.test(file.type || '')) { toast('目前群聊只支持发送图片'); continue; }
+      // 修复：仅允许常见光栅图，拒绝 image/svg+xml（SVG 可内嵌脚本造成 XSS）
+      if (!/^image\/(?:png|jpe?g|gif|webp|bmp|avif)$/i.test(file.type || '')) { toast('目前群聊只支持发送 PNG/JPG/GIF/WebP 图片'); continue; }
       if (file.size > 40 * 1024 * 1024) { toast('图片太大了'); continue; }
       var preview = URL.createObjectURL(file);
       var dims = await new Promise(function (resolve) { var probe = new Image(); probe.onload = function () { resolve([probe.naturalWidth, probe.naturalHeight]); }; probe.onerror = function () { resolve([0, 0]); }; probe.src = preview; });
@@ -1274,7 +1277,7 @@
     var shown = d.members.slice(0, canInvite ? (admin ? 18 : 19) : 20);
     var grid = shown.map(function (m) {
       return '<button type="button" class="grp-member" data-member="' + esc(m.user_name) + '">' + avatarHtml(m.user_name) +
-        '<span>' + esc(m.nickname || m.user_name) + '</span>' + (m.role !== 'member' ? '<em class="grp-role is-' + m.role + '">' + (m.role === 'owner' ? '群主' : '管理') + '</em>' : '') + '</button>';
+        '<span>' + esc(m.nickname || m.user_name) + '</span>' + (m.role !== 'member' ? '<em class="grp-role is-' + roleClass(m.role) + '">' + (m.role === 'owner' ? '群主' : '管理') + '</em>' : '') + '</button>';
     }).join('');
     if (canInvite) grid += '<button type="button" class="grp-member is-tool" data-info="invite"><span class="grp-tool-icon">+</span><span>邀请</span></button>';
     if (admin && !g.dissolved) grid += '<button type="button" class="grp-member is-tool" data-info="remove"><span class="grp-tool-icon">−</span><span>移出</span></button>';
@@ -1396,7 +1399,7 @@
       var banned = m.banned_until && new Date(m.banned_until) > new Date();
       return '<button type="button" class="grp-member-row" data-member="' + esc(m.user_name) + '" data-search="' + esc((m.nickname || '') + ' ' + m.user_name).toLowerCase() + '">' +
         avatarHtml(m.user_name) + '<span class="grp-member-name">' + esc(m.nickname || m.user_name) + (m.nickname ? '<small>' + esc(m.user_name) + '</small>' : '') + '</span>' +
-        (m.role !== 'member' ? '<em class="grp-role is-' + m.role + '">' + (m.role === 'owner' ? '群主' : '管理员') + '</em>' : '') +
+        (m.role !== 'member' ? '<em class="grp-role is-' + roleClass(m.role) + '">' + (m.role === 'owner' ? '群主' : '管理员') + '</em>' : '') +
         (banned ? '<em class="grp-role is-banned">禁言中</em>' : '') + (m.user_name === me() ? '<em class="grp-role">我</em>' : '') + '</button>';
     }
     var body = '<div class="grp-search"><svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg><input type="search" id="grpMemberFilter" placeholder="搜索群成员" aria-label="搜索群成员"></div>' +

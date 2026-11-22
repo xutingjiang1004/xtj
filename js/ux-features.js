@@ -270,6 +270,7 @@
   async function exportMyData() {
     var button=document.getElementById('xtjExportDataBtn'),owner=window.currentUser;
     if(!owner){if(window.openAuthModal)window.openAuthModal('login');return;}
+    if(!button)return; // 判空：按钮可能尚未渲染
     if(button.disabled)return;
     button.disabled=true;
     try {
@@ -284,7 +285,9 @@
           var body=await response.json();if(!response.ok||!body.ok)throw new Error(body.error||'导出失败，请重试');
           if(window.currentUser!==owner)throw new Error('账号已切换，导出已停止');
           snapshot=body.snapshot;account=body.account||account;
-          payload.data[kind].push.apply(payload.data[kind],body.items);
+          // 用循环替代 push.apply，避免大数组作参数导致栈溢出
+          var items = Array.isArray(body.items) ? body.items : [];
+          for (var ii = 0; ii < items.length; ii++) payload.data[kind].push(items[ii]);
           if(!body.has_more)break;
           if(!body.next_cursor||seen.has(body.next_cursor))throw new Error('导出分页异常，请重试');
           cursor=body.next_cursor;seen.add(cursor);

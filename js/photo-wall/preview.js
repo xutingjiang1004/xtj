@@ -1506,7 +1506,11 @@
                     var result=await window.deletePhotoWallPhoto(selectedPhoto,{render:false});
                     if (!result || !result.ok) return;
                     n=n.filter(function(photo){return photo && String(photo.id)!==id;});
-                    if (t && String(t.id)===id) V();
+                    if (t && String(t.id)===id) {
+                        // 修复：删除当前查看的照片时优先走完整关闭链（动画+清理），
+                        // 找不到再回退私有 V()，避免残留遮罩/滚动锁/监听器
+                        if (typeof window.closePhotoPreview === 'function') window.closePhotoPreview(); else V();
+                    }
                     else if (t) { i=n.findIndex(function(photo){return String(photo.id)===String(t.id);});F(i); }
                     window.showToast('照片已从照片墙删除');
                 } catch (error) { window.showToast('删除失败，请稍后重试'); }

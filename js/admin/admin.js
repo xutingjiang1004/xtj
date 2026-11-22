@@ -1294,7 +1294,8 @@
                 if (!userRes || !Array.isArray(userRes.data)) throw new Error('用户目录响应无效');
                 var previousUsers=Object.create(null);allUsers.forEach(function(user){previousUsers[user.name]=user;});
                 var refreshedUsers=userRes.data.map(function(row){
-                    var info=JSON.parse(row.content || '{}');
+                    // 修复：单条脏数据不应打断整批用户目录加载
+                    var info={};try {info=JSON.parse(row.content || '{}');} catch (_) {}
                     return {name:row.user_name,info:mergeAdminUserInfo(previousUsers[row.user_name] && previousUsers[row.user_name].info,info)};
                 });
                 allUsers=refreshedUsers;
@@ -2129,7 +2130,7 @@
     // 已删除；仅保留后文完整版本（含「分类 report_category」字段、escapeHtml 转义）。
 
     window.doDeleteReportPost = function(id) {
-        var r = reportsData.find(function(x) { return x.id === id; });
+        var r = reportsData.find(function(x) { return String(x.id) === String(id); });
         showConfirm('删除内容', '确认删除被举报的' + (r && r.target_type === 'photo' ? '照片' : '帖子') + '？此操作不可撤销。', '确认删除', async function() {
             try {
                 await apiCall('POST', '/admin/report/' + id + '/delete-post');
@@ -2142,7 +2143,7 @@
     };
 
     window.doBanReportUser = function(id) {
-        var r = reportsData.find(function(x) { return x.id === id; });
+        var r = reportsData.find(function(x) { return String(x.id) === String(id); });
         if (!r || !r.target_user) { showToast('无法确定被举报用户', 'error'); return; }
         showConfirm('封禁用户', '确认封禁用户 ' + r.target_user + '？\n\n将封禁 72 小时（3 天）。', '确认封禁', async function() {
             try {
@@ -3397,7 +3398,7 @@
     };
 
     window.handleReportDetail = function(id) {
-        var r = reportsData.find(function(x) { return x.id === id; });
+        var r = reportsData.find(function(x) { return String(x.id) === String(id); });
         if (!r) return;
         var modal = document.createElement('div');
         modal.className = 'report-detail-modal';

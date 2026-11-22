@@ -100,7 +100,8 @@ const SIGNED_CACHE = 'xtj-signed-media-v1';
 const SIGNED_MAX_BYTES = 160 * 1024 * 1024;
 const SIGNED_MAX_FILE_BYTES = 24 * 1024 * 1024;
 const SIGNED_MAX_AGE = 30 * 86400000;
-let signedWrites = Promise.resolve(), signedCorsBroken = false;
+let signedWrites = Promise.resolve(), signedCorsBrokenUntil = 0;
+const SIGNED_CORS_COOLDOWN = 60000; // 单次瞬时断网只熔断 60 秒，不再永久关闭缓存
 // FIX CACHE-06: 退出登录清理必须让在途的签名图写入作废，否则缓存会被重新创建。
 let signedGeneration = 0;
 function signedKey(request) {
@@ -130,10 +131,12 @@ async function signedResponse(event, key) {
     const cache = await caches.open(SIGNED_CACHE), saved = await cache.match(key);
     if (saved && Date.now() - Number(saved.headers.get('X-XTJ-Cached-At')) <= SIGNED_MAX_AGE) return saved;
   } catch (_) {} // Full or disabled storage must not stop pictures from loading.
-  if (signedCorsBroken) return fetch(event.request);
+  if (Date.now() < signedCorsBrokenUntil) return fetch(event.request);
   let response;
   try { response = await fetch(event.request.url, { mode: 'cors', credentials: 'omit' }); }
-  catch (_) { signedCorsBroken = true; return fetch(event.request); }
+  catch (_) { signedCorsBrokenUntil = Date.now() + SIGNED_CORS_COOLDOWN; return fetch(event.request); }
+  // 请求成功即重置熔断，冷却期内恢复也立即重新启用缓存
+  signedCorsBrokenUntil = 0;
   const bytes = Number(response.headers.get('Content-Length'));
   if (response.status === 200 && /^image\//i.test(response.headers.get('Content-Type') || '') && bytes > 0 && bytes <= SIGNED_MAX_FILE_BYTES) {
     const headers = new Headers(response.headers);
@@ -159,6 +162,7 @@ self.addEventListener('message', event => {
   if (event.data?.type === 'XTJ_CLEAR_ORIGINAL_MEDIA') {
     originalGeneration++;
     signedGeneration++;
+    signedCorsBrokenUntil = 0; // 清缓存时一并重置 CORS 熔断
     if (originalSeedController) originalSeedController.abort();
     // FIX CACHE-06: 删除排到所有在途写入之后，避免 clear 先删、随后 put 把上一账号的私有图重新写回。
     event.waitUntil(originalWrite(() => caches.delete(ORIGINAL_CACHE)).catch(() => {})

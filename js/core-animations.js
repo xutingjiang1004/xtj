@@ -108,22 +108,30 @@
     });
   };
 
-  var _origCloseModal = window.closeModal;
+  // 惰性解析原函数（与 window.openModal 一致），解除脚本加载顺序耦合：
+  // 若本脚本先于定义 closeModal 的脚本执行，立即捕获会拿到 undefined。
+  if (!window.__xtjOrigCloseModal && typeof window.closeModal === 'function') window.__xtjOrigCloseModal = window.closeModal;
   var _closeModalGuard = {};
-  window.closeModal = function (id) {
+  function origCloseModal() {
+    if (!window.__xtjOrigCloseModal && typeof window.closeModal === 'function' && window.closeModal !== _animateCloseModal) window.__xtjOrigCloseModal = window.closeModal;
+    return window.__xtjOrigCloseModal;
+  }
+  window.closeModal = _animateCloseModal;
+  function _animateCloseModal(id) {
     var overlay = document.getElementById(id);
     if (overlay && morphOwns(id, 'close')) {
       delete _closeModalGuard[id];
-      if (_origCloseModal) _origCloseModal(id);
+      var _orig = origCloseModal();
+      if (_orig && _orig !== _animateCloseModal) _orig(id);
       return;
     }
     if (!overlay || !hasGSAP() || perfMode() === 'lite') {
-      if (_origCloseModal) _origCloseModal(id);
+      var _origCM = origCloseModal(); if (_origCM && _origCM !== _animateCloseModal) _origCM(id);
       return;
     }
     var box = overlay.querySelector('.modal-box');
     if (!box) {
-      if (_origCloseModal) _origCloseModal(id);
+      var _origCM = origCloseModal(); if (_origCM && _origCM !== _animateCloseModal) _origCM(id);
       return;
     }
     _closeModalGuard[id] = true;
@@ -138,13 +146,13 @@
         cleanup();
         if (_closeModalGuard[id]) {
           delete _closeModalGuard[id];
-          if (_origCloseModal) _origCloseModal(id);
+          var _origCM = origCloseModal(); if (_origCM && _origCM !== _animateCloseModal) _origCM(id);
           box.style.removeProperty('opacity');
           box.style.removeProperty('transform');
         }
       }
     });
-  };
+  }
 
   window.xtjAnimateLikeToggle = function (btn, liked) {
     if (!btn || perfMode() === 'lite') return;
@@ -163,14 +171,17 @@
     });
   };
 
-  var _origOpenComment = window.openComment;
-  window.openComment = function (postId) {
+  // 惰性解析（与 openModal 一致），避免脚本加载顺序导致捕获到 undefined
+  if (!window.__xtjOrigOpenComment && typeof window.openComment === 'function') window.__xtjOrigOpenComment = window.openComment;
+  window.openComment = function _animateOpenComment(postId) {
     if (!window.currentUser) {
       if (window.showToast) window.showToast('请先登录');
       return;
     }
     // 转发全部参数：回复某条评论时第二个参数带着被回复评论的信息。
-    if (_origOpenComment) _origOpenComment.apply(this, arguments);
+    var _origOC = window.__xtjOrigOpenComment;
+    if (!_origOC && typeof window.openComment === 'function' && window.openComment !== _animateOpenComment) _origOC = window.openComment;
+    if (typeof _origOC === 'function' && _origOC !== _animateOpenComment) _origOC.apply(this, arguments);
   };
 
   document.addEventListener('click', function (e) {

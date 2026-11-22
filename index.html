@@ -66,7 +66,7 @@
             }
         } catch (_) {}
     </script>
-    <link rel="stylesheet" href="css/style.min.css?v=896ac0f4d7" />
+    <link rel="stylesheet" href="css/style.min.css?v=d8099cbc72" />
     <!-- 次要样式异步加载，避免阻塞首屏（style.min.css 已可达 300KB+） -->
     <!-- ★ 2026-09-22 响应式修复：下面两个 CSS 是「media="print" onload 切 all」的异步加载，
          浏览器要等 onload 后才知道它们是样式表 → 应用前后存在两阶段布局跳变（CLS）。
@@ -75,7 +75,7 @@
     <link rel="preload" as="style" href="css/visual-refinements.min.css?v=3fd6a30cd9" />
     <link rel="preload" as="style" href="css/ui-enhance.min.css?v=a921692a91" />
     <link rel="stylesheet" href="css/visual-refinements.min.css?v=3fd6a30cd9" media="print" onload="this.media='all'" />
-    <noscript><link rel="stylesheet" href="css/visual-refinements.min.css?v=3fd6a30cd9" /><link rel="stylesheet" href="css/ai-agent.min.css?v=dbfb3cb4d3" /><link rel="stylesheet" href="css/ui-enhance.min.css?v=a921692a91" /><link rel="stylesheet" href="css/ui-shell.min.css?v=394a92c9e6" /></noscript>
+    <noscript><link rel="stylesheet" href="css/visual-refinements.min.css?v=3fd6a30cd9" /><link rel="stylesheet" href="css/ai-agent.min.css?v=708eef01ce" /><link rel="stylesheet" href="css/ui-enhance.min.css?v=a921692a91" /><link rel="stylesheet" href="css/ui-shell.min.css?v=394a92c9e6" /></noscript>
     <!-- ★ 2026-09-22 响应式修复（补完）：desktop.css 自身首条断点就是 @media (min-width: 768px)，
          只按宽度加载会让「横屏手机」（宽 ≥768、高 ≈390）也套上桌面两列栅格，与 ui-shell.css 侧
          已加的 min-height:480px 门禁不一致（会出现"桌面栅格 + 移动外壳"的混合布局）。
@@ -92,31 +92,29 @@
          DCL 因此推迟到 4s 量级。preload 只提前「下载」，不改变执行顺序
          （defer 仍按文档顺序执行），构建脚本会同步刷新 ?v= 指纹。 -->
     <link rel="preload" as="script" href="js/vendor/supabase.min.js?v=e8c548fa1b" />
-    <link rel="preload" as="script" href="js/core.min.js?v=d722d16765" />
-    <!-- 小猫 AI 模块按需加载，但实测它会被首屏图片请求挤在连接队列里几十秒，
-         用户点开只看到「正在加载 AI 模块」且无法返回。这里在第一波就把它取下来，
-         执行时机仍由模块加载器决定（不会提前执行）。 -->
-    <link rel="preload" as="script" href="js/ai-agent.js?v=20261119dual" />
+    <link rel="preload" as="script" href="js/core.min.js?v=af15c5f080" />
+    <!-- 修复(P0-01)：删除 ai-agent.js 未压缩版的强制 preload（1MB 阻塞首屏，
+         且指向源文件而非构建产物，与构建一致性校验冲突）。小猫AI 仍由模块加载器按需加载。 -->
     <!-- 照片墙与图片预览同样是按需模块。实测它们会被首屏图片请求挤住，
          表现为「点照片墙没反应」「点开照片几秒后黑屏」。这几个模块合计约 130KB
          （gzip 后 30KB 上下），提前取下来比让用户卡在空面板里划算。 -->
     <link rel="preload" as="script" href="js/photo-wall/data.min.js?v=76f1a1ed5d" />
     <link rel="preload" as="script" href="js/photo-wall/render.min.js?v=e147a8920e" />
     <link rel="preload" as="script" href="js/photo-wall/photo-wall.min.js?v=af904af583" />
-    <link rel="preload" as="script" href="js/photo-wall/preview.min.js?v=6a48de6e2d" />
-    <link rel="preload" as="script" href="js/photo-wall/preview-hotfix.min.js?v=150b755e22" />
-    <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=dbfb3cb4d3">
+    <link rel="preload" as="script" href="js/photo-wall/preview.min.js?v=dbe9306782" />
+    <link rel="preload" as="script" href="js/photo-wall/preview-hotfix.min.js?v=da5f1d46b9" />
+    <meta name="xtj-module-ai-style" content="css/ai-agent.min.css?v=708eef01ce">
     <meta name="xtj-module-ai-reading-style" content="css/ai-reading.min.css?v=69f38f78de">
-    <meta name="xtj-module-ai-features-style" content="css/ai-assistant-features.min.css?v=73be28d6e6">
-    <meta name="xtj-module-ai-script" content="js/ai-agent.js?v=20261119dual">
+    <meta name="xtj-module-ai-features-style" content="css/ai-assistant-features.min.css?v=822ecdf789">
+    <meta name="xtj-module-ai-script" content="js/ai-agent.min.js?v=3a162f34e3">
     <meta name="xtj-module-photo-preview-style" content="css/photo-preview.min.css?v=897c087f70">
-    <meta name="xtj-module-photo-preview" content="js/photo-wall/preview.min.js?v=6a48de6e2d">
-    <meta name="xtj-module-photo-preview-hotfix" content="js/photo-wall/preview-hotfix.min.js?v=150b755e22">
+    <meta name="xtj-module-photo-preview" content="js/photo-wall/preview.min.js?v=dbe9306782">
+    <meta name="xtj-module-photo-preview-hotfix" content="js/photo-wall/preview-hotfix.min.js?v=da5f1d46b9">
     <meta name="xtj-module-photo-upload" content="js/photo-wall/upload-ui.min.js?v=e780dfe14f">
     <meta name="xtj-module-photo-data" content="js/photo-wall/data.min.js?v=76f1a1ed5d">
     <meta name="xtj-module-photo-render" content="js/photo-wall/render.min.js?v=e147a8920e">
     <meta name="xtj-module-photo-main" content="js/photo-wall/photo-wall.min.js?v=af904af583">
-    <meta name="xtj-module-core-animations" content="js/core-animations.min.js?v=81eba41a86">
+    <meta name="xtj-module-core-animations" content="js/core-animations.min.js?v=3e2514d352">
     <meta name="xtj-module-features" content="js/features.min.js?v=93266150b7">
     <meta name="xtj-module-ui-effects" content="js/ui-effects.min.js?v=91dbf623d2">
 
@@ -1269,16 +1267,6 @@
         })();
     </script>
     <!-- AI Core shared modules (must load before ai-agent) -->
-    <script defer src="js/ai-core/errors.min.js?v=8b6848b214"></script>
-    <script defer src="js/ai-core/request-controller.min.js?v=b064f8e5bf"></script>
-    <script defer src="js/ai-core/transport.min.js?v=777765595a"></script>
-    <script defer src="js/ai-core/markdown-renderer.min.js?v=f0f2c7ab87"></script>
-    <script defer src="js/ai-core/scroll-controller.min.js?v=34059556ba"></script>
-    <script defer src="js/ai-core/stream-renderer.min.js?v=eed391db66"></script>
-    <script defer src="js/ai-core/telemetry.min.js?v=3a5ac455ac"></script>
-    <script defer src="js/ai-core/reading-tools.min.js?v=e729f4fc29"></script>
-    <script defer src="js/ai-core/assistant-features.min.js?v=10a2b87030"></script>
-    <script defer src="js/ai-core/voice-conversation.min.js?v=fbe120183b"></script>
     <!-- Keep the database SDK on the same origin. The former public-CDN request
          was a single point of failure on restricted/mobile networks and could
          leave the feed permanently unavailable. `defer` preserves script order
@@ -1292,22 +1280,32 @@
     <script defer src="js/media-cache.min.js?v=0dabc98b31"></script>
     <script defer src="js/image-load-guard.min.js?v=0c6461e54e"></script>
     <script defer src="js/post-composer-media.min.js?v=3557fd6070"></script>
-    <script defer src="js/post-originals.min.js?v=b6ca281d48"></script>
-    <script defer src="js/post-publish-progress.min.js?v=8cf6ad5f4d"></script>
-    <script defer src="js/post-publish-motion.min.js?v=da76b1b6d0"></script>
-    <script defer src="js/profile-settings.min.js?v=43f278e0ff"></script>
+    <script defer src="js/post-originals.min.js?v=8377eaef8d"></script>
+    <script defer src="js/post-publish-progress.min.js?v=dcc5a147ad"></script>
+    <script defer src="js/post-publish-motion.min.js?v=bb4c31fe26"></script>
+    <script defer src="js/profile-settings.min.js?v=1a792874f1"></script>
     <script defer src="js/author-posts.min.js?v=910d415439"></script>
-    <script src="js/ip-city-data.min.js?v=84becef210"></script>
-    <script src="js/ip-location.min.js?v=ab51fe25f2"></script>
+    <script defer src="js/ip-city-data.min.js?v=84becef210"></script>
+    <script defer src="js/ip-location.min.js?v=ab51fe25f2"></script>
     <script defer src="js/core-utils.min.js?v=a376d5219e"></script>
     <script defer src="js/photo-wall/story.min.js?v=a07892bc45"></script>
-    <script defer src="js/voice-transcription.min.js?v=5cb3011971"></script>
-    <script defer src="js/core.min.js?v=d722d16765"></script>
+    <script defer src="js/voice-transcription.min.js?v=e361ff6f64"></script>
+    <script defer src="js/core.min.js?v=af15c5f080"></script>
+    <script defer src="js/ai-core/errors.min.js?v=3b3a007fcd"></script>
+    <script defer src="js/ai-core/request-controller.min.js?v=b064f8e5bf"></script>
+    <script defer src="js/ai-core/transport.min.js?v=ad623e646f"></script>
+    <script defer src="js/ai-core/markdown-renderer.min.js?v=3663d92889"></script>
+    <script defer src="js/ai-core/scroll-controller.min.js?v=15858ae3ed"></script>
+    <script defer src="js/ai-core/stream-renderer.min.js?v=6bff392d36"></script>
+    <script defer src="js/ai-core/telemetry.min.js?v=3a5ac455ac"></script>
+    <script defer src="js/ai-core/reading-tools.min.js?v=5d9debedc1"></script>
+    <script defer src="js/ai-core/assistant-features.min.js?v=f0db5588db"></script>
+    <script defer src="js/ai-core/voice-conversation.min.js?v=fbe120183b"></script>
     <script defer src="js/login-device.min.js?v=7f402fc787"></script>
     <script defer src="js/theme-toggle.min.js?v=f67dfa81a9"></script>
     <script defer src="js/desktop-shell.min.js?v=8420dc4713"></script>
-    <script defer src="js/ux-features.min.js?v=b4c8715f12"></script>
-    <script defer src="js/chat-groups.min.js?v=ed9ac6df1f"></script>
+    <script defer src="js/ux-features.min.js?v=4b14003d13"></script>
+    <script defer src="js/chat-groups.min.js?v=6a990195e0"></script>
 
 <!-- 深入研究二级页面：直接放在 body 下，确保真全屏覆盖 -->
 <div class="dock-panel hidden" id="panelDeepThink">

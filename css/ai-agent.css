@@ -80,7 +80,7 @@
 .ai-chat-header {
   position: relative;
   top: auto;
-  z-index: 1000;
+  z-index: 20;
   flex: 0 0 auto;
   display: flex;
   align-items: center;
@@ -1215,7 +1215,7 @@ html.xtj-reduce-motion .ai-rail-beat.is-open .ai-rail-reason {
 .ai-site-search-panel {
   position: fixed;
   inset: 0;
-  z-index: 99999;
+  z-index: 9000;
   display: flex;
   width: 100%;
   min-width: 0;
@@ -1438,7 +1438,7 @@ html[data-xtj-motion="off"] .ai-voice-status, html[data-xtj-motion="off"] .ai-ch
   position: relative;
   /* 允许 + 菜单向上溢出显示 */
   overflow: visible;
-  z-index: 5;
+  z-index: 30;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
   transition: transform 0.16s ease, padding 0.16s ease, border-color 0.16s ease, box-shadow 0.15s ease, background 0.15s ease;
@@ -1832,7 +1832,7 @@ html[data-xtj-motion="off"] .ai-chat-input-bar {
 /* One reversible compositor transition; content never stretches or clips. */
 .ai-plus-panel-shell {
   position:absolute; left:8px; bottom:calc(100% + 10px);
-  width:min(308px,calc(100vw - 20px)); max-height:min(78vh,640px);
+  width:min(308px,calc(100vw - 20px)); max-height:min(78vh,640px); max-height:min(78dvh,640px);
   box-sizing:border-box; border-radius:22px;
   border:1px solid rgba(120,170,155,.18); background:#f4faf6;
   box-shadow:0 12px 32px rgba(40,80,70,.12); z-index:30;
@@ -1858,6 +1858,7 @@ html[data-xtj-motion="off"] .ai-chat-input-bar {
   position: relative;
   min-height: 0;
   max-height: min(74vh, 560px);
+  max-height: min(74dvh, 560px);
   overflow-y: auto;
   overflow-x: hidden;
   padding: 10px;
@@ -4133,6 +4134,7 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
   display: none;
   text-align: left;
   max-height: min(36vh, 280px);
+  max-height: min(36dvh, 280px);
   overflow-y: auto;
   margin: 4px 0 0;
   border: 0;
@@ -4267,7 +4269,7 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
   position: fixed !important;
   inset: 0 !important;
   top: 0 !important; right: 0 !important; bottom: 0 !important; left: 0 !important;
-  z-index: 99999 !important;
+  z-index: 9000 !important;
   padding: 0 !important;
   margin: 0 !important;
   width: 100vw !important;
@@ -5583,7 +5585,7 @@ html[data-xtj-motion=weak] .ai-search-status .ai-search-status-label::before {
 [data-theme="dark"] .dt-msg-content {
   color: #e5e7eb;
 }
-[data-theme="dark"] .dt-msg.user .dt-msg-content {
+[data-theme="dark"] #panelDeepThink .dt-msg.user .dt-msg-content {
   background: rgba(34, 77, 65, .45);
   border-color: rgba(127, 187, 172, .2);
   color: #e5e7eb;
@@ -7903,7 +7905,7 @@ html.xtj-reduce-motion .ai-copy-menu .ai-reply-menu-panel { animation: none; }
    替代系统原生 select（部分设备原生下拉渲染不全/错位），全部由站点自绘。 */
 .ai-select-pop {
   position:fixed; z-index:12000; box-sizing:border-box; overflow-y:auto;
-  max-height:60vh; padding:8px; border-radius:20px;
+  max-height:60vh; max-height:60dvh; padding:8px; border-radius:20px;
   background:#f6fbf8; color:#284b40; border:1px solid rgba(120,177,170,.24);
   box-shadow:0 12px 32px rgba(30,80,63,.15);
   backdrop-filter:none; -webkit-backdrop-filter:none;
@@ -8901,6 +8903,7 @@ html[data-theme="dark"] .ai-msg.assistant .ai-msg-bubble {
 .ai-auto-box {
   width: min(560px, 100%);
   max-height: min(82vh, 720px);
+  max-height: min(82dvh, 720px);
   display: flex; flex-direction: column;
   background: #fff; color: #1c2b28;
   border-radius: 18px;
@@ -8960,7 +8963,7 @@ html[data-theme="dark"] .ai-msg.assistant .ai-msg-bubble {
 .ai-auto-form {
   margin-top: 10px; padding: 12px; border-radius: 12px;
   background: rgba(244, 250, 248, 0.96); border: 1px solid rgba(78, 168, 142, 0.18);
-  max-height: 52vh; overflow-y: auto;
+  max-height: 52vh; max-height: 52dvh; overflow-y: auto;
 }
 .ai-auto-field { display: block; margin-bottom: 9px; font-size: 12px; color: rgba(56, 84, 78, 0.9); }
 .ai-auto-field > span { display: block; margin-bottom: 4px; font-weight: 600; }

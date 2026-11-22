@@ -59,7 +59,22 @@
     state.items.concat(state.text ? [state.text] : []).forEach(function(item) {
       var ghost = document.createElement('div'); ghost.className = 'post-publish-flight'; ghost.setAttribute('aria-hidden','true');
       place(ghost,item.source);
-      if (item.image) { item.image.style.objectFit='cover'; ghost.appendChild(item.image); }
+      if (item.image) {
+        // 修复：记录真实 img 的原父节点/位置，stop 时归还；否则发布失败保留草稿时
+        // 预览缩略图的 img 被 ghost.remove() 一并删除，草稿图片消失。
+        item.imageHome = item.image.parentNode;
+        item.imageNext = item.image.nextSibling;
+        var prevFit = item.image.style.objectFit;
+        state.restores.push(function(){
+          try {
+            if (item.imageHome && item.image.parentNode !== item.imageHome) {
+              item.imageHome.insertBefore(item.image, item.imageNext && item.imageNext.parentNode === item.imageHome ? item.imageNext : null);
+            }
+            item.image.style.objectFit = prevFit;
+          } catch (_) {}
+        });
+        item.image.style.objectFit='cover'; ghost.appendChild(item.image);
+      }
       else { ghost.textContent=item.text; ghost.style.font=item.font; ghost.style.lineHeight=item.lineHeight; }
       item.ghost=ghost; state.ghosts.push(ghost); fragment.appendChild(ghost);
     });
