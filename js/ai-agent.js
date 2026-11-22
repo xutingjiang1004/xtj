@@ -11257,51 +11257,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     scrollToBottom(messagesEl, true);
     playUserSendFlight(userNode, sendFlightFrom);
 
-    // ★★★ 方案B（全网深搜）：当联网开关处于第三态 required（已改文案为「全网深搜」）时，
-    //   在【当前对话】里复用研究流：chatMode 让 runTavilyResearchFlow 脱离深研页状态，
-    //   研究卡 + 带来源报告直接渲染在 messagesEl。额度明确耗尽时降级为普通联网聊天。
-    if (sendSettings.networkMode === 'required' && !sendCustomCfg) {
-      var _deepSearchQuotaOK = !S.quota || !searchQuotaExhausted(S.quota);
-      if (!_deepSearchQuotaOK) {
-        notify('今日网页搜索次数已达上限，已按普通联网回复');
-      } else {
-        var _deepOutcome;
-        try {
-          _deepOutcome = await runTavilyResearchFlow({
-            chatMode: true,
-            messagesEl: messagesEl,
-            text: text,
-            originalUserText: displayText,
-            fileData: fileData,
-            attachments: attachmentPayload,
-            reqId: reqId,
-            model: S.selectedModel,
-            researchModel: 'pro',
-            webSearch: true,
-            networkMode: 'required'
-          });
-        } catch (eDeepSearch) {
-          console.warn('[AI] 全网深搜失败，回退普通联网:', eDeepSearch && eDeepSearch.message);
-          _deepOutcome = 'fallback';
-        }
-        if (S._currentReqId !== reqId || !customModelIdentityCurrent(sendIdentity)) return;
-        if (_deepOutcome !== 'fallback') {
-          // 研究卡已自行收尾（报告/来源/历史由后端按 conversation_id 落库）
-          resetSendingIfCurrent();
-          if (_isTouchMobile) { try { input.blur(); } catch (_) {} }
-          updateInputMetrics();
-          scrollToBottom(messagesEl, false);
-          return;
-        }
-        // 回退：移除深搜可能残留的研究卡，继续下方普通联网聊天
-        try {
-          var _dsCards = messagesEl.querySelectorAll('.ai-research-card, .ai-research-intro');
-          for (var _dsi = 0; _dsi < _dsCards.length; _dsi++) {
-            if (_dsCards[_dsi].dataset && _dsCards[_dsi].dataset.reqId === reqId) _dsCards[_dsi].remove();
-          }
-        } catch (_) {}
-      }
-    }
+    // ★ 全网深搜（required 态）：只在普通对话里强制深度联网，不渲染研究卡。
+    //   研究卡流程属于「深入研究」页，深搜不复用它。下方内置/第三方链路会发送
+    //   web_search:true + network_mode:'required'，由后端深度检索后流式回复到当前对话。
 
     // P5 修复: 创建单一助手节点，typing dots 放在节点内部
     // 从发送到完成，始终使用同一个 DOM 节点
@@ -16110,7 +16068,9 @@ function showChatMessages() {
         networkControl.querySelectorAll('[data-network-mode]').forEach(function(button) {
           var selected = button.dataset.networkMode === mode;
           button.setAttribute('aria-checked', String(selected)); button.tabIndex = selected ? 0 : -1;
-          if (button.dataset.networkMode === 'required') button.setAttribute('aria-disabled', String(!q || searchQuotaExhausted(q)));
+          // 仅在「明确查到搜索额度耗尽」时才禁用深搜按钮；quota 未加载(null)时
+          // searchQuotaExhausted 返回 false，按钮保持正常可选态，不再误发灰(opacity:.48)。
+          if (button.dataset.networkMode === 'required') button.setAttribute('aria-disabled', String(searchQuotaExhausted(q)));
         });
         var note = panelShell.querySelector('.ai-network-note');
         if (note) note.textContent = {off:'仅使用对话和已提供的资料',auto:'由 AI 按问题决定是否检索',required:'先检索，再结合来源回答'}[mode];

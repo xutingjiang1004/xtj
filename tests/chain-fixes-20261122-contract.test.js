@@ -72,20 +72,29 @@ test('bug6a: prefetchUserLinks 以带超时的 await 竞速，结果写入 linkP
   assert.match(server, /linkPrefetch = _pfResult \|\| linkPrefetch/);
 });
 
-// ───────── 方案B: 全网深搜（chatMode 复用研究流） ─────────
+// ───────── 方案B: 全网深搜（当前对话普通联网回复，不走研究卡） ─────────
 test('方案B: 联网第三态 required 文案改为深搜', () => {
   assert.match(agent, /data-network-mode="required" aria-label="全网深入搜索">深搜</);
   assert.match(agent, /required:'全网深搜'/);
 });
-test('方案B: handleSendMessage 里 required 态走 chatMode 研究流', () => {
-  assert.match(agent, /sendSettings\.networkMode === 'required' && !sendCustomCfg/);
-  assert.match(agent, /runTavilyResearchFlow\(\{[\s\S]{0,200}chatMode: true/);
+test('方案B修正: handleSendMessage 不再把深搜导向 chatMode 研究流', () => {
+  // 深搜不得再走 runTavilyResearchFlow（那会渲染研究卡，与「深入研究」重复）
+  assert.doesNotMatch(agent, /sendSettings\.networkMode === 'required' && !sendCustomCfg/);
+  assert.doesNotMatch(agent, /runTavilyResearchFlow\(\{[\s\S]{0,200}chatMode: true/);
+  // 深搜走普通聊天链路：内置/第三方请求体携带 web_search + network_mode=required
+  assert.match(agent, /web_search: sendSettings\.webSearch === true,network_mode:sendSettings\.networkMode/);
+  assert.match(agent, /web_search: sendSettings\.webSearch,network_mode:sendSettings\.networkMode/);
 });
-test('方案B: runTavilyResearchFlow 支持 chatMode 脱离深研页状态', () => {
+test('方案B修正: runTavilyResearchFlow 仍保留 chatMode 能力供他处复用', () => {
   assert.match(agent, /var chatMode = opts\.chatMode === true/);
   assert.match(agent, /var flowReqId = function\(\) \{ return chatMode \? S\._currentReqId : S\._dtCurrentReqId; \}/);
   assert.match(agent, /conversationId: chatMode \? S\.conversationId : undefined/);
   assert.match(agent, /flowReqId\(\) !== reqId/);
+});
+test('深搜颜色: quota 未加载(null)时深搜按钮不被误标 aria-disabled 发灰', () => {
+  // searchQuotaExhausted(null) 返回 false；不得再叠加 !q 把深搜按钮标成禁用态
+  assert.doesNotMatch(agent, /aria-disabled', String\(!q \|\| searchQuotaExhausted\(q\)\)/);
+  assert.match(agent, /aria-disabled', String\(searchQuotaExhausted\(q\)\)/);
 });
 
 // ───────── 红线：游客额度逻辑未被动 ─────────
