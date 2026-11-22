@@ -161,12 +161,12 @@ test('S9-5: 研究流接口本身的名额管理顺序正确（回归哨兵）',
   const block = stripComments(m >= 0 ? source.slice(start, start + 1 + m) : rest);
 
   const abortIdx = block.indexOf("req.on('aborted', markStreamDisconnected)");
-  // ★ 2026-11-14：游客限时开放窗口内并发 key 改为 guest:<ip>，锚点放宽到调用本身，
-  //   仍严格锁定「先注册监听、后 acquire」的顺序契约。
+  // ★ 2026-11-22：游客并发 key 改为会话级 guestResearchKey（Cookie 优先、缺失回落 IP），
+  //   锚点仍严格锁定「先注册监听、后 acquire」的顺序契约。
   const acquireIdx = block.indexOf('researchRelease = tryAcquireDeepResearch(');
   assert.ok(abortIdx >= 0 && acquireIdx >= 0, '两者都必须存在');
-  assert.match(block, /tryAcquireDeepResearch\(guestWindow \? \('guest:' \+ getRealIp\(req\)\) : userName\)/,
-    '研究流游客必须用 guest:<ip> 作并发 key，否则空 userName 会被闸门拒绝、深入研究永远用不了');
+  assert.match(block, /tryAcquireDeepResearch\(guestWindow \? guestResearchKey\(req\) : userName\)/,
+    '研究流游客必须用会话级 guest key，否则空 userName 会被闸门拒绝、深入研究永远用不了');
   assert.ok(abortIdx < acquireIdx,
     '研究流接口同样是「先注册监听、后 acquire」；若被改回相反顺序会引入同类泄漏');
 
@@ -218,8 +218,11 @@ test('S9-8: 深度思考链路游客并发 key 不得为空 userName（「深入
   const code = stripComments(deepThinkSource());
   // 空 userName 会被 tryAcquireDeepResearch 直接拒绝 → 每次都返回 concurrent，
   // 前端表现为「请等待上一个请求完成」，点重试也无效。必须与 research/stream 一样用 guest:<ip>。
-  assert.match(code, /tryAcquireDeepResearch\('guest:' \+ getRealIp\(req\)\)/,
-    '游客深度思考必须用 guest:<ip> 抢并发名额');
+  assert.match(code, /tryAcquireDeepResearch\(guestResearchKey\(req\)\)/,
+    '游客深度思考必须用会话级 guest key 抢并发名额');
+  // 会话 Cookie 优先、缺失时才回落 IP，避免同一 NAT 下的游客互相阻塞
+  assert.match(source, /function guestResearchKey\(req\)\s*\{\s*return 'guest:' \+ \(guestSessionId\(req\) \|\| getRealIp\(req\)\);/,
+    '游客并发 key 必须优先会话 Cookie，缺失时才回落 IP');
   assert.match(code, /:\s*tryAcquireDeepResearch\(userName\)/,
     '非游客仍必须保留 tryAcquireDeepResearch(userName) 分支，登录用户行为不变');
   // 断开监听仍须早于 acquire（游客分支同样不能绕过这条泄漏防线）

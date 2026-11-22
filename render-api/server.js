@@ -5017,6 +5017,37 @@ function getRealIp(req) {
   return getClientIp(req);
 }
 
+// ★ 复查修复（R1）：游客并发 key 优先用服务端签发的会话 Cookie。
+//   原实现用 guest:<ip>，同一出口 IP（公司/学校 NAT）下的多个游客会互相占满
+//   「每用户 1 个」的研究名额，第二个人只能看到「请等待上一个请求完成」。
+//   同一浏览器多标签仍共享同一个 key（符合“每用户”语义），Cookie 缺失时才回落 IP。
+var GUEST_CONCURRENCY_COOKIE = 'xtj_guest_id';
+function guestSessionId(req) {
+  var raw = req && req.cookies && req.cookies[GUEST_CONCURRENCY_COOKIE];
+  return (typeof raw === 'string' && /^[A-Za-z0-9_-]{16,64}$/.test(raw)) ? raw : '';
+}
+function ensureGuestSessionId(req, res) {
+  var existing = guestSessionId(req);
+  if (existing) return existing;
+  var id = '';
+  try { id = require('crypto').randomBytes(12).toString('base64url'); } catch (e) {}
+  if (!id) return '';
+  try {
+    res.cookie(GUEST_CONCURRENCY_COOKIE, id, {
+      httpOnly: true,
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 24 * 60 * 60 * 1000,
+      secure: !!(req && req.secure)
+    });
+  } catch (e) {}
+  try { req.cookies[GUEST_CONCURRENCY_COOKIE] = id; } catch (e) {}
+  return id;
+}
+function guestResearchKey(req) {
+  return 'guest:' + (guestSessionId(req) || getRealIp(req));
+}
+
 // ★ 2026-11-16（U-S9 / U-S10）：让官方 Files API 的归属命名空间用与全站一致的
 //   getRealIp，而不是裸 req.ip（Render 反代下曾退化为 10.x 内网导致游客互相串号）。
 setAiFileIpResolver(getRealIp);
@@ -9801,6 +9832,9 @@ async function callDeepSeekViaResponses(messages, options) {
   //   prompt/completion/total，Responses 的推理 token 恒为 0，成本报表失真）
   var totalUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, reasoning_tokens: 0, prompt_cache_hit_tokens: 0 };
   var finalContent = '';
+  // ★ 复查修复（R2）：标记“最终回复只剩工具协议、没有任何可读正文”，
+  //   用于后面追加一次自然语言重答。
+  var protocolOnlyFallback = false;
   var finalReasoning = '';
   var finalModel = model;
   // ★ 记录工具轮次中模型的正常叙述，供达到轮数上限时兜底汇总（避免用户只看到报错）
@@ -10280,7 +10314,12 @@ async function callDeepSeekViaResponses(messages, options) {
             finalContent = _salvaged;
           } else {
             console.error('[RESPONSES] suppressed internal tool protocol from final reply', 'round', round);
-            finalContent = toolRoundsNarration.length ? toolRoundsNarration.join('\n\n') : '（工具调用解析失败，请重试。）';
+            if (toolRoundsNarration.length) {
+              finalContent = toolRoundsNarration.join('\n\n');
+            } else {
+              protocolOnlyFallback = true;
+              finalContent = '（工具调用解析失败，请重试。）';
+            }
           }
         } else {
           finalContent = content;
@@ -10374,6 +10413,69 @@ async function callDeepSeekViaResponses(messages, options) {
         //   消除"id/call_id 不一致导致回传 400"的间歇性失败。
         workingInput.push({ type: 'function_call_output', call_id: _pairCallId, output: toolContent });
       });
+    }
+
+    // ★ 复查修复（R2）：纯协议兜底时追加一次“不带工具、要求自然语言作答”的重试。
+    //   研究合成器等调用本来就不会传 tools，模型仍可能幻觉出 DSML/JSON；单靠
+    //   剥离只能得到错误串。这里用同一上下文再要一次正文，仍失败才保留提示。
+    if (protocolOnlyFallback && !controller.signal.aborted) {
+      try {
+        var retryBody = {
+          model: model,
+          input: workingInput.concat([{
+            type: 'message',
+            role: 'user',
+            content: '上一次回复只包含工具调用标记，用户没有看到任何正文。请直接用自然语言完整回答前面的问题；不要输出任何工具调用、DSML 标签或 JSON 参数。'
+          }]),
+          stream: false,
+          reasoning: { effort: 'none' }
+        };
+        if (workingInstructions) retryBody.instructions = workingInstructions;
+        var retryResp = await fetch(DEEPSEEK_RESPONSES_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + DEEPSEEK_API_KEY
+          },
+          body: JSON.stringify(retryBody),
+          signal: controller.signal
+        });
+        if (retryResp && retryResp.ok) {
+          var retryData = await retryResp.json().catch(function() { return {}; });
+          if (retryData && retryData.usage) {
+            lastUsage = responsesUsageToInternal(retryData.usage);
+            totalUsage.prompt_tokens += lastUsage.prompt_tokens || 0;
+            totalUsage.completion_tokens += lastUsage.completion_tokens || 0;
+            totalUsage.total_tokens += lastUsage.total_tokens || 0;
+            totalUsage.reasoning_tokens += lastUsage.reasoning_tokens || 0;
+            totalUsage.prompt_cache_hit_tokens += lastUsage.prompt_cache_hit_tokens || 0;
+          }
+          var retryText = '';
+          if (retryData && Array.isArray(retryData.output)) {
+            for (var rri = 0; rri < retryData.output.length; rri++) {
+              var rItem = retryData.output[rri];
+              if (!rItem || rItem.type !== 'message' || rItem.role !== 'assistant' || !Array.isArray(rItem.content)) continue;
+              for (var rci = 0; rci < rItem.content.length; rci++) {
+                var rPart = rItem.content[rci];
+                if (rPart && rPart.type === 'output_text' && rPart.text) retryText += rPart.text;
+              }
+            }
+          }
+          if (retryText && (finalReplyContainsInternalProtocolGlobal(retryText) || looksLikeToolArgsFragment(retryText))) {
+            retryText = salvageVisibleFinalReply(retryText) || '';
+          }
+          retryText = String(retryText || '').trim();
+          if (retryText) {
+            finalContent = retryText;
+            try { if (hasContentCb) options.onContentChunk(retryText); } catch (eRetryCb) {}
+          }
+        } else {
+          console.error('[RESPONSES] natural-language retry HTTP error', retryResp && retryResp.status);
+        }
+      } catch (eRetry) {
+        if (externalSignal && externalSignal.aborted) throw eRetry;
+        console.error('[RESPONSES] natural-language retry failed:', eRetry && eRetry.message);
+      }
     }
 
     if (!finalContent || !String(finalContent).trim()) {
@@ -20292,6 +20394,8 @@ async function guestAiAuth(req, res, next) {
   req.guestAi = true;
   req.userName = '';
   req.accountId = '';
+  // ★ 复查修复（R1）：为游客签发稳定的并发身份，供研究/深想闸门使用。
+  ensureGuestSessionId(req, res);
   return next();
 }
 // ★ 2026-10-27 限时公开：OpenRouter 免费模型在公开期内对未登录游客开放。
@@ -21970,9 +22074,9 @@ async function handleDeepThinkChat(req, res) {
   // ★ 并发上限：先 acquire，成功后再 track，避免同 conv 覆盖进行中任务的 cancel 句柄
   // ★ 2026-11-14 修复「深入研究一直用不了」：游客 userName 为空，tryAcquireDeepResearch('')
   //   永远返回 null，深度思考/回退链路每次都在闸门处被判 concurrent（「请等待上一个请求完成」）。
-  //   与 /api/agent/research/stream 保持一致，窗口内改用 guest:<ip> 作并发 key；
-  //   非游客分支保留 tryAcquireDeepResearch(userName)，登录用户行为不变。
-  var releaseDeep = guestWindow ? tryAcquireDeepResearch('guest:' + getRealIp(req)) : tryAcquireDeepResearch(userName);
+  //   与 /api/agent/research/stream 保持一致，窗口内改用会话级 guest key
+  //   （Cookie 优先，缺失时回落 IP）；非游客分支保留 tryAcquireDeepResearch(userName)。
+  var releaseDeep = guestWindow ? tryAcquireDeepResearch(guestResearchKey(req)) : tryAcquireDeepResearch(userName);
   if (!releaseDeep) {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
@@ -27107,6 +27211,9 @@ async function runSelfResearchFlow(opts) {
     ? Math.min(Math.max(Number(opts.flowTimeoutMs), 60000), 600000)
     : 8 * 60 * 1000;
   var flowWallTimer = setTimeout(function() {
+    // ★ 复查修复（R3）：区分“用户取消”和“整体超时”，后者需要在收尾时
+    //   给前端补一个明确的终止事件，否则研究卡只能等流关闭后显示笼统的“未完成”。
+    try { cancelToken.wallTimedOut = true; } catch (e) {}
     try { cancelToken.cancelled = true; } catch (e) {}
     try { flowAbortCtrl.abort(); } catch (e) {}
     try { if (typeof cancelToken._onSubCancel === 'function') cancelToken._onSubCancel(); } catch (e) {}
@@ -27610,8 +27717,8 @@ app.post('/api/agent/research/stream', guestAiAuth, aiChatConcurrencyGate, guest
     //   到期后 guestAiPublicWindowOpen() 自动变 false，游客回落登录鉴权，本分支自动失效。
     var guestWindow = !!(req.guestAi && guestAiPublicWindowOpen());
     // ★ 并发上限：每用户最多 1 个研究任务、全局最多 5 个，超限返回 concurrent
-    // ★ 2026-11-13 限时开放 15 天：游客用 guest IP 作并发 key（空 userName 会被 tryAcquireDeepResearch 拒绝），到期自动失效
-    researchRelease = tryAcquireDeepResearch(guestWindow ? ('guest:' + getRealIp(req)) : userName);
+    // ★ 2026-11-13 限时开放 15 天：游客用会话级 guest key 作并发身份（Cookie 优先、缺失回落 IP），到期自动失效
+    researchRelease = tryAcquireDeepResearch(guestWindow ? guestResearchKey(req) : userName);
     if (!researchRelease) {
       writeSse(res, { type: 'error', error: 'concurrent', code: 'concurrent', message: '请等待上一个研究请求完成' });
       return safeEnd();
@@ -27834,6 +27941,19 @@ app.post('/api/agent/research/stream', guestAiAuth, aiChatConcurrencyGate, guest
         usage: (selfResult && selfResult.usage) || null,
         searchApiCount: Math.floor(Number(selfResult && selfResult.search_count) || 0)
       });
+      }
+      // ★ 复查修复（R3）：整体墙钟超时不是用户取消，必须给前端一个明确终止事件，
+      //   让研究卡立即收尾；否则前端只能等 SSE 关闭后报“未收到完整结果”。
+      if (!aborted && cancelToken && cancelToken.wallTimedOut && !res.writableEnded) {
+        try {
+          writeSse(res, {
+            type: 'error',
+            error: 'research_timeout',
+            code: 'research_timeout',
+            message: '研究用时过长，已自动收束；请缩小范围或降低研究档位后重试。',
+            retryable: true
+          });
+        } catch (_) {}
       }
       return safeEnd();
     }

@@ -8352,6 +8352,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (synthStatus) synthStatus.textContent = msg || '正在综合生成中文报告…';
         setResearchSteps(progressCard, 3, 3);
         appendResearchThinkingEntry(progressCard, '总指挥 · 生成报告', msg || '正在交叉验证材料并撰写研究报告…', { forceNew: true });
+      } else if (stage === 'timeout') {
+        // ★ 复查修复（R3）：后端整体墙钟超时会发 research_stage=timeout。
+        //   旧实现只在思考日志里记一条，卡片状态仍停在“生成报告”，看起来像卡死。
+        appendResearchThinkingEntry(progressCard, '研究进程 · 超时', msg || '研究用时过长，正在收束…', { forceNew: true });
+        markResearchCardOutcome(progressCard, 'timeout', msg || '研究用时过长，本次研究已停止。');
       } else if (stage || msg) {
         // 未知 stage：仍记入思考日志，避免静默丢事件
         appendResearchThinkingEntry(
@@ -8487,7 +8492,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (answer.trim() && progressCard.isConnected && !controller.signal.aborted && window.XTJHaptics) window.XTJHaptics.play('success');
       if (result && result.quota) applyQuota(result.quota);
       if (!chatMode && result && result.conversation_id && !S.dtConversationId) { S.dtConversationId = result.conversation_id; saveDtConvId(); }
-      if (result && result.saved === false) markResearchCardOutcome(progressCard, 'interrupted', '报告已生成，但聊天记录未保存，请复制保留后重试');
+      // ★ 复查修复（R4）：游客窗口内研究结果本就不落库（saved:false 属预期），
+      //   报告已正常返回，不应再标红成 interrupted。只有登录用户保存失败才提示。
+      if (result && result.saved === false && readUserName()) markResearchCardOutcome(progressCard, 'interrupted', '报告已生成，但聊天记录未保存，请复制保留后重试');
       return 'done';
     } catch (err) {
       if (!customModelIdentityCurrent(flowIdentity) || flowLifecycle !== (chatMode ? (S.lifecycleId || 0) : S.dtLifecycleId)) return 'done';
@@ -8520,7 +8527,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var isConcurrent = errCode === 'concurrent' || errCode === 'ai_concurrent_limit' || /上一个(研究)?请求|请等待上一个|已有进行中的 AI 请求/.test(errMsg);
       var isQuota = /quota_exceeded|search_limit|rate_limited|daily_limit|hourly_limit|pro_required|insufficient|not_enough/i.test(errCode)
         || /次数已达上限|额度|开通 Pro|访问过于频繁|请求过于频繁/.test(errMsg) || (err && err.status === 429);
-      if (isConcurrent || isQuota || /^task_(?:search_)?budget_/.test(errCode) || errCode==='network_disabled' || String(opts && opts.researchModel || '') === CUSTOM_MODEL_PREFIX + OPENROUTER_MODEL_UID || /^checkpoint_/.test(errCode) || errCode === 'research_incomplete' || (progressCard && progressCard.dataset && progressCard.dataset.checkpointId) || (err && err.retryable === false) || answer) {
+      if (isConcurrent || isQuota || /^task_(?:search_)?budget_/.test(errCode) || errCode==='network_disabled' || String(opts && opts.researchModel || '') === CUSTOM_MODEL_PREFIX + OPENROUTER_MODEL_UID || /^checkpoint_/.test(errCode) || errCode === 'research_incomplete' || errCode === 'research_timeout' || (progressCard && progressCard.dataset && progressCard.dataset.checkpointId) || (err && err.retryable === false) || answer) {
         console.warn('[AI] Tavily research 终结于不可回退错误:', errCode || errMsg);
         var terminalMsg = isConcurrent
           ? '上一个请求仍在进行中，请等它结束后重试'
@@ -8912,7 +8919,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           }
           finishThinkCard(aiNodeRef.value, aiContentRef.value, evt);
           if (evt.complete === true && String(evt.sanitized_content || evt.content || '').trim() && window.XTJHaptics) window.XTJHaptics.play('success');
-          if (evt.saved === false && aiNodeRef.value) {
+          // ★ 复查修复（R4）：游客窗口内回复不落库，saved:false 是预期，不提示“未保存”。
+          if (evt.saved === false && readUserName() && aiNodeRef.value) {
             var unsavedNote = el('div', { class: 'ai-error-note', text: '回答已生成，但聊天记录未保存，请复制保留后重试' });
             aiNodeRef.value.appendChild(unsavedNote);
           }
