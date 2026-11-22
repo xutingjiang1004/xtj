@@ -8968,8 +8968,15 @@ async function callDeepSeek(messages, options) {
       if (dsmlResult.detected) {
         content = dsmlResult.visibleContent;
         if (dsmlResult.error) {
-          console.error('[DEEPSEEK] DSML tool protocol parse failed:', dsmlResult.error, 'round', round);
-          finalContent = '（工具调用解析失败，请重试。）';
+          // 修复(2026-11-22)：解析失败时不再整段丢弃，先尽量保住已剥离的可见正文。
+          var _salvaged = salvageVisibleFinalReply(content);
+          if (_salvaged) {
+            console.warn('[DEEPSEEK] DSML parse failed, kept visible text:', dsmlResult.error, 'round', round);
+            finalContent = _salvaged;
+          } else {
+            console.error('[DEEPSEEK] DSML tool protocol parse failed:', dsmlResult.error, 'round', round);
+            finalContent = '（工具调用解析失败，请重试。）';
+          }
           break;
         }
         if (!toolCalls || toolCalls.length === 0) toolCalls = dsmlResult.calls;
@@ -8978,8 +8985,15 @@ async function callDeepSeek(messages, options) {
       // 没 tool_calls：最终回复
       if (!toolCalls || toolCalls.length === 0) {
         if (finalReplyContainsInternalProtocol(content)) {
-          console.error('[DEEPSEEK] suppressed internal tool protocol from final reply', 'round', round);
-          finalContent = '（工具调用解析失败，请重试。）';
+          // 修复(2026-11-22)：先剥离协议片段保住可见正文，确实无正文才降级。
+          var _salvaged = salvageVisibleFinalReply(content);
+          if (_salvaged) {
+            console.warn('[DEEPSEEK] stripped protocol from final reply, kept visible text', 'round', round);
+            finalContent = _salvaged;
+          } else {
+            console.error('[DEEPSEEK] suppressed internal tool protocol from final reply', 'round', round);
+            finalContent = '（工具调用解析失败，请重试。）';
+          }
         } else {
           finalContent = content;
           // ★ 修复：defer 模式下最终内容必须完整推送给 onContentChunk（原代码 slice(0,4000)
@@ -9117,8 +9131,15 @@ async function callDeepSeek(messages, options) {
             var noToolContent = typeof noToolMsg.content === 'string' ? noToolMsg.content : '';
             var noToolDsml = parseDsmlToolCalls(noToolContent, maxToolRounds);
             if (noToolDsml.detected) {
-              console.error('[DEEPSEEK] DSML protocol appeared during no-tool recovery:', noToolDsml.error || 'tool request suppressed');
-              finalContent = '（工具调用解析失败，请重试。）';
+              // 修复(2026-11-22)：先保住协议之外的可见正文，确实为空才降级。
+              var _salvaged = salvageVisibleFinalReply(String(noToolDsml.visibleContent || noToolContent));
+              if (_salvaged) {
+                console.warn('[DEEPSEEK] no-tool recovery kept visible text:', noToolDsml.error || 'tool request suppressed');
+                finalContent = _salvaged;
+              } else {
+                console.error('[DEEPSEEK] DSML protocol appeared during no-tool recovery:', noToolDsml.error || 'tool request suppressed');
+                finalContent = '（工具调用解析失败，请重试。）';
+              }
               noToolContent = '';
             }
             if (noToolContent && noToolContent.length > 10) {
@@ -9174,8 +9195,15 @@ async function callDeepSeek(messages, options) {
     }
 
     if (finalReplyContainsInternalProtocol(finalContent)) {
-      console.error('[DEEPSEEK] final reply still contained internal protocol; suppressed');
-      finalContent = '（工具调用解析失败，请重试。）';
+      // 修复(2026-11-22)：兜底也先尝试剥离协议、保留可见正文。
+      var _salvaged = salvageVisibleFinalReply(finalContent);
+      if (_salvaged) {
+        console.warn('[DEEPSEEK] final reply protocol stripped, kept visible text');
+        finalContent = _salvaged;
+      } else {
+        console.error('[DEEPSEEK] final reply still contained internal protocol; suppressed');
+        finalContent = '（工具调用解析失败，请重试。）';
+      }
     }
     // off 模式强制清空 reasoning
     if (!useThinking) finalReasoning = '';
@@ -9311,7 +9339,11 @@ function scrubStreamToolProtocol(text) {
   var s = String(text || '');
   if (!s) return s;
   // ① DSML 指令/标签：<|DSML|invoke ...> 、<| | DSML | | invoke ...> 、</|DSML|invoke>
-  s = s.replace(/<\s*[|｜]\s*[|｜]?\s*DSML\s*[|｜]?\s*[|｜]?\s*[A-Za-z_]*\s*[|｜]?\s*(?:\/?\s*[|｜]\s*)?>/gi, '');
+  // ★ 修复(2026-11-22)：旧正则在帧名后只允许可选竖线，导致标准写法
+  //   `<|DSML|invoke name="x">` / `</|DSML|parameter>`（竖线后紧跟帧名+属性）
+  //   匹配不到 → 协议片段清洗不掉 → 下游重判仍命中 → 整段正文被误降级。
+  //   放宽为「帧名后允许任意非 '>' 字符直到 '>'」，兼容标准/带空格/全角/闭合写法。
+  s = s.replace(/<\s*\/?\s*[|｜]\s*[|｜]?\s*DSML\s*[|｜]?\s*[|｜]?\s*[A-Za-z_]*[^>]*>/gi, '');
   // ② 简易 XML 协议块：<tool_calls>...</tool_calls> / <function_calls>...</function_calls>
   s = s.replace(/<\s*tool_calls?\b[^>]*>[\s\S]*?<\s*\/\s*tool_calls?\s*>/gi, '');
   s = s.replace(/<\s*function_calls?\b[^>]*>[\s\S]*?<\s*\/\s*function_calls?\s*>/gi, '');
@@ -9324,6 +9356,24 @@ function scrubStreamToolProtocol(text) {
   var t = s.trim();
   if (t && (t.charAt(0) === '{' || t.charAt(0) === '[') && looksLikeToolArgsFragment(t)) return '';
   return s;
+}
+
+// ★ 修复(2026-11-22)：判定最终正文「含内部协议」时，旧逻辑把整段可见正文
+//   一刀切成降级提示，导致「思考/流式里已有真实报告，最终正文却变空」。
+//   本函数在降级前先剥离协议片段，尽量保住模型已产出的可见正文：
+//   - 清洗后仍有可读正文且不再命中协议 → 返回清洗后的正文（救回报告）；
+//   - 清洗后为空、或仍是清洗不掉的协议残留 → 返回 ''（调用方走原降级，安全不泄漏）。
+function salvageVisibleFinalReply(text) {
+  var raw = String(text || '');
+  if (!raw.trim()) return '';
+  var hadProtocol = finalReplyContainsInternalProtocolGlobal(raw) || looksLikeToolArgsFragment(raw);
+  var cleaned = String(scrubStreamToolProtocol(raw) || '').trim();
+  if (!cleaned) return '';
+  if (finalReplyContainsInternalProtocolGlobal(cleaned) || looksLikeToolArgsFragment(cleaned)) return '';
+  // 若原文几乎全是协议、清洗后只剩极短碎片（如参数值），视为无有效正文，走降级。
+  // 避免把 "abc" 这类协议残渣当成报告正文展示；正常的「报告+少量协议」不受影响。
+  if (hadProtocol && cleaned.length < 8 && cleaned.length < raw.length * 0.3) return '';
+  return cleaned;
 }
 
 // ★★★ 2026-09-15 新增（P0-4「第三方模型把工具调用当正文回复」配套）：
@@ -10223,9 +10273,15 @@ async function callDeepSeekViaResponses(messages, options) {
         //   Responses 路径此前完全没有对最终 content 做内部协议过滤，
         //   网关若把 function_call/DSML 写进 output_text，就会被原样当答案展示。
         if (finalReplyContainsInternalProtocolGlobal(content) || looksLikeToolArgsFragment(content)) {
-          console.error('[RESPONSES] suppressed internal tool protocol from final reply', 'round', round);
-          // 若整段是协议残留，尝试用前面的正常叙述兜底，至少给用户一个交代
-          finalContent = toolRoundsNarration.length ? toolRoundsNarration.join('\n\n') : '（工具调用解析失败，请重试。）';
+          // 修复(2026-11-22)：先剥离协议片段、保住可见正文；仅当确实没有可读正文时才降级。
+          var _salvaged = salvageVisibleFinalReply(content);
+          if (_salvaged) {
+            console.warn('[RESPONSES] stripped internal protocol from final reply, kept visible text', 'round', round);
+            finalContent = _salvaged;
+          } else {
+            console.error('[RESPONSES] suppressed internal tool protocol from final reply', 'round', round);
+            finalContent = toolRoundsNarration.length ? toolRoundsNarration.join('\n\n') : '（工具调用解析失败，请重试。）';
+          }
         } else {
           finalContent = content;
         }
@@ -23451,13 +23507,21 @@ app.post('/api/agent/custom-chat/stream', guestOpenRouterAuth, aiChatConcurrency
       _customParts.followups = res._aiFollowupEnabled && _cnFinal.trim() ? assistantOutput.normalizeFollowups(_customParts.followups, res._aiFollowupQuestion) : [];
       res._aiFollowups = _customParts.followups;
       if (!_cnFinal && assistantContent.trim() && (finalReplyContainsInternalProtocolGlobal(assistantContent) || looksLikeToolArgsFragment(assistantContent))) {
-        _cnFinal = '（工具调用解析失败，请重试。）';
-        writeSse(res,{type:'content',text:_cnFinal});
+        // 修复(2026-11-22)：先尝试从原文剥离协议保住可见正文，确实为空才降级。
+        _cnFinal = salvageVisibleFinalReply(assistantContent) || '（工具调用解析失败，请重试。）';
+        if (_cnFinal) writeSse(res,{type:'content',text:_cnFinal});
       }
       if (_cnFinal.trim()) {
         if (finalReplyContainsInternalProtocolGlobal(_cnFinal) || looksLikeToolArgsFragment(_cnFinal)) {
-          console.error('[CUSTOM] suppressed internal tool protocol from final reply');
-          _cnFinal = '（工具调用解析失败，请重试。）';
+          // 修复(2026-11-22)：先剥离协议保住可见正文。
+          var _salvaged = salvageVisibleFinalReply(_cnFinal);
+          if (_salvaged) {
+            console.warn('[CUSTOM] stripped protocol from final reply, kept visible text');
+            _cnFinal = _salvaged;
+          } else {
+            console.error('[CUSTOM] suppressed internal tool protocol from final reply');
+            _cnFinal = '（工具调用解析失败，请重试。）';
+          }
         }
         finalAssistantContent = _cnFinal; // ★ S6：供 finally 记账时写入落库内容
       }
@@ -26147,9 +26211,15 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, guestAwar
                 break; // 退出内层 while，到 22853+ 统一走工具执行链
               }
               if (_dsmlProbe && _dsmlProbe.detected && _dsmlProbe.error) {
-                // 检测到协议但解析失败：不下发原始协议，用可重试提示替代。
-                console.error('[AGENT-STREAM] DSML tool protocol parse failed:', _dsmlProbe.error, 'round', toolRound);
-                contentBuffer = contentBuffer.slice(0, roundContentStart) + '（工具调用解析失败，请重试。）';
+                // 修复(2026-11-22)：解析失败先保住协议外的可见正文，确实为空才用提示替代。
+                var _salvaged = salvageVisibleFinalReply(String(_dsmlProbe.visibleContent || ''));
+                if (_salvaged) {
+                  console.warn('[AGENT-STREAM] DSML parse failed, kept visible text:', _dsmlProbe.error, 'round', toolRound);
+                  contentBuffer = contentBuffer.slice(0, roundContentStart) + _salvaged;
+                } else {
+                  console.error('[AGENT-STREAM] DSML tool protocol parse failed:', _dsmlProbe.error, 'round', toolRound);
+                  contentBuffer = contentBuffer.slice(0, roundContentStart) + '（工具调用解析失败，请重试。）';
+                }
               }
             } catch (eDsml) {
               console.error('[AGENT-STREAM] DSML fallback exception:', eDsml && eDsml.message);
