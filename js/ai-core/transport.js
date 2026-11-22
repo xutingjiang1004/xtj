@@ -14,6 +14,13 @@
       var json = null;
       try { json = JSON.parse(text); } catch (e) {}
 
+      // 网关 502/504 常返回 HTML 错误页：绝不把 HTML 源码原文透传给用户提示。
+      // 检测 Content-Type 或 HTML 文档特征时丢弃原始正文，交给 classify 走标准中文文案。
+      var contentType = (resp.headers && typeof resp.headers.get === 'function') ? (resp.headers.get('content-type') || '') : '';
+      if (!json && (/text\/html/i.test(contentType) || /^\s*<!doctype|^\s*<html/i.test(text))) {
+        text = '';
+      }
+
       // Backend structured error
       if (json && json.code && json.error) {
         return Errors.build(json.code, json.error, json.retryable === true, {
@@ -79,7 +86,7 @@
       return resp.json();
     }).catch(function (err) {
       // Already structured
-      if (err && err.code) throw err;
+      if (err && typeof err.code === 'string' && err.code) throw err;
       // Network error：fetch 抛出的 TypeError 且未收到 HTTP 响应
       if (err instanceof TypeError && !gotResponse) {
         throw Errors.build(Errors.CODES.NETWORK_ERROR, Errors.MESSAGES[Errors.CODES.NETWORK_ERROR], true, requestOptions);
@@ -106,7 +113,32 @@
     // 未派发完的 data 行一直累积到出现空行（或流结束）才派发
     var sseState = { currentEvent: null, dataLines: [] };
 
+    // 空闲超时：上游静默卡死但不断开 TCP 时，reader.read() 会永久挂起。
+    // 每收到一个 chunk 重置定时器；超时则 cancel reader 并派发 PROVIDER_TIMEOUT。
+    var idleTimeoutMs = Number(options.idleTimeoutMs) || 0;
+    var idleTimer = null;
+    var idleTimedOut = false;
+    function resetIdleTimer() {
+      if (!idleTimeoutMs || idleTimedOut) return;
+      if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
+      idleTimer = setTimeout(function () {
+        idleTimer = null;
+        if (aborted) return;
+        idleTimedOut = true;
+        aborted = true;
+        try { cancelReader(reader); } catch (e) {}
+        if (onEvent) {
+          try { onEvent({ type: 'error', data: Errors.build(Errors.CODES.PROVIDER_TIMEOUT, Errors.MESSAGES[Errors.CODES.PROVIDER_TIMEOUT], true, options) }); }
+          catch (e) {}
+        }
+      }, idleTimeoutMs);
+    }
+    function clearIdleTimer() {
+      if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
+    }
+
     function cleanup() {
+      clearIdleTimer();
       if (signal) {
         try { signal.removeEventListener('abort', cancel); } catch (e) {}
       }
@@ -139,9 +171,11 @@
 
     function pump() {
       if (aborted) return Promise.resolve();
+      resetIdleTimer(); // 每次发起读取前重置空闲计时
 
       return reader.read().then(function (result) {
         if (aborted) return;
+        clearIdleTimer(); // 收到 chunk，清掉本轮计时，pump 下一轮会重建
         if (result.done) {
           // 先解码剩余字节，再做尾部 flush
           buffer += decoder.decode();
@@ -163,6 +197,8 @@
         buffer = processSSEBuffer(buffer, onEvent, options, sseState) || '';
         return pump();
       }).catch(function (err) {
+        // 断流上报前先 flush 末尾残帧，避免丢失最后一条未以空行结束的事件
+        try { flushPendingEvent(); } catch (e) {}
         cleanup();
         if (aborted) return;
         if (onEvent) {
@@ -171,7 +207,10 @@
               type: 'error',
               data: Errors.classify(err, options)
             });
-          } catch (e) {}
+          } catch (e) {
+            // 不再静默吞掉 onEvent 内部异常，至少留下日志便于定位
+            try { console.error('[transport] onEvent error dispatch failed:', e); } catch (_) {}
+          }
         }
       });
     }

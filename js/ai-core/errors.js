@@ -60,15 +60,27 @@
       return buildError(code, err.message || USER_MESSAGES[code] || '操作失败', retryable, options);
     }
 
-    // AbortError
+    var msg = String(err.message || err || '');
+
+    // 超时优先于 AbortError：原生 AbortController.abort('timeout') 抛的 AbortError
+    // 带 timeout 原因，若先按 AbortError 判定会误标成"已取消"而非"超时"。
+    if (err.name === 'TimeoutError' || (err.name === 'AbortError' && /timeout|超时/i.test(msg + ' ' + (err.reason || '')))) {
+      return buildError(ERROR_CODES.PROVIDER_TIMEOUT, USER_MESSAGES[ERROR_CODES.PROVIDER_TIMEOUT], true, options);
+    }
+    // AbortError（非超时原因）→ 用户取消
     if (err.name === 'AbortError') {
       return buildError(ERROR_CODES.REQUEST_CANCELLED, USER_MESSAGES[ERROR_CODES.REQUEST_CANCELLED], false, options);
     }
-
-    var msg = String(err.message || err || '');
+    // JSON 解析失败（网关返回非 JSON 的 SyntaxError）不得被下面的认证/token 正则误判为"登录失效"
+    if (err instanceof SyntaxError) {
+      return buildError(ERROR_CODES.INTERNAL_ERROR, USER_MESSAGES[ERROR_CODES.INTERNAL_ERROR], true, options);
+    }
 
     // HTTP status classification
     if (options.httpStatus) {
+      if (options.httpStatus === 504) {
+        return buildError(ERROR_CODES.PROVIDER_TIMEOUT, USER_MESSAGES[ERROR_CODES.PROVIDER_TIMEOUT], true, options);
+      }
       if (options.httpStatus === 401) {
         return buildError(ERROR_CODES.AUTH_FAILED, USER_MESSAGES[ERROR_CODES.AUTH_FAILED], false, options);
       }
@@ -102,19 +114,19 @@
     if (/network|fetch|网络|连接/i.test(msg)) {
       return buildError(ERROR_CODES.NETWORK_ERROR, USER_MESSAGES[ERROR_CODES.NETWORK_ERROR], true, options);
     }
-    if (/index|索引|rebuild/i.test(msg)) {
-      if (/rebuild|重建/i.test(msg)) {
+    if (/\bindex\b|索引|\brebuild\b/i.test(msg)) {
+      if (/\brebuild\b|重建/i.test(msg)) {
         return buildError(ERROR_CODES.INDEX_REBUILD_REQUIRED, USER_MESSAGES[ERROR_CODES.INDEX_REBUILD_REQUIRED], true, options);
       }
       return buildError(ERROR_CODES.INDEX_NOT_FOUND, USER_MESSAGES[ERROR_CODES.INDEX_NOT_FOUND], true, options);
     }
-    if (/rate|limit|频繁|429/i.test(msg)) {
+    if (/\brate[\s_-]*limit\b|\btoo many requests\b|频繁|\b429\b/i.test(msg)) {
       return buildError(ERROR_CODES.RATE_LIMITED, USER_MESSAGES[ERROR_CODES.RATE_LIMITED], true, options);
     }
-    if (/auth|login|登录|认证|\btoken\b/i.test(msg)) {
+    if (/\bauth(?:entication|orize|orization)?\b|\blogin\b|\bsign[\s_-]?in\b|登录|认证|\b(?:access|auth|refresh|jwt|bearer)[\s_-]*token\b/i.test(msg)) {
       return buildError(ERROR_CODES.AUTH_FAILED, USER_MESSAGES[ERROR_CODES.AUTH_FAILED], false, options);
     }
-    if (/tool|工具/i.test(msg)) {
+    if (/\btool\b|\btool[\s_-]?call\b|工具/i.test(msg)) {
       return buildError(ERROR_CODES.TOOL_FAILED, msg, true, options);
     }
 

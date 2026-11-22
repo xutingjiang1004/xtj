@@ -62,13 +62,13 @@
     return 'https://xtj.local';
   }
   function passthroughUrlValue(rawVal, allowDataImage) {
-    var decoded = decodeHtmlEntities(rawVal).replace(/[\t\r\n ]/g, '');
+    var decoded = decodeHtmlEntities(rawVal).replace(/[\x00-\x1f\x7f\s]+/g, '');
+    if (/^\/\//.test(decoded)) return '#';
     var protocol = '';
     try { protocol = new URL(decoded, safeOrigin()).protocol.toLowerCase(); } catch (e) { protocol = ''; }
     if (protocol === 'http:' || protocol === 'https:' || protocol === 'mailto:') return decoded;
     if (protocol === 'data:' && allowDataImage && /^data:image\/(?!svg\b)/i.test(decoded)) return decoded;
-    // 无显式协议：允许相对路径/锚点；拒绝协议相对 URL（//host）
-    if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(decoded)) return (/^\/\//.test(decoded) ? '#' : decoded);
+    if (/^(\/(?!\/)|\.\/|\.\.\/|#|\?)/.test(decoded)) return decoded;
     return '#';
   }
   function walkPassthrough(node, out) {
@@ -124,35 +124,37 @@
   function sanitizeHtml(html) {
     if (!html) return '';
     var s = String(html);
-    // Strip dangerous tags
-    s = s.replace(BLOCKED_TAGS_RE, '');
+    // 先剥离内联协议帧/工具调用/推理原文——避免攻击者用 {"tool_calls":[]}、<|DSML|>
+    // 把敏感标签或事件属性拆开，待过滤完成后再被拼接还原成可执行代码（先剥后滤）。
+    s = s.replace(DSML_RE, '');
+    s = s.replace(TOOL_CALLS_RAW_RE, '');
+    s = s.replace(REASONING_RAW_RE, '');
+    // Strip dangerous tags（收敛循环：一次替换可能暴露出新的可匹配片段）
+    var prev;
+    do { prev = s; s = s.replace(BLOCKED_TAGS_RE, ''); } while (s !== prev);
     // Strip event handlers / style attrs (quoted and unquoted values, incl. no-space boundary)
-    // 保留边界字符：避免 <img src="x"onerror="a"onload="b"> 时连边界一起删导致相邻属性存活
-    s = s.replace(BLOCKED_ATTRS_RE, function (m, p1) { return p1 || ''; });
-    // Strip entity-encoded event handler attribute names（同样保留边界字符）
-    s = s.replace(BLOCKED_ATTRS_ENTITY_RE, function (m, p1) { return p1 || ''; });
-    // 统一校验 href/src 值：先解码 HTML 实体（&#x61; → a），再剥离空白
-    // （java&#x09;script → javascript），最后用 new URL 取 protocol 做白名单判定，
-    // 非 http/https/mailto（及 data:image 非 svg）一律降级为 '#'
+    // 保留边界字符并补空格：避免 <img src="x"onerror="a"onload="b"> 相邻粘连时，
+    // 首次匹配吃掉闭合引号后第二个 on* 属性缺少前置边界而存活（零点击 XSS）。
+    do { prev = s; s = s.replace(BLOCKED_ATTRS_RE, function (m, p1) { return (p1 || '') + ' '; }); } while (s !== prev);
+    // Strip entity-encoded event handler attribute names（同样收敛 + 保留边界）
+    do { prev = s; s = s.replace(BLOCKED_ATTRS_ENTITY_RE, function (m, p1) { return (p1 || '') + ' '; }); } while (s !== prev);
+    // 统一校验 href/src 值：先解码 HTML 实体（&#x61; → a），再剥离全部 C0/DEL 控制字符与空白
+    // （java&#x09;script / &#x01;javascript → javascript），用 new URL 取 protocol 做白名单判定。
+    // 非 http/https/mailto（及 data:image 非 svg）一律降级为 '#'；无协议不再无条件放行，
+    // 仅显式放行安全相对路径（/ ./ ../ # ?），彻底堵死 \x01javascript: 回退放行。
     s = s.replace(/(href|src)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi, function (match, attr, dq, sq, unq) {
       var rawVal = dq !== undefined ? dq : (sq !== undefined ? sq : (unq || ''));
-      var decoded = decodeHtmlEntities(rawVal).replace(/[\t\r\n ]/g, '');
+      var decoded = decodeHtmlEntities(rawVal).replace(/[\x00-\x1f\x7f\s]+/g, '');
+      if (/^\/\//.test(decoded)) return attr + '="#"';
       var protocol = '';
       try { protocol = new URL(decoded, safeOrigin()).protocol.toLowerCase(); } catch (e) { protocol = ''; }
       if (protocol === 'http:' || protocol === 'https:' || protocol === 'mailto:') return match;
       if (protocol === 'data:' && /^data:image\/(?!svg\b)/i.test(decoded)) return match;
-      // 无显式协议（相对路径/锚点）视为安全
-      if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(decoded)) return match;
+      if (/^(\/(?!\/)|\.\/|\.\.\/|#|\?)/.test(decoded)) return match;
       return attr + '="#"';
     });
     // Strip CSS expressions（防 style 内 expression() 历史漏洞）
     s = s.replace(/\bexpression\s*\(/gi, '');
-    // Strip DSML protocol frames
-    s = s.replace(DSML_RE, '');
-    // Strip raw tool_calls JSON
-    s = s.replace(TOOL_CALLS_RAW_RE, '');
-    // Strip reasoning_content
-    s = s.replace(REASONING_RAW_RE, '');
     return s;
   }
 
@@ -160,7 +162,8 @@
   // Supports: headings, lists, code blocks, inline code, tables, links, blockquotes, bold/italic
   function renderMarkdown(text) {
     if (!text) return '';
-    var s = String(text);
+    // 入口即清除 NUL/SOH：阻断 \x00INLINE 自引用占位符注入与 \x01javascript: 控制字符绕过
+    var s = String(text).replace(/[\x00\x01]/g, '');
 
     // 1. Fenced code blocks: ```lang ... ```
     var codeBlocks = [];
@@ -183,7 +186,16 @@
       return stashInline('<code>' + _escapeHtml(code) + '</code>');
     });
   /// 5. Links: [text](url)
-    function safeHref(rawUrl, allowDataImage) { var u = String(rawUrl || '').trim(); var scheme = (u.match(/^([a-zA-Z][a-zA-Z0-9+.-]*):/) || [])[1]; if (!scheme) { if (/^\/\//.test(u)) return { ok: false, url: u }; return { ok: true, url: u }; } var s = scheme.toLowerCase(); if (s === 'http' || s === 'https' || s === 'mailto') return { ok: true, url: u }; if (allowDataImage && s === 'data' && /^data:image\/(?!svg\b)/i.test(u)) return { ok: true, url: u }; return { ok: false, url: u }; }
+    function safeHref(rawUrl, allowDataImage) {
+      var u = decodeHtmlEntities(rawUrl).replace(/[\x00-\x1f\x7f\s]+/g, '');
+      if (/^\/\//.test(u)) return { ok: false, url: '#' };
+      var protocol = '';
+      try { protocol = new URL(u, safeOrigin()).protocol.toLowerCase(); } catch (e) { protocol = ''; }
+      if (protocol === 'http:' || protocol === 'https:' || protocol === 'mailto:') return { ok: true, url: u };
+      if (allowDataImage && protocol === 'data:' && /^data:image\/(?!svg\b)/i.test(u)) return { ok: true, url: u };
+      if (/^(\/(?!\/)|\.\/|\.\.\/|#|\?)/.test(u)) return { ok: true, url: u };
+      return { ok: false, url: '#' };
+    }
     // 6. Images: ![alt](url)
     s = s.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, function (_, alt, url) { var h = safeHref(url, true); if (!h.ok) return _escapeHtml(alt || '图片'); return stashInline('<img src="' + _escapeHtml(h.url) + '" alt="' + _escapeHtml(alt).replace(/"/g, '&quot;') + '" loading="lazy" />'); });
     s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function (_, text, url) { var h = safeHref(url, false); if (!h.ok) return stashInline('<span title="' + _escapeHtml(h.url) + '">' + _escapeHtml(text) + '</span>'); return stashInline('<a href="' + _escapeHtml(h.url) + '" target="_blank" rel="noopener noreferrer">' + _escapeHtml(text) + '</a>'); });
@@ -248,7 +260,9 @@
     var paragraphHtmlStore = [];
     function stashParagraphHtml(m) {
       var idx = paragraphHtmlStore.length;
-      paragraphHtmlStore.push(m);
+      // 段落内透传的 HTML 片断一律先经 <template> 白名单重建再入占位表，
+      // 堵死以 text/非块级标签开头的段落绕过 cleanPassthroughHtml 的路径。
+      paragraphHtmlStore.push(cleanPassthroughHtml(m));
       return '\x00PH' + idx + '\x00';
     }
     var PARAGRAPH_HTML_RE = /<h[1-6]>[\s\S]*?<\/h[1-6]>|<blockquote>[\s\S]*?<\/blockquote>|<ul>[\s\S]*?<\/ul>|<ol>[\s\S]*?<\/ol>|<li>[\s\S]*?<\/li>|<table>[\s\S]*?<\/table>|<pre>[\s\S]*?<\/pre>|<div>[\s\S]*?<\/div>|<code>[\s\S]*?<\/code>|<a\b[^>]*>[\s\S]*?<\/a>|<span\b[^>]*>[\s\S]*?<\/span>|<img\b[^>]*\/?>|<hr\b[^>]*>/gi;
@@ -272,9 +286,12 @@
     //     以便内联占位符中嵌套的代码块占位符（如 **```js```**）也能被还原。
     //     使用迭代还原，处理 *a**b**c* 这类斜体包裹加粗的嵌套场景。
     var inlinePasses = 0;
-    while (/\x00INLINE(\d+)\x00/.test(s) && inlinePasses < 10) {
+    var _restoreBudget = 2000000; // 展开总长度上限，防自引用占位符指数膨胀致 OOM
+    while (/\x00INLINE(\d+)\x00/.test(s) && inlinePasses < 10 && _restoreBudget > 0) {
       s = s.replace(/\x00INLINE(\d+)\x00/g, function (_, idx) {
-        return inlineStore[parseInt(idx, 10)] || '';
+        var piece = inlineStore[parseInt(idx, 10)] || '';
+        _restoreBudget -= piece.length;
+        return _restoreBudget > 0 ? piece : '';
       });
       inlinePasses++;
     }

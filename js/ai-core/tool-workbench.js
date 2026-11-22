@@ -1,6 +1,7 @@
 (function (global) {
   'use strict';
   var MAX_ROWS=5000,MAX_COLS=60,MAX_TEXT=200000;
+  var activeWorkbench=null; // 工作台单例，防重复点击叠加重复 DOM ID
   function scalar(value) { return value==null?'':String(value); }
   function csvCell(value,safe) {
     var text=scalar(value);
@@ -78,6 +79,8 @@
   function safeFileName(value,extension) { return scalar(value||'小猫工具成果').replace(/[\x00-\x1f\\/:*?"<>|]/g,'').slice(0,100)+(extension||''); }
   function open(options) {
     options=options||{};
+    // 单例互斥：已打开的工作台先 dispose，避免重复 aw-body/aw-tab-* DOM ID
+    if(activeWorkbench){try{activeWorkbench.dispose();}catch(e){}activeWorkbench=null;}
     if(!global.document || !options.owner || typeof options.api!=='function')throw Error('工作台需要有效的登录状态');
     var doc=global.document,disposed=false,controllers=new Set(),readers=new Set(),objectUrls=new Set(),generation=0,tabGeneration=0,tableEpoch=0,webEpoch=0,assetReadEpoch=0,assetListEpoch=0,assetMutationPending=false;
     var life=new AbortController(),tabLife=null,previousFocus=doc.activeElement;
@@ -408,13 +411,13 @@
       (result.cards||[]).forEach(function(card){var data=card.data||{},source=data.data_url;if(!source||!/^data:(?:application\/(?:pdf|vnd\.[a-z0-9.+-]+)|text\/(?:csv|html));base64,[a-z0-9+/=]+$/i.test(source))return;var name=data.filename||'小猫成果',box=node('div','aw-download');box.append(node('strong','',name),note(/\.html$/i.test(name)?'实际交付为 HTML 文档；下载后用浏览器打开并选择“打印 → 另存为 PDF”。':/\.pdf$/i.test(name)?'PDF 文档已生成。':'数据文件已生成。'),button('下载 '+name,function(){downloadData(source,safeFileName(name));}));host.append(box);});
     }
     function downloadData(data,name) {
-      ensure();if(data.length>12*1024*1024)throw Error('下载文件超过工作台大小上限');var match=/^data:([^;,]+);base64,([a-z0-9+/=]+)$/i.exec(data);if(!match)throw Error('文件下载格式无效');var bytes=atob(match[2]),array=new Uint8Array(bytes.length);for(var i=0;i<bytes.length;i++)array[i]=bytes.charCodeAt(i);downloadBlob(new Blob([array],{type:match[1]}),name);
+      ensure();if(data.length>12*1024*1024)throw Error('下载文件超过工作台大小上限');var match=/^data:([^;,]+);base64,([a-z0-9+/=]+)$/i.exec(data);if(!match)throw Error('文件下载格式无效');var bytes;try{bytes=atob(match[2]);}catch(eAtob){throw Error('文件数据损坏，无法解码');}var array=new Uint8Array(bytes.length);for(var i=0;i<bytes.length;i++)array[i]=bytes.charCodeAt(i);downloadBlob(new Blob([array],{type:match[1]}),name);
     }
     function downloadBlob(blob,name) { ensure();var url=URL.createObjectURL(blob);objectUrls.add(url);var a=doc.createElement('a');a.href=url;a.download=safeFileName(name);a.style.display='none';root.append(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(url);objectUrls.delete(url);},30000); }
     function dispose() {
-      if(disposed)return;disposed=true;generation++;controllers.forEach(function(c){c.abort();});controllers.clear();readers.forEach(function(r){try{r.abort();}catch(_){}});readers.clear();if(tabLife)tabLife.abort();life.abort();objectUrls.forEach(function(url){URL.revokeObjectURL(url);});objectUrls.clear();panel.querySelectorAll('audio').forEach(function(audio){audio.pause();audio.removeAttribute('src');audio.load();});charts=new WeakMap();chartOwners=new WeakMap();previewExports=new WeakMap();state.csvDraft='';state.webDraft='';state.images=[];state.documents=[];state.audio=null;state.audioText='';state.clips=[];state.assets=[];state.steps=[];root.remove();if(previousFocus&&previousFocus.isConnected&&typeof previousFocus.focus==='function')previousFocus.focus({preventScroll:true});if(typeof options.onClose==='function')options.onClose();
+      if(disposed)return;disposed=true;generation++;controllers.forEach(function(c){c.abort();});controllers.clear();readers.forEach(function(r){try{r.abort();}catch(_){}});readers.clear();if(tabLife)tabLife.abort();life.abort();objectUrls.forEach(function(url){URL.revokeObjectURL(url);});objectUrls.clear();panel.querySelectorAll('audio').forEach(function(audio){audio.pause();audio.removeAttribute('src');audio.load();});charts=new WeakMap();chartOwners=new WeakMap();previewExports=new WeakMap();state.csvDraft='';state.webDraft='';state.images=[];state.documents=[];state.audio=null;state.audioText='';state.clips=[];state.assets=[];state.steps=[];root.remove();if(activeWorkbench&&activeWorkbench.root===root)activeWorkbench=null;if(previousFocus&&previousFocus.isConnected&&typeof previousFocus.focus==='function')previousFocus.focus({preventScroll:true});if(typeof options.onClose==='function')options.onClose();
     }
-    return {root:root,dispose:dispose};
+    activeWorkbench={root:root,dispose:dispose};return activeWorkbench;
   }
   var api={open:open,parseCsv:parseCsv,csvStringify:csvStringify,filterRows:filterRows,spreadsheetTables:spreadsheetTables,extractTimeline:extractTimeline,weightedDecision:weightedDecision,buildMarkdown:buildMarkdown,validDate:validDate};
   if(typeof module==='object' && module.exports)module.exports=api;
