@@ -511,6 +511,9 @@ const ADMIN_NAME = "xxz";
                 var revokeRemote = options.revokeRemote !== false;
                 var shouldBroadcast = options.broadcast !== false;
                 var reason = options.reason || 'manual';
+                // 远端 account_switched 同步：源标签页已清理共享存储，此处只清本标签内存态，
+                // 不得再删共享 localStorage（否则新登录标签页刷新后掉线）。
+                var preserveShared = options.preserveSharedStorage === true;
                 var tokenForRevocation = getUserToken();
                 try { if (window.xtjClearOriginalMediaCache) window.xtjClearOriginalMediaCache(); } catch (_) {}
                 try { if (typeof window.__xtjAbortAiRequests === 'function') window.__xtjAbortAiRequests(); } catch (_) {}
@@ -521,15 +524,17 @@ const ADMIN_NAME = "xxz";
                 lastUserSessionWriteAt = 0;
                 try { sessionStorage.removeItem('xtj_pw_hash'); } catch(e) {}
                 try { window.safeStorage.remove('xtj_pw_hash'); } catch(e) {}
-                try { window.safeStorage.remove('xtj_user'); } catch(e) {}
-                try { window.safeStorage.remove(USER_SESSION_KEY); } catch(e) {}
+                if (!preserveShared) {
+                    try { window.safeStorage.remove('xtj_user'); } catch(e) {}
+                    try { window.safeStorage.remove(USER_SESSION_KEY); } catch(e) {}
+                }
                 try { sessionStorage.removeItem('xtj_user'); } catch(e) {}
                 try { if (typeof window.clearAiHistoryCacheForUser === 'function') window.clearAiHistoryCacheForUser(); } catch(eCache) {}
                 // ★ 清理 AI 聊天缓存
                 try { window.safeStorage.remove('xtj_ai_history'); } catch(e) {}
                 try { sessionStorage.removeItem('xtj_ai_history'); } catch(e) {}
                 // ★ 清理个人资料缓存
-                try { window.safeStorage.remove('xtj_profile_cache'); } catch(e) {}
+                if (!preserveShared) { try { window.safeStorage.remove('xtj_profile_cache'); } catch(e) {} }
                 try { sessionStorage.removeItem('xtj_profile_cache'); } catch(e) {}
                 // ★ 清理头像缓存
                 try { avatarCache = {}; } catch(e) {}
@@ -547,7 +552,7 @@ const ADMIN_NAME = "xxz";
                 // ★ 清理浏览历史与 feed 缓存：不含用户名的缓存键必须随账号切换清空，防止跨用户串扰（隐私泄漏）
                 try { window.safeStorage.remove('xtj_view_history'); } catch(e) {}
                 try { sessionStorage.removeItem('xtj_view_history'); } catch(e) {}
-                try { window.safeStorage.remove('xtj_feed_cache_v8'); } catch(e) {}
+                if (!preserveShared) { try { window.safeStorage.remove('xtj_feed_cache_v8'); } catch(e) {} }
                 try { sessionStorage.removeItem('xtj_feed_cache_v8'); } catch(e) {}
                 // ★ 清理 AI 相关的异步请求和 pending 状态
                 try {
@@ -595,6 +600,11 @@ const ADMIN_NAME = "xxz";
                         console.warn('[feed] anonymous reload after session reset failed:', error);
                     });
                 });
+                // ★ 修复(P0-03)：登出/切号后重置封禁遮罩、禁言条与 60 秒轮询，
+                //   否则 #blockedOverlay / #muteIndicator 永久残留且后台轮询不止。
+                if (typeof window.resetUserRestrictionsState === 'function') {
+                    try { window.resetUserRestrictionsState(); } catch (eResetRestrictions) {}
+                }
             }
             window.clearAllAuthState = clearAllAuthState;
 
@@ -624,7 +634,11 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                 if (existingToken && !maybeStale) return existingToken;
                 // 无 token 或可能过期：用 refresh cookie 刷新
                 var result = await refreshUserTokenViaCookie();
-                return (result && result.token) || existingToken || '';
+                // ★ 修复(P1-07)：await 期间用户可能已登出/切号，existingToken 已陈旧。
+                //   返回前重读实时 memoryUserToken，仅在 currentUser 仍存在且未被清空时回退。
+                var liveToken = memoryUserToken || '';
+                if (!currentUser) return (result && result.token) || '';
+                return (result && result.token) || liveToken || '';
             }
 
             // ★ 2026-09-22：设备标识 —— "本机 30 天免登录"的锚点。
@@ -1533,7 +1547,10 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                     if (msg.type === 'account_switched' || msg.type === 'logout') {
                         // 其他标签页切换了账号，本标签页必须清除旧状态
                         // ★ broadcast:false 防止形成循环广播
-                        clearAllAuthState({ revokeRemote: false, broadcast: false, reason: 'remote_sync' });
+                        // ★ 修复(P0-02)：account_switched 时不能删共享 localStorage ——
+                        //   新登录的标签页可能刚写入新账号的 xtj_user/会话态，源标签页
+                        //   已自行清理；此处再删会让新登录标签页刷新后掉线。仅清内存态。
+                        clearAllAuthState({ revokeRemote: false, broadcast: false, reason: 'remote_sync', preserveSharedStorage: msg.type === 'account_switched' });
                         currentUser = '';
                         window.currentUser = '';
                         window._lastKnownUser = '';
@@ -3106,6 +3123,17 @@ function isAdmin() {
             function stopRestrictionPolling() {
                 if (restrictionPollTimer) { clearInterval(restrictionPollTimer); restrictionPollTimer = null; }
             }
+
+            // ★ 修复(P0-03)：供 clearAllAuthState（登出/切号/账号同步）调用，
+            //   彻底重置限制态：停 60 秒轮询、隐藏封禁遮罩与禁言条、恢复发布框可用态。
+            window.resetUserRestrictionsState = function resetUserRestrictionsState() {
+                stopRestrictionPolling();
+                userRestrictions = { is_banned: false, is_blacklisted: false, is_muted: false };
+                hideBlockedScreen();
+                hideMuteIndicator();
+                var pubBox = document.getElementById('publishBox');
+                if (pubBox) { pubBox.style.opacity = ''; pubBox.style.pointerEvents = ''; }
+            };
 
             window.currentUserInfoSnapshot = window.currentUserInfoSnapshot || null;
 
@@ -24254,6 +24282,8 @@ function renderProfileActivityList(kind) {
             window.closeStatRecordsModal = function() {
                 var modal = document.getElementById('statRecordsModal');
                 if (modal) modal.classList.remove('active');
+                // 修复：关闭统计记录弹窗后重算 header 弹窗 body 滚动锁，避免页面无法滚动
+                try { if (typeof syncHeaderModalBodyLock === 'function') syncHeaderModalBodyLock(); } catch (e) {}
             };
 
             window.openStatPostDetail = function(postId) {
@@ -24616,7 +24646,7 @@ function renderProfileActivityList(kind) {
             window.__xtjEmergencyActionRescueV1 = true;
 
             function setBodyLockFromVisibleModals() {
-                var activeIds = ['announcementModal', 'reportModal', 'reportHistoryModal', 'statModal'];
+                var activeIds = ['announcementModal', 'reportModal', 'reportHistoryModal', 'statModal', 'statRecordsModal'];
                 var hasActive = activeIds.some(function(id) {
                     var el = document.getElementById(id);
                     return !!(el && el.classList.contains('active'));
@@ -25026,7 +25056,7 @@ function renderProfileActivityList(kind) {
             }
 
             function syncHeaderModalBodyLock() {
-                var activeIds = ['announcementModal', 'reportModal', 'reportHistoryModal', 'statModal'];
+                var activeIds = ['announcementModal', 'reportModal', 'reportHistoryModal', 'statModal', 'statRecordsModal'];
                 var hasActive = activeIds.some(function(id) {
                     var el = document.getElementById(id);
                     return !!(el && el.classList.contains('active'));
@@ -25180,7 +25210,9 @@ function renderProfileActivityList(kind) {
                 //   直接 return，不碰 DOM），并让 title/subtitle 真正参与渲染；07 带来的视觉
                 //   改进（xtj-chat-photo-loading 类 + 共享骨架 HTML）保持不变。
                 var seq = parseInt(options && options.seq, 10);
-                if (seq > 0 && el.getAttribute('data-loading-seq') === String(seq) && el.querySelector('.xtj-loading')) return;
+                // 去重选择器覆盖实际骨架类名（.xtj-loading 在部分路径并不存在，
+                // 会导致 seq 判重失效、骨架反复重绘闪白）
+                if (seq > 0 && el.getAttribute('data-loading-seq') === String(seq) && el.querySelector('.xtj-magic-loading, .xtj-loading-skeleton, .xtj-skeleton-card, .xtj-chat-photo-loading, .xtj-loading')) return;
                 if (seq > 0) el.setAttribute('data-loading-seq', String(seq));
                 if (variant === 'chat-list' && window.__xtjChatListSkeletonHtml) {
                     el.classList.remove('xtj-chat-photo-loading');
@@ -25200,11 +25232,18 @@ function renderProfileActivityList(kind) {
                 if (window.__xtjChatPhotoLoaderFinalV1) return;
                 window.__xtjChatPhotoLoaderFinalV1 = true;
                 var originalMagicLoader = window.xtjMagicLoadingHtml;
-                window.__xtjSharedPhotoLoaderHtml = window.__xtjSharedPhotoLoaderHtml || (window.__xtjSkeletonCardHtml ? window.__xtjSkeletonCardHtml(true) : '');
+                // 惰性求值：不在安装时永久缓存空串（若此时 __xtjSkeletonCardHtml 尚未就绪，
+                // 后续再也无法生成骨架）。每次取用时若仍为空则重新尝试。
+                function sharedLoaderHtml() {
+                    if (!window.__xtjSharedPhotoLoaderHtml && typeof window.__xtjSkeletonCardHtml === 'function') {
+                        try { window.__xtjSharedPhotoLoaderHtml = window.__xtjSkeletonCardHtml(true) || ''; } catch (e) {}
+                    }
+                    return window.__xtjSharedPhotoLoaderHtml || '';
+                }
                 window.xtjMagicLoadingHtml = function(title, subtitle, variant) {
                     var mode = String(variant || '');
                     if (mode.indexOf('chat') !== -1 || /聊天|消息/.test(String(title || '') + String(subtitle || ''))) {
-                        return window.__xtjSharedPhotoLoaderHtml;
+                        return sharedLoaderHtml();
                     }
                     return originalMagicLoader ? originalMagicLoader.apply(this, arguments) : '';
                 };

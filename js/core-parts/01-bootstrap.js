@@ -505,6 +505,9 @@ const ADMIN_NAME = "xxz";
                 var revokeRemote = options.revokeRemote !== false;
                 var shouldBroadcast = options.broadcast !== false;
                 var reason = options.reason || 'manual';
+                // 远端 account_switched 同步：源标签页已清理共享存储，此处只清本标签内存态，
+                // 不得再删共享 localStorage（否则新登录标签页刷新后掉线）。
+                var preserveShared = options.preserveSharedStorage === true;
                 var tokenForRevocation = getUserToken();
                 try { if (window.xtjClearOriginalMediaCache) window.xtjClearOriginalMediaCache(); } catch (_) {}
                 try { if (typeof window.__xtjAbortAiRequests === 'function') window.__xtjAbortAiRequests(); } catch (_) {}
@@ -515,15 +518,17 @@ const ADMIN_NAME = "xxz";
                 lastUserSessionWriteAt = 0;
                 try { sessionStorage.removeItem('xtj_pw_hash'); } catch(e) {}
                 try { window.safeStorage.remove('xtj_pw_hash'); } catch(e) {}
-                try { window.safeStorage.remove('xtj_user'); } catch(e) {}
-                try { window.safeStorage.remove(USER_SESSION_KEY); } catch(e) {}
+                if (!preserveShared) {
+                    try { window.safeStorage.remove('xtj_user'); } catch(e) {}
+                    try { window.safeStorage.remove(USER_SESSION_KEY); } catch(e) {}
+                }
                 try { sessionStorage.removeItem('xtj_user'); } catch(e) {}
                 try { if (typeof window.clearAiHistoryCacheForUser === 'function') window.clearAiHistoryCacheForUser(); } catch(eCache) {}
                 // ★ 清理 AI 聊天缓存
                 try { window.safeStorage.remove('xtj_ai_history'); } catch(e) {}
                 try { sessionStorage.removeItem('xtj_ai_history'); } catch(e) {}
                 // ★ 清理个人资料缓存
-                try { window.safeStorage.remove('xtj_profile_cache'); } catch(e) {}
+                if (!preserveShared) { try { window.safeStorage.remove('xtj_profile_cache'); } catch(e) {} }
                 try { sessionStorage.removeItem('xtj_profile_cache'); } catch(e) {}
                 // ★ 清理头像缓存
                 try { avatarCache = {}; } catch(e) {}
@@ -541,7 +546,7 @@ const ADMIN_NAME = "xxz";
                 // ★ 清理浏览历史与 feed 缓存：不含用户名的缓存键必须随账号切换清空，防止跨用户串扰（隐私泄漏）
                 try { window.safeStorage.remove('xtj_view_history'); } catch(e) {}
                 try { sessionStorage.removeItem('xtj_view_history'); } catch(e) {}
-                try { window.safeStorage.remove('xtj_feed_cache_v8'); } catch(e) {}
+                if (!preserveShared) { try { window.safeStorage.remove('xtj_feed_cache_v8'); } catch(e) {} }
                 try { sessionStorage.removeItem('xtj_feed_cache_v8'); } catch(e) {}
                 // ★ 清理 AI 相关的异步请求和 pending 状态
                 try {
@@ -589,6 +594,11 @@ const ADMIN_NAME = "xxz";
                         console.warn('[feed] anonymous reload after session reset failed:', error);
                     });
                 });
+                // ★ 修复(P0-03)：登出/切号后重置封禁遮罩、禁言条与 60 秒轮询，
+                //   否则 #blockedOverlay / #muteIndicator 永久残留且后台轮询不止。
+                if (typeof window.resetUserRestrictionsState === 'function') {
+                    try { window.resetUserRestrictionsState(); } catch (eResetRestrictions) {}
+                }
             }
             window.clearAllAuthState = clearAllAuthState;
 
@@ -618,7 +628,11 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                 if (existingToken && !maybeStale) return existingToken;
                 // 无 token 或可能过期：用 refresh cookie 刷新
                 var result = await refreshUserTokenViaCookie();
-                return (result && result.token) || existingToken || '';
+                // ★ 修复(P1-07)：await 期间用户可能已登出/切号，existingToken 已陈旧。
+                //   返回前重读实时 memoryUserToken，仅在 currentUser 仍存在且未被清空时回退。
+                var liveToken = memoryUserToken || '';
+                if (!currentUser) return (result && result.token) || '';
+                return (result && result.token) || liveToken || '';
             }
 
             // ★ 2026-09-22：设备标识 —— "本机 30 天免登录"的锚点。
@@ -1527,7 +1541,10 @@ window.handleProtectedAuthFailure = handleProtectedAuthFailure;
                     if (msg.type === 'account_switched' || msg.type === 'logout') {
                         // 其他标签页切换了账号，本标签页必须清除旧状态
                         // ★ broadcast:false 防止形成循环广播
-                        clearAllAuthState({ revokeRemote: false, broadcast: false, reason: 'remote_sync' });
+                        // ★ 修复(P0-02)：account_switched 时不能删共享 localStorage ——
+                        //   新登录的标签页可能刚写入新账号的 xtj_user/会话态，源标签页
+                        //   已自行清理；此处再删会让新登录标签页刷新后掉线。仅清内存态。
+                        clearAllAuthState({ revokeRemote: false, broadcast: false, reason: 'remote_sync', preserveSharedStorage: msg.type === 'account_switched' });
                         currentUser = '';
                         window.currentUser = '';
                         window._lastKnownUser = '';

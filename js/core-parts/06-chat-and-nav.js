@@ -9415,6 +9415,8 @@
             window.closeStatRecordsModal = function() {
                 var modal = document.getElementById('statRecordsModal');
                 if (modal) modal.classList.remove('active');
+                // 修复：关闭统计记录弹窗后重算 header 弹窗 body 滚动锁，避免页面无法滚动
+                try { if (typeof syncHeaderModalBodyLock === 'function') syncHeaderModalBodyLock(); } catch (e) {}
             };
 
             window.openStatPostDetail = function(postId) {

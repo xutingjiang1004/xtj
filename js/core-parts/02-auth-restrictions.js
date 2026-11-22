@@ -139,6 +139,17 @@
                 if (restrictionPollTimer) { clearInterval(restrictionPollTimer); restrictionPollTimer = null; }
             }
 
+            // ★ 修复(P0-03)：供 clearAllAuthState（登出/切号/账号同步）调用，
+            //   彻底重置限制态：停 60 秒轮询、隐藏封禁遮罩与禁言条、恢复发布框可用态。
+            window.resetUserRestrictionsState = function resetUserRestrictionsState() {
+                stopRestrictionPolling();
+                userRestrictions = { is_banned: false, is_blacklisted: false, is_muted: false };
+                hideBlockedScreen();
+                hideMuteIndicator();
+                var pubBox = document.getElementById('publishBox');
+                if (pubBox) { pubBox.style.opacity = ''; pubBox.style.pointerEvents = ''; }
+            };
+
             window.currentUserInfoSnapshot = window.currentUserInfoSnapshot || null;
 
             function normalizeUserInfoSnapshot(info) {

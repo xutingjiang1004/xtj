@@ -18,6 +18,7 @@
     var scrollHandler = null;
     var lastScrollTop = 0;
     var scrollTicking = false;
+    var programmaticScroll = false; // 程序自身滚动标志，避免 scrollToBottom 被当成用户上滑
 
     function isNearBottom(el) {
       if (!el) return true;
@@ -27,27 +28,32 @@
     function scrollToBottom(force) {
       if (!container) return;
       if (force || pinned) {
+        programmaticScroll = true;
         container.scrollTop = container.scrollHeight;
+        lastScrollTop = container.scrollTop;
+        // 用 rAF 复位，确保本次 programmatic scroll 事件已被消费
+        var rafReset = window.requestAnimationFrame || function (cb) { setTimeout(cb, 16); };
+        rafReset(function () { programmaticScroll = false; });
       }
     }
 
     function onScroll() {
       if (!container) return;
-      if (scrollTicking) return;
-      scrollTicking = true;
-      var raf = window.requestAnimationFrame || function (cb) { setTimeout(cb, 16); };
-      raf(function () {
-        scrollTicking = false;
-        if (!container) return;
-        var near = isNearBottom(container);
-        if (near) {
+      // ★ 修复(F1)：同步阶段立即判定"用户上滑"并解钉。原实现把 pinned 更新推迟到
+      //   rAF，同帧内 onNewContent() 抢先 scrollToBottom() 把用户强行拉回底部。
+      var currentTop = container.scrollTop;
+      if (!programmaticScroll) {
+        // 用户主动向上滚动（top 减小）或明显不在底部 → 立即解钉
+        if (currentTop < lastScrollTop - 1 || !isNearBottom(container)) {
+          pinned = false;
+        } else if (isNearBottom(container)) {
           pinned = true;
           hideBanner();
-        } else {
-          pinned = false;
         }
-        lastScrollTop = container.scrollTop;
-      });
+        lastScrollTop = currentTop;
+      } else {
+        lastScrollTop = currentTop;
+      }
     }
 
     function ensureBanner() {
@@ -90,14 +96,39 @@
       }
     }
 
+    // ★ 修复(F2)：wheel/touch 主动上滑时立即解钉，抢在流式 onNewContent 之前，
+    //   避免"轻滑上滚被下一帧拉回底部"。均为 passive，仅读不拦默认行为。
+    function onWheel(e) {
+      if (!e || typeof e.deltaY !== 'number') return;
+      if (e.deltaY < 0) { pinned = false; }
+    }
+    function onTouchStart(e) {
+      if (!e || !e.touches || !e.touches.length) return;
+      onTouchStart._y = e.touches[0].clientY;
+    }
+    function onTouchMove(e) {
+      if (!e || !e.touches || !e.touches.length) return;
+      var prevY = onTouchStart._y;
+      if (typeof prevY === 'number' && e.touches[0].clientY > prevY) {
+        pinned = false; // 手指向下滑 = 看历史消息
+      }
+      onTouchStart._y = e.touches[0].clientY;
+    }
+
     function attach() {
       if (!container) return;
       container.addEventListener('scroll', onScroll, { passive: true });
+      container.addEventListener('wheel', onWheel, { passive: true });
+      container.addEventListener('touchstart', onTouchStart, { passive: true });
+      container.addEventListener('touchmove', onTouchMove, { passive: true });
     }
 
     function detach() {
       if (!container) return;
       container.removeEventListener('scroll', onScroll);
+      container.removeEventListener('wheel', onWheel);
+      container.removeEventListener('touchstart', onTouchStart);
+      container.removeEventListener('touchmove', onTouchMove);
       hideBanner();
       if (newContentBanner && newContentBanner.parentNode) {
         try { newContentBanner.parentNode.removeChild(newContentBanner); } catch (e) {}

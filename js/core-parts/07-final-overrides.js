@@ -140,7 +140,7 @@
             window.__xtjEmergencyActionRescueV1 = true;
 
             function setBodyLockFromVisibleModals() {
-                var activeIds = ['announcementModal', 'reportModal', 'reportHistoryModal', 'statModal'];
+                var activeIds = ['announcementModal', 'reportModal', 'reportHistoryModal', 'statModal', 'statRecordsModal'];
                 var hasActive = activeIds.some(function(id) {
                     var el = document.getElementById(id);
                     return !!(el && el.classList.contains('active'));
@@ -550,7 +550,7 @@
             }
 
             function syncHeaderModalBodyLock() {
-                var activeIds = ['announcementModal', 'reportModal', 'reportHistoryModal', 'statModal'];
+                var activeIds = ['announcementModal', 'reportModal', 'reportHistoryModal', 'statModal', 'statRecordsModal'];
                 var hasActive = activeIds.some(function(id) {
                     var el = document.getElementById(id);
                     return !!(el && el.classList.contains('active'));
@@ -704,7 +704,9 @@
                 //   直接 return，不碰 DOM），并让 title/subtitle 真正参与渲染；07 带来的视觉
                 //   改进（xtj-chat-photo-loading 类 + 共享骨架 HTML）保持不变。
                 var seq = parseInt(options && options.seq, 10);
-                if (seq > 0 && el.getAttribute('data-loading-seq') === String(seq) && el.querySelector('.xtj-loading')) return;
+                // 去重选择器覆盖实际骨架类名（.xtj-loading 在部分路径并不存在，
+                // 会导致 seq 判重失效、骨架反复重绘闪白）
+                if (seq > 0 && el.getAttribute('data-loading-seq') === String(seq) && el.querySelector('.xtj-magic-loading, .xtj-loading-skeleton, .xtj-skeleton-card, .xtj-chat-photo-loading, .xtj-loading')) return;
                 if (seq > 0) el.setAttribute('data-loading-seq', String(seq));
                 if (variant === 'chat-list' && window.__xtjChatListSkeletonHtml) {
                     el.classList.remove('xtj-chat-photo-loading');
@@ -724,11 +726,18 @@
                 if (window.__xtjChatPhotoLoaderFinalV1) return;
                 window.__xtjChatPhotoLoaderFinalV1 = true;
                 var originalMagicLoader = window.xtjMagicLoadingHtml;
-                window.__xtjSharedPhotoLoaderHtml = window.__xtjSharedPhotoLoaderHtml || (window.__xtjSkeletonCardHtml ? window.__xtjSkeletonCardHtml(true) : '');
+                // 惰性求值：不在安装时永久缓存空串（若此时 __xtjSkeletonCardHtml 尚未就绪，
+                // 后续再也无法生成骨架）。每次取用时若仍为空则重新尝试。
+                function sharedLoaderHtml() {
+                    if (!window.__xtjSharedPhotoLoaderHtml && typeof window.__xtjSkeletonCardHtml === 'function') {
+                        try { window.__xtjSharedPhotoLoaderHtml = window.__xtjSkeletonCardHtml(true) || ''; } catch (e) {}
+                    }
+                    return window.__xtjSharedPhotoLoaderHtml || '';
+                }
                 window.xtjMagicLoadingHtml = function(title, subtitle, variant) {
                     var mode = String(variant || '');
                     if (mode.indexOf('chat') !== -1 || /聊天|消息/.test(String(title || '') + String(subtitle || ''))) {
-                        return window.__xtjSharedPhotoLoaderHtml;
+                        return sharedLoaderHtml();
                     }
                     return originalMagicLoader ? originalMagicLoader.apply(this, arguments) : '';
                 };

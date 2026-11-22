@@ -436,7 +436,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (!findCustomModel(uid) && uid !== OPENROUTER_MODEL_UID) {
           var first = loadCustomModels().filter(function(m) { return !m.server_managed; })[0];
           S.selectedModel = first ? (CUSTOM_MODEL_PREFIX + first.uid) : DEFAULT_AI_MODEL;
-          try { localStorage.setItem('xtj_ai_model', S.selectedModel); } catch (eLs) {}
+          try { scopedStorageSet('xtj_ai_model', S.selectedModel); } catch (eLs) {}
         }
       }
       S._customModelsSyncedAt = Date.now();
@@ -531,7 +531,15 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   }
   function resolveInitialModel() {
     try {
-      var saved = localStorage.getItem('xtj_ai_model');
+      // ★ 2026-11-22：xtj_ai_model 迁至按账号隔离的 scopedStorage；
+      //   首次读取时把旧全局值迁移过来，避免老用户丢失模型选择、也避免切号残留。
+      var saved = scopedStorageGet('xtj_ai_model');
+      if (!saved) {
+        try {
+          var legacyModel = localStorage.getItem('xtj_ai_model');
+          if (legacyModel) { saved = legacyModel; scopedStorageSet('xtj_ai_model', legacyModel); }
+        } catch (eLegacyModel) {}
+      }
       // ★ 2026-09-11 迁移：存量 localStorage 里可能是已下线的旧模型 ID
       //   （deepseek-v4-flash-vision-exp 等）。先归一化到当前 ID 再校验，
       //   否则老用户会被静默踢回默认模型、且旧值一直残留在存储里。
@@ -539,7 +547,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         var migrated = normalizeAiModelId(saved);
         if (migrated !== saved) {
           saved = migrated;
-          try { localStorage.setItem('xtj_ai_model', migrated); } catch (eMig) {}
+          try { scopedStorageSet('xtj_ai_model', migrated); } catch (eMig) {}
         }
       }
       if (saved && ALLOWED_AI_MODELS.indexOf(saved) >= 0) return saved;
@@ -924,8 +932,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     return false;
   }
 
-  function canSendWithQuota() {
+  function canSendWithQuota(opts) {
+    opts = opts || {};
     var q = S.quota;
+    // BYOK 自定义模型（非 server_managed）自带 API Key，不消耗本站 token 额度，
+    // 平台额度耗尽时不应被 token 拦截；仅本站联网搜索仍需校验搜索次数。
+    var skipTokenCheck = opts.skipTokenCheck === true;
     // 访客没有账号额度；是否放行由 ensureUserAuthOrNotify 按后台开关决定。
     
     if (!q) {
@@ -940,7 +952,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // 「已用完」而拦截，导致兑换无限额邀请码后仍提示额度不足。改为以 can_chat 为主，
     // 仅在非无限时再判 remaining<=0。
     var _tokUnlimited = q.tokens_unlimited === true || Number(q.tokens_limit) === -1;
-    if (q.exhausted_window === 'week' || (!_tokUnlimited && typeof q.window_week_remaining === 'number' && q.window_week_remaining <= 0)) { return { ok: false, reason: 'token_limit_week', message: '本周 AI 额度已用完（周一 00:00 重置），开通 Pro 可获得 10 倍额度' }; } if (q.can_chat === false || (!_tokUnlimited && typeof q.tokens_remaining === 'number' && q.tokens_remaining <= 0)) { var _cd = ''; if (q.window_5h_reset_at) { var _diffMs = Math.max(0, new Date(q.window_5h_reset_at).getTime() - Date.now()); var _mins = Math.ceil(_diffMs / 60000); if (_mins > 0) { var _h = Math.floor(_mins / 60), _m = _mins % 60; _cd = _h > 0 ? (_m > 0 ? _h + ' 小时 ' + _m + ' 分钟' : _h + ' 小时') : (_m + ' 分钟'); } } return { ok: false, reason: 'token_limit_5h', message: _cd ? '5 小时 AI 额度已用完（约 ' + _cd + ' 后恢复），开通 Pro 可获得 10 倍额度' : '5 小时 AI 额度已用完，开通 Pro 可获得 10 倍额度' }; }
+    // skipTokenCheck：BYOK 自带 Key 的模型跳过 token 额度拦截（含 week 窗口）；
+    // 同时把 exhausted_window==='week' 收进 !_tokUnlimited 保护内，避免无限额度被误拦。
+    if (!skipTokenCheck && (!_tokUnlimited && (q.exhausted_window === 'week' || (typeof q.window_week_remaining === 'number' && q.window_week_remaining <= 0)))) { return { ok: false, reason: 'token_limit_week', message: '本周 AI 额度已用完（周一 00:00 重置），开通 Pro 可获得 10 倍额度' }; } if (!skipTokenCheck && (q.can_chat === false || (!_tokUnlimited && typeof q.tokens_remaining === 'number' && q.tokens_remaining <= 0))) { var _cd = ''; if (q.window_5h_reset_at) { var _diffMs = Math.max(0, new Date(q.window_5h_reset_at).getTime() - Date.now()); var _mins = Math.ceil(_diffMs / 60000); if (_mins > 0) { var _h = Math.floor(_mins / 60), _m = _mins % 60; _cd = _h > 0 ? (_m > 0 ? _h + ' 小时 ' + _m + ' 分钟' : _h + ' 小时') : (_m + ' 分钟'); } } return { ok: false, reason: 'token_limit_5h', message: _cd ? '5 小时 AI 额度已用完（约 ' + _cd + ' 后恢复），开通 Pro 可获得 10 倍额度' : '5 小时 AI 额度已用完，开通 Pro 可获得 10 倍额度' }; }
     if (S.webSearchEnabled && searchQuotaExhausted(q)) {
       return { ok: false, reason: 'search_limit', message: '今日网页搜索次数已达上限，开通 Pro 可无限搜索' };
     }
@@ -6619,7 +6633,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var state = card._researchState;
     if (!refs || !state) return;
     if (nextState === 'error') nextState = 'interrupted';
-    if ((state.state === 'timeout' || state.state === 'interrupted' || state.state === 'cancelled') && nextState === 'done') return;
+    // 终态不可被任何后续状态覆写：尤其防止泄漏的看门狗定时器把 cancelled 卡
+    // 覆写成 timeout（"取消研究 45 秒后变连接超时"）。原仅拦截 ->done，范围过窄。
+    if (state.state === 'timeout' || state.state === 'interrupted' || state.state === 'cancelled') return;
     if (typeof opts.elapsedMs === 'number') state.elapsedMs = opts.elapsedMs;
     if (typeof opts.durationMs === 'number' && opts.durationMs >= 0) state.durationMs = opts.durationMs;
     if (typeof opts.agentCount === 'number') state.agentCount = opts.agentCount;
@@ -7277,7 +7293,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         : Promise.resolve('');
       tokenPromise.then(function(token) {
         if (!customModelIdentityCurrent(cancelIdentity)) return;
-        if ((isDeepPageCancel ? S._dtSendSeq : S.sendSeq) !== cancelSeq) return;
+        // ★ 修复：去掉 _dtSendSeq !== cancelSeq 守卫 —— 覆盖发送时先 cancel() 再
+        //   同步 _dtSendSeq++，导致该守卫恒成立、/chat/cancel 永远发不出去。
+        //   仅保留账号身份校验即可，取消请求本身由 conversation_id 定位，安全。
         var headers = { 'Content-Type': 'application/json' };
         if (token) headers.Authorization = 'Bearer ' + token;
         return fetch(API_BASE + '/chat/cancel', {
@@ -8960,8 +8978,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         await _handleSseEvent(evt, evtReceivedAt);
       }
 
-      if (doneReceivedRef && doneReceivedRef.value) return;
-      if (abortedRef && abortedRef.value) return;
+      // ★ 修复：这两处必须 break 而非 return —— return 会跳过循环后的
+      //   clearInterval(_idleCheckTimer)，泄漏看门狗定时器；用户取消研究 45 秒后，
+      //   泄漏的定时器还会把已置为 cancelled 的卡片覆写成「连接超时」。
+      if (doneReceivedRef && doneReceivedRef.value) break;
+      if (abortedRef && abortedRef.value) break;
     }
     // H-25: 45s 无数据超时 / 120s 绝对超时 — 清理卡片、复位状态并提示，避免永久"处理中"
     // research 卡片的超时由调用方（sseResult.timedOut）专门处理，这里跳过
@@ -9165,7 +9186,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
     try {
       var authOk = await ensureUserAuthOrNotify();
-      if (!authOk) return;
+      // ★ 修复：面板已在上文显示，鉴权失败若直接 return 会留下全空白空壳界面
+      if (!authOk) { try { closeDeepThinkPage(); } catch (eAuthClose) {} return; }
       if (!currentPage()) return;
 
       // 已有会话 → 如果消息区不为空且不是页面刷新，直接显示缓存内容
@@ -9254,6 +9276,15 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   }
 
   function closeDeepThinkPage() {
+    // ★ 修复：关闭面板时若仍有在途研究流/进度卡，复用 cancelDeepThink 置终态、
+    //   清看门狗/清理定时器并通知后端 /chat/cancel —— 否则同会话重开命中
+    //   reuseHistory 会展示永久卡在「深入研究中」的僵尸卡。
+    try {
+      if (S._dtSending || S.deepThinkProgressCard || S._dtAbortController) {
+        var dtConvAtClose = S.dtConversationId || '';
+        cancelDeepThink(dtConvAtClose);
+      }
+    } catch (eCloseCancel) {}
     _dtFileSelectionSeq += 1;
     _dtFilesLoading = false;
     var panel = document.getElementById('panelDeepThink');
@@ -9396,7 +9427,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         }
       } catch (eQ) {}
       if (!isCurrentDeepSend()) return;
-      var qGateDT = canSendWithQuota();
+      // BYOK 研究模型跳过 token 额度；此处仅校验本站联网搜索次数
+      var qGateDT = canSendWithQuota({ skipTokenCheck: !!dtCustomConfig });
       if (!qGateDT.ok) {
         notify(qGateDT.message || '今日额度已用完');
         releaseDeepPreflightLock();
@@ -9653,20 +9685,24 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           setupBubbleCopy(answerEl, dtMessagesEl);
         }
         if (answerEl) {
-          if (answerRenderer) {
-            answerRenderer.finish(contentForRender);
-            answerRenderer = null;
+          // ★ 修复：真实渲染器由 processDeepThinkSSE 写入 ar.value / cr.value，
+          //   原判断的局部变量 answerRenderer 从未赋值（恒 null），导致 EOF 后
+          //   ar.value 未 finish，随后 resetActiveRenderersByChannel('deep') 对其
+          //   cancel() 把刚渲染好的完整答案清空变白。
+          if (ar.value) {
+            ar.value.finish(contentForRender);
+            ar.value = null;
             finalizeAnswer();
           } else {
-            if (contentRenderer) { try { contentRenderer.stop && contentRenderer.stop(); } catch (e) {} }
+            if (cr.value) { try { cr.value.stop && cr.value.stop(); } catch (e) {} }
             answerEl.innerHTML = '';
-            contentRenderer = createSmoothTextRenderer(answerEl, {
+            cr.value = createSmoothTextRenderer(answerEl, {
               channel: 'deep', minChunk: 8, maxChunk: 64, charsPerMs: 100,
               onDone: function() { finalizeAnswer(); }
             });
-            contentRenderer.append(contentForRender);
-            contentRenderer.finish(contentForRender);
-            contentRenderer = null;
+            cr.value.append(contentForRender);
+            cr.value.finish(contentForRender);
+            cr.value = null;
           }
         }
 
@@ -11321,14 +11357,15 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         // The server checks quota before any model call. An optional UI refresh
         // must not serialize a healthy ordinary send behind another HTTP trip.
         // Keep waiting when the known gate needs a fresh result to allow it.
-        if (!canSendWithQuota().ok) await quotaRefresh;
+        // BYOK 自定义模型跳过 token 额度拦截，仅本站联网搜索仍受搜索额度约束
+        if (!canSendWithQuota({ skipTokenCheck: !!sendCustomCfg }).ok) await quotaRefresh;
       }
     } catch (eQ) {}
     // A close/reopen can start a new send while this quota request is pending.
     // The stale send must not clear or reuse the newer send's state.
     if (sendToken !== S.sendSeq || !customModelIdentityCurrent(sendIdentity)) return;
     if (!S.active) { abandonInactiveSend(); return; }
-    var qGate = canSendWithQuota();
+    var qGate = canSendWithQuota({ skipTokenCheck: !!sendCustomCfg });
     if (!qGate.ok) {
       notify(qGate.message || '今日额度已用完');
       assistantNode.remove();
@@ -11390,6 +11427,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       }
     }
 
+    // ★ 2026-11-22 修复（资源泄漏）：sharedCtrl 创建之后的所有早退 return
+    //   （鉴权失败/额度不足/被新请求抢占/超时等）此前会跳过函数尾部的
+    //   unregisterInFlight + dispose，泄漏 30 分钟绝对超时定时器与闭包。
+    //   用 try/finally 包住请求主体，将上述清理统一迁入 finally，幂等安全。
+    try {
     // ★ 自定义第三方模型：走独立转发路由，不消耗本站配额
     var isCustomModel = isCustomModelId(sendSettings.model);
     var customCfg = sendCustomCfg;
@@ -13434,7 +13476,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             //        ② 新增 terminalErrorSeen 标志，记录"服务端已明确报错"，
             //           使兜底文案能区分"已知服务端错误"与"真的意外断连"。
             if (doneReceived) {
-              if (!_finalized && aiContent) finishAiMessage(assistantNode, aiContent, aiReasoning, null);
+              if (!_finalized && (aiContent || aiReasoning)) finishAiMessage(assistantNode, aiContent, aiReasoning, null);
               resetSendingIfCurrent();
               cancelAiStreamReader(reader);
               aborted = true;
@@ -13444,8 +13486,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             terminalErrorSeen = true;
             evtHandled = true;
             lastServerError = errMsg;
-            if (aiContent) {
-              // 已有部分回复，保留内容并追加错误提示
+            if (aiContent || aiReasoning) {
+              // 已有部分回复（或仅有思考过程），保留内容并追加错误提示；
+              // 不再因无正文就把原消息误回填输入框
               var errNote = el('div', { class: 'ai-error-note' }, errMsg);
               try { assistantNode.appendChild(errNote); } catch (e) {}
               ensureAssistantBubbleReady();
@@ -13467,8 +13510,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           if (evt.error && !evt.type) {
             hideAssistantTyping();
             var errMsg2 = evt.error || 'AI 调用失败';
-            
-            if (aiContent) {
+            // 与新格式错误分支对齐：必须标记终态，否则跳出 while 后会重复 finishAiMessage
+            terminalErrorSeen = true;
+            evtHandled = true;
+            lastServerError = errMsg2;
+            if (aiContent || aiReasoning) {
               var errNote2 = el('div', { class: 'ai-error-note' }, errMsg2);
               try { assistantNode.appendChild(errNote2); } catch (e) {}
               finishAiMessage(assistantNode, aiContent, aiReasoning, evt);
@@ -13920,12 +13966,16 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       }
     }
     
-    if (sharedCtrl) {
-      if (sharedAbortHandler && typeof sharedCtrl.signal.removeEventListener === 'function') {
-        try { sharedCtrl.signal.removeEventListener('abort', sharedAbortHandler); } catch (eRemoveShared) {}
+    } finally {
+      // 无论正常收尾还是任意早退 return，都在此统一释放共享控制器，杜绝泄漏
+      if (sharedCtrl) {
+        if (sharedAbortHandler && typeof sharedCtrl.signal.removeEventListener === 'function') {
+          try { sharedCtrl.signal.removeEventListener('abort', sharedAbortHandler); } catch (eRemoveShared) {}
+        }
+        try { window.XtjAiCore.RequestController.unregisterInFlight('cat_ai', sharedCtrl); } catch (eUnregFinal) {}
+        try { sharedCtrl.dispose(); } catch (eDisposeFinal) {}
+        sharedCtrl = null;
       }
-      window.XtjAiCore.RequestController.unregisterInFlight('cat_ai', sharedCtrl);
-      sharedCtrl.dispose();
     }
     resetSendingIfCurrent();
     if ((S._currentReqId !== reqId || !customModelIdentityCurrent(sendIdentity))) return;
@@ -16169,7 +16219,7 @@ function showChatMessages() {
           S.selectedModel = value;
           if (window.XTJHaptics) window.XTJHaptics.play('selection');
           S._userPickedModel = true;
-          try { localStorage.setItem('xtj_ai_model', value); } catch (err) {}
+          try { scopedStorageSet('xtj_ai_model', value); } catch (err) {}
           notify('模型：' + (isCustomModelId(value) ? customModelDisplayName(value) : (modelLabels[value] || value)));
         }
         updateModelUI(true);
@@ -16628,7 +16678,7 @@ function showChatMessages() {
               // 点击条目主体 = 切换使用该模型
               S.selectedModel = CUSTOM_MODEL_PREFIX + uid;
               S._userPickedModel = true;
-              try { localStorage.setItem('xtj_ai_model', S.selectedModel); } catch (err) {}
+              try { scopedStorageSet('xtj_ai_model', S.selectedModel); } catch (err) {}
               updateModelUI(true);
               notify('已切换到：' + (m ? (m.label || m.model) : '自定义模型'));
               close();
@@ -16699,7 +16749,7 @@ function showChatMessages() {
         if (editingUid === uid) resetForm();
         if (S.selectedModel === CUSTOM_MODEL_PREFIX + uid) {
           S.selectedModel = 'deepseek-flash';
-          try { localStorage.setItem('xtj_ai_model', S.selectedModel); } catch (err) {}
+          try { scopedStorageSet('xtj_ai_model', S.selectedModel); } catch (err) {}
         }
         updateModelUI(true);
         renderList();
@@ -16748,7 +16798,7 @@ function showChatMessages() {
           var managedModel = findCustomModel(OPENROUTER_MODEL_UID);
           if (!managedModel || !managedModel.server_managed) { feedback.className = 'ai-invite-code-feedback is-bad'; feedback.textContent = '暂未获取到该免费模型。请确认后端已配置 OPENROUTER_API_KEY 并已重新部署，稍后重试。'; return; }
           S.selectedModel = CUSTOM_MODEL_PREFIX + managedModel.uid; S._userPickedModel = true;
-          try { localStorage.setItem('xtj_ai_model',S.selectedModel); } catch (_) {}
+          try { scopedStorageSet('xtj_ai_model',S.selectedModel); } catch (_) {}
           updateModelUI(true); close(); notify('已切换到 MiniMax M3.1 Flash 免费版'); return;
         }
 
@@ -16797,7 +16847,7 @@ function showChatMessages() {
           var editSync = saveCustomModels(customs), editSeq = customModelMutationSeq;
           S.selectedModel = CUSTOM_MODEL_PREFIX + targetUid;
           S._userPickedModel = true;
-          try { localStorage.setItem('xtj_ai_model', S.selectedModel); } catch (err) {}
+          try { scopedStorageSet('xtj_ai_model', S.selectedModel); } catch (err) {}
           updateModelUI(true);
           renderList();
           resetForm();
@@ -16814,7 +16864,7 @@ function showChatMessages() {
           var newUid = record.uid;
           S.selectedModel = CUSTOM_MODEL_PREFIX + newUid;
           S._userPickedModel = true;
-          try { localStorage.setItem('xtj_ai_model', S.selectedModel); } catch (err) {}
+          try { scopedStorageSet('xtj_ai_model', S.selectedModel); } catch (err) {}
           updateModelUI(true);
           close();
           notify('已添加并切换到：' + label + '，正在同步到账号…');
@@ -18015,9 +18065,11 @@ function showChatMessages() {
     serverModelCatalog = []; serverModelIdentity = null;
     // 60 秒同步缓存属于上一个账号：不清掉的话，换账号后 openAiChat 会跳过同步，托管模型目录与新账号的模型、研究模型偏好都要等一分钟。
     S._customModelsSyncedAt = 0;
-    if (S.selectedModel === CUSTOM_MODEL_PREFIX + OPENROUTER_MODEL_UID) {
+    // ★ 修复：切号时清除所有残留 BYOK 自定义模型选中态（原仅清理 OpenRouter 特例，
+    //   普通自带 Key 的自定义模型会残留到下一账号）。
+    if (isCustomModelId(S.selectedModel)) {
       S.selectedModel = DEFAULT_AI_MODEL;
-      try { localStorage.setItem('xtj_ai_model',DEFAULT_AI_MODEL); } catch (_) {}
+      try { scopedStorageSet('xtj_ai_model', DEFAULT_AI_MODEL); } catch (_) {}
     }
     closeAiChat(true);
     closeDeepThinkPage();
