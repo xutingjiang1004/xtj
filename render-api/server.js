@@ -1689,6 +1689,11 @@ function aiToolsForSearch(includeTavily, forWorker) {
     var name = fn.name || '';
     if (!name) continue;
     if (name === 'tavily_search' && !includeTavily) continue;
+    // ★ 天气改走网页搜索（用户要求）：不再向模型下发内置 get_weather 工具。
+    //   天气/气温/预报等时效问题改由 search_web / 内置 web_search 搜网页，
+    //   再配合 read_web_page 读取权威天气来源的正文核对最新数据。
+    //   工具定义与执行分支保留（其它链路兼容），仅从"模型可见的工具清单"里移除。
+    if (name === 'get_weather') continue;
     if (forWorker && AI_WORKER_EXCLUDED_TOOLS.has(name)) continue;
     filtered.push(AI_TOOLS[i]);
   }
@@ -7241,6 +7246,9 @@ function buildCatAiToolSummary(includeSearch) {
     if (!nm) continue;
     // 关闭网页搜索时，不向模型宣称搜索类工具可用（与 aiToolsForSearch 的裁剪保持一致）
     if (!includeSearch && (nm === 'search_web' || nm === 'tavily_search')) continue;
+    // ★ 天气改走网页搜索（用户要求）：提示词清单与 aiToolsForSearch 的实际下发保持一致，
+    //   不再向模型宣称有 get_weather，避免模型幻觉出能力却拿不到工具。
+    if (nm === 'get_weather') continue;
     names.push(nm);
   }
   return '共 ' + names.length + ' 个：' + names.join(' / ');
@@ -21538,7 +21546,7 @@ function buildAiCorePrompt(config) {
     //   1) 参数规范：减少因参数形态随意导致的工具失败（尤其 get_weather 地名）；
     //   2) 失败处理：区分 recoverable / unrecoverable，禁止复述英文错误码或编造数据；
     //   3) 本轮已实测过：模型在工具报错后常直接编造天气/汇率数据，或以"换个城市名"敷衍过去。
-    '工具使用规范：① 查天气时 location 只传规范城市名（如“成都”“大阪”“Los Angeles”），不要传省市区全称、不要带“市/区/县”后缀；② 查汇率/行情只传标准代码（如 USD、CNY、AAPL）；③ 工具返回中若含 recoverable=true，可修正参数重试一次；若 recoverable=false，说明是服务侧故障，直接如实告诉用户“该服务暂时不可用”，绝不编造数据、不反复重试同一工具；④ 绝不要把工具返回里的英文错误码或 JSON 原文念给用户，要用自然中文转述；⑤ 工具失败时告知真实原因（参数问题 vs 服务问题），不要笼统地说“换个城市名试试”来敷衍。',
+    '工具使用规范：① 天气/气温/预报/空气质量等时效信息一律用网页搜索（search_web 或内置联网）查最新数据，并用 read_web_page 读取中国天气网等权威来源正文核对时间与数值，再据此作答；不要用内置天气工具，也不要凭记忆报天气；② 查汇率/行情只传标准代码（如 USD、CNY、AAPL）；③ 工具返回中若含 recoverable=true，可修正参数重试一次；若 recoverable=false，说明是服务侧故障，直接如实告诉用户“该服务暂时不可用”，绝不编造数据、不反复重试同一工具；④ 绝不要把工具返回里的英文错误码或 JSON 原文念给用户，要用自然中文转述；⑤ 工具失败时告知真实原因（搜索无结果 vs 服务问题），换关键词或换来源再试，不要笼统地说“换个城市名试试”来敷衍。',
     '回复规则：优先直接回答，按内容使用段落、列表或表格；不写“作为一个 AI”开场白，不用括号动作描写；图片消息只依据其中文字回答业务问题，不讨论 OCR/识别引擎；只答对话内容，不编造已执行操作，不查他人记录。中文回复。',
     // 普通聊天按这句话涉及的工具组拼装能力说明（见 ai-tool-router）；研究、深度思考等没有路由的请求用完整版。
     aiTaskPolicy.forRequest(typeof aiRequestFeatures === 'undefined' || !aiRequestFeatures.current() ? null : aiRequestFeatures.current().toolRoute || null),
