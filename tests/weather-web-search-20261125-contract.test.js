@@ -65,3 +65,17 @@ test('W5: 底层天气模块与执行分支保留（不影响其它链路与既�
   assert.match(server, /case 'get_weather': \{/, '执行分支应保留以兼容其它调用');
   assert.ok(fs.existsSync('render-api/weather.js'), 'weather.js 模块应保留');
 });
+
+test('W6: core prompt 含独立于联网开关的反瞎编铁律（禁止编造时效数字）', () => {
+  const fn = server.indexOf('function buildAiCorePrompt(');
+  assert.ok(fn > -1, '应存在 buildAiCorePrompt');
+  const seg = server.slice(fn, fn + 5000);
+  assert.match(seg, /【时效信息铁律·最高优先级】/, '必须有最高优先级时效铁律');
+  assert.match(seg, /没有真实工具数据就绝对禁止编造任何具体数值/, '必须禁止无数据编造');
+  assert.match(seg, /不得声称[^\n]*已联网核对过/, '必须禁止幻觉声称查过');
+  assert.match(seg, /用户问天气就必须实际发起网页搜索/, '必须强制天气触发网页搜索');
+  // 铁律必须独立于 allowWebSearch 三元分支：位置在两个分支文案之后，保证联网关闭时也生效
+  const noSearchPos = seg.indexOf('CAT_AI_TOOL_SUMMARY_NO_SEARCH');
+  const ironPos = seg.indexOf('【时效信息铁律');
+  assert.ok(noSearchPos > -1 && ironPos > noSearchPos, '铁律须放在联网分支之后，对 off/auto/required 一律生效');
+});
