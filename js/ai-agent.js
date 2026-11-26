@@ -93,6 +93,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   var CONTEXT_LIMIT_MAX = 2048;
   var MSG_MAX_CHARS_NORMAL = 4000;
   var MSG_MAX_CHARS_MAX = 32000;
+  // ★ D-H2：历史总字符预算。单条截断 + 附件 68MB 预算之外，此前没有历史总
+  //   字符上限：思考 Max 理论可达 2048 条 × 32000 字 ≈ 65M 字符，远超服务端
+  //   80MB JSON 上限与模型上下文窗口。2M 字中文约 6MB，留足余量；普通模式
+  //   上限 256 条 × 4000 字 ≈ 102 万字不受影响。超预算时从最旧的轮次开始
+  //   丢弃，最旧的保留轮次标记 context_truncated。
+  var HISTORY_TOTAL_CHARS_MAX = 2000000;
 
   // ── 自定义第三方模型（千问/豆包/DeepSeek/Kimi/智谱/OpenAI/自定义）────────────
   // 模型 Key 加密保存在服务端；浏览器缓存元数据与账号引用。
@@ -2438,6 +2444,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var attachmentCount = Math.min(10, currentAttachmentCount);
     var result = [];
     var charCap = Math.max(1, Number(maxChars) || MSG_MAX_CHARS_NORMAL);
+    // ★ D-H2：历史总字符预算（见 HISTORY_TOTAL_CHARS_MAX）。本循环由新到旧
+    //   遍历，先到的最新轮次优先保留；超预算的更旧轮次直接丢弃并计数。
+    var totalCharsBudget = Math.max(1, Number(HISTORY_TOTAL_CHARS_MAX) || 2000000);
+    var totalCharsUsed = 0;
+    var historyDropped = 0;
 
     for (var hi = candidates.length - 1; hi >= 0; hi--) {
       var item = candidates[hi];
@@ -2470,6 +2481,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var contextFeatures = managed ? assistantFeatures() : null;
       var entry = { role: itemRole, content: contextFeatures && contextFeatures.historyExcerpt ? contextFeatures.historyExcerpt(itemContent,charCap) : itemContent.slice(0,charCap) };
       if(managed){entry.context_id=String(item.client_request_id||item.id||'local-'+hi);if(itemContent.length>charCap)entry.context_truncated=true;}
+      // ★ D-H2：超总预算时丢弃本条及更旧的轮次（循环由新到旧，丢的都是最旧的）。
+      var entryChars = String(entry.content || '').length;
+      if (totalCharsUsed + entryChars > totalCharsBudget) { historyDropped++; continue; }
+      totalCharsUsed += entryChars;
       if (forwarded.length) entry.attachments = forwarded;
       if (Array.isArray(item.vision_urls) && item.vision_urls.length && !forwarded.length) {
         entry.vision_urls = [];
@@ -2484,6 +2499,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       result.push(entry);
     }
     result.reverse();
+    // ★ D-H2：超预算丢弃过更旧轮次时，在最旧的保留轮次上标记截断，
+    //   让调用方/服务端知道历史是不完整的（只保留了最近的部分）。
+    if (historyDropped > 0 && result.length) result[0].context_truncated = true;
     return result;
   }
 
