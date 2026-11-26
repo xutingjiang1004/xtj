@@ -10828,11 +10828,23 @@ function renderProfileActivityList(kind) {
                     // VPN 下 supabase.co 也可能半开连接，必须有硬超时，否则永久转圈
                     var end = start + FEED_PAGE_SIZE - 1;
                     var fallbackQuery = getFeedBasePostQuery();
-                    if (requestCursor && requestCursor.created_at && requestCursor.id) {
+                    // E-M4: 回退也全程走游标。offset/range 翻页在并发发帖/删帖时会
+                    // 漂移（重复或漏帖）。无游标时不用 offset 翻页：已加载过帖子
+                    // 就用最旧一帖当游标继续往下翻；没有已加载帖子时只从头拉第一页。
+                    var fallbackCursor = (requestCursor && requestCursor.created_at && requestCursor.id) ? requestCursor : null;
+                    if (!fallbackCursor && start > 0 && Array.isArray(feedAllPosts) && feedAllPosts.length) {
+                        var lastLoadedPost = feedAllPosts[feedAllPosts.length - 1];
+                        if (lastLoadedPost && lastLoadedPost.created_at && lastLoadedPost.id) {
+                            fallbackCursor = { created_at: lastLoadedPost.created_at, id: String(lastLoadedPost.id) };
+                        }
+                    }
+                    if (fallbackCursor) {
                         fallbackQuery = fallbackQuery
-                            .or('created_at.lt.' + requestCursor.created_at + ',and(created_at.eq.' + requestCursor.created_at + ',id.lt.' + requestCursor.id + ')')
+                            .or('created_at.lt.' + fallbackCursor.created_at + ',and(created_at.eq.' + fallbackCursor.created_at + ',id.lt.' + fallbackCursor.id + ')')
                             .order('id', { ascending: false })
                             .limit(FEED_PAGE_SIZE);
+                    } else if (start > 0) {
+                        fallbackQuery = fallbackQuery.range(0, FEED_PAGE_SIZE - 1);
                     } else {
                         fallbackQuery = fallbackQuery.range(start, end);
                     }
