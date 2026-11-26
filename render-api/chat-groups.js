@@ -137,8 +137,12 @@ function createChatGroupsRouter(options) {
       if (name === null) return fail(res, 'invalid_name');
       // ★ 第二轮修复（聊-8）：成员名单非法（非数组/超长/含空名）时 cleanNames
       //   返回 null，旧代码把它当成 group_full（“群成员已达上限”）报给用户，
-      //   文案张冠李戴。非法与空名单分开报。
-      if (!members) return fail(res, 'invalid_members');
+      //   文案张冠李戴。非法与空名单分开报；但数组本身超 999 人是真的超员，
+      //   仍报 group_full（chat-groups-runtime.test.js 有此断言）。
+      if (!members) {
+        if (Array.isArray(body.members) && body.members.length > 999) return fail(res, 'group_full');
+        return fail(res, 'invalid_members');
+      }
       if (!members.length) return fail(res, 'members_required');
       const data = await rpc('chat_group_create', { p_actor: req.userName, p_name: name.trim(), p_members: members });
       if (!data.ok) return fail(res, data.code, { rejected: data.rejected || [] });
@@ -298,8 +302,16 @@ function createChatGroupsRouter(options) {
       if (body.message_id !== undefined) { if (!UUID_RE.test(String(body.message_id))) return fail(res, 'message_not_found'); args.message_id = String(body.message_id); }
       if (body.request_id !== undefined) { if (!UUID_RE.test(String(body.request_id))) return fail(res, 'request_not_found'); args.request_id = String(body.request_id); }
       if (body.user_name !== undefined) { const n = String(body.user_name).trim(); if (!n || n.length > 80) return fail(res, 'member_not_found'); args.user_name = n; }
-      // ★ 第二轮修复（聊-8，同款）：改成员路径的非法名单也不能报 group_full。
-      if (body.members !== undefined) { const m = cleanNames(body.members, 999); if (!m) return fail(res, 'invalid_members'); args.members = m; }
+      // ★ 第二轮修复（聊-8，同款）：改成员路径的非法名单也不能报 group_full；
+      //   但数组本身超 999 人是真的超员，仍报 group_full。
+      if (body.members !== undefined) {
+        const m = cleanNames(body.members, 999);
+        if (!m) {
+          if (Array.isArray(body.members) && body.members.length > 999) return fail(res, 'group_full');
+          return fail(res, 'invalid_members');
+        }
+        args.members = m;
+      }
       if (body.name !== undefined) { const n = cleanText(body.name, 30); if (n === null) return fail(res, 'invalid_name'); args.name = n; }
       if (body.nickname !== undefined) { const n = cleanText(body.nickname, 20); if (n === null) return fail(res, 'invalid_nickname'); args.nickname = n; }
       if (body.announcement !== undefined) { const n = cleanText(body.announcement, 2000); if (n === null) return fail(res, 'announcement_too_long'); args.announcement = n; }
