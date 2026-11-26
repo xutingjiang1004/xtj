@@ -9888,6 +9888,29 @@ function renderProfileActivityList(kind) {
             };
 
             // 按钮滚进视口就自动补齐 → 视觉上评论始终是全展开的，不需要用户点任何东西。
+            // E-H2: 自动展开加全局并发上限（同时最多 2 个在途），快速往下刷列表时
+            // 不再每个进视口的帖子都并发拉评论；用户主动点击按钮不受上限影响。
+            var _commentExpandAutoQueue = [];
+            var _commentExpandAutoActive = 0;
+            var COMMENT_EXPAND_AUTO_MAX = 2;
+            function pumpCommentExpandAutoQueue() {
+                while (_commentExpandAutoActive < COMMENT_EXPAND_AUTO_MAX && _commentExpandAutoQueue.length) {
+                    var next = _commentExpandAutoQueue.shift();
+                    if (!next.btn.isConnected) continue;
+                    _commentExpandAutoActive++;
+                    window.__xtjExpandPostComments(next.pid, next.btn).then(function() {
+                        _commentExpandAutoActive--;
+                        pumpCommentExpandAutoQueue();
+                    }, function() {
+                        _commentExpandAutoActive--;
+                        pumpCommentExpandAutoQueue();
+                    });
+                }
+            }
+            function queueAutoCommentExpand(pid, btn) {
+                _commentExpandAutoQueue.push({ pid: pid, btn: btn });
+                pumpCommentExpandAutoQueue();
+            }
             var _commentAutoObserver = null;
             var _commentAutoTimer = null;
             function autoExpandVisibleComments() {
@@ -9902,7 +9925,7 @@ function renderProfileActivityList(kind) {
                             _commentAutoObserver.unobserve(btn);
                             if (!btn.isConnected) return;
                             var pid = btn.getAttribute('data-post-id');
-                            if (pid) window.__xtjExpandPostComments(pid, btn);
+                            if (pid) queueAutoCommentExpand(pid, btn);
                         });
                     }, { rootMargin: '240px 0px' });
                 }
