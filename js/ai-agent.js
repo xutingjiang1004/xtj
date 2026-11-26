@@ -9598,7 +9598,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (!isCurrentDeepSend()) return;
       try { controller.abort('timeout'); } catch (e) {}
       controller._abortReason = 'timeout';
-    }, 1800000);
+    }, 300000);
     S._dtFetchTimeoutTimer = dtFetchTimeoutTimer;
     if (dtFetchTimeoutTimer && dtFetchTimeoutTimer.unref) dtFetchTimeoutTimer.unref();
 
@@ -11444,7 +11444,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         clientRequestId: 'cr_' + S.clientRequestId,
         // ★ 优化：后端深入研究/长思考最长 5 分钟，前端 120s 会提前掐断，
         // 对齐为 300s（SSE idle 看门狗 45s/120s 仍负责真正的假死检测）。
-        timeoutMs: 1800000
+        timeoutMs: 300000
       });
       sharedCtrl.start();
       window.XtjAiCore.RequestController.registerInFlight('cat_ai', sharedCtrl);
@@ -11469,7 +11469,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
     // ★ 2026-11-22 修复（资源泄漏）：sharedCtrl 创建之后的所有早退 return
     //   （鉴权失败/额度不足/被新请求抢占/超时等）此前会跳过函数尾部的
-    //   unregisterInFlight + dispose，泄漏 30 分钟绝对超时定时器与闭包。
+    //   unregisterInFlight + dispose，泄漏 300s 绝对超时定时器与闭包。
     //   用 try/finally 包住请求主体，将上述清理统一迁入 finally，幂等安全。
     try {
     // ★ 自定义第三方模型：走独立转发路由，不消耗本站配额
@@ -11526,7 +11526,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         // ★ 修复：自定义模型通道此前漏发 attachments，文件内容无法传给模型
         attachments: attachmentPayload || undefined,
         client_request_id: reqId,
-        timeout_ms: 1800000
+        timeout_ms: 300000
       });
     } else {
       // ★★★ 2026-09-17 修复（P0「内置模型上下文丢失」）：
@@ -12667,8 +12667,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var _receivedAny = false;
       var _idleCheckTimer = setInterval(function() {
         if (timedOut || !S.active) return;
-        // 心跳会刷新 _lastDataTime。这里只判断连接真的没数据，绝对上限由 30 分钟控制器负责。
-        var idleThreshold = _receivedAny ? 180000 : 120000;
+        // ★ A-H1 修复：心跳事件不刷新 _lastDataTime（见下方解析处，只有
+        //   有意义的事件才刷新）。服务端每 2.5s 发一次心跳，旧逻辑每次
+        //   chunk 到达都刷新，看门狗在上游卡住时永不触发。这里只判断
+        //   连接真的没数据，绝对上限由 300s 控制器负责。
+        var idleThreshold = _receivedAny ? 120000 : 45000;
         if (Date.now() - _lastDataTime > idleThreshold) {
           timedOut = true;
           if (controller && controller.abort) { try { controller.abort(); } catch (e) {} }
@@ -12716,8 +12719,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           reader.cancel().catch(function(){});
           break;
         }
-        _lastDataTime = Date.now();
-        _receivedAny = true; // B 修复：已收到任意数据，放宽 idle 阈值到 120s
+        // ★ A-H1 修复：原始 chunk 到达不再刷新看门狗——chunk 里可能只有
+        //   心跳/注释行，上游卡住时心跳仍会持续到达。
         
         for (var li = 0; li < lines.length; li++) {
           var line = lines[li].trim();
@@ -12732,6 +12735,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           var evt;
           try { evt = JSON.parse(eventStr); } catch (e) { continue; }
           if (!evt) continue;
+          // ★ A-H1 修复：只有有意义的事件（content/reasoning/meta 等）才刷新
+          //   看门狗；心跳事件不算——否则服务端每 2.5s 的心跳会让看门狗永不触发。
+          if (evt.type !== 'heartbeat') { _lastDataTime = Date.now(); _receivedAny = true; }
           
           // 检查是否被新请求取代
           if ((S._currentReqId !== reqId || !customModelIdentityCurrent(sendIdentity))) { aborted = true; break; }
@@ -12750,7 +12756,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           }
           if(evt.type==='context_status'){if(S._contextCapacity)S._contextCapacity.stage(evt);continue;}
           
-          // 服务端心跳保活事件：仅用于保持连接与重置 idle 看门狗，无 UI 副作用
+          // 服务端心跳保活事件：仅用于保持连接，无 UI 副作用；
+          // ★ A-H1 修复：心跳不再重置 idle 看门狗（上游卡住时心跳仍会到达）。
           if (evt.type === 'heartbeat') {
             continue;
           }
