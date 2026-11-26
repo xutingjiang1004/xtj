@@ -690,6 +690,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // AI 额度 / Pro（服务端权威；前端 20s 轮询 + done 事件即时刷新）
     quota: null,
     quotaFetchedAt: 0,
+    // ★ 第二轮修复（额-3）：额度拉取失败标记。renderQuotaUI 没数据时
+    //   用它区分“还在加载”与“拉取失败”，不再永远显示“加载中”。
+    _quotaFetchFailed: false,
     _quotaTimer: null,
     _quotaInflight: null,
     _quotaInflightStartedAt: 0
@@ -867,6 +870,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     Object.keys(quota).forEach(function(k) { if (quota[k] !== null && quota[k] !== undefined) _mergedQuota[k] = quota[k]; });
     S.quota = _mergedQuota;
     S.quotaFetchedAt = Date.now();
+    S._quotaFetchFailed = false;
     // ★ 修复: 轮询/刷新拉到的新额度若显示搜索已不可用（search_remaining<=0 且非无限），
     //   自动关闭搜索开关（覆盖「原本已开启、额度刚耗尽」的场景），并同步持久化；
     //   随后 S._renderQuotaUI 会以关闭后的状态刷新 UI。避免带着超限开关继续触发第三方搜索。
@@ -933,7 +937,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           }
           return S.quota;
         }
+        // ★ 第二轮修复（额-3）：服务端没给可用额度（401/503/空响应）也要
+        //   记失败，面板不再永远停在“加载中”。
+        S._quotaFetchFailed = true;
       } catch (e) {
+        // ★ 第二轮修复（额-3）：网络/请求异常同样记失败。
+        S._quotaFetchFailed = true;
         try { if (AI_DEBUG) console.warn('[AI] quota fetch failed', e); } catch (e2) {}
       } finally {
         if (S._quotaInflight === inflight) { S._quotaInflight = null; S._quotaInflightStartedAt = 0; }
@@ -16534,18 +16543,20 @@ function showChatMessages() {
       //   不能把默认占位值（0/100k、0/1M、0/10）当真额度显示——用户发了
       //   消息也永远是 0%。没数据时显示“加载中”，并触发一次重拉。
       if (!S.quota) {
+        // ★ 第二轮修复（额-3）：拉取失败时显示“加载失败”，别永远“加载中”。
+        var _quotaFailText = S._quotaFetchFailed ? '加载失败' : '加载中…';
         var _lf = panelShell.querySelector('#aiQuotaBarFill');
         if (_lf) { _lf.style.width = '0%'; _lf.classList.remove('is-warn', 'is-danger'); }
         var _lt = panelShell.querySelector('#aiQuotaTokenText');
-        if (_lt) _lt.textContent = '5小时: 加载中…';
+        if (_lt) _lt.textContent = '5小时: ' + _quotaFailText;
         var _lp = panelShell.querySelector('#aiQuotaPercentText');
         if (_lp) _lp.textContent = '—';
         var _ls = panelShell.querySelector('#aiQuotaSearchLine');
-        if (_ls) _ls.textContent = '网页搜索：加载中…';
+        if (_ls) _ls.textContent = '网页搜索：' + _quotaFailText;
         var _lw = panelShell.querySelector('#aiQuotaWeekWrap');
         if (_lw) {
           var _lwt = _lw.querySelector('#aiQuotaWeekText');
-          if (_lwt) _lwt.textContent = '本周: 加载中…';
+          if (_lwt) _lwt.textContent = '本周: ' + _quotaFailText;
           var _lwp = _lw.querySelector('#aiQuotaWeekPercentText');
           if (_lwp) _lwp.textContent = '—';
           var _lwf = _lw.querySelector('#aiQuotaWeekBarFill');

@@ -21,9 +21,24 @@ test('额-2: S.quota 为 null 时 renderQuotaUI 显示加载中，不用假默�
   assert.ok(!head.includes('var q = S.quota || defaultQuotaShape();'),
     '不得再用默认占位形状冒充真实额度');
   assert.ok(head.includes('if (!S.quota)'), 'null 额度应走加载态分支');
-  assert.ok(head.includes('5小时: 加载中'), 'token 文案应显示加载中');
-  assert.ok(head.includes('网页搜索：加载中'), '搜索行应显示加载中');
+  assert.ok(head.includes("'加载中…'"), '没失败时 token/搜索行应显示加载中');
+  assert.ok(head.includes('_quotaFailText'), '加载文案应按失败标记区分加载中/加载失败');
+  assert.ok(head.includes("textContent = '5小时: ' + _quotaFailText"), 'token 文案应用动态加载文案');
+  assert.ok(head.includes("textContent = '网页搜索：' + _quotaFailText"), '搜索行应用动态加载文案');
   assert.ok(head.includes('fetchAiQuota(false)'), '没数据时应触发一次重拉');
+});
+
+test('额-3: 拉取失败要记标记，面板区分加载中与加载失败', () => {
+  assert.ok(src.includes('_quotaFetchFailed: false'), 'S 应有 _quotaFetchFailed 初始标记');
+  const fetchIdx = src.indexOf('async function fetchAiQuota(force)');
+  assert.ok(fetchIdx >= 0, '应有 fetchAiQuota');
+  const fetchBody = src.slice(fetchIdx, fetchIdx + 2200);
+  assert.ok(fetchBody.includes('S._quotaFetchFailed = true'), '拉取失败（异常或无可用额度）应置失败标记');
+  assert.ok(src.includes('S._quotaFetchFailed = false;'), '拉到真实额度后应清除失败标记');
+  const renderIdx = src.indexOf('function renderQuotaUI()');
+  const renderHead = src.slice(renderIdx, renderIdx + 2200);
+  assert.ok(renderHead.includes("_quotaFailText = S._quotaFetchFailed ? '加载失败' : '加载中…"),
+    '没数据时应按失败标记区分“加载失败”与“加载中”');
 });
 
 test('额-4: applyQuota 三层合并，缺失字段沿用旧值', () => {
