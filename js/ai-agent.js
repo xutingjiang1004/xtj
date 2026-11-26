@@ -36,6 +36,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   //   在其内，正常回翻不受影响。
   var AI_HISTORY_MAX_MESSAGES = 500;
   var CONFIG_CACHE_TTL = 5 * 60 * 1000;
+  // ★ D-M5：历史缓存 TTL（30 分钟）。写入时就有 cached_at，但此前从未被读取，
+  //   旧缓存会无限期用于首屏绘制；过期视为无缓存，改走服务端历史。
+  var AI_HISTORY_CACHE_TTL_MS = 30 * 60 * 1000;
   var CONFIG_REFRESH_INTERVAL = 5 * 60 * 1000; // ★ U3: 与 TTL 保持一致，避免每分钟做无用功
   var CONV_ID_KEY = 'xtj_ai_last_conversation_id';
   var REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)';
@@ -2648,6 +2651,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (!str) return null;
       var obj = JSON.parse(str);
       if (!obj) return null;
+      // ★ D-M5：超过 TTL 的缓存视为过期，不再用于首屏绘制。无 cached_at 的
+      //   旧格式条目（cached_at 为 0）同样视为过期。
+      var cachedAt = (obj && obj.cached_at) || 0;
+      if (!cachedAt || (Date.now() - cachedAt) > AI_HISTORY_CACHE_TTL_MS) return null;
       var rawMsgs = Array.isArray(obj) ? obj : (obj.messages && Array.isArray(obj.messages) ? obj.messages : null);
       if (!rawMsgs || !rawMsgs.length) return null;
       if (obj.conversation_id && cid && obj.conversation_id !== cid && obj.conversation_id !== 'default') return null;
