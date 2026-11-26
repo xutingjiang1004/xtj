@@ -55,6 +55,40 @@
     return raw;
   }
 
+  // E-H3: 超长正文折叠。只针对 UI 本来发不出的帖子：正文超 2000 字（前端发帖
+  // 上限，后端放 50000 字）或超 30 行。列表默认只显示 8 行 +「展开全文」，
+  // 点开看全文、能再收起；2000 字以内的正常帖子原样输出，渲染零变化。
+  // 展开按钮复用 .post-all-comments 的文字按钮样式，不新增 CSS。
+  function foldPostContent(innerHtml, plainText) {
+    var text = String(plainText || '');
+    var lines = (text.match(/\n/g) || []).length + 1;
+    if (text.length <= 2000 && lines <= 30) {
+      return '<div class="content">' + innerHtml + '</div>';
+    }
+    return '<div class="content" data-xtj-folded="1" style="display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:8;overflow:hidden">' + innerHtml + '</div>' +
+      '<button type="button" class="post-all-comments post-content-toggle" onclick="window.__xtjTogglePostContent && window.__xtjTogglePostContent(this)">展开全文</button>';
+  }
+  window.__xtjFoldPostContent = foldPostContent;
+  window.__xtjTogglePostContent = function (btn) {
+    var c = btn && btn.previousElementSibling;
+    if (!c) return;
+    if (c.getAttribute('data-xtj-folded') === '1') {
+      c.style.display = '';
+      c.style.webkitBoxOrient = '';
+      c.style.webkitLineClamp = '';
+      c.style.overflow = '';
+      c.setAttribute('data-xtj-folded', '0');
+      btn.textContent = '收起';
+    } else {
+      c.style.display = '-webkit-box';
+      c.style.webkitBoxOrient = 'vertical';
+      c.style.webkitLineClamp = '8';
+      c.style.overflow = 'hidden';
+      c.setAttribute('data-xtj-folded', '1');
+      btn.textContent = '展开全文';
+    }
+  };
+
   function feedEl() {
     return document.getElementById('feed');
   }
@@ -149,7 +183,8 @@
     var html = posts
       .map(function (p) {
         var name = esc(p.user_name || '用户');
-        var text = esc(postText(p.content)).replace(/\n/g, '<br>');
+        var rawText = postText(p.content);
+        var text = esc(rawText).replace(/\n/g, '<br>');
         var time = '';
         try {
           time = p.created_at ? new Date(p.created_at).toLocaleString() : '';
@@ -177,9 +212,7 @@
           '</span><span class="post-time">' +
           esc(time) +
           '</span></div></div>' +
-          '<div class="content">' +
-          (text || '&nbsp;') +
-          '</div>' + mediaSpace + '</div>'
+          foldPostContent(text || '&nbsp;', rawText) + mediaSpace + '</div>'
         );
       })
       .join('');

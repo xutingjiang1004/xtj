@@ -4289,7 +4289,7 @@
                       <div class="post-badge-stack">${buildPostBadges(normalized)}</div>
                     </div>
                   </div>
-                  <div class="content">${buildPostContentHtml(normalized.content)}</div>
+                  ${typeof window.__xtjFoldPostContent === 'function' ? window.__xtjFoldPostContent(buildPostContentHtml(normalized.content), String(normalized.content || '')) : '<div class="content">' + buildPostContentHtml(normalized.content) + '</div>'}
                   ${mediaMarkup}
                   ${buildPostLocationHtml(normalized)}
                   <div class="post-stats-text">${buildPostStatsLine(normalized, Number.isFinite(normalized.like_count) ? normalized.like_count : pLikes.length, Number.isFinite(normalized.comment_count) ? normalized.comment_count : pComms.length)}</div>
