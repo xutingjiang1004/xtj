@@ -1803,7 +1803,16 @@
                     var onEnd = open ? finishOpen : finishClose;
                     move.onfinish = onEnd;
                     endTimer = setTimeout(onEnd, D + 260);
-                    handle.abort = function() { clearTimeout(endTimer); handle.ended = true; closeDone = true; cleanup(0); motionEnded(handle); };
+                    handle.abort = function() {
+                        clearTimeout(endTimer); handle.ended = true; closeDone = true;
+                        // ★ 第二轮修复（点-5）：abort 之前跳过 o.hide()。被 abort 的
+                        //   若是关闭动画（kind 'close'/'close-reversing'），目标
+                        //   面板既不再走 finishClose，又保持可见 + inert——用户
+                        //   看得到却点不动。abort 关闭时仍执行 hide（与 finishClose
+                        //   一致）；abort 打开时不隐藏（调用方 abort 打开就是为了重显）。
+                        if ((handle.kind === 'close' || handle.kind === 'close-reversing') && o.hide) { try { o.hide(); } catch (_) {} }
+                        cleanup(0); motionEnded(handle);
+                    };
                     // 打开途中被关：沿原路退回（打开用的那些动画反着放），退回到头再按关闭收尾。
                     handle.reverse = function(next) {
                         if (handle.ended) return null;

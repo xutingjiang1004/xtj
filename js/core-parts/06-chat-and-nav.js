@@ -86,7 +86,12 @@
                     return;
                 }
                 // 离开小猫AI 到其它 tab → 只隐藏浮层，保留在途回复与 DOM。
-                if (currentDockTab === 'ai-chat') {
+                // ★ 第二轮修复（点-1）：不能只认 currentDockTab——非 Dock 入口
+                //   （聊天页“问小猫”、顶部 AI 工具等）直接调 __xtjOpenAiChat()
+                //   打开面板时 currentDockTab 仍是旧值；切 tab 时不收面板，
+                //   z-9000 的全屏面板盖住 Dock，全站看起来冻住。以面板实际
+                //   状态 __xtjAiChatActive 为准（06 内 5853 行已有同样写法）。
+                if (currentDockTab === 'ai-chat' || window.__xtjAiChatActive) {
                     if (typeof window.__xtjHideAiChat === 'function') {
                         try { window.__xtjHideAiChat(); } catch (eHide) {}
                     } else if (typeof window.__xtjCloseAiChat === 'function') {
@@ -5855,6 +5860,10 @@
                 openDockChatSocialSheet('blocks');
             };
 
+            // ★ 第二轮修复（聊-2）：建群选人空态的“去添加好友”从
+            //   chat-groups.js 跳过来，打开「联系人」搜索页。
+            window.__xtjOpenChatSocial = openDockChatSocialSheet;
+
             function closeDockChatSocialSheet() {
                 var sheet = document.getElementById('dockChatSocialSheet');
                 if (!sheet) return;
@@ -5878,7 +5887,10 @@
                     var id=pointer;pointer=null;rail.classList.remove('is-dragging');
                     slider.style.transform='';slider.style.removeProperty('--liquid-stretch');
                     rail.querySelectorAll('[data-drag-active]').forEach(function(b){b.removeAttribute('data-drag-active');});
-                    suppressClickUntil=Date.now()+400;
+                    // ★ 第二轮修复（聊-9）：只有真正拖动后才需要压住随后 400ms
+                    //   的点击（防拖动抬手后的点击误切标签）。普通点按本身就是
+                    //   一次点击，压住它会让 400ms 内的点按无响应。
+                    if(moved)suppressClickUntil=Date.now()+400;
                     if(!cancelled)renderDockChatSocialTab(moved?tabs[Math.max(0,Math.min(3,Math.round(left/cellWidth())))]:startTab);
                     if(rail.hasPointerCapture&&rail.hasPointerCapture(id))rail.releasePointerCapture(id);
                 }
@@ -6165,6 +6177,11 @@
                 }
             }
 
+            // ★ 第二轮修复（聊-3）：好友关系变动后，建群选人用的 30 秒好友
+            //   缓存必须立即失效，否则刚加的好友 30 秒内进不了建群名单。
+            function invalidateChatGroupsFriendsCache() {
+                try { if (window.__xtjChatGroups && typeof window.__xtjChatGroups.invalidateFriends === 'function') window.__xtjChatGroups.invalidateFriends(); } catch (_) {}
+            }
             async function handleDockChatSocialAction(button) {
                 var action = button.getAttribute('data-chat-social-action') || '';
                 var peer = button.getAttribute('data-peer') || '';
@@ -6200,6 +6217,7 @@
                     try {
                         await requestDockChatSocial('/friends/' + encodeURIComponent(peer), { method: 'DELETE' });
                         await refreshChatFriendNotes(true);
+                        invalidateChatGroupsFriendsCache();
                         if (dockChatActiveUser === peer) updateDockChatComposerPermission(peer);
                         showToast('已删除好友，历史聊天保留');
                         renderDockChatSocialTab('friends');
@@ -6211,6 +6229,7 @@
                     try {
                         await requestDockChatSocial('/blocks/' + encodeURIComponent(peer), { method: 'POST', body: '{}' });
                         await refreshChatFriendNotes(true);
+                        invalidateChatGroupsFriendsCache();
                         refreshChatSocialBadge(true);
                         if (dockChatActiveUser === peer) updateDockChatComposerPermission(peer);
                         showToast('已拉黑该用户');
@@ -6234,6 +6253,7 @@
                         var resultStatus = response.result && response.result.status;
                         if (resultStatus === 'accepted') {
                             showToast('已添加好友');
+                            invalidateChatGroupsFriendsCache();
                             await refreshChatFriendNotes(true);
                             if (dockChatActiveUser === peer) updateDockChatComposerPermission(peer);
                         } else {
@@ -6324,7 +6344,14 @@
                     }
                 } catch (_) {
                     if (seq !== _dockChatRelationshipSeq || dockChatActiveUser !== userName) return;
-                    if (message) message.textContent = '暂时无法确认好友关系，消息发送已暂停。';
+                    // ★ 第二轮修复（聊-7）：关系查不到时不要永久锁死输入框。
+                    //   “重试”失败原因不变时会原地打转。服务端发消息时自己会
+                    //   校验关系（assertCanSendDirectMessage），前端放开不会绕过
+                    //   拉黑/好友门禁，发送时由服务端裁决；提示与重试保留。
+                    if (input) input.disabled = false;
+                    if (send) send.disabled = false;
+                    if (attach) attach.disabled = false;
+                    if (message) message.textContent = '暂时无法确认好友关系，发送时将由服务端确认。';
                     if (actionButton) {
                         actionButton.hidden = false;
                         actionButton.textContent = '重试';

@@ -732,6 +732,18 @@
         toolbar.appendChild(button);
       }
     });
+    // ★ 第二轮修复（预-3）：工具栏四个按钮也用 inline !important 钉住横排
+    //   布局（position:relative + inset:auto）。photo-preview.css 未加载
+    //   时，style.css 的旧绝对定位规则会把它们散到四个角（左下/右下/居中/
+    //   右上）；样式表正常时这里的值与表内规则一致，无可见变化。
+    ['ppDeleteBtn', 'ppInfoBtn', 'ppShareBtn', 'ppRotateBtn'].forEach(function (id) {
+      var tbBtn = toolbar.querySelector('#' + id);
+      if (!tbBtn) return;
+      ['position:relative', 'left:auto', 'right:auto', 'top:auto', 'bottom:auto',
+        'width:44px', 'height:44px', 'min-width:44px', 'min-height:44px', 'margin:0',
+        'transform:none'
+      ].forEach(function (rule) { var i = rule.indexOf(':'); tbBtn.style.setProperty(rule.slice(0, i), rule.slice(i + 1), 'important'); });
+    });
     // 2026-10-31：用户要求把放大／缩小图标放回来（此前为避免「不明按钮」被隐藏）。
     //   现在它们是右侧的一对 + / −，叠在底部工具栏上方，不再被塞进工具栏，也不会遮住左下角的作者信息。
     //   必须用 setProperty(..., 'important')：style.css 里还有带 !important 的旧定位规则。
@@ -1591,10 +1603,15 @@
   var fitTick = 0;
   function syncPreviewImageFit(img) {
     var root=overlay(); if (!root || !img || !img.naturalWidth || !img.naturalHeight) return;
-    var fitSig=(img.currentSrc||img.src)+'|'+img.naturalWidth+'x'+img.naturalHeight+'|'+fitTick;
+    // ★ 第二轮修复（预-4）：旋转 90°/270° 后图片视觉宽高互换，但签名里
+    //   没有旋转角，缓存会跳过必要的重算，横图转竖后溢出视口。签名加
+    //   入旋转角，fit 用互换后的尺寸算。
+    var _rot=((state.rotation%180)+180)%180;
+    var fitSig=(img.currentSrc||img.src)+'|'+img.naturalWidth+'x'+img.naturalHeight+'|'+fitTick+'|'+_rot;
     if (img.__ppFitSig===fitSig && img.style.getPropertyValue('width') && img.style.getPropertyValue('height')) return;
     img.__ppFitSig=fitSig;
-    var fit=Math.min(root.clientWidth/img.naturalWidth,root.clientHeight/img.naturalHeight);
+    var _rotated=_rot===90;
+    var fit=Math.min(root.clientWidth/(_rotated?img.naturalHeight:img.naturalWidth),root.clientHeight/(_rotated?img.naturalWidth:img.naturalHeight));
     var width=(img.naturalWidth*fit)+'px',height=(img.naturalHeight*fit)+'px';
     if(img.style.width!==width)img.style.setProperty('width',width,'important');
     if(img.style.height!==height)img.style.setProperty('height',height,'important');
@@ -1885,6 +1902,10 @@
   window.ppRotatePhoto = function () {
     state.rotation = (state.rotation + 90) % 360;
     applyImageTransform(true);
+    // ★ 第二轮修复（预-4）：旋转后立即按新角度重算 fit，否则缓存签名
+    //   不变会跳过重算，图片溢出视口。
+    var _rotImg = previewImage();
+    if (_rotImg) syncPreviewImageFit(_rotImg);
     if (window.showToast) window.showToast('已旋转');
   };
 

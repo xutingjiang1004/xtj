@@ -246,6 +246,8 @@
 .grp-chips.grp-chips.grp-chips:empty { display: none; }
 .grp-chip.grp-chip.grp-chip { border: 0; border-radius: 999px; padding: 4px 10px; background: rgba(33, 157, 114, .14); color: var(--grp-accent); font-size: 12px; cursor: pointer; animation: grpFadeUp .14s ease both; }
 .grp-pick-list.grp-pick-list.grp-pick-list, .grp-member-list.grp-member-list.grp-member-list { display: grid; gap: 2px; }
+/* ★ 第二轮修复（聊-2）：建群选人空态的“去添加好友”按钮，全宽。 */
+.grp-pick-empty-action.grp-pick-empty-action.grp-pick-empty-action { width: 100%; margin-top: 10px; }
 .grp-pick-row.grp-pick-row.grp-pick-row, .grp-member-row.grp-member-row.grp-member-row { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 54px; padding: 4px 6px; border: 0; border-radius: 12px; background: none; color: var(--grp-ink); text-align: left; font-size: 15px; cursor: pointer; }
 .grp-pick-row.grp-pick-row.grp-pick-row[hidden], .grp-member-row.grp-member-row.grp-member-row[hidden] { display: none; }
 .grp-pick-row.grp-pick-row.grp-pick-row:active, .grp-member-row.grp-member-row.grp-member-row:active { background: var(--grp-control); }

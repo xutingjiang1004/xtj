@@ -260,6 +260,8 @@
      A pure suffix or a new list item extends the existing nodes instead. */
   function patchInnerHTML(targetEl, html, ink) {
     if (!targetEl) return;
+    // ★ 第二轮修复（点-6）：同 ai-agent.js，内容没变直接跳过全量 diff。
+    if (targetEl.__xtjStreamHtml === html) return;
     if (targetEl.__xtjStreamHtml && tryExtendStreamHtml(targetEl, targetEl.__xtjStreamHtml, html, ink)) {
       targetEl.__xtjStreamHtml = html;
       return;

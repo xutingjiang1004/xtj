@@ -30,7 +30,10 @@
   var lastSuccessfulLoadedAt = 0;
   var lastAttemptAt = 0;
   var lastFailureAt = 0;
-  var LOAD_CACHE_TTL_MS = 20000;
+  // ★ 第二轮修复（重-4）：列表缓存 20s 太短，切走几十秒回来必定重新拉
+  //   列表。实时订阅 + BroadcastChannel 本就会即时推送新增/删除，列表
+  //   拉取只是兜底，放宽到 60s 不影响新鲜度。
+  var LOAD_CACHE_TTL_MS = 60000;
   var photoLoadGeneration = 0;
   var activePhotoLoadController = null;
   var loadMoreController = null;

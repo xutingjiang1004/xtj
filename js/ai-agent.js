@@ -690,6 +690,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // AI 额度 / Pro（服务端权威；前端 20s 轮询 + done 事件即时刷新）
     quota: null,
     quotaFetchedAt: 0,
+    // ★ 第二轮修复（额-3）：额度拉取失败标记。renderQuotaUI 没数据时
+    //   用它区分“还在加载”与“拉取失败”，不再永远显示“加载中”。
+    _quotaFetchFailed: false,
     _quotaTimer: null,
     _quotaInflight: null,
     _quotaInflightStartedAt: 0
@@ -857,8 +860,17 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // S.quota === null 表示「还没拉过额度」，不能当成免费→Pro
     var hadPriorQuota = S.quota != null;
     var wasPro = !!(S.quota && S.quota.is_pro);
-    S.quota = Object.assign(defaultQuotaShape(), quota);
+    // ★ 第二轮修复（额-4）：多个来源（/quota、SSE done、429 报错、深研、
+    //   邀请码）轮流写 S.quota，形状不一。旧写法 Object.assign(默认, 新)
+    //   会把新来源没带的字段洗回默认值（0/100k/1M），“无限”被有限覆盖。
+    //   改为 默认 → 旧值 → 新值 三层合并，新来源缺失的字段沿用旧值；
+    //   新来源显式 null/undefined 的字段不参与合并。
+    var _prevQuota = S.quota;
+    var _mergedQuota = Object.assign(defaultQuotaShape(), _prevQuota || {});
+    Object.keys(quota).forEach(function(k) { if (quota[k] !== null && quota[k] !== undefined) _mergedQuota[k] = quota[k]; });
+    S.quota = _mergedQuota;
     S.quotaFetchedAt = Date.now();
+    S._quotaFetchFailed = false;
     // ★ 修复: 轮询/刷新拉到的新额度若显示搜索已不可用（search_remaining<=0 且非无限），
     //   自动关闭搜索开关（覆盖「原本已开启、额度刚耗尽」的场景），并同步持久化；
     //   随后 S._renderQuotaUI 会以关闭后的状态刷新 UI。避免带着超限开关继续触发第三方搜索。
@@ -925,7 +937,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           }
           return S.quota;
         }
+        // ★ 第二轮修复（额-3）：服务端没给可用额度（401/503/空响应）也要
+        //   记失败，面板不再永远停在“加载中”。
+        S._quotaFetchFailed = true;
       } catch (e) {
+        // ★ 第二轮修复（额-3）：网络/请求异常同样记失败。
+        S._quotaFetchFailed = true;
         try { if (AI_DEBUG) console.warn('[AI] quota fetch failed', e); } catch (e2) {}
       } finally {
         if (S._quotaInflight === inflight) { S._quotaInflight = null; S._quotaInflightStartedAt = 0; }
@@ -5305,6 +5322,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   // 长回答每一帧的代价就会随长度增长。
   function patchInnerHTML(targetEl, html, ink, stable) {
     if (!targetEl) return;
+    // ★ 第二轮修复（点-6）：内容没变时直接跳过。重复事件/重渲染会带着
+    //   与上一帧完全相同的 html 再调进来，旧逻辑仍要整段 parse + 全量
+    //   diff；长回复下每帧都这样就是白白占主线程。html 相同则 DOM 已是
+    //   对的，无需再 diff。
+    if (targetEl.__xtjStreamHtml === html) return;
     if (targetEl.__xtjStreamHtml && tryExtendStreamHtml(targetEl, targetEl.__xtjStreamHtml, html, ink)) {
       targetEl.__xtjStreamHtml = html;
       return;
@@ -9257,12 +9279,22 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
   var secondaryPageOwners = {};
 
+  // ★ 第二轮修复（点-4）：open 时把面板元素传给 XTJSecondaryPageState，
+  //   否则 owner 没有 domRef，cleanStaleOwners 永远无法回收；一旦某条
+  //   关闭路径漏调 close，body 的 overflow:hidden + touch-action:none
+  //   锁就永久不释放（页面滚不动）。各调用点都在调 open 之前已把面板
+  //   的 hidden 摘掉、aria-hidden 置 false，所以 open 内那次 reconcile
+  //   不会误回收；面板之后被隐藏/断开又没人 close 时，下次 reconcile
+  //   会把它当 stale owner 清掉、把锁放开。
+  var SECONDARY_PAGE_PANELS = { 'ai-chat': 'panelAiChat', 'deep-think': 'panelDeepThink', 'site-search': 'aiSiteSearchPanel' };
   function updateSecondaryPageState(open, owner) {
     owner = owner || 'deep-think';
     try {
       if (window.XTJSecondaryPageState) {
         if (open && !secondaryPageOwners[owner]) {
-          window.XTJSecondaryPageState.open(owner);
+          var ownerEl = null;
+          try { ownerEl = document.getElementById(SECONDARY_PAGE_PANELS[owner] || ''); } catch (eEl) {}
+          window.XTJSecondaryPageState.open(owner, ownerEl);
           secondaryPageOwners[owner] = true;
         } else if (!open && secondaryPageOwners[owner]) {
           window.XTJSecondaryPageState.close(owner);
@@ -9770,13 +9802,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     S.deepThinkJob = controller;
     S.currentStreamAborted = false;
     // 深入研究 fetch 无独立超时：服务端持续发 heartbeat 时 45s idle watchdog 永不触发，
-    // 请求可无限挂起。这里加 300s 绝对超时兜底（后端最长 5 分钟思考，
-    // 此前 120s 会在后端完成前被前端掐断。超时只 abort 本次，不清理全局状态）。
+    // 请求可无限挂起。这里加绝对超时兜底（服务端 deep-stream 默认/上限就是
+    // 1800000ms，上一轮的 300s 会在后端完成前掐断长研究。超时只 abort 本次，不清理全局状态）。
     var dtFetchTimeoutTimer = setTimeout(function() {
       if (!isCurrentDeepSend()) return;
       try { controller.abort('timeout'); } catch (e) {}
       controller._abortReason = 'timeout';
-    }, 300000);
+    }, 1800000);
     S._dtFetchTimeoutTimer = dtFetchTimeoutTimer;
     if (dtFetchTimeoutTimer && dtFetchTimeoutTimer.unref) dtFetchTimeoutTimer.unref();
 
@@ -11675,9 +11707,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       sharedCtrl = window.XtjAiCore.RequestController.create({
         requestId: reqId,
         clientRequestId: 'cr_' + S.clientRequestId,
-        // ★ 优化：后端深入研究/长思考最长 5 分钟，前端 120s 会提前掐断，
-        // 对齐为 300s（SSE idle 看门狗 45s/120s 仍负责真正的假死检测）。
-        timeoutMs: 300000
+        // ★ 第二轮修复（点-2）：绝对超时改回 1800000ms（30 分钟），与服务端
+        // callDeepSeek 的 TOTAL_TIMEOUT_MS 对齐。上一轮砍到 300s 会掐断
+        // 超过 5 分钟的正常长思考；真正假死仍由 SSE idle 看门狗
+        //（首包 120s、收到数据后 300s 无意义事件）负责检测。
+        timeoutMs: 1800000
       });
       sharedCtrl.start();
       window.XtjAiCore.RequestController.registerInFlight('cat_ai', sharedCtrl);
@@ -11687,7 +11721,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       }
       // ★ 双 AbortController 统一：fetch 始终绑定本地 controller.signal，
       // sharedCtrl 的超时/取消通过 externalSignal 转发到同一个 controller（参考 sendOnce 转发模式），
-      // 避免看门狗 abort 落空导致 300s 绝对超时失效。
+      // 避免看门狗 abort 落空导致 1800s 绝对超时失效。
       if (sharedCtrl && sharedCtrl.signal) {
         sharedAbortHandler = function() {
           try {
@@ -11702,7 +11736,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
     // ★ 2026-11-22 修复（资源泄漏）：sharedCtrl 创建之后的所有早退 return
     //   （鉴权失败/额度不足/被新请求抢占/超时等）此前会跳过函数尾部的
-    //   unregisterInFlight + dispose，泄漏 300s 绝对超时定时器与闭包。
+    //   unregisterInFlight + dispose，泄漏 1800s 绝对超时定时器与闭包。
     //   用 try/finally 包住请求主体，将上述清理统一迁入 finally，幂等安全。
     try {
     // ★ 自定义第三方模型：走独立转发路由，不消耗本站配额
@@ -11732,7 +11766,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var fetchBody;
     // ★ A-H2 修复：发送前先补齐历史（见 ensureHistoryLoadedForSend）。
     //   首屏只拉了 10 条时，直接拼装会让服务端只拿到最近 10 条上下文。
-    try { await ensureHistoryLoadedForSend(); } catch (eHistEnsure) {}
+    //   托管模式才需要补到 256 条，其余只补到服务端实际会用的 24 条。
+    try { await ensureHistoryLoadedForSend(sendSettings.contextManaged); } catch (eHistEnsure) {}
     if (isCustomModel && customCfg) {
       // ★ 思考Max 上下文拼装：开启时尽量保留全部上下文不压缩（榨干性能）；
       //   关闭时限制在 CONTEXT_LIMIT_NORMAL 条（256），超过即自动压缩丢弃更早内容，
@@ -11765,7 +11800,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         client_request_id: reqId,
         // ★ A-M2：内部续写请求带标记，服务端不把模板句存为用户轮次。
         continuation: isContinuation || undefined,
-        timeout_ms: 300000
+        timeout_ms: 1800000
       });
     } else {
       // ★★★ 2026-09-17 修复（P0「内置模型上下文丢失」）：
@@ -12912,8 +12947,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       
       // H-25: 普通对话 idle 看门狗 — 无数据视为超时，中止等待并清理，
       // 避免服务端/provider 挂起时界面永久停在"处理中"。
-      // B 修复：收到首个数据块前用 45s（防连接假死）；一旦收到任何事件（含 reasoning/content），
-      // 说明连接存活、AI 正在工作，放宽到 120s，容忍慢模型在思考阶段的静默，避免误判"AI中断"。
+      // B 修复 + 第二轮（点-2）：收到首个数据块前用 120s（防连接假死；
+      // 服务端思考态首包可达 1800s，上一轮的 45s 太紧）；一旦收到任何
+      // 事件（含 reasoning/content），说明连接存活、AI 正在工作，放宽到
+      // 300s，容忍慢模型在思考/工具编排阶段的长时间静默，避免误判"AI中断"。
       var _lastDataTime = Date.now();
       var timedOut = false;
       var _receivedAny = false;
@@ -12922,8 +12959,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         // ★ A-H1 修复：心跳事件不刷新 _lastDataTime（见下方解析处，只有
         //   有意义的事件才刷新）。服务端每 2.5s 发一次心跳，旧逻辑每次
         //   chunk 到达都刷新，看门狗在上游卡住时永不触发。这里只判断
-        //   连接真的没数据，绝对上限由 300s 控制器负责。
-        var idleThreshold = _receivedAny ? 120000 : 45000;
+        //   连接真的没数据，绝对上限由 1800s 控制器负责。
+        var idleThreshold = _receivedAny ? 300000 : 120000;
         if (Date.now() - _lastDataTime > idleThreshold) {
           timedOut = true;
           if (controller && controller.abort) { try { controller.abort(); } catch (e) {} }
@@ -14365,17 +14402,18 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           if (telemetry) { telemetry.finalize('error', { code: 'STREAM_INTERRUPTED', phase: 'stream_read', message: String(fetchErr && fetchErr.message || '') }); }
         }
       } else {
-        // AbortError: 用户主动停止，或 sharedCtrl 300s 绝对超时
+        // AbortError: 用户主动停止，或 sharedCtrl 1800s 绝对超时
         var sharedTimedOut = !!(sharedCtrl && typeof sharedCtrl.getCancelReason === 'function' && sharedCtrl.getCancelReason() === 'timeout');
         var ctrlReason = (controller && controller._abortReason) || '';
-        var timedOut300 = sharedTimedOut || ctrlReason === 'timeout';
+        var timedOutAbs = sharedTimedOut || ctrlReason === 'timeout';
         if (sharedCtrl) {
-          sharedCtrl.cancel(timedOut300 ? 'timeout' : 'user_cancelled');
-          if (telemetry) { telemetry.finalize(timedOut300 ? 'timeout' : 'cancelled', { code: timedOut300 ? 'REQUEST_TIMEOUT' : 'REQUEST_CANCELLED', phase: 'stream_read', message: timedOut300 ? '思考超时' : '用户取消' }); }
+          sharedCtrl.cancel(timedOutAbs ? 'timeout' : 'user_cancelled');
+          if (telemetry) { telemetry.finalize(timedOutAbs ? 'timeout' : 'cancelled', { code: timedOutAbs ? 'REQUEST_TIMEOUT' : 'REQUEST_CANCELLED', phase: 'stream_read', message: timedOutAbs ? '思考超时' : '用户取消' }); }
         }
-        // ★ 300s 绝对超时与用户取消区分：给出明确提示，避免用户误以为
+        // ★ 1800s 绝对超时与用户取消区分：给出明确提示，避免用户误以为
+        //   是自己点的停止。
         // AI 未回复而重发导致重复扣费/重复请求。
-        stopNoteKind = timedOut300 ? 'timeout' : 'stopped';
+        stopNoteKind = timedOutAbs ? 'timeout' : 'stopped';
         if (aiContent || aiReasoning || (sealedContents && sealedContents.length) || (assistantNode && assistantNode.querySelector('.ai-thinking, .ai-content-segment'))) {
           if (!_finalized) finishAiMessage(assistantNode, aiContent, aiReasoning, { interrupted: true });
           appendStoppedNote(assistantNode, stopNoteKind);
@@ -14386,7 +14424,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           // ★ 与其他中止/失败分支保持一致：无内容中断时也要回填输入框原文与附件，
           //   否则用户主动停止/超时后输入框内容丢失（preserveFailedTurn 只处理消息节点）。
           restoreInputText();
-          if (timedOut300) notify('请求超时，可点击继续');
+          if (timedOutAbs) notify('请求超时，可点击继续');
         }
       }
     }
@@ -14447,18 +14485,27 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   // ★ A-H2 修复：发送前把未加载的更早历史分页补齐，避免只带最近 10 条。
   //   首屏只拉 HISTORY_PAGE_SIZE(10) 条就直接发送时，服务端优先用前端传的
   //   历史，不会补全，长会话的上下文会被静默截断。
-  //   只补到发送上下文上限（CONTEXT_LIMIT_NORMAL 条）为止，最多 25 页；
-  //   单页失败、会话切换或仍在加载时不阻塞发送，调用方用已加载的历史继续。
-  async function ensureHistoryLoadedForSend() {
+  //   ★ 第二轮修复（点-3）：服务端只用最近 24 条前端历史
+  //   （render-api/server.js 的 AI_CHAT_HISTORY_FETCH_BUFFER=24），补到
+  //   256 条纯属浪费；上一轮最多串行拉 25 页，每页一次往返 + DOM 前插，
+  //   首 token 被拖慢。非托管模式最多补 2 页（首屏 10 + 20 = 30 条，
+  //   覆盖 24 条历史 + 当前一条）；托管模式服务端用到 256 条，保留
+  //   25 页上限，但全程加时间预算，超时即发，不阻塞发送。
+  async function ensureHistoryLoadedForSend(contextManaged) {
     if (!S.conversationId || !S.hasMore || !S.messagesEl || !S.oldestCursor) return;
     var convId = S.conversationId;
-    var maxPages = 25;
+    var maxPages = contextManaged ? 25 : 2;
+    var budgetMs = contextManaged ? 5000 : 1500;
+    var deadline = Date.now() + budgetMs;
+    // S.messages 已含当前一条用户消息；服务端去当前条后只取最近 24 条，
+    // 非托管模式补到 25 条即饱和，多了服务端也会丢掉。
+    var targetCount = contextManaged ? CONTEXT_LIMIT_NORMAL : 25;
     var waited = 0;
-    while ((S.loading || S.loadingMore) && waited < 2000) {
+    while ((S.loading || S.loadingMore) && waited < 500 && Date.now() < deadline) {
       await new Promise(function(resolve) { setTimeout(resolve, 100); });
       waited += 100;
     }
-    while (S.hasMore && S.oldestCursor && S.messages.length < CONTEXT_LIMIT_NORMAL && maxPages-- > 0) {
+    while (S.hasMore && S.oldestCursor && S.messages.length < targetCount && maxPages-- > 0 && Date.now() < deadline) {
       if (!S.active || S.conversationId !== convId) return;
       var beforeCount = S.messages.length;
       try { await loadHistory(S.messagesEl, S.oldestCursor); } catch (eHistLoad) { return; }
@@ -16492,7 +16539,34 @@ function showChatMessages() {
       }
     }
     function renderQuotaUI() {
-      var q = S.quota || defaultQuotaShape();
+      // ★ 第二轮修复（额-2）：S.quota 为 null 表示从来没拉到过真实额度，
+      //   不能把默认占位值（0/100k、0/1M、0/10）当真额度显示——用户发了
+      //   消息也永远是 0%。没数据时显示“加载中”，并触发一次重拉。
+      if (!S.quota) {
+        // ★ 第二轮修复（额-3）：拉取失败时显示“加载失败”，别永远“加载中”。
+        var _quotaFailText = S._quotaFetchFailed ? '加载失败' : '加载中…';
+        var _lf = panelShell.querySelector('#aiQuotaBarFill');
+        if (_lf) { _lf.style.width = '0%'; _lf.classList.remove('is-warn', 'is-danger'); }
+        var _lt = panelShell.querySelector('#aiQuotaTokenText');
+        if (_lt) _lt.textContent = '5小时: ' + _quotaFailText;
+        var _lp = panelShell.querySelector('#aiQuotaPercentText');
+        if (_lp) _lp.textContent = '—';
+        var _ls = panelShell.querySelector('#aiQuotaSearchLine');
+        if (_ls) _ls.textContent = '网页搜索：' + _quotaFailText;
+        var _lw = panelShell.querySelector('#aiQuotaWeekWrap');
+        if (_lw) {
+          var _lwt = _lw.querySelector('#aiQuotaWeekText');
+          if (_lwt) _lwt.textContent = '本周: ' + _quotaFailText;
+          var _lwp = _lw.querySelector('#aiQuotaWeekPercentText');
+          if (_lwp) _lwp.textContent = '—';
+          var _lwf = _lw.querySelector('#aiQuotaWeekBarFill');
+          if (_lwf) _lwf.style.width = '0%';
+        }
+        updateSearchStatus();
+        try { fetchAiQuota(false); } catch (eQuotaRetry) {}
+        return;
+      }
+      var q = S.quota;
       function fmtReset(iso) { if (!iso) return ''; var ms = Math.max(0, new Date(iso).getTime() - Date.now()); if (!isFinite(ms) || ms <= 0) return ''; var mins = Math.ceil(ms / 60000); var h = Math.floor(mins / 60), m = mins % 60; return (h > 0 ? (m > 0 ? h + 'h ' + m + 'm' : h + 'h') : (m + 'm')) + '后重置'; } var _rawUsed5h = q.window_5h_used != null ? q.window_5h_used : q.tokens_used; var _rawLimit5h = q.window_5h_limit != null ? q.window_5h_limit : q.tokens_limit; var used = Math.max(0, Number(_rawUsed5h) || 0); var tokensUnlimited = Number(_rawLimit5h) === -1; var limit = tokensUnlimited ? -1 : Math.max(1, Number(_rawLimit5h) || FREE_TOKEN_DEFAULT); var _rawPct5h = typeof q.window_5h_percent === 'number' ? q.window_5h_percent : q.tokens_percent; var pct = tokensUnlimited ? 0 : (typeof _rawPct5h === 'number' ? Math.min(100, Math.max(0, _rawPct5h)) : Math.min(100, Math.round((used * 1000) / limit) / 10));
       var fill = panelShell.querySelector('#aiQuotaBarFill');
       var tokenText = panelShell.querySelector('#aiQuotaTokenText');
@@ -17435,8 +17509,14 @@ function showChatMessages() {
     function autoApi(method, path, body) {
       return apiRequest(method, '/scheduled-tasks' + path, body, { background: true });
     }
-    function autoRenderList(box, tasks) {
+    function autoRenderList(box, tasks, isError) {
       if (!box) return;
+      // ★ 第二轮修复（定-5）：加载失败（503 等）别再显示“还没有定时任务”——
+      //   用户会以为自己没建过任务。失败时显示错误态 + 重试。
+      if (isError) {
+        box.innerHTML = '<div class="ai-auto-empty">定时任务列表加载失败，请稍后重试。<br><button type="button" data-auto-retry>重试</button></div>';
+        return;
+      }
       if (!tasks || !tasks.length) {
         box.innerHTML = '<div class="ai-auto-empty">还没有定时任务。<br>直接在小猫对话框里说一句，例如「每天早上 9 点帮我搜 AI 新闻并整理成简报」，它会自己建好。</div>';
         return;
@@ -17513,13 +17593,15 @@ function showChatMessages() {
       function loadTasks() {
         autoApi('GET', '').then(function(r) {
           if (r && r.ok && r.data && r.data.ok) autoRenderList(listBox, r.data.tasks || []);
-          else autoRenderList(listBox, []);
-        }).catch(function() { autoRenderList(listBox, []); });
+          else autoRenderList(listBox, [], true);
+        }).catch(function() { autoRenderList(listBox, [], true); });
       }
 
       modal.addEventListener('click', function(e) {
         if (e.target === modal) { autoClose(); return; }
         if (e.target.closest('.ai-auto-close')) { autoClose(); return; }
+        // ★ 第二轮修复（定-5）：加载失败态的重试按钮。
+        if (e.target.closest('[data-auto-retry]')) { loadTasks(); return; }
         if (e.target.closest('#aiAutoNewBtn')) {
           form.hidden = !form.hidden;
           syncFormKind();
