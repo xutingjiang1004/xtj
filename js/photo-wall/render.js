@@ -6,6 +6,10 @@
   var ERROR_IMG = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400"%3E%3Crect fill="%23f0f0f0" width="400" height="400"/%3E%3Cg text-anchor="middle" font-family="sans-serif"%3E%3Ctext x="200" y="190" font-size="26" fill="%23c0392b"%3E%E5%8A%A0%E8%BD%BD%E5%A4%B1%E8%B4%A5%3C/text%3E%3Ctext x="200" y="230" font-size="16" fill="%2395a5a0"%3E%E7%82%B9%E5%87%BB%E9%87%8D%E8%AF%95%3C/text%3E%3C/g%3E%3C/svg%3E';
   // P6: DOM 卡片数量上限 — 超过后不再 append 新卡片，避免数组/DOM 无限增长
   var MAX_DOM_PHOTOS = 500;
+  // G-M2: “下一批”翻页单次时间预算。稀疏分组逐页试探时，旧循环固定 30 次、
+  // 单页 10 秒超时，最坏 300 秒才停；改为 20 秒预算（加一页在途时间，
+  // 最坏约 30 秒），到点即停并提示继续查找。
+  var BATCH_LOAD_TIME_BUDGET_MS = 20000;
   var photoBatchStart = 0;
   var recentPhotos=new Map(),recentBytes=0,recentOwner=String(window.currentUser || "");
   function retireRecentPhoto(id){
@@ -524,6 +528,15 @@
     renderSorted(sortPhotoWallData(window.photoWallData || [], window.pwSortKey || 'date_desc'), true);
   }
 
+  // G-M2: 取消本次“下一批”翻页加载。只让循环在当前在途页跑完后退出
+  // （不中断在途请求），并把哨兵文案改回可点击重试；loadingMore 立即
+  // 释放，避免取消后卡死。切视图/登出等仍走原有的 current() 失效路径。
+  function cancelBatchLoad(){
+    loadMoreGeneration++;
+    loadingMore = false;
+    resetSentinelText(document.getElementById('photoGrid'), '已取消加载，点击继续查找', true);
+  }
+
   async function showNextPhotoBatch(){
     if (loadingMore) return;
     var generation = ++loadMoreGeneration;
@@ -540,11 +553,21 @@
     }
     if (typeof window.hasMorePhotos !== 'function' || !window.hasMorePhotos() || typeof window.loadMorePhotos !== 'function') return;
     loadingMore = true;
-    resetSentinelText(document.getElementById('photoGrid'), '正在加载下一批…', false);
+    var batchStartAt = Date.now();
+    resetSentinelText(document.getElementById('photoGrid'), '正在加载下一批…（点击取消）', false);
+    // G-M2: 加载中哨兵可点取消（resetSentinelText 刚把 onclick 置空，这里补上）。
+    var batchGrid = document.getElementById('photoGrid');
+    var batchSent = batchGrid && batchGrid.querySelector('.pw-load-more-sentinel');
+    if (batchSent) {
+      batchSent.onclick = cancelBatchLoad;
+      batchSent.setAttribute('role', 'button');
+      batchSent.setAttribute('tabindex', '0');
+    }
     try {
       // An album detail may need several server pages before its date appears.
       // Bound each click so sparse groups cannot keep the UI busy indefinitely.
-      for (var attempt = 0; attempt < 30; attempt++) {
+      // G-M2: 30 次上限之外再加时间预算，到点即停（见 BATCH_LOAD_TIME_BUDGET_MS）。
+      for (var attempt = 0; attempt < 30 && Date.now() - batchStartAt < BATCH_LOAD_TIME_BUDGET_MS; attempt++) {
         await window.loadMorePhotos();
         if (!current()) return;
         sorted = sortPhotoWallData(window.photoWallData || [], window.pwSortKey || 'date_desc');
@@ -1006,6 +1029,7 @@
   window.renderPhotoWallWithoutReload = renderPhotoWallWithoutReload;
   window.showPreviousPhotoBatch = showPreviousPhotoBatch;
   window.showNextPhotoBatch = showNextPhotoBatch;
+  window.__xtjCancelPhotoWallBatchLoad = cancelBatchLoad;
   var albumAnimation=null,albumMotionSequence=0;
   function changeAlbumView(change){
     var grid=document.getElementById('photoGrid'),sequence=++albumMotionSequence;
