@@ -10,12 +10,14 @@ const server = fs.readFileSync('render-api/server.js', 'utf8');
 const chat = fs.readFileSync('js/core-parts/06-chat-and-nav.js', 'utf8');
 
 test('F-M5: 撤回注释不得再写不存在的管理员 10 分钟', () => {
-  const start = server.indexOf("app.post('/api/dm/withdraw'");
-  assert.ok(start > 0, '找不到 /api/dm/withdraw');
-  const head = server.slice(Math.max(0, start - 2000), start);
-  assert.ok(!/管理员10分钟|管理员 10 分钟/.test(head), '注释仍在写不存在的管理员撤回');
-  assert.match(head, /仅发送者本人/, '注释必须写明仅发送者可撤回');
-  assert.match(head, /3 分钟内/, '注释必须写明 3 分钟时限');
+  // 路由注释与 app.post 之间隔着大段 H-1 注释，不能用固定 2000 字窗口取；
+  // 直接定位注释行本身。
+  const idx = server.indexOf('// POST /api/dm/withdraw');
+  assert.ok(idx > 0, '找不到 /api/dm/withdraw 路由注释');
+  const line = server.slice(idx, server.indexOf('\n', idx));
+  assert.ok(!/管理员10分钟|管理员 10 分钟/.test(line), '注释仍在写不存在的管理员撤回');
+  assert.match(line, /仅发送者本人/, '注释必须写明仅发送者可撤回');
+  assert.match(line, /3 分钟内/, '注释必须写明 3 分钟时限');
 });
 
 test('F-M5: 撤回实现仍是仅发送者、固定 3 分钟，前后端口径一致', () => {
