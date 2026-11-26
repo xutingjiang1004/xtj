@@ -15987,7 +15987,10 @@ app.post('/api/avatar/status', authenticateUser, rateLimit(60000, 30), async (re
 //   与自定义模型一致采用"先立后破"：先插入新快照，成功后再删旧行）。
 //   注意：这是"对我隐藏"，不是"撤回"——撤回仍走 /api/dm/withdraw（3 分钟窗口，
 //   会真正改掉消息内容）。两者语义不同，不要混用。
-var DM_DELETED_MAX = 500;
+// F-M3：与前端墓碑上限、merge_dm_deleted_ids 单次 3000 条上限对齐。
+// 之前这里是 500，前端是 8000：读快照只回前 500，POST 入参也只留前 500，
+// 超出的删除在换设备后会悄悄复活；且前端 resp.ok 就全清待补传队列。
+var DM_DELETED_MAX = 3000;
 
 function cleanDmDeletedIds(list) {
   if (!Array.isArray(list)) return [];

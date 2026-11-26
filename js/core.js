@@ -18345,7 +18345,10 @@ function renderProfileActivityList(kind) {
             //   现在墓碑按账号同步到服务端（/api/dm/deleted），localStorage 退化为
             //   本地快取：启动时与服务端合并，删除时回推，离线删除在下次同步补传。
             var DM_DELETED_KEY_PREFIX = 'xtj_dm_deleted_';
-            var DM_DELETED_MAX = 8000;
+            // F-M3：与服务端 cleanDmDeletedIds、merge_dm_deleted_ids 单次
+            // 3000 条上限对齐。之前这里是 8000，服务端只留 500，超出的删
+            // 除在换设备后会悄悄复活；且推送时不校验服务端返回的合并结果。
+            var DM_DELETED_MAX = 3000;
             // ★ 2026-09-27 修复（审计 C12）：
             //   _dmDeletedSyncedUsers 的键此前只用"对手 userName" u，但墓碑实际是
             //   **账号级**的（DM_DELETED_KEY_PREFIX + currentUser，服务端 /api/dm/deleted
@@ -18457,7 +18460,22 @@ function renderProfileActivityList(kind) {
                 }).then(function(resp) {
                     if (!current()) return false;
                     if (!resp || !resp.ok) throw new Error('dm_deleted_sync_failed');
-                    clearDmDeletedPendingForCurrentAccount(list);
+                    return resp.json();
+                }).then(function(data) {
+                    if (!current()) return false;
+                    // F-M3：只清服务端合并结果里确实有的 id —— 旧实现 resp.ok 就
+                    // 全清待补传队列，服务端截断/合并丢掉的 id 会被误认为已同步，
+                    // 换设备后又出现。没进合并结果的 id 留在待补传队列里。
+                    var merged = (data && Array.isArray(data.ids)) ? data.ids : null;
+                    if (!merged) throw new Error('dm_deleted_sync_unverified');
+                    var confirmed = list.filter(function(id) { return merged.indexOf(id) >= 0; });
+                    if (confirmed.length) clearDmDeletedPendingForCurrentAccount(confirmed);
+                    var missing = list.filter(function(id) { return merged.indexOf(id) < 0; });
+                    if (missing.length) {
+                        console.warn('[DM] 删除记录部分未被服务端合并，保留待补传:', missing.length);
+                        enqueueDmDeletedPending(missing);
+                        return false;
+                    }
                     return true;
                 }).catch(function(err) {
                     if (!current()) return false;
