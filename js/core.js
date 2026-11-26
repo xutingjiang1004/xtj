@@ -8731,12 +8731,27 @@ function renderProfileActivityList(kind) {
                         localStorage.setItem(KEY, JSON.stringify(out));
                     } catch (_) {}
                 }
+                // E-M5: 音乐解析加全局并发上限（同时最多 3 个），不同链接排队等候；
+                // 同一链接仍按 pending map 去重，缓存仍只留 60 条。
+                var MUSIC_RESOLVE_MAX = 3;
+                var resolveActive = 0, resolveQueue = [];
+                function pumpResolveQueue() {
+                    while (resolveActive < MUSIC_RESOLVE_MAX && resolveQueue.length) resolveQueue.shift()();
+                }
                 function resolve(url) {
                     if (url in memory) return Promise.resolve(memory[url]);
                     if (pending[url]) return pending[url];
-                    return pending[url] = fetch(API_BASE + '/api/music/resolve?url=' + encodeURIComponent(url)).then(function(res) { return res.ok ? res.json() : null; })
-                        .then(function(data) { var card = data && data.ok && data.card ? data.card : null; if (card) { memory[url] = card; persist(); } return card; })
-                        .catch(function() { return null; }).then(function(card) { delete pending[url]; return card; });
+                    var task = new Promise(function(done) {
+                        function start() {
+                            resolveActive++;
+                            fetch(API_BASE + '/api/music/resolve?url=' + encodeURIComponent(url)).then(function(res) { return res.ok ? res.json() : null; })
+                                .then(function(data) { var card = data && data.ok && data.card ? data.card : null; if (card) { memory[url] = card; persist(); } return card; })
+                                .catch(function() { return null; }).then(function(card) { delete pending[url]; resolveActive--; pumpResolveQueue(); done(card); });
+                        }
+                        if (resolveActive < MUSIC_RESOLVE_MAX) start();
+                        else resolveQueue.push(start);
+                    });
+                    return pending[url] = task;
                 }
                 function fill(el, card) {
                     if (!card || !el.isConnected) return;
@@ -8769,7 +8784,11 @@ function renderProfileActivityList(kind) {
                     });
                 }
                 var timer = 0;
-                if (typeof MutationObserver === 'function') new MutationObserver(function() { clearTimeout(timer); timer = setTimeout(function() { scan(document); }, 80); }).observe(document.body, { childList: true, subtree: true });
+                // E-M5: 卡片被 feed 重建移除后，试听音频会继续播。Mutation 回调里先检查
+                // 正在试听的按钮是否还在文档里，不在就暂停（onpause 会复位按钮状态）。
+                // 全局监听保留：音乐卡片分布在列表、详情、作者动态三处，缩到 #feed
+                // 会漏掉详情页的卡片解析；扫描本身只针对待解析卡片，已复核无风暴。
+                if (typeof MutationObserver === 'function') new MutationObserver(function() { clearTimeout(timer); timer = setTimeout(function() { if (playing && !playing.isConnected && audio) audio.pause(); scan(document); }, 80); }).observe(document.body, { childList: true, subtree: true });
                 return { scan: scan, resolve: resolve };
             })();
             window.xtjMusicCards = musicCards;
