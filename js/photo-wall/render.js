@@ -207,7 +207,11 @@
         var ratio = Math.max(3 / 4, Math.min(4 / 3, p.width / p.height));
         aspectStyle = '--pw-aspect:' + (Math.round(1000 * ratio) / 1000) + ';';
       }
-      html += '<div class="photo-wall-item pw-stagger-enter" role="button" tabindex="0" aria-label="' + esc(username + '的照片，' + time + (p.caption ? '，' + p.caption : '')) + '" data-photo-id="' + esc(String(p.id)) + '" style="' + aspectStyle + 'animation-delay:' + delay + 'ms" onclick="openPhotoWallPreviewAt(' + index + ', this)" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();(this.querySelector(\'img\')||this).click();}">';
+      // G-L5: 键盘 Enter/空格直接点卡片本身（打开预览），不再经过 img。
+      // 图片加载失败时 img.onclick 已被改成重试加载并 stopPropagation，
+      // 旧写法 (img||card).click() 会让键盘 Enter 变成重试，与鼠标点
+      // 卡片其他区域（打开预览）不一致；图片重试仍可鼠标点图本身触发。
+      html += '<div class="photo-wall-item pw-stagger-enter" role="button" tabindex="0" aria-label="' + esc(username + '的照片，' + time + (p.caption ? '，' + p.caption : '')) + '" data-photo-id="' + esc(String(p.id)) + '" style="' + aspectStyle + 'animation-delay:' + delay + 'ms" onclick="openPhotoWallPreviewAt(' + index + ', this)" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();this.click();}">';
       var recent=recentPhotos.get(String(p.id));
       html += recent ? '<img src="' + safeUrl(recent.url) + '" alt="photo" class="pw-blur-done" data-recent-upload-id="' + esc(String(p.id)) + '" loading="eager" decoding="async">' : '<img src="' + esc(FALLBACK_IMG) + '" alt="photo" class="pw-blur-in" data-src="' + safeUrl(realUrl) + '" loading="lazy" decoding="async">';
       html += '<span class="pw-skeleton" aria-hidden="true"></span>';
