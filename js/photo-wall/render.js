@@ -76,7 +76,8 @@
         photos.sort(function(a, b){ return (a.timestamp || 0) - (b.timestamp || 0); });
         break;
       case 'name':
-        photos.sort(function(a, b){ return String(a.username || a.id || '').localeCompare(String(b.username || b.id || '')); });
+        // G-L6: 兜底排序也用中文拼音序，与 data.js comparePhotoOrder 一致。
+        photos.sort(function(a, b){ return String(a.username || a.id || '').localeCompare(String(b.username || b.id || ''), 'zh-CN'); });
         break;
       case 'size':
         photos.sort(function(a, b){ return (b.fileSize || 0) - (a.fileSize || 0); });

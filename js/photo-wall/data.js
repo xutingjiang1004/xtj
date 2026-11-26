@@ -328,8 +328,13 @@
     function stamp(photo){var s=String(photo.created_at||'');var m=s.match(/^(.*:\d{2})(?:\.(\d+))?(?:Z|\+00:00)$/);var ts=Number(photo.timestamp);return m?m[1]+'.'+String(m[2]||'').padEnd(6,'0'):new Date(Number.isFinite(ts)?ts:0).toISOString();}
     var ascending=key==='date_asc'||key==='name',direction=ascending?1:-1,primary=0;
     if(key==='name'){
-      var x=Array.from(String(a.sort_name!=null?a.sort_name:a.username||'')),y=Array.from(String(b.sort_name!=null?b.sort_name:b.username||''));
-      for(var i=0;i<Math.min(x.length,y.length);i++){primary=x[i].codePointAt(0)-y[i].codePointAt(0);if(primary)break;}if(!primary)primary=x.length-y.length;
+      // G-L6: 按用户排序用中文拼音序。旧实现按码点逐字比较，中文用户名
+      // 按 Unicode 码点排（与用户预期的拼音/首字母序不符）；与服务端
+      // server.js 已有的 user_name localeCompare(..., 'zh-CN') 保持一致。
+      // 服务端 RPC 仍用 COLLATE "C"（改它需迁移，见需决定清单），客户端
+      // 全量重排后展示序是拼音序。
+      var x=String(a.sort_name!=null?a.sort_name:a.username||''),y=String(b.sort_name!=null?b.sort_name:b.username||'');
+      primary=x.localeCompare(y,'zh-CN');
     }else if(key==='size')primary=(Number(a.fileSize)||0)-(Number(b.fileSize)||0);
     else if(key==='views')primary=(Number(a.views)||0)-(Number(b.views)||0);
     if(!primary)primary=stamp(a).localeCompare(stamp(b));
