@@ -9257,12 +9257,22 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
   var secondaryPageOwners = {};
 
+  // ★ 第二轮修复（点-4）：open 时把面板元素传给 XTJSecondaryPageState，
+  //   否则 owner 没有 domRef，cleanStaleOwners 永远无法回收；一旦某条
+  //   关闭路径漏调 close，body 的 overflow:hidden + touch-action:none
+  //   锁就永久不释放（页面滚不动）。各调用点都在调 open 之前已把面板
+  //   的 hidden 摘掉、aria-hidden 置 false，所以 open 内那次 reconcile
+  //   不会误回收；面板之后被隐藏/断开又没人 close 时，下次 reconcile
+  //   会把它当 stale owner 清掉、把锁放开。
+  var SECONDARY_PAGE_PANELS = { 'ai-chat': 'panelAiChat', 'deep-think': 'panelDeepThink', 'site-search': 'aiSiteSearchPanel' };
   function updateSecondaryPageState(open, owner) {
     owner = owner || 'deep-think';
     try {
       if (window.XTJSecondaryPageState) {
         if (open && !secondaryPageOwners[owner]) {
-          window.XTJSecondaryPageState.open(owner);
+          var ownerEl = null;
+          try { ownerEl = document.getElementById(SECONDARY_PAGE_PANELS[owner] || ''); } catch (eEl) {}
+          window.XTJSecondaryPageState.open(owner, ownerEl);
           secondaryPageOwners[owner] = true;
         } else if (!open && secondaryPageOwners[owner]) {
           window.XTJSecondaryPageState.close(owner);
