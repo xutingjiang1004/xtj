@@ -12802,8 +12802,26 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             if(contentRenderer){contentRenderer.cancel();contentRenderer=null;}
             hideAssistantTyping();
             if (assistantBubble) try { assistantBubble.innerHTML = ''; } catch (e) {}
+            // ★ A-H4 修复：第一轮已封存的正文也要丢掉，只清当前气泡不够——
+            //   finishAiMessage 存的是 sealedContents.join('') + content，
+            //   不清 sealedContents，第一轮正文会进历史而屏幕上只有第二轮。
+            //   已封存的气泡段一并移出 DOM（叙述句在时间轴里，仍保留显示）。
+            sealedContents.length = 0;
+            if (assistantNode) {
+              try {
+                var _sealedSegs = assistantNode.querySelectorAll('.ai-content-segment');
+                for (var _ssi = 0; _ssi < _sealedSegs.length; _ssi++) _sealedSegs[_ssi].remove();
+              } catch (eSealedSeg) {}
+            }
+            // ★ A-H4 修复：第二轮按新轮次走，与 tool_calls 分支一致。
+            //   不复位时，第二轮首字不会正常交接思考面板（_thinkingSettledOnContent
+            //   仍为真），正文也不会按新一轮提升（answerCommitted 仍为真）。
+            answerCommitted = false;
+            _thinkingSettledOnContent = false;
             // ★ 修复：reasoning 节点引用一并失效。旧节点可能已随 supplement 被清理/脱管，
             // 若继续复用脱离 DOM 的节点，新一轮 thinking 内容会插入已 detached 节点而不显示。
+            // 注意：aiReasoning 不清——本分支明确保留已显示的思考过程，
+            // 思考面板仍显示第一轮思考，存档的 reasoning 累积值与显示一致。
             aiContent = '';
             doneReceived = false;
             continue;
