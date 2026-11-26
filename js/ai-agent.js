@@ -4763,7 +4763,68 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   // ★ 重新生成：定位当前 assistant 消息之前最近的一条用户消息，重新发送
   //   live 会话中的用户消息带有 attachments（含图片 data URL），可原样复用；
   //   历史/跨端加载的消息无附件，则退回纯文本重发。
-  function triggerRegenerate(messagesEl, anchorMsg) {
+  // ★ A-M3：附件里是否还有可直接恢复的 data（可恢复预览/重发）。
+  function regenerateAttachmentsUsable(atts) {
+    return !!(atts && atts.some(function(a) { return a && (a.data_url || a.dataUrl); }));
+  }
+  // ★ A-M3：从本地 vision_urls 重建附件（与 loadHistory 的服务端重建同构）。
+  function rebuildAttachmentsFromVisionUrls(msg) {
+    if (!msg || !Array.isArray(msg.vision_urls) || !msg.vision_urls.length) return null;
+    var atts = [];
+    for (var vi = 0; vi < msg.vision_urls.length; vi++) {
+      var url = String(msg.vision_urls[vi] || '');
+      if (url.indexOf('data:') !== 0) continue;
+      var mime = 'image/png';
+      var mm = url.match(/^data:([^;,]+);/);
+      if (mm && mm[1]) mime = mm[1];
+      atts.push({ name: '图片' + (vi + 1), type: mime, data_url: url });
+    }
+    return atts.length ? atts : null;
+  }
+  // ★ A-M3：拉服务端历史，用该轮次重建的附件覆盖本地已被剥掉的附件。
+  //   先等正在进行的加载完成，再拉首屏历史（锚点轮次通常在最近 10 条内）；
+  //   按 client_request_id/id 找轮次，找不到时按去图后的纯文本兜底匹配。
+  async function rebuildRegenerateAttachments(messagesEl, userMsg, plain) {
+    var waited = 0;
+    while ((S.loading || S.loadingMore) && waited < 3000) {
+      await new Promise(function(resolve) { setTimeout(resolve, 100); });
+      waited += 100;
+    }
+    if (!S.loading && !S.loadingMore) {
+      try { await loadHistory(messagesEl); } catch (eHist) { return null; }
+    }
+    var key = userMsg && String(userMsg.client_request_id || userMsg.id || '');
+    var list = Array.isArray(S.messages) ? S.messages : [];
+    var textFallback = null;
+    for (var i = 0; i < list.length; i++) {
+      var m = list[i];
+      if (!m || m.role !== 'user') continue;
+      var match = false;
+      if (key) match = String(m.client_request_id || m.id || '') === key;
+      else if (m === userMsg) match = true;
+      if (!match && plain) {
+        var mPlain = String(m.content || '')
+          .replace(/!\[[^\]]*\]\(data:[^)]+\)/g, ' ')
+          .replace(/\[图片:[^\]]*\]/g, ' ')
+          .replace(/\[文件:[^\]]*\]/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+        if (mPlain === plain) textFallback = m;
+      }
+      if (!match) continue;
+      if (m.attachments && regenerateAttachmentsUsable(m.attachments)) return m.attachments;
+      var rebuilt = rebuildAttachmentsFromVisionUrls(m);
+      if (rebuilt) return rebuilt;
+      return null;
+    }
+    if (textFallback) {
+      if (textFallback.attachments && regenerateAttachmentsUsable(textFallback.attachments)) return textFallback.attachments;
+      return rebuildAttachmentsFromVisionUrls(textFallback);
+    }
+    return null;
+  }
+
+  async function triggerRegenerate(messagesEl, anchorMsg) {
     try {
       if (S.sending) { try { notify('请等待当前回复完成后重试'); } catch (eRg) {} return; }
       var msgs = Array.isArray(S.messages) ? S.messages : [];
@@ -4785,8 +4846,24 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         .trim();
       var atts = (userMsg.attachments && userMsg.attachments.length) ? userMsg.attachments : null;
       if (!plain && !atts) { try { notify('这条消息无法重新生成'); } catch (eEmp) {} return; }
+      // ★ A-M3：附件优先用服务端历史重建。缓存恢复的轮次附件 data_url 已被
+      //   sanitizeCacheMsgs 剥掉（只剩 data_unavailable），直接重发会静默丢图。
+      //   ① 本地 vision_urls 还有真实 data 时先重建；② 否则拉服务端历史
+      //   （loadHistory 会把 vision_urls 转回 attachments）再找该轮次；
+      //   ③ 确实找不回、且还有文字可发时明确提示，仅按文字重新生成。
+      var sendAtts = atts;
+      if (atts && !regenerateAttachmentsUsable(atts)) {
+        sendAtts = rebuildAttachmentsFromVisionUrls(userMsg);
+        if (!sendAtts) {
+          try { sendAtts = await rebuildRegenerateAttachments(messagesEl, userMsg, plain); } catch (eRebuild) { sendAtts = null; }
+        }
+        if (!sendAtts && plain) {
+          try { notify('原附件图片已无法恢复，将仅按文字重新生成'); } catch (eLost) {}
+        }
+      }
+      if (!plain && !sendAtts) { try { notify('这条消息无法重新生成'); } catch (eEmp2) {} return; }
       if (typeof S._resendFn === 'function') {
-        S._resendFn(plain || raw, atts);
+        S._resendFn(plain || raw, sendAtts);
       } else {
         try { notify('重新生成暂不可用，请手动重发'); } catch (eNoFn) {}
       }
@@ -17534,11 +17611,18 @@ function showChatMessages() {
         var t = String(resendText || '').trim();
         if (!t && !(resendAttachments && resendAttachments.length)) return;
         if (_aiChatFiles.length) clearAiChatFilePreview();
-        if (resendAttachments && resendAttachments.length && resendAttachments[0] && resendAttachments[0].data_url) {
-          _aiChatFiles = resendAttachments.slice(0, 10).map(function(a) {
-            return { name: a.name || 'file', type: a.type || '', dataUrl: a.data_url, size: a.size || 0 };
-          });
-          renderAiMultiFilePreview(_aiChatFiles);
+        if (resendAttachments && resendAttachments.length) {
+          // ★ A-M3：恢复所有带 data_url 的可用附件（此前只看第 0 个，[0] 没
+          //   data 就静默丢掉整组）；全丢时明确提示，而不是静默按文字重发。
+          var usableResend = resendAttachments.filter(function(a) { return a && (a.data_url || a.dataUrl); });
+          if (usableResend.length) {
+            _aiChatFiles = usableResend.slice(0, 10).map(function(a) {
+              return { name: a.name || 'file', type: a.type || '', dataUrl: a.data_url || a.dataUrl, size: a.size || 0 };
+            });
+            renderAiMultiFilePreview(_aiChatFiles);
+          } else {
+            notify('原附件图片已无法恢复，将仅按文字重新生成');
+          }
         }
         input.value = t;
         autoresize();
