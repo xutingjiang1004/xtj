@@ -857,7 +857,15 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // S.quota === null 表示「还没拉过额度」，不能当成免费→Pro
     var hadPriorQuota = S.quota != null;
     var wasPro = !!(S.quota && S.quota.is_pro);
-    S.quota = Object.assign(defaultQuotaShape(), quota);
+    // ★ 第二轮修复（额-4）：多个来源（/quota、SSE done、429 报错、深研、
+    //   邀请码）轮流写 S.quota，形状不一。旧写法 Object.assign(默认, 新)
+    //   会把新来源没带的字段洗回默认值（0/100k/1M），“无限”被有限覆盖。
+    //   改为 默认 → 旧值 → 新值 三层合并，新来源缺失的字段沿用旧值；
+    //   新来源显式 null/undefined 的字段不参与合并。
+    var _prevQuota = S.quota;
+    var _mergedQuota = Object.assign(defaultQuotaShape(), _prevQuota || {});
+    Object.keys(quota).forEach(function(k) { if (quota[k] !== null && quota[k] !== undefined) _mergedQuota[k] = quota[k]; });
+    S.quota = _mergedQuota;
     S.quotaFetchedAt = Date.now();
     // ★ 修复: 轮询/刷新拉到的新额度若显示搜索已不可用（search_remaining<=0 且非无限），
     //   自动关闭搜索开关（覆盖「原本已开启、额度刚耗尽」的场景），并同步持久化；
@@ -16522,7 +16530,32 @@ function showChatMessages() {
       }
     }
     function renderQuotaUI() {
-      var q = S.quota || defaultQuotaShape();
+      // ★ 第二轮修复（额-2）：S.quota 为 null 表示从来没拉到过真实额度，
+      //   不能把默认占位值（0/100k、0/1M、0/10）当真额度显示——用户发了
+      //   消息也永远是 0%。没数据时显示“加载中”，并触发一次重拉。
+      if (!S.quota) {
+        var _lf = panelShell.querySelector('#aiQuotaBarFill');
+        if (_lf) { _lf.style.width = '0%'; _lf.classList.remove('is-warn', 'is-danger'); }
+        var _lt = panelShell.querySelector('#aiQuotaTokenText');
+        if (_lt) _lt.textContent = '5小时: 加载中…';
+        var _lp = panelShell.querySelector('#aiQuotaPercentText');
+        if (_lp) _lp.textContent = '—';
+        var _ls = panelShell.querySelector('#aiQuotaSearchLine');
+        if (_ls) _ls.textContent = '网页搜索：加载中…';
+        var _lw = panelShell.querySelector('#aiQuotaWeekWrap');
+        if (_lw) {
+          var _lwt = _lw.querySelector('#aiQuotaWeekText');
+          if (_lwt) _lwt.textContent = '本周: 加载中…';
+          var _lwp = _lw.querySelector('#aiQuotaWeekPercentText');
+          if (_lwp) _lwp.textContent = '—';
+          var _lwf = _lw.querySelector('#aiQuotaWeekBarFill');
+          if (_lwf) _lwf.style.width = '0%';
+        }
+        updateSearchStatus();
+        try { fetchAiQuota(false); } catch (eQuotaRetry) {}
+        return;
+      }
+      var q = S.quota;
       function fmtReset(iso) { if (!iso) return ''; var ms = Math.max(0, new Date(iso).getTime() - Date.now()); if (!isFinite(ms) || ms <= 0) return ''; var mins = Math.ceil(ms / 60000); var h = Math.floor(mins / 60), m = mins % 60; return (h > 0 ? (m > 0 ? h + 'h ' + m + 'm' : h + 'h') : (m + 'm')) + '后重置'; } var _rawUsed5h = q.window_5h_used != null ? q.window_5h_used : q.tokens_used; var _rawLimit5h = q.window_5h_limit != null ? q.window_5h_limit : q.tokens_limit; var used = Math.max(0, Number(_rawUsed5h) || 0); var tokensUnlimited = Number(_rawLimit5h) === -1; var limit = tokensUnlimited ? -1 : Math.max(1, Number(_rawLimit5h) || FREE_TOKEN_DEFAULT); var _rawPct5h = typeof q.window_5h_percent === 'number' ? q.window_5h_percent : q.tokens_percent; var pct = tokensUnlimited ? 0 : (typeof _rawPct5h === 'number' ? Math.min(100, Math.max(0, _rawPct5h)) : Math.min(100, Math.round((used * 1000) / limit) / 10));
       var fill = panelShell.querySelector('#aiQuotaBarFill');
       var tokenText = panelShell.querySelector('#aiQuotaTokenText');
