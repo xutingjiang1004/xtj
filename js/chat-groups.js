@@ -1891,7 +1891,11 @@
     handleJoinLink();
     // Account changes: the core bumps _authStateEpoch and fires auth events.
     ['auth-ready', 'xtj-auth-changed', 'storage'].forEach(function (name) { window.addEventListener(name, function () { setTimeout(syncAccount, 0); }); });
-    setInterval(syncAccount, 1500);
+    // F-M7：之前每 1.5 秒空转一次 syncAccount，整个页面生命周期不停。
+    // 账号变化本来就有 auth-ready / xtj-auth-changed / storage 事件即时
+    // 触发同步，这里的定时器只是防漏网的兜底；改成 10 秒一次、页面隐藏
+    // 时跳过，兜底仍在，唤醒次数降到原来的约 1/7。
+    setInterval(function () { if (document.visibilityState !== 'hidden') syncAccount(); }, 10000);
     document.addEventListener('visibilitychange', function () {
       if (document.visibilityState === 'visible' && me()) { scheduleListRefresh(100); if (state.active) fetchNewer(state.active); }
     });
