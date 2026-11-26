@@ -5305,6 +5305,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   // 长回答每一帧的代价就会随长度增长。
   function patchInnerHTML(targetEl, html, ink, stable) {
     if (!targetEl) return;
+    // ★ 第二轮修复（点-6）：内容没变时直接跳过。重复事件/重渲染会带着
+    //   与上一帧完全相同的 html 再调进来，旧逻辑仍要整段 parse + 全量
+    //   diff；长回复下每帧都这样就是白白占主线程。html 相同则 DOM 已是
+    //   对的，无需再 diff。
+    if (targetEl.__xtjStreamHtml === html) return;
     if (targetEl.__xtjStreamHtml && tryExtendStreamHtml(targetEl, targetEl.__xtjStreamHtml, html, ink)) {
       targetEl.__xtjStreamHtml = html;
       return;
