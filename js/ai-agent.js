@@ -509,7 +509,16 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     return {networkMode:S.networkMode==='off'?'off':S.webSearchEnabled?'required':'auto'};
   }
   var modelCapabilityCache = new Map();
-  function capabilityKey(config) { return JSON.stringify([config.provider,config.base_url,config.model,config.model_uid||config.uid||'',config.config_revision||'',config.api_key||'']); }
+  // C-1：缓存键只拼密钥的哈希，不拼明文。FNV-1a 32 位 + 长度即可区分不同
+  // 密钥（仅作缓存键标识，不作密码学用途）；空密钥返回 ''。
+  function hashApiKeyForCache(key) {
+    var s = String(key || '');
+    if (!s) return '';
+    var h = 0x811c9dc5;
+    for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+    return 'h' + (h >>> 0).toString(16) + ':' + s.length;
+  }
+  function capabilityKey(config) { return JSON.stringify([config.provider,config.base_url,config.model,config.model_uid||config.uid||'',config.config_revision||'',hashApiKeyForCache(config.api_key||'')]); }
   function resolveCustomModelConfig(mid) {
     if (!isCustomModelId(mid)) return null;
     var uid = mid.slice(CUSTOM_MODEL_PREFIX.length);

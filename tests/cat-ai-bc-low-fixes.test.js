@@ -121,3 +121,32 @@ test('B-13 history loading state shows a spinner distinct from the empty state',
   assert.ok(css.includes('@media (prefers-reduced-motion: reduce) {\n  .ai-history-loading-spinner { animation: none; }\n}'),
     'spinner must stop under prefers-reduced-motion');
 });
+
+// C-1: BYOK 密钥进缓存键 —— capabilityKey 直接把用户 api_key 明文拼进
+// JSON.stringify 作缓存键。改成拼密钥的哈希（FNV-1a + 长度），不再存明文；
+// 草稿在服务端保存成功返回 stored_reference 时已被清除（见 saveCustomModels）。
+test('C-1 capability cache key carries a hash of the API key, never the key itself', () => {
+  const lineStart = source.indexOf('function capabilityKey(');
+  assert.notEqual(lineStart, -1, 'missing capabilityKey');
+  const body = source.slice(lineStart, source.indexOf('\n', lineStart));
+  // 密钥不得再作为缓存键数组的直接元素（旧写法：...,config.api_key||''])；
+  // 现在只允许出现在 hashApiKeyForCache(...) 的参数里
+  assert.doesNotMatch(body, /'',config\.api_key/);
+  assert.doesNotMatch(body, /,config\.api_key\|\|''\]/);
+  assert.match(body, /hashApiKeyForCache\(config\.api_key/);
+  assert.match(body, /provider|base_url|model/);
+  const hashStart = source.indexOf('function hashApiKeyForCache(');
+  assert.notEqual(hashStart, -1, 'missing hashApiKeyForCache');
+  const hashFn = source.slice(hashStart, source.indexOf('\n  }\n', hashStart) + 5);
+  const hash = new Function(hashFn + '; return hashApiKeyForCache;')();
+  assert.equal(typeof hash('sk-test-key'), 'string');
+  assert.ok(!hash('sk-test-key').includes('sk-test-key'), 'hash must not contain the key');
+  assert.equal(hash('sk-test-key'), hash('sk-test-key'), 'hash must be deterministic');
+  assert.notEqual(hash('sk-test-key'), hash('sk-other-key'), 'different keys hash differently');
+  assert.notEqual(hash(''), hash('sk-test-key'));
+});
+
+test('C-1 model key drafts are cleared once the server confirms the save', () => {
+  // 服务端保存成功且返回 stored_reference 时删除对应草稿（已有行为，回归哨兵）
+  assert.match(source, /if\s*\(m\.stored_reference\)\s*modelKeyDrafts\(\)\.delete\(String\(m\.uid\)\)/);
+});
