@@ -86,7 +86,12 @@
                     return;
                 }
                 // 离开小猫AI 到其它 tab → 只隐藏浮层，保留在途回复与 DOM。
-                if (currentDockTab === 'ai-chat') {
+                // ★ 第二轮修复（点-1）：不能只认 currentDockTab——非 Dock 入口
+                //   （聊天页“问小猫”、顶部 AI 工具等）直接调 __xtjOpenAiChat()
+                //   打开面板时 currentDockTab 仍是旧值；切 tab 时不收面板，
+                //   z-9000 的全屏面板盖住 Dock，全站看起来冻住。以面板实际
+                //   状态 __xtjAiChatActive 为准（06 内 5853 行已有同样写法）。
+                if (currentDockTab === 'ai-chat' || window.__xtjAiChatActive) {
                     if (typeof window.__xtjHideAiChat === 'function') {
                         try { window.__xtjHideAiChat(); } catch (eHide) {}
                     } else if (typeof window.__xtjCloseAiChat === 'function') {
