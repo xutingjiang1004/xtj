@@ -895,6 +895,8 @@
             //   Broadcast 的频道名由服务端 HMAC 派生、只发给本人，天然按人隔离。
             //   收到消息后**直接把 payload 写进缓存并增量渲染**（复审 P2-02 的建议形态），
             //   不再因为一条新消息就回拉 180 条历史。
+            //   F-H2：payload 只含 message_id + sender（不含正文），取回正文后
+            //   再走同一条增量路径；取不到时只刷新列表与角标。
             // ══════════════════════════════════════════════════════════════════
             var dmBroadcast = { channel: null, topic: null, owner: '', epoch: 0, attempts: 0 };
             window.__xtjResetDmBroadcast = function() {
@@ -970,6 +972,29 @@
                 } catch (e) { console.warn("[dm-realtime] apply failed:", e && e.message); }
             }
 
+            // F-H2：新版服务端 Broadcast 只发 {message_id, sender}，正文不在
+            // 广播里。收到 id 后走已鉴权的 /api/dm/messages 取回该条消息，再走
+            // applyRealtimeDmMessage 的同一条增量渲染路径；取不到（竞态/失败）
+            // 就只刷新列表与角标，轮询兜底仍会补上。
+            async function applyRealtimeDmId(messageId, sender) {
+                try {
+                    if (!messageId || !sender || sender === window.currentUser) return;
+                    if (typeof window.xtjProtectedFetch !== 'function') { window.dockChatListCacheTime = 0; return; }
+                    var resp = await window.xtjProtectedFetch('/api/dm/messages?target=' + encodeURIComponent(sender) + '&limit=30', { timeoutMs: 12000 });
+                    if (!resp || !resp.ok) { window.dockChatListCacheTime = 0; loadDockChatList(); updateUnreadBadge(); return; }
+                    var data = await resp.json().catch(function () { return {}; });
+                    var rows = (data && Array.isArray(data.data)) ? data.data : [];
+                    var msg = null;
+                    for (var i = 0; i < rows.length; i++) {
+                        if (rows[i] && String(rows[i].id) === String(messageId)) { msg = rows[i]; break; }
+                    }
+                    if (msg) { applyRealtimeDmMessage(msg); return; }
+                    window.dockChatListCacheTime = 0;
+                    loadDockChatList();
+                    updateUnreadBadge();
+                } catch (e) { console.warn('[dm-realtime] apply id failed:', e && e.message); }
+            }
+
             async function subscribeToDmBroadcast() {
                 var owner=window.currentUser || '';
                 if (dmBroadcast.owner !== owner) {
@@ -998,8 +1023,12 @@
                     dmBroadcast.channel = sb.channel(dmBroadcast.topic, { config: { broadcast: { self: false } } })
                         .on("broadcast", { event: "dm" }, function (payload) {
                             if (myEpoch !== dmBroadcast.epoch) return;
-                            var msg = payload && payload.payload && payload.payload.message;
-                            applyRealtimeDmMessage(msg);
+                            var p = payload && payload.payload;
+                            if (!p) return;
+                            // F-H2：新版只发 {message_id, sender}，正文走鉴权接口取回；
+                            // 旧版全量 message 仍兼容（部署窗口期内可能收到）。
+                            if (p.message) { applyRealtimeDmMessage(p.message); return; }
+                            if (p.message_id && p.sender) { applyRealtimeDmId(p.message_id, p.sender); }
                         })
                         .on("broadcast", { event: "chat-state" }, function(payload) {
                             if (myEpoch !== dmBroadcast.epoch) return;

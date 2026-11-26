@@ -141,3 +141,71 @@ test('broadcast arrivals mark only an incoming message in the visible active con
     assert.equal(reads,scenario.expected,JSON.stringify(scenario));
   }
 });
+
+// ---------------------------------------------------------------- F-H2
+test('F-H2: 私聊 Broadcast 只发消息 id，不发正文/媒体地址', () => {
+  const start = server.indexOf('function publishDmRealtime(targetUser, message) {');
+  const end = server.indexOf('function publishChatEvent(targetUser,event,payload) {', start);
+  assert.ok(start > 0 && end > start, '无法定位 publishDmRealtime');
+  const fn = server.slice(start, end);
+  assert.match(fn, /message_id/, '广播 payload 必须只含 message_id');
+  assert.match(fn, /sender/, '广播 payload 必须带发送人，供客户端取回正文');
+  assert.ok(!/hydrateMessage/.test(fn), '不得再把水合后的整条消息（含媒体签名地址）发进广播');
+  assert.ok(!/\{message\s*:/.test(fn) && !/message\s*:\s*outgoing/.test(fn),
+    '广播 payload 不得含整条 message 对象');
+});
+
+test('F-H2: 前端收到 id-only 广播后走鉴权接口取回正文', () => {
+  const handler = block(feed, '.on("broadcast", { event: "dm" }', 900);
+  assert.match(handler, /p\.message_id && p\.sender/, '必须识别新版 id-only payload');
+  assert.match(handler, /applyRealtimeDmId\(p\.message_id, p\.sender\)/, '必须走取回路径');
+  assert.match(handler, /p\.message/, '旧版全量 message 在部署窗口期内仍兼容');
+  const fn = block(feed, 'async function applyRealtimeDmId(messageId, sender) {', 2200);
+  assert.match(fn, /\/api\/dm\/messages\?target=/, '必须用已鉴权的 /api/dm/messages 取回正文');
+  assert.match(fn, /encodeURIComponent\(sender\)/, '取回时目标必须是广播里的发送人');
+  assert.match(fn, /applyRealtimeDmMessage\(msg\)/, '取回后走同一条增量渲染路径');
+  assert.match(fn, /loadDockChatList\(\)/, '取不到时必须刷新列表兜底');
+  assert.ok(!/loadDockChatMessages\s*\(/.test(fn), '取回只拉最近 30 条找这一条，不得触发整页历史回拉');
+});
+
+test('F-H2: applyRealtimeDmId 取回命中/未命中/发给自己的行为', async () => {
+  const start = feed.indexOf('            async function applyRealtimeDmId(messageId, sender) {');
+  const end = feed.indexOf('            async function subscribeToDmBroadcast()', start);
+  assert.ok(start > 0 && end > start, '找不到 applyRealtimeDmId');
+  const msg = { id: 'm-1', media_type: '__dm__', user_name: 'sender', media_url: 'viewer', content: '{"type":"dm","text":"hi"}' };
+  async function runScenario(rows, sender) {
+    let applied = null, listed = 0, badged = 0;
+    const sandbox = {
+      window: {
+        currentUser: 'viewer',
+        dockChatListCacheTime: 99,
+        xtjProtectedFetch: async (url) => {
+          assert.match(url, /\/api\/dm\/messages\?target=sender&limit=30/, '取回必须按发送人查最近消息');
+          return { ok: true, json: async () => ({ ok: true, data: rows }) };
+        }
+      },
+      loadDockChatList() { listed++; },
+      updateUnreadBadge() { badged++; },
+      applyRealtimeDmMessage(m) { applied = m; },
+      console: { warn() {} }
+    };
+    const vm = require('node:vm');
+    vm.runInNewContext(feed.slice(start, end), sandbox);
+    await sandbox.applyRealtimeDmId('m-1', sender);
+    return { applied, listed, badged, cacheTime: sandbox.window.dockChatListCacheTime };
+  }
+  // 命中：取回后增量应用，不刷新列表
+  let r = await runScenario([msg], 'sender');
+  assert.equal(r.applied, msg, '命中时必须把取回的消息交给增量渲染');
+  assert.equal(r.listed, 0, '命中时不得额外刷新列表');
+  // 未命中：只刷新列表与角标
+  r = await runScenario([{ id: 'm-2', media_type: '__dm__' }], 'sender');
+  assert.equal(r.applied, null, '未命中时不得应用别人的消息');
+  assert.equal(r.listed, 1, '未命中时必须刷新列表兜底');
+  assert.equal(r.badged, 1, '未命中时必须刷新角标');
+  assert.equal(r.cacheTime, 0, '未命中时列表缓存必须失效');
+  // 发给自己（回环）：不取回
+  r = await runScenario([msg], 'viewer');
+  assert.equal(r.applied, null, '自己的消息不走取回路径');
+  assert.equal(r.listed, 0, '自己的消息不得刷新列表');
+});

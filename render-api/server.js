@@ -17162,9 +17162,12 @@ app.get('/api/dm/realtime-topic', authenticateUser, rateLimit(60000, 60), async 
 });
 
 // 把一条私信发布到收件人的频道。**永不阻塞、永不抛错**：投递失败不能影响发送本身。
+// F-H2：Broadcast 只发消息 id + 发送人，不发正文/媒体签名地址。频道名只是
+// 128 bit 确定性 HMAC，一旦正文进了 payload，任何拿到频道名的人都能读到私信
+// 内容。客户端收到 id 后走已鉴权的 /api/dm/messages 取回正文（与群聊只发 id 一致）。
 function publishDmRealtime(targetUser, message) {
-  var outgoing = { ...message };
-  void dmPrivateStorage.hydrateMessage(outgoing).then(() => publishChatEvent(targetUser,'dm',{message:outgoing})).catch(() => publishChatEvent(targetUser,'chat-state',{kind:'refresh'}));
+  if (!message || !message.id) return;
+  publishChatEvent(targetUser, 'dm', { message_id: String(message.id), sender: message.user_name || '' });
 }
 
 function publishChatEvent(targetUser,event,payload) {
