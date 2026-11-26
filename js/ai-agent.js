@@ -2250,11 +2250,15 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     };
   }
 
-  function upgradeEmptyStateAvatar(scope) {
+  // B-06：只在确有头像 URL 时才升级重画。无 URL 时重画会把 buildEmptyState
+  // 刚画好的头像再刷成 SVG 默认图，造成一次闪烁；已有 URL 头像的节点也不重复画。
+  function upgradeEmptyStateAvatar(scope, avatarUrl, avatarVersion) {
     if (!scope || !scope.querySelectorAll) return;
+    if (!avatarUrl) return;
     var nodes = scope.querySelectorAll('.ai-chat-empty-emoji');
     for (var i = 0; i < nodes.length; i++) {
-      renderCatAvatarNode(nodes[i], 'ai-chat-empty-avatar');
+      if (nodes[i].querySelector('.ai-avatar-image')) continue;
+      renderCatAvatarNode(nodes[i], 'ai-chat-empty-avatar', avatarUrl, avatarVersion);
     }
   }
 
@@ -2262,7 +2266,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     if (!container) return null;
     var node = buildEmptyState(tipText);
     container.appendChild(node);
-    upgradeEmptyStateAvatar(container);
+    upgradeEmptyStateAvatar(container, S.config && S.config.avatar_url, S.config && S.config.avatar_version);
     return node;
   }
 
