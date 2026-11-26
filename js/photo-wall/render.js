@@ -787,6 +787,13 @@
       sentinel.remove();
       return;
     }
+    // G-L3: 已达 500 张 DOM 上限且服务端仍有更多时，直接写明触顶状态并
+    // 保留点击入口；否则用户滚到底只看到通用的“加载更多…”，要等哨兵
+    // 进视口、IO 回调触发后才出现明确入口，容易误以为墙到底了。
+    if (domPhotoLimitReached()) {
+      resetSentinelText(grid, '已达当前渲染上限，点击继续加载', true);
+      return;
+    }
     resetSentinelText(grid, window.IntersectionObserver ? '加载更多...' : '点击加载更多', !window.IntersectionObserver);
   }
 
