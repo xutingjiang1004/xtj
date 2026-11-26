@@ -30,6 +30,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   var AI_DISPLAY_NAME = '小猫';
   // Keep the first network payload small; older messages remain available by scrolling.
   var HISTORY_PAGE_SIZE = 10;
+  // ★ D-H3：内存历史与 DOM 上限。分页上滑会无限前置加载，实时发送也会一条
+  //   条追加，S.messages 与 .ai-msg 节点此前没有任何上限。超限时剪最旧的，
+  //   只保留最近 500 条；服务端 history_scan_limit 会先拦超大扫描，500 条
+  //   在其内，正常回翻不受影响。
+  var AI_HISTORY_MAX_MESSAGES = 500;
   var CONFIG_CACHE_TTL = 5 * 60 * 1000;
   var CONFIG_REFRESH_INTERVAL = 5 * 60 * 1000; // ★ U3: 与 TTL 保持一致，避免每分钟做无用功
   var CONV_ID_KEY = 'xtj_ai_last_conversation_id';
@@ -12230,6 +12235,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           })
         };
         S.messages.push(aiMsg);
+        // ★ D-H3：长会话实时发送也会无限追加，收尾同样按 500 条剪最旧的。
+        pruneAiHistory(messagesEl, []);
         if (hasContent && !(evt && evt.interrupted) && S._voiceConversation) S._voiceConversation.reply(content);
         // ★ 2026-09-29（审计 S1）：登记本轮的本地 assistant 消息，并把节点与消息
         //   互相关联，供首屏历史到达时按"是否本地未同步"保留气泡。
@@ -14339,6 +14346,33 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }
   }
 
+  // ★ D-H3：内存历史与 DOM 剪枝。超 AI_HISTORY_MAX_MESSAGES 条时剪掉最旧
+  //   的消息与节点，只保留最近的。keepNodes：本页刚加载的节点——它们是最旧
+  //   的，但刚加载完不能立刻剪掉（否则用户翻上来却看不到）；只剪它们之前
+  //   的旧内容。正在流式的 .generating 节点不剪。分页调用方须在滚动锚点
+  //   的 rAF 回调前同步执行，锚点 Δ（新 scrollHeight - 旧 scrollHeight）
+  //   自然包含剪掉的高度，视口仍停在原来那条消息上。
+  function pruneAiHistory(messagesEl, keepNodes) {
+    var total = Array.isArray(S.messages) ? S.messages.length : 0;
+    var over = total - AI_HISTORY_MAX_MESSAGES;
+    if (over <= 0) return;
+    var keepCount = Array.isArray(keepNodes) ? keepNodes.length : 0;
+    var drop = Math.min(over, Math.max(0, total - keepCount));
+    if (drop <= 0) return;
+    S.messages.splice(0, drop);
+    if (!messagesEl || !messagesEl.querySelectorAll) return;
+    var nodes = messagesEl.querySelectorAll('.ai-msg');
+    var removed = 0;
+    for (var i = 0; i < nodes.length && removed < drop; i++) {
+      var n = nodes[i];
+      if (!n || !n.parentNode) continue;
+      if (keepNodes && keepNodes.indexOf(n) >= 0) continue;
+      if (n.classList && n.classList.contains('generating')) continue;
+      n.parentNode.removeChild(n);
+      removed++;
+    }
+  }
+
   async function loadHistory(messagesEl, before) {
     if (S.loading || S.loadingMore) return;
     if (before) S.loadingMore = true;
@@ -14536,6 +14570,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           frag.appendChild(node);
         }
         messagesEl.insertBefore(frag, _existingFirstNode);
+        // ★ D-H3：超 500 条时剪最旧的节点与消息（本页新节点不剪；须在下方
+        //   rAF 锚点回调前同步完成，Δ 已含剪掉的高度，视口不跳）。
+        pruneAiHistory(messagesEl, _historyNodes);
         renderAiHistoryCards(messagesEl, msgs, _historyNodes, msgs.map(function() { return _existingFirstNode; }));
         try {
           requestAnimationFrame(function() {
