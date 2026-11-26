@@ -867,14 +867,12 @@
         if (response.ok) size = Number(response.headers.get('content-length')) || null;
       } catch (error) { if (controller.signal.aborted) return null; }
       if (!Number.isSafeInteger(size) || size <= 0) {
-        // Ask for one byte and cancel the body if the server ignores Range.
-        response = await fetch(photo.imageUrl, { method:'GET', headers:{Range:'bytes=0-0'}, mode:'cors', credentials:'same-origin', signal:controller.signal });
-        try {
-          if (response.ok) {
-            var total = /\/(\d+)$/.exec(response.headers.get('content-range') || '');
-            size = total ? Number(total[1]) : response.status === 206 ? null : Number(response.headers.get('content-length')) || null;
-          } else size = null;
-        } finally { if (response.body) await response.body.cancel().catch(function(){}); }
+        // G-L7: HEAD 拿不到长度就返回 null，不再发 Range: bytes=0-0 的
+        // 第二次请求。原图代理对 HEAD 会透传存储的 content-length，
+        // HEAD 无长度本就极少走到；Range 一旦被忽略，服务端会下发完整
+        // 原图、客户端 cancel() 也只能中途截断，浪费流量（Supabase
+        // 流量已用完）。详情面板对 null 显示“--”，下次打开再试 HEAD。
+        return null;
       }
       if (!Number.isSafeInteger(size) || size <= 0) return null;
       photo.fileSize = size;
