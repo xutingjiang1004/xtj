@@ -291,6 +291,11 @@
     img.classList.remove('pw-blur-in');
     img.classList.add('pw-blur-done');
     img.classList.remove('pw-load-timeout');
+    // ★ 第二轮修复（影-2）：骨架隐藏别只靠 CSS 兄弟选择器
+    //   （img.pw-blur-done + .pw-skeleton）。这里直接把同卡片的骨架
+    //   span 藏掉，结算失败或选择器失效时骨架也不会永久残留。
+    var _sk = img.nextElementSibling;
+    if (_sk && _sk.classList && _sk.classList.contains('pw-skeleton')) _sk.style.display = 'none';
     if (imgObserver) imgObserver.unobserve(img);
     applyPhotoWallAspect(img);
   }
@@ -306,6 +311,10 @@
     img._pwLoadFailed = false;
     img._pwQueued = false;
     img.classList.remove('pw-load-error', 'pw-load-timeout');
+    // ★ 第二轮修复（影-2）：重试时把 finishImg 藏掉的骨架还给 CSS 控制，
+    //   重载期间重新显示占位。
+    var _skRetry = img.nextElementSibling;
+    if (_skRetry && _skRetry.classList && _skRetry.classList.contains('pw-skeleton')) _skRetry.style.display = '';
     img.style.cursor = '';
     img.onclick = null;
     queueImage(img);
@@ -953,7 +962,17 @@
         if (!isError && hasNextPage) installLoadMoreSentinel(grid);
         return;
       }
-      grid.innerHTML = photoCardHtml(photos.slice(photoBatchStart, photoBatchStart + MAX_DOM_PHOTOS), photoBatchStart) + photoBatchNavHtml(photos);
+      var _renderSlice = photos.slice(photoBatchStart, photoBatchStart + MAX_DOM_PHOTOS);
+      // ★ 第二轮修复（重-1）：切回照片墙时数据没变就别重建网格。旧逻辑每次
+      //   innerHTML 全量重写，图片重新走骨架+淡入、流量重新烧。签名覆盖
+      //   本页卡片的 id/图址/作者/文案/时间/宽高与最近上传态；浏览数不计入
+      //   （它由 updatePhotoViewDisplays 定点更新，不走重建）。
+      var _renderSig = (window.currentUser || '') + '|' + photoBatchStart + '|' + photos.length + '|' + _renderSlice.map(function(p) {
+        return (p && (p.cloudId || p.id)) + ':' + (p.thumbUrl || p.imageUrl || '') + ':' + (p.username || '') + ':' + (p.caption || '') + ':' + (p.timestamp || '') + ':' + (p.width || '') + 'x' + (p.height || '') + ':' + (recentPhotos.has(String(p.id)) ? 'R' : '');
+      }).join(',');
+      if (grid.__xtjPwSig === _renderSig && grid.querySelector('.photo-wall-item[data-photo-id]')) return;
+      grid.__xtjPwSig = _renderSig;
+      grid.innerHTML = photoCardHtml(_renderSlice, photoBatchStart) + photoBatchNavHtml(photos);
       revealCards(grid);
       observeImages(grid);
       installLoadMoreSentinel(grid);

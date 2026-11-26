@@ -1712,6 +1712,21 @@
             window.renderPhotoWallLockedState = renderPhotoWallLockedState;
             window.setPhotoWallLockedState = setPhotoWallLockedState;
 
+            // ★ 第二轮修复（重-3）：.pw-skeleton 在每张卡片里永久存在（加载完成
+            //   只是 CSS display:none），“存在即需重载”恒为真，每次都强制全量
+            //   重载。只统计视口附近（上下各放宽一屏）还没加载完成的卡片；
+            //   视口外的懒加载图本来就还没轮到，不应触发重载。
+            function hasVisiblePhotoWallSkeleton(grid) {
+                if (!grid) return false;
+                var cards = grid.querySelectorAll('.photo-wall-item');
+                for (var i = 0; i < cards.length; i++) {
+                    var img = cards[i].querySelector('img');
+                    if (!img || img.classList.contains('pw-blur-done')) continue;
+                    var rect = cards[i].getBoundingClientRect();
+                    if (rect.bottom >= -window.innerHeight && rect.top <= window.innerHeight * 2) return true;
+                }
+                return false;
+            }
             async function ensurePhotoWallVisibleContent(options) {
                 var opts = options || {};
                 if (!window.currentUser) { renderPhotoWallLockedState(); return; }
@@ -1727,7 +1742,7 @@
                 var grid = document.getElementById('photoGrid');
                 if (!grid) return;
                 var hasRenderedPhotos = !!grid.querySelector('.photo-wall-item');
-                var hasSkeleton = !!grid.querySelector('.pw-skeleton');
+                var hasSkeleton = hasVisiblePhotoWallSkeleton(grid);
                 var hasEmptyState = !!grid.querySelector('.photo-wall-empty');
                 var hasPhotoData = Array.isArray(window.photoWallData) && window.photoWallData.length > 0;
                 if (opts.forceReload || !hasRenderedPhotos || hasSkeleton || (!hasPhotoData && !hasEmptyState)) {
@@ -1743,7 +1758,7 @@
                     if (!sameIdentity()) return;
                     grid = document.getElementById('photoGrid');
                     hasRenderedPhotos = !!(grid && grid.querySelector('.photo-wall-item'));
-                    hasSkeleton = !!(grid && grid.querySelector('.pw-skeleton'));
+                    hasSkeleton = hasVisiblePhotoWallSkeleton(grid);
                     hasEmptyState = !!(grid && grid.querySelector('.photo-wall-empty'));
                     hasPhotoData = Array.isArray(window.photoWallData) && window.photoWallData.length > 0;
                 }
