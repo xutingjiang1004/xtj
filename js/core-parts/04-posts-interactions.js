@@ -1193,11 +1193,23 @@
                     return 'unknown';
                 }
             }
+            // E-H4: 写操作（删帖/置顶/改可见性/发布）成功后，v8 由 clearFeedCache()
+            // 清掉，但 early-feed 的 v1 缓存（7 天）不受影响，下次回访服务器慢时
+            // 已删/已私密的旧帖子会从 v1 里再画出来。写操作走这里同时清 v1；
+            // 7 天离线兜底本身不动，搜索/筛选切换仍只清 v8。
+            function clearEarlyFeedCacheV1() {
+                if (typeof window.__xtjClearEarlyFeedCache === 'function') { try { window.__xtjClearEarlyFeedCache(); } catch (e) {} }
+                else { try { localStorage.removeItem('xtj_feed_cache_v1'); } catch (e) {} }
+            }
+            function invalidateFeedCaches() {
+                if (typeof clearFeedCache === 'function') { try { clearFeedCache(); } catch (e) {} }
+                clearEarlyFeedCacheV1();
+            }
             function applyConfirmedPostDeletion(postId, session) {
                 removeDeletedPostFromFeed(postId);
                 if (typeof window.__xtjRemoveAuthorPost === 'function') window.__xtjRemoveAuthorPost(postId);
                 if (String(window.__xtjPostDetailCurrentId || '') === String(postId) && typeof window.closeModal === 'function') window.closeModal('postDetailModal');
-                if (typeof clearFeedCache === 'function') { try { clearFeedCache(); } catch (e) {} }
+                invalidateFeedCaches();
 
                 // 删除只过渡合成属性，完成后一次移除节点，避免连续重算整张卡片的布局。
                 if (session.postEl && session.postEl.parentNode) {
@@ -1346,14 +1358,16 @@
                             return {};
                         });
                     } catch (raceErr) {
-                        if (finished || session.cancelled || !currentDelete()) return;
+                        // E-M2: 关弹窗只关确认框，不丢弃在途的删除结果。请求超时后仍以
+                        // 权威接口确认一次：服务端已删就从列表移除，否则才恢复。
+                        if (finished || !currentDelete()) return;
                         if (deleteTimedOut) {
                             console.warn('[delBtn] delete request timed out; checking locally');
                             // The delete request may have reached the server before this
                             // browser timed out. Confirm with the authoritative endpoint
                             // before deciding whether to restore the optimistic UI.
                             var authoritativeStatus = await confirmPostDeleteStatus(targetPostId, identity);
-                            if (finished || session.cancelled || !currentDelete()) return;
+                            if (finished || !currentDelete()) return;
                             finished = true;
                             if (authoritativeStatus.confirmed && authoritativeStatus.deleted) {
                                 applyConfirmedPostDeletion(targetPostId, session);
@@ -1370,13 +1384,16 @@
                     } finally {
                         clearTimeout(deleteTimer);
                     }
-                    if (finished || session.cancelled || !currentDelete()) return;
+                    // E-M2: 成功回调不再因关过弹窗直接丢弃结果。关弹窗只是关了
+                    // 确认框，请求本身仍在途；服务端已确认删除就从列表移除，
+                    // 否则用户会看到一条其实已删的帖子，再点一次还报错。
+                    if (finished || !currentDelete()) return;
                     if (!deleteResponse.ok || !deleteResult.ok || (!deleteResult.deleted && !deleteResult.already_deleted)) {
                         finished = true;
                         if (!session.cancelled) cleanupDeleteSession({ toast: "删除失败: " + (deleteResult.error || "服务器未确认删除") });
                         return;
                     }
-                    if (session.cancelled || !currentDelete()) return;
+                    if (!currentDelete()) return;
                     finished = true;
                     applyConfirmedPostDeletion(targetPostId, session);
                 } catch (e) {
@@ -3026,12 +3043,27 @@
                         localStorage.setItem(KEY, JSON.stringify(out));
                     } catch (_) {}
                 }
+                // E-M5: 音乐解析加全局并发上限（同时最多 3 个），不同链接排队等候；
+                // 同一链接仍按 pending map 去重，缓存仍只留 60 条。
+                var MUSIC_RESOLVE_MAX = 3;
+                var resolveActive = 0, resolveQueue = [];
+                function pumpResolveQueue() {
+                    while (resolveActive < MUSIC_RESOLVE_MAX && resolveQueue.length) resolveQueue.shift()();
+                }
                 function resolve(url) {
                     if (url in memory) return Promise.resolve(memory[url]);
                     if (pending[url]) return pending[url];
-                    return pending[url] = fetch(API_BASE + '/api/music/resolve?url=' + encodeURIComponent(url)).then(function(res) { return res.ok ? res.json() : null; })
-                        .then(function(data) { var card = data && data.ok && data.card ? data.card : null; if (card) { memory[url] = card; persist(); } return card; })
-                        .catch(function() { return null; }).then(function(card) { delete pending[url]; return card; });
+                    var task = new Promise(function(done) {
+                        function start() {
+                            resolveActive++;
+                            fetch(API_BASE + '/api/music/resolve?url=' + encodeURIComponent(url)).then(function(res) { return res.ok ? res.json() : null; })
+                                .then(function(data) { var card = data && data.ok && data.card ? data.card : null; if (card) { memory[url] = card; persist(); } return card; })
+                                .catch(function() { return null; }).then(function(card) { delete pending[url]; resolveActive--; pumpResolveQueue(); done(card); });
+                        }
+                        if (resolveActive < MUSIC_RESOLVE_MAX) start();
+                        else resolveQueue.push(start);
+                    });
+                    return pending[url] = task;
                 }
                 function fill(el, card) {
                     if (!card || !el.isConnected) return;
@@ -3064,7 +3096,11 @@
                     });
                 }
                 var timer = 0;
-                if (typeof MutationObserver === 'function') new MutationObserver(function() { clearTimeout(timer); timer = setTimeout(function() { scan(document); }, 80); }).observe(document.body, { childList: true, subtree: true });
+                // E-M5: 卡片被 feed 重建移除后，试听音频会继续播。Mutation 回调里先检查
+                // 正在试听的按钮是否还在文档里，不在就暂停（onpause 会复位按钮状态）。
+                // 全局监听保留：音乐卡片分布在列表、详情、作者动态三处，缩到 #feed
+                // 会漏掉详情页的卡片解析；扫描本身只针对待解析卡片，已复核无风暴。
+                if (typeof MutationObserver === 'function') new MutationObserver(function() { clearTimeout(timer); timer = setTimeout(function() { if (playing && !playing.isConnected && audio) audio.pause(); scan(document); }, 80); }).observe(document.body, { childList: true, subtree: true });
                 return { scan: scan, resolve: resolve };
             })();
             window.xtjMusicCards = musicCards;
@@ -3091,43 +3127,37 @@
                 return Array.isArray(feedAllPosts) ? feedAllPosts.length : 0;
             }
             function updateFeedStats() {
-    // 统一统计口径：优先使用内存全量数据（feedAll* 缓存），
-    // 避免筛选/分页后 DOM 只含部分帖子导致统计数字错乱；内存数据缺失时回退 DOM 统计。
+    // 统一统计口径：只认内存全量数据（feedAll* 缓存）的精确计数。
+    // E-M6: 去掉 DOM 文本正则兜底——筛选/分页后 DOM 只含部分帖子，
+    // 正则猜出来的数字与详情页的精确 count 对不上；内存数据缺失时
+    // 显示 —，不猜数字。
     var posts = [];
     var totalLikes = 0, totalComments = 0, totalViews = 0;
-    // feedAll* 是与 updateFeedStats 同作用域的闭包变量（let 声明），直接访问；
-    // 未初始化（undefined）时回退 DOM 统计，避免筛选/分页后统计错乱。
+    // feedAll* 是与 updateFeedStats 同作用域的闭包变量（let 声明），直接访问。
     var hasFullData = Array.isArray(feedAllPosts) && Array.isArray(feedAllLikes) && Array.isArray(feedAllComments);
-    if (hasFullData) {
-        posts = feedAllPosts;
-        var visibleIds = new Set(feedAllPosts.map(function(post) { return String(post && post.id); }));
-        feedAllLikes.forEach(function(like) {
-            if (like && visibleIds.has(String(like.post_id)) && !(like.is_like === false || like.like_type === 'unlike')) totalLikes += 1;
-        });
-        totalComments = feedAllComments.filter(function(comment) { return comment && visibleIds.has(String(comment.post_id)); }).length;
-        posts.forEach(function(p) {
-            if (p && Number(p.views)) totalViews += Number(p.views);
-        });
-    } else {
-        posts = Array.prototype.slice.call(document.querySelectorAll('.post'));
-        posts.forEach(function(p) {
-            var text = (p.querySelector('.post-stats-text') || {}).textContent || '';
-            var matchV = text.match(/(?:浏览|👁)\s*(\d+)/);
-            if (matchV) totalViews += parseInt(matchV[1], 10) || 0;
-            var matchL = text.match(/(?:点赞|❤)\s*(\d+)/);
-            if (matchL) totalLikes += parseInt(matchL[1], 10) || 0;
-            var matchC = text.match(/(?:评论|💬)\s*(\d+)/);
-            if (matchC) totalComments += parseInt(matchC[1], 10) || 0;
-        });
+    // 缓存引用前先校验节点仍在文档中，避免节点被 innerHTML 重写后写入已脱离文档的旧节点
+    var sPosts = (_cachedSPosts && document.body.contains(_cachedSPosts)) ? _cachedSPosts : (_cachedSPosts = document.getElementById('sPosts'));
+    var sViews = (_cachedSViews && document.body.contains(_cachedSViews)) ? _cachedSViews : (_cachedSViews = document.getElementById('sViews'));
+    var sLikes = (_cachedSLikes && document.body.contains(_cachedSLikes)) ? _cachedSLikes : (_cachedSLikes = document.getElementById('sLikes'));
+    if (sPosts) sPosts.textContent = resolveTotalPostCount();
+    if (!hasFullData) {
+        if (sViews) sViews.textContent = '—';
+        // 只显示点赞数；互动合计见统计弹层文案
+        if (sLikes) sLikes.textContent = '—';
+        return;
     }
-                // 缓存引用前先校验节点仍在文档中，避免节点被 innerHTML 重写后写入已脱离文档的旧节点
-                var sPosts = (_cachedSPosts && document.body.contains(_cachedSPosts)) ? _cachedSPosts : (_cachedSPosts = document.getElementById('sPosts'));
-                var sViews = (_cachedSViews && document.body.contains(_cachedSViews)) ? _cachedSViews : (_cachedSViews = document.getElementById('sViews'));
-                var sLikes = (_cachedSLikes && document.body.contains(_cachedSLikes)) ? _cachedSLikes : (_cachedSLikes = document.getElementById('sLikes'));
-                if (sPosts) sPosts.textContent = resolveTotalPostCount();
-                if (sViews) sViews.textContent = totalViews;
-                // 只显示点赞数；互动合计见统计弹层文案
-                if (sLikes) sLikes.textContent = totalLikes;
+    posts = feedAllPosts;
+    var visibleIds = new Set(feedAllPosts.map(function(post) { return String(post && post.id); }));
+    feedAllLikes.forEach(function(like) {
+        if (like && visibleIds.has(String(like.post_id)) && !(like.is_like === false || like.like_type === 'unlike')) totalLikes += 1;
+    });
+    totalComments = feedAllComments.filter(function(comment) { return comment && visibleIds.has(String(comment.post_id)); }).length;
+    posts.forEach(function(p) {
+        if (p && Number(p.views)) totalViews += Number(p.views);
+    });
+    if (sViews) sViews.textContent = totalViews;
+    // 只显示点赞数；互动合计见统计弹层文案
+    if (sLikes) sLikes.textContent = totalLikes;
             }
 
             async function initialLoad(skipCache = false) {
@@ -3997,7 +4027,11 @@
                     var validDims = width > 0 && height > 0 && width <= 20000 && height <= 20000;
                     var ratio = validDims ? width + ' / ' + height : '4 / 3';
                     var aspect = validDims ? width / height : 4 / 3;
-                    var singleSize = '--post-single-max-width:' + (aspect * 520) + 'px;--post-single-viewport-width:' + (aspect * 65) + 'vh;';
+                    // E-L5: 单图宽 = min(100%, aspect*520px, aspect*65vh)，1:10 的图只剩约 52px。
+                    // 尺寸宽高比下限 200/520，保证单图至少 200px 宽；真实比例（--post-image-ratio）
+                    // 不变，不拉伸图片；正常比例的图片不受影响。
+                    var sizeAspect = Math.max(aspect, 200 / 520);
+                    var singleSize = '--post-single-max-width:' + (sizeAspect * 520) + 'px;--post-single-viewport-width:' + (sizeAspect * 65) + 'vh;';
                     var attrs = 'data-post-id="' + escapeHtml(String(post.id)) + '" data-post-media-index="' + index + '" data-media-url="' + escapeHtml(url) + '"' +
                         ' data-post-user="' + escapeHtml(post.user_name || '') + '" data-post-created-at="' + escapeHtml(post.created_at || '') + '" data-post-views="' + escapeHtml(String(post.views || 0)) + '"' +
                         ' data-file-size="' + escapeHtml(String(item.file_size || '')) + '" data-actor-key="' + escapeHtml(post.actor_key || '') + '" data-can-delete="' + (canDeletePost(post) ? '1' : '0') + '"';
@@ -4054,8 +4088,10 @@
                 if (!cell || !img.naturalWidth || !img.naturalHeight) return;
                 var ratio = img.naturalWidth / img.naturalHeight;
                 cell.style.setProperty('--post-image-ratio', img.naturalWidth + ' / ' + img.naturalHeight);
-                cell.style.setProperty('--post-single-max-width', (ratio * 520) + 'px');
-                cell.style.setProperty('--post-single-viewport-width', (ratio * 65) + 'vh');
+                // E-L5: 同上，真实尺寸同步时尺寸宽高比下限 200/520，单图至少 200px 宽。
+                var sizeRatio = Math.max(ratio, 200 / 520);
+                cell.style.setProperty('--post-single-max-width', (sizeRatio * 520) + 'px');
+                cell.style.setProperty('--post-single-viewport-width', (sizeRatio * 65) + 'vh');
             };
 
             var expandedPostComments = new Set(), expandedCommentsOwner = currentUser;
@@ -4121,7 +4157,7 @@
                           _roots.push(c);
                         }
                       });
-                      function _renderCommentNode(c, depth, parent) {
+                      function _renderCommentNode(c, depth, parent, forceReplyName) {
                         depth = typeof depth === 'number' ? depth : 0;
                         if (_seen[String(c.id)] || _count >= limit) return '';
                         _seen[String(c.id)] = true; _count++;
@@ -4134,6 +4170,11 @@
                         var isAiComment = c.user_name === 'cat_ai' && !!c.generated_by_ai;
                         // 只有回复的是“回复”（第三层起）才点名：第二层缩进已经表明在回上一条。
                         var replyToName = depth >= 2 && parent && !(parent.user_name === 'cat_ai' && parent.generated_by_ai) ? parent.user_name : (depth >= 2 && parent ? '小猫' : '');
+                        // E-M3: 超过 8 层被截断、或孤儿评论被当根追加时，没有缩进表明
+                        // 在回谁，强制点名父作者，避免它看起来像一条顶层评论。
+                        if (!replyToName && forceReplyName && parent) {
+                            replyToName = (parent.user_name === 'cat_ai' && parent.generated_by_ai) ? '小猫' : parent.user_name;
+                        }
                         var _kids = _childrenOf[String(c.id)] || [];
                         var _replies = '';
                         if (_kids.length && depth < 8 && _count < limit) {
@@ -4144,7 +4185,8 @@
                       }
                 var html = _roots.map(function(c) { return _renderCommentNode(c, 0); }).join('');
                 // Orphan/cyclic/deep historical replies stay readable without unbounded recursion.
-                pComms.forEach(function(c) { if (!_seen[String(c.id)] && _count < limit) html += _renderCommentNode(c, 0); });
+                // E-M3: 兜底追加时把父评论传进去并强制点名，避免超深回复看起来像顶层评论。
+                pComms.forEach(function(c) { if (!_seen[String(c.id)] && _count < limit) html += _renderCommentNode(c, 0, _byId[String(c.parent_comment_id)] || null, true); });
                 var totalComments = Number.isFinite(post.comment_count) ? post.comment_count : pComms.length;
                 if (!(options && options.detail) && totalComments > _count) html += '<button type="button" class="post-all-comments" data-post-id="' + escapeHtml(String(post.id)) + '" onclick="__xtjExpandPostComments(\'' + safeJsStr(String(post.id)) + '\', this)">展开其余 ' + (totalComments - _count) + ' 条评论</button>';
                 return '<div class="comments">' + html + '</div>';
@@ -4200,6 +4242,29 @@
             };
 
             // 按钮滚进视口就自动补齐 → 视觉上评论始终是全展开的，不需要用户点任何东西。
+            // E-H2: 自动展开加全局并发上限（同时最多 2 个在途），快速往下刷列表时
+            // 不再每个进视口的帖子都并发拉评论；用户主动点击按钮不受上限影响。
+            var _commentExpandAutoQueue = [];
+            var _commentExpandAutoActive = 0;
+            var COMMENT_EXPAND_AUTO_MAX = 2;
+            function pumpCommentExpandAutoQueue() {
+                while (_commentExpandAutoActive < COMMENT_EXPAND_AUTO_MAX && _commentExpandAutoQueue.length) {
+                    var next = _commentExpandAutoQueue.shift();
+                    if (!next.btn.isConnected) continue;
+                    _commentExpandAutoActive++;
+                    window.__xtjExpandPostComments(next.pid, next.btn).then(function() {
+                        _commentExpandAutoActive--;
+                        pumpCommentExpandAutoQueue();
+                    }, function() {
+                        _commentExpandAutoActive--;
+                        pumpCommentExpandAutoQueue();
+                    });
+                }
+            }
+            function queueAutoCommentExpand(pid, btn) {
+                _commentExpandAutoQueue.push({ pid: pid, btn: btn });
+                pumpCommentExpandAutoQueue();
+            }
             var _commentAutoObserver = null;
             var _commentAutoTimer = null;
             function autoExpandVisibleComments() {
@@ -4214,7 +4279,7 @@
                             _commentAutoObserver.unobserve(btn);
                             if (!btn.isConnected) return;
                             var pid = btn.getAttribute('data-post-id');
-                            if (pid) window.__xtjExpandPostComments(pid, btn);
+                            if (pid) queueAutoCommentExpand(pid, btn);
                         });
                     }, { rootMargin: '240px 0px' });
                 }
@@ -4266,7 +4331,7 @@
                       <div class="post-badge-stack">${buildPostBadges(normalized)}</div>
                     </div>
                   </div>
-                  <div class="content">${buildPostContentHtml(normalized.content)}</div>
+                  ${typeof window.__xtjFoldPostContent === 'function' ? window.__xtjFoldPostContent(buildPostContentHtml(normalized.content), String(normalized.content || '')) : '<div class="content">' + buildPostContentHtml(normalized.content) + '</div>'}
                   ${mediaMarkup}
                   ${buildPostLocationHtml(normalized)}
                   <div class="post-stats-text">${buildPostStatsLine(normalized, Number.isFinite(normalized.like_count) ? normalized.like_count : pLikes.length, Number.isFinite(normalized.comment_count) ? normalized.comment_count : pComms.length)}</div>
@@ -4612,93 +4677,6 @@
                 }
             };
 
-            window._legacyTogglePostPinBase = async function(postId, btn) {
-                if (!postId) { showToast("置顶失败: postId 为空"); return; }
-                var nextPinned;
-                var originalText;
-                if (btn) {
-                    originalText = btn.textContent;
-                    btn.disabled = true;
-                    btn.textContent = '处理中..';
-                }
-                try {
-                    // Fetch current post state directly from DB (only select columns that exist)
-                    var fetchRes = await sb.from('posts').select('*').eq('id', postId).maybeSingle();
-                    if (fetchRes.error) { showToast('置顶失败，请稍后重试', 'error'); throw fetchRes.error; }
-                    if (!fetchRes.data) { showToast('这条帖子已不存在', 'error'); throw new Error('not found'); }
-                    var dbPost = normalizePost(fetchRes.data);
-                    // Check permission
-                    if (currentUser !== dbPost.user_name && currentUser !== ADMIN_NAME) {
-                        showToast('无权置顶');
-                        if (btn) { btn.disabled = false; btn.textContent = originalText; }
-                        return;
-                    }
-                    nextPinned = !dbPost.is_pinned;
-                    btn.textContent = nextPinned ? '置顶中..' : '取消中..';
-                    // P0: 改为后端 API (service_role), 不走前端 direct UPDATE
-                    var updHeaders = (typeof window.getUserAuthHeaders === 'function')
-                        ? await window.getUserAuthHeaders() : null;
-                    if (!updHeaders) { showToast('登录已失效'); if (btn) { btn.disabled = false; btn.textContent = originalText; } return; }
-                    var updResp = await fetch((window.API_BASE || '') + '/api/post/update', {
-                        method: 'POST',
-                        headers: updHeaders,
-                        body: JSON.stringify({ post_id: postId, is_pinned: nextPinned })
-                    });
-                    var updResult = await updResp.json();
-                    if (!updResp.ok || !updResult.ok) { showToast('更新失败，请稍后重试', 'error'); throw new Error(updResult.error); }
-                    clearFeedCache();
-                    showToast(nextPinned ? '帖子已置顶' : '已取消置顶');
-                    await loadFeed(true);
-                } catch (e) {
-                    console.error('[togglePostPin] error:', e);
-                    if (btn) { btn.disabled = false; btn.textContent = originalText || '置顶'; }
-                    if (!/^[\u4e00-\u9fa5]/.test(e && e.message || '')) {
-                        showToast('操作异常，请查看控制台');
-                    }
-                }
-            };
-            window._legacyTogglePostPin = async function(postId, btn) {
-                if (!postId) { showToast("置顶失败: postId 为空"); return; }
-                var nextPinned;
-                var originalText;
-                if (btn) {
-                    originalText = btn.textContent;
-                    btn.disabled = true;
-                    btn.textContent = '处理中..';
-                }
-                try {
-                    var fetchRes = await sb.from('posts').select('*').eq('id', postId).maybeSingle();
-                    if (fetchRes.error) throw fetchRes.error;
-                    if (!fetchRes.data) throw new Error('未找到对应帖子');
-                    var dbPost = normalizePost(fetchRes.data);
-                    if (!isAdmin()) {
-                        showToast('无权置顶');
-                        return;
-                    }
-                    nextPinned = !dbPost.is_pinned;
-                    if (btn) btn.textContent = nextPinned ? '置顶中..' : '取消中..';
-                    var updateRes = await updatePostRecord(fetchRes.data, {
-                        is_pinned: nextPinned,
-                        pinned_at: nextPinned ? new Date().toISOString() : null,
-                        updated_at: new Date().toISOString()
-                    });
-                    if (!updateRes.ok) {
-                        showToast('置顶失败: ' + ((updateRes.error && updateRes.error.message) || '未知错误'));
-                        return;
-                    }
-                    clearFeedCache();
-                    await loadFeed(true);
-                    showToast(nextPinned ? '帖子已置顶' : '已取消置顶');
-                } catch (e) {
-                    console.error('[togglePostPin override] error:', e);
-                    showToast('置顶失败: ' + (e && e.message ? e.message : '未知错误'));
-                } finally {
-                    if (btn) {
-                        btn.disabled = false;
-                        btn.textContent = originalText || '置顶';
-                    }
-                }
-            };
             var feedCacheWriteTimer = null;
             function shouldPersistMediaUrl(url) {
                 url = String(url || '');
@@ -5100,11 +5078,23 @@
                     // VPN 下 supabase.co 也可能半开连接，必须有硬超时，否则永久转圈
                     var end = start + FEED_PAGE_SIZE - 1;
                     var fallbackQuery = getFeedBasePostQuery();
-                    if (requestCursor && requestCursor.created_at && requestCursor.id) {
+                    // E-M4: 回退也全程走游标。offset/range 翻页在并发发帖/删帖时会
+                    // 漂移（重复或漏帖）。无游标时不用 offset 翻页：已加载过帖子
+                    // 就用最旧一帖当游标继续往下翻；没有已加载帖子时只从头拉第一页。
+                    var fallbackCursor = (requestCursor && requestCursor.created_at && requestCursor.id) ? requestCursor : null;
+                    if (!fallbackCursor && start > 0 && Array.isArray(feedAllPosts) && feedAllPosts.length) {
+                        var lastLoadedPost = feedAllPosts[feedAllPosts.length - 1];
+                        if (lastLoadedPost && lastLoadedPost.created_at && lastLoadedPost.id) {
+                            fallbackCursor = { created_at: lastLoadedPost.created_at, id: String(lastLoadedPost.id) };
+                        }
+                    }
+                    if (fallbackCursor) {
                         fallbackQuery = fallbackQuery
-                            .or('created_at.lt.' + requestCursor.created_at + ',and(created_at.eq.' + requestCursor.created_at + ',id.lt.' + requestCursor.id + ')')
+                            .or('created_at.lt.' + fallbackCursor.created_at + ',and(created_at.eq.' + fallbackCursor.created_at + ',id.lt.' + fallbackCursor.id + ')')
                             .order('id', { ascending: false })
                             .limit(FEED_PAGE_SIZE);
+                    } else if (start > 0) {
+                        fallbackQuery = fallbackQuery.range(0, FEED_PAGE_SIZE - 1);
                     } else {
                         fallbackQuery = fallbackQuery.range(start, end);
                     }
@@ -5716,7 +5706,7 @@
                     if (serverSucceeded) {
                         console.error('[pin] render failed after server success', e);
                         showToast('置顶已更新，正在尝试恢复界面同步');
-                        clearFeedCache();
+                        invalidateFeedCaches();
                         loadFeed(true).catch(function(err){ console.error('loadFeed failed in catch', err); });
                         refreshPostDetailIfActive(normalizedPostId).catch(function(err){ console.error('refreshPostDetailIfActive failed in catch', err); });
                     } else {
@@ -5778,7 +5768,7 @@
                         showToast("操作失败: " + ((result.error && result.error.message) || "未知错误"));
                         return;
                     }
-                    clearFeedCache();
+                    invalidateFeedCaches();
                     showToast(nextVisibility === "private" ? "已设为私密" : "已设为公开");
                     var visibilityFeed = document.getElementById('feed');
                     var visibilitySurface = getActualScrollSurface(visibilityFeed);
@@ -6559,11 +6549,12 @@
                     showToast(insertRes.fallback ? "发布成功，已兼容旧数据结构" : "发布成功");
                     if (window.XTJHaptics) window.XTJHaptics.play('success');
                     if (!insertPublishedPostIntoFeed(insertRes.data, !!publishMotion)) {
-                        clearFeedCache();
+                        invalidateFeedCaches();
                         await loadFeed(true);
                         assertPostPublishIdentity(flight);
                     } else {
                         writeFeedCacheSnapshot();
+                        clearEarlyFeedCacheV1();
                     }
                     if (publishMotion) window.XtjPostPublishMotion.play(publishMotion, findBySafePostSelector(insertRes.data && insertRes.data.id));
                     if (insertRes.data && insertRes.data.id) {
