@@ -5887,7 +5887,10 @@
                     var id=pointer;pointer=null;rail.classList.remove('is-dragging');
                     slider.style.transform='';slider.style.removeProperty('--liquid-stretch');
                     rail.querySelectorAll('[data-drag-active]').forEach(function(b){b.removeAttribute('data-drag-active');});
-                    suppressClickUntil=Date.now()+400;
+                    // ★ 第二轮修复（聊-9）：只有真正拖动后才需要压住随后 400ms
+                    //   的点击（防拖动抬手后的点击误切标签）。普通点按本身就是
+                    //   一次点击，压住它会让 400ms 内的点按无响应。
+                    if(moved)suppressClickUntil=Date.now()+400;
                     if(!cancelled)renderDockChatSocialTab(moved?tabs[Math.max(0,Math.min(3,Math.round(left/cellWidth())))]:startTab);
                     if(rail.hasPointerCapture&&rail.hasPointerCapture(id))rail.releasePointerCapture(id);
                 }
@@ -6341,7 +6344,14 @@
                     }
                 } catch (_) {
                     if (seq !== _dockChatRelationshipSeq || dockChatActiveUser !== userName) return;
-                    if (message) message.textContent = '暂时无法确认好友关系，消息发送已暂停。';
+                    // ★ 第二轮修复（聊-7）：关系查不到时不要永久锁死输入框。
+                    //   “重试”失败原因不变时会原地打转。服务端发消息时自己会
+                    //   校验关系（assertCanSendDirectMessage），前端放开不会绕过
+                    //   拉黑/好友门禁，发送时由服务端裁决；提示与重试保留。
+                    if (input) input.disabled = false;
+                    if (send) send.disabled = false;
+                    if (attach) attach.disabled = false;
+                    if (message) message.textContent = '暂时无法确认好友关系，发送时将由服务端确认。';
                     if (actionButton) {
                         actionButton.hidden = false;
                         actionButton.textContent = '重试';
