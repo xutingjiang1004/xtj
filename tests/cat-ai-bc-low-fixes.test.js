@@ -42,3 +42,17 @@ test('B-07 chat composers use 16px font to avoid iOS auto-zoom', () => {
   const dtInput = css.slice(css.indexOf('.dt-input {'), css.indexOf('.dt-input::placeholder'));
   assert.match(dtInput, /font-size:\s*16px/);
 });
+
+// B-09: 主操作按钮缺键盘焦点可见样式 —— 发送键、返回键、头部按钮、
+// 学习/深入研究开关都要有 :focus-visible 轮廓（与 .ai-history-retry 同款）。
+test('B-09 main AI buttons have a visible keyboard focus outline', () => {
+  for (const sel of ['.ai-chat-send:focus-visible', '.ai-chat-back:focus-visible',
+    '.ai-chat-hist-btn:focus-visible', '.ai-chat-new-btn:focus-visible',
+    '.ai-chat-del-btn:focus-visible', '.ai-study-toggle:focus-visible',
+    '.ai-deep-think-toggle:focus-visible']) {
+    assert.ok(css.includes(sel), 'missing ' + sel);
+  }
+  const idx = css.indexOf('.ai-chat-send:focus-visible');
+  const block = css.slice(idx, css.indexOf('}', idx));
+  assert.match(block, /outline:\s*3px solid/);
+});

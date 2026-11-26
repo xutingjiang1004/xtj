@@ -1374,6 +1374,18 @@ html.xtj-reduce-motion .ai-rail-beat.is-open .ai-rail-reason {
   outline-offset: 2px;
 }
 
+/* B-09：主操作按钮键盘焦点可见样式（与 .ai-history-retry 同款轮廓）。 */
+.ai-chat-send:focus-visible,
+.ai-chat-back:focus-visible,
+.ai-chat-hist-btn:focus-visible,
+.ai-chat-new-btn:focus-visible,
+.ai-chat-del-btn:focus-visible,
+.ai-study-toggle:focus-visible,
+.ai-deep-think-toggle:focus-visible {
+  outline: 3px solid rgba(38, 156, 123, 0.32);
+  outline-offset: 2px;
+}
+
 .ai-history-loading .ai-chat-empty-visual {
   opacity: 0.72;
 }
