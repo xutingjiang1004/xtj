@@ -4138,7 +4138,7 @@
                           _roots.push(c);
                         }
                       });
-                      function _renderCommentNode(c, depth, parent) {
+                      function _renderCommentNode(c, depth, parent, forceReplyName) {
                         depth = typeof depth === 'number' ? depth : 0;
                         if (_seen[String(c.id)] || _count >= limit) return '';
                         _seen[String(c.id)] = true; _count++;
@@ -4151,6 +4151,11 @@
                         var isAiComment = c.user_name === 'cat_ai' && !!c.generated_by_ai;
                         // 只有回复的是“回复”（第三层起）才点名：第二层缩进已经表明在回上一条。
                         var replyToName = depth >= 2 && parent && !(parent.user_name === 'cat_ai' && parent.generated_by_ai) ? parent.user_name : (depth >= 2 && parent ? '小猫' : '');
+                        // E-M3: 超过 8 层被截断、或孤儿评论被当根追加时，没有缩进表明
+                        // 在回谁，强制点名父作者，避免它看起来像一条顶层评论。
+                        if (!replyToName && forceReplyName && parent) {
+                            replyToName = (parent.user_name === 'cat_ai' && parent.generated_by_ai) ? '小猫' : parent.user_name;
+                        }
                         var _kids = _childrenOf[String(c.id)] || [];
                         var _replies = '';
                         if (_kids.length && depth < 8 && _count < limit) {
@@ -4161,7 +4166,8 @@
                       }
                 var html = _roots.map(function(c) { return _renderCommentNode(c, 0); }).join('');
                 // Orphan/cyclic/deep historical replies stay readable without unbounded recursion.
-                pComms.forEach(function(c) { if (!_seen[String(c.id)] && _count < limit) html += _renderCommentNode(c, 0); });
+                // E-M3: 兜底追加时把父评论传进去并强制点名，避免超深回复看起来像顶层评论。
+                pComms.forEach(function(c) { if (!_seen[String(c.id)] && _count < limit) html += _renderCommentNode(c, 0, _byId[String(c.parent_comment_id)] || null, true); });
                 var totalComments = Number.isFinite(post.comment_count) ? post.comment_count : pComms.length;
                 if (!(options && options.detail) && totalComments > _count) html += '<button type="button" class="post-all-comments" data-post-id="' + escapeHtml(String(post.id)) + '" onclick="__xtjExpandPostComments(\'' + safeJsStr(String(post.id)) + '\', this)">展开其余 ' + (totalComments - _count) + ' 条评论</button>';
                 return '<div class="comments">' + html + '</div>';
