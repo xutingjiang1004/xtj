@@ -7046,14 +7046,16 @@ function renderProfileActivityList(kind) {
                             return {};
                         });
                     } catch (raceErr) {
-                        if (finished || session.cancelled || !currentDelete()) return;
+                        // E-M2: 关弹窗只关确认框，不丢弃在途的删除结果。请求超时后仍以
+                        // 权威接口确认一次：服务端已删就从列表移除，否则才恢复。
+                        if (finished || !currentDelete()) return;
                         if (deleteTimedOut) {
                             console.warn('[delBtn] delete request timed out; checking locally');
                             // The delete request may have reached the server before this
                             // browser timed out. Confirm with the authoritative endpoint
                             // before deciding whether to restore the optimistic UI.
                             var authoritativeStatus = await confirmPostDeleteStatus(targetPostId, identity);
-                            if (finished || session.cancelled || !currentDelete()) return;
+                            if (finished || !currentDelete()) return;
                             finished = true;
                             if (authoritativeStatus.confirmed && authoritativeStatus.deleted) {
                                 applyConfirmedPostDeletion(targetPostId, session);
@@ -7070,13 +7072,16 @@ function renderProfileActivityList(kind) {
                     } finally {
                         clearTimeout(deleteTimer);
                     }
-                    if (finished || session.cancelled || !currentDelete()) return;
+                    // E-M2: 成功回调不再因关过弹窗直接丢弃结果。关弹窗只是关了
+                    // 确认框，请求本身仍在途；服务端已确认删除就从列表移除，
+                    // 否则用户会看到一条其实已删的帖子，再点一次还报错。
+                    if (finished || !currentDelete()) return;
                     if (!deleteResponse.ok || !deleteResult.ok || (!deleteResult.deleted && !deleteResult.already_deleted)) {
                         finished = true;
                         if (!session.cancelled) cleanupDeleteSession({ toast: "删除失败: " + (deleteResult.error || "服务器未确认删除") });
                         return;
                     }
-                    if (session.cancelled || !currentDelete()) return;
+                    if (!currentDelete()) return;
                     finished = true;
                     applyConfirmedPostDeletion(targetPostId, session);
                 } catch (e) {
