@@ -2977,7 +2977,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       }
       if (!currentRequest()) return { ok: false, status: 0, error_code: 'aborted' };
       if (!resp.ok && !options.retry) {
-        try { console.warn('[AI] request failed', { method: method, url: url, status: resp.status, data: data }); } catch (e4) {}
+        try { console.warn('[AI] request failed', { method: method, url: url, status: resp.status, code: data && data.code }); } catch (e4) {}
       }
       return {
         ok: resp.ok && !(data && data.ok === false),

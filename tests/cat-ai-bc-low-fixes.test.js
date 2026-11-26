@@ -170,3 +170,14 @@ test('C-7 patchInnerHTML fallbacks never write raw HTML', () => {
     assert.match(src, /targetEl\.textContent = targetEl\.textContent/);
   }
 });
+
+// C-8: 日志收敛（观察项，只做一处最小收敛）—— sendOnce 的失败日志不再打
+// 完整 data 对象，只打 code/status；其余日志保持现状。
+test('C-8 failed-request log carries only code/status, not the full payload', () => {
+  const idx = source.indexOf("console.warn('[AI] request failed'");
+  assert.notEqual(idx, -1, 'missing request-failed log');
+  const line = source.slice(idx, source.indexOf('\n', idx));
+  assert.doesNotMatch(line, /data:\s*data/);
+  assert.match(line, /code:\s*data && data\.code/);
+  assert.match(line, /status:\s*resp\.status/);
+});
