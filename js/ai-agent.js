@@ -579,6 +579,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     oldestCursor: null,
     hasMore: false,
     sending: false,
+    // ★ A-M1：访客预检窄窗口锁，只覆盖 ensureGuestAiMode() 的 await 期间。
+    _sendPreflight: false,
     deletingConversations: new Set(),
     loading: false,
     loadingMore: false,
@@ -11193,11 +11195,20 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // Empty/invalid drafts must never interrupt a reply. A distinct valid send
     // replaces the active turn synchronously, including its auth/preflight phase.
     if (!text && !fileList.some(function(f) { return f && f.dataUrl; })) return;
+    // ★ A-M1：访客预检窄窗口锁。ensureGuestAiMode() 的 await 期间 S.sending
+    //   仍为 false，访客首次发送时两次点击会各进一次预检、开出两条流。
+    //   预检前同步置锁，入口处先查锁；S.sending=true 接管后释放，预检失败
+    //   的早退路径同样释放。锁只覆盖预检窗口，不影响「再次发送=打断上一条」
+    //   （打断判断在预检之后、S.sending=true 之前，原位置不动）。
+    if (S._sendPreflight) { try { notify('已发送，请勿重复点击'); } catch (eDupPreflight) {} return; }
     // ★ 2026-11-14：游客先确认 /guest-mode，避免 S.guestAi 尚未初始化时误拦（含带附件发送）
-    if (!readUserName() && !S.guestAi) { await ensureGuestAiMode(); }
-    if (!readUserName() && !S.guestAi) { notify('请先登录后再和小猫聊天'); return; }
-    if (!S.active) { notify('聊天面板未就绪，请重新打开后再发送'); return; }
-    if (text.length > 50000) { notify('消息过长，最多 50000 字符，请精简后重试'); return; }
+    if (!readUserName() && !S.guestAi) {
+      S._sendPreflight = true;
+      await ensureGuestAiMode();
+    }
+    if (!readUserName() && !S.guestAi) { S._sendPreflight = false; notify('请先登录后再和小猫聊天'); return; }
+    if (!S.active) { S._sendPreflight = false; notify('聊天面板未就绪，请重新打开后再发送'); return; }
+    if (text.length > 50000) { S._sendPreflight = false; notify('消息过长，最多 50000 字符，请精简后重试'); return; }
     // ★ 2026-10-29（按用户确认恢复旧行为）：小猫 AI 正在回复时再次发送，
     //   语义是「打断上一条，直接回答新问题」，不做排队。
     //   被打断的回复保留已生成的部分内容（preserveInterruptedTurn），用户问题不丢。
@@ -11218,7 +11229,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var sendCustomCfg = isCustomModelId(sendSettings.model) ? Object.assign({}, resolveCustomModelConfig(sendSettings.model)) : null;
     // Lock synchronously before the first await (auth/token acquisition), so
     // two clicks in the same event loop cannot create two streams.
+    // ★ A-M1：S.sending 接管后释放访客预检锁（S._sendPreflight）。
     S.sending = true;
+    S._sendPreflight = false;
     setAiSendBtnDisabled(false);
     if (S.pauseBtnEl) S.pauseBtnEl.style.display = '';
     // ★ 修复：遥测不再上传提问内容（原 30 字符随行为记录上行，AI 提问可能含敏感信息）
