@@ -105,7 +105,7 @@ test('pure image history turns reconcile with server vision_urls despite differe
   const helperStart = aiSource.indexOf('function stripAiHistoryAttachmentData');
   const helperEnd = aiSource.indexOf('function setAiHistoryCache', helperStart);
   assert.ok(helperStart >= 0 && helperEnd > helperStart, 'AI history helpers are present');
-  const context = vm.createContext({ Date, S: { messages: [] }, CONTEXT_LIMIT_NORMAL: 256, MSG_MAX_CHARS_NORMAL: 16000 });
+  const context = vm.createContext({ Date, S: { messages: [] }, CONTEXT_LIMIT_NORMAL: 256, MSG_MAX_CHARS_NORMAL: 16000, HISTORY_TOTAL_CHARS_MAX: 2000000 });
   vm.runInContext(aiSource.slice(helperStart, helperEnd) + '\nglobalThis.matchHistory = aiHistoryMessagesMatch; globalThis.buildHistory = buildAiConversationHistory; globalThis.reconcileHistory = reconcileAiHistoryPending;', context);
 
   const createdAt = '2026-09-29T12:00:00.000Z';
@@ -140,7 +140,7 @@ test('pure image history turns reconcile with server vision_urls despite differe
 test('history request excludes the current turn and keeps prior image attachments structured', () => {
   const helperStart = aiSource.indexOf('function stripAiHistoryAttachmentData');
   const helperEnd = aiSource.indexOf('function setAiHistoryCache', helperStart);
-  const context = vm.createContext({ Date, S: { messages: [] }, CONTEXT_LIMIT_NORMAL: 256, MSG_MAX_CHARS_NORMAL: 16000 });
+  const context = vm.createContext({ Date, S: { messages: [] }, CONTEXT_LIMIT_NORMAL: 256, MSG_MAX_CHARS_NORMAL: 16000, HISTORY_TOTAL_CHARS_MAX: 2000000 });
   vm.runInContext(aiSource.slice(helperStart, helperEnd) + '\nglobalThis.buildHistory = buildAiConversationHistory;', context);
   const prior = {
     role: 'user',

@@ -4918,6 +4918,10 @@
             }
             window.isSystemPost = isSystemPost;
 
+            // ★ E-H1 修复：回退查询的显式字段白名单，与 /api/feed 的
+            //   selectFields 对齐但去掉 actor_key（前端不需要，也不应
+            //   把内部键拉到浏览器）。此前这里用 select("*") 整行拉取。
+            var FEED_FALLBACK_SELECT = 'id, user_name, media_type, media_url, content, created_at, updated_at, visibility, is_deleted, views, is_pinned, pinned_at, location_name, location_province, location_city, location_district, location_level, ip_province, ip_city, ip_region_text, ip_region_status, ip_lookup_started_at';
             function getFeedBasePostQuery() {
                 if (!sb) {
                     return {
@@ -4925,7 +4929,7 @@
                     };
                 }
                 return applyVisiblePostQueryFilters(
-                    sb.from("posts").select("*")
+                    sb.from("posts").select(FEED_FALLBACK_SELECT)
                 ).order("created_at", { ascending: false });
             }
 
@@ -5076,7 +5080,13 @@
                 if (!usedApi) {
                     // 回退：Supabase 直连（RLS 仅返回公开帖子）
                     // VPN 下 supabase.co 也可能半开连接，必须有硬超时，否则永久转圈
+                    // ★ E-H1 修复：回退路径也要执行与 /api/feed 相同的访客限制
+                    //   （GUEST_FEED_LIMIT=10）。此前 API 失败后访客可无限翻页。
+                    var fallbackIsGuest = !knownUser && !hasToken;
+                    var fallbackGuestLimit = 10;
+                    if (fallbackIsGuest) feedGuestLimited = true;
                     var end = start + FEED_PAGE_SIZE - 1;
+                    if (fallbackIsGuest) end = Math.min(end, fallbackGuestLimit - 1);
                     var fallbackQuery = getFeedBasePostQuery();
                     // E-M4: 回退也全程走游标。offset/range 翻页在并发发帖/删帖时会
                     // 漂移（重复或漏帖）。无游标时不用 offset 翻页：已加载过帖子
@@ -5092,17 +5102,20 @@
                         fallbackQuery = fallbackQuery
                             .or('created_at.lt.' + fallbackCursor.created_at + ',and(created_at.eq.' + fallbackCursor.created_at + ',id.lt.' + fallbackCursor.id + ')')
                             .order('id', { ascending: false })
-                            .limit(FEED_PAGE_SIZE);
+                            .limit(fallbackIsGuest ? Math.max(1, fallbackGuestLimit - start) : FEED_PAGE_SIZE);
                     } else if (start > 0) {
                         fallbackQuery = fallbackQuery.range(0, FEED_PAGE_SIZE - 1);
                     } else {
                         fallbackQuery = fallbackQuery.range(start, end);
                     }
-                    var postRes = await withTimeout(
-                        fallbackQuery,
-                        FEED_NET_TIMEOUT_MS,
-                        'feed-supabase'
-                    );
+                    // 访客已到 10 条上限：不再发查询，直接空页并结束，末尾显示登录入口。
+                    var postRes = (fallbackIsGuest && start >= fallbackGuestLimit)
+                        ? { data: [], error: null }
+                        : await withTimeout(
+                            fallbackQuery,
+                            FEED_NET_TIMEOUT_MS,
+                            'feed-supabase'
+                        );
                     if (requestId && requestId !== feedLoadRequestId) return null;
                     if (postRes.error) throw postRes.error;
                     var fallbackPosts = postRes.data || [];

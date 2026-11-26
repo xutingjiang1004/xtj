@@ -27,15 +27,18 @@ async function saveCustomChatTurn(options) {
   const userExtra = { ...identity, chat_mode: 'normal', web_search: webSearch === true, vision_urls: visionUrls };
   const assistantExtra = { chat_mode: 'normal', web_search: webSearch === true,
     ...identity, followups: normalizeFollowups(options.followups, message),context_memory:options.contextMemory,context_budget:options.contextBudget, process_events: processEvents, site_cards: (cards || []).slice(0, 32) };
+  // ★ A-M2：内部续写请求（continuation）不把模板句存为用户轮次，只存助手回复。
   const rows = [
-    { user_name: userName, content: String(message).slice(0, 60000), media_type: marker,
-      media_url: buildMeta('user', convId, null, null, 1, null, 0, userExtra),
-      actor_key: 'ai_msg_conv_' + convId + '_user_' + userName + '_' + now },
     { user_name: userName, content: String(content).slice(0, 500000), media_type: marker,
       media_url: buildMeta('assistant', convId, {...options.usage,model, thinking_mode: thinkingMode},
         thinkingMode === 'off' ? '' : String(reasoning || '').slice(0, 400000), 2, null, thinkingElapsedMs, assistantExtra),
       actor_key: 'ai_msg_conv_' + convId + '_agent_' + userName + '_' + (now + 1) }
   ];
+  if (!options.continuation) rows.unshift(
+    { user_name: userName, content: String(message).slice(0, 60000), media_type: marker,
+      media_url: buildMeta('user', convId, null, null, 1, null, 0, userExtra),
+      actor_key: 'ai_msg_conv_' + convId + '_user_' + userName + '_' + now }
+  );
   try {
     const result = await db.from('posts').insert(rows);
     return !!result && !result.error;
@@ -50,12 +53,14 @@ async function saveInterruptedChatTurn(options) {
   const extra = { chat_mode: options.chatMode === 'deep_think' ? 'deep_think' : 'normal', interrupted: true, complete: false,
     finish_reason: options.finishReason || 'cancelled', client_request_id: turnId,context_memory:options.contextMemory,context_budget:options.contextBudget };
   if (options.chatMode === 'deep_think') Object.assign(extra, { deep_think: true, thinking_log: options.thinkingLog || [], agent_count: options.agentCount || 0 });
-  const rows = [{ user_name: userName, content: message.slice(0, 60000), media_type: marker,
+  // ★ A-M2：内部续写请求中断时也不把模板句存为用户轮次；无任何可存内容时不落库。
+  const rows = [];
+  if (!options.continuation) rows.push({ user_name: userName, content: message.slice(0, 60000), media_type: marker,
     media_url: buildMeta('user', convId, null, null, 1, null, 0,
       Object.assign({}, extra, { vision_urls: options.visionUrls || [],
         ...(typeof options.attachmentContext === 'string' && options.attachmentContext ? { attachment_context: options.attachmentContext.slice(0,60000) } : {}) })),
     actor_key: 'ai_msg_conv_' + convId + '_interrupted_' + userName + '_' + turnId + '_user',
-    created_at: new Date(stamp).toISOString() }];
+    created_at: new Date(stamp).toISOString() });
   const content = String(options.content || '').slice(0, 500000);
   const reasoning = String(options.reasoning || '').slice(0, 400000);
   if (content || reasoning || (options.processEvents || []).length) rows.push({
@@ -66,6 +71,7 @@ async function saveInterruptedChatTurn(options) {
     actor_key: 'ai_msg_conv_' + convId + '_interrupted_' + userName + '_' + turnId + '_assistant',
     created_at: new Date(stamp + 1).toISOString()
   });
+  if (!rows.length) return false;
   try {
     const result = await db.from('posts').insert(rows);
     return !!result && (!result.error || result.error.code === '23505');

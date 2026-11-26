@@ -30,7 +30,15 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   var AI_DISPLAY_NAME = '小猫';
   // Keep the first network payload small; older messages remain available by scrolling.
   var HISTORY_PAGE_SIZE = 10;
+  // ★ D-H3：内存历史与 DOM 上限。分页上滑会无限前置加载，实时发送也会一条
+  //   条追加，S.messages 与 .ai-msg 节点此前没有任何上限。超限时剪最旧的，
+  //   只保留最近 500 条；服务端 history_scan_limit 会先拦超大扫描，500 条
+  //   在其内，正常回翻不受影响。
+  var AI_HISTORY_MAX_MESSAGES = 500;
   var CONFIG_CACHE_TTL = 5 * 60 * 1000;
+  // ★ D-M5：历史缓存 TTL（30 分钟）。写入时就有 cached_at，但此前从未被读取，
+  //   旧缓存会无限期用于首屏绘制；过期视为无缓存，改走服务端历史。
+  var AI_HISTORY_CACHE_TTL_MS = 30 * 60 * 1000;
   var CONFIG_REFRESH_INTERVAL = 5 * 60 * 1000; // ★ U3: 与 TTL 保持一致，避免每分钟做无用功
   var CONV_ID_KEY = 'xtj_ai_last_conversation_id';
   var REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)';
@@ -93,6 +101,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   var CONTEXT_LIMIT_MAX = 2048;
   var MSG_MAX_CHARS_NORMAL = 4000;
   var MSG_MAX_CHARS_MAX = 32000;
+  // ★ D-H2：历史总字符预算。单条截断 + 附件 68MB 预算之外，此前没有历史总
+  //   字符上限：思考 Max 理论可达 2048 条 × 32000 字 ≈ 65M 字符，远超服务端
+  //   80MB JSON 上限与模型上下文窗口。2M 字中文约 6MB，留足余量；普通模式
+  //   上限 256 条 × 4000 字 ≈ 102 万字不受影响。超预算时从最旧的轮次开始
+  //   丢弃，最旧的保留轮次标记 context_truncated。
+  var HISTORY_TOTAL_CHARS_MAX = 2000000;
 
   // ── 自定义第三方模型（千问/豆包/DeepSeek/Kimi/智谱/OpenAI/自定义）────────────
   // 模型 Key 加密保存在服务端；浏览器缓存元数据与账号引用。
@@ -495,7 +509,16 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     return {networkMode:S.networkMode==='off'?'off':S.webSearchEnabled?'required':'auto'};
   }
   var modelCapabilityCache = new Map();
-  function capabilityKey(config) { return JSON.stringify([config.provider,config.base_url,config.model,config.model_uid||config.uid||'',config.config_revision||'',config.api_key||'']); }
+  // C-1：缓存键只拼密钥的哈希，不拼明文。FNV-1a 32 位 + 长度即可区分不同
+  // 密钥（仅作缓存键标识，不作密码学用途）；空密钥返回 ''。
+  function hashApiKeyForCache(key) {
+    var s = String(key || '');
+    if (!s) return '';
+    var h = 0x811c9dc5;
+    for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+    return 'h' + (h >>> 0).toString(16) + ':' + s.length;
+  }
+  function capabilityKey(config) { return JSON.stringify([config.provider,config.base_url,config.model,config.model_uid||config.uid||'',config.config_revision||'',hashApiKeyForCache(config.api_key||'')]); }
   function resolveCustomModelConfig(mid) {
     if (!isCustomModelId(mid)) return null;
     var uid = mid.slice(CUSTOM_MODEL_PREFIX.length);
@@ -568,9 +591,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     oldestCursor: null,
     hasMore: false,
     sending: false,
+    // ★ A-M1：访客预检窄窗口锁，只覆盖 ensureGuestAiMode() 的 await 期间。
+    _sendPreflight: false,
     deletingConversations: new Set(),
     loading: false,
     loadingMore: false,
+    // ★ A-L1：历史分页待处理标志。上翻时若正在加载，记下来等本页完成再补拉一次。
+    _historyPagePending: false,
     thinkingMode: resolveInitialThinkingMode(),
     // Normal chat has a bounded, tool-aware middle gear.  It is intentionally
     // separate from deep research so the latter remains a dedicated flow.
@@ -660,7 +687,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     selectedModel: resolveInitialModel(),
     _userPickedThinkingMode: false,
     _userPickedModel: false,
-    // AI 额度 / Pro（服务端权威；前端 90s 轮询 + done 事件即时刷新）
+    // AI 额度 / Pro（服务端权威；前端 20s 轮询 + done 事件即时刷新）
     quota: null,
     quotaFetchedAt: 0,
     _quotaTimer: null,
@@ -668,7 +695,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     _quotaInflightStartedAt: 0
   };
 
-  var QUOTA_POLL_MS = 30000;
+  // ★ D-L2：配额缓存窗口统一常量 20000ms。三处原值：fetchAiQuota 内
+  //   20000ms（inflight 复用/去重）与 15000ms（缓存直返）两档、轮询
+  //   30000ms。取 20000ms 的理由：三处已有两处用它，只改动两处；轮询由
+  //   30s 加密到 20s，额度显示最多滞后 20s、更及时，/quota 是轻量 GET；
+  //   缓存窗口 15s→20s，与轮询周期对齐，轮询到达时缓存刚过期、恰好拉新。
+  var AI_QUOTA_CACHE_MS = 20000;
   var FREE_TOKEN_DEFAULT = 100000;
   var PRO_TOKEN_DEFAULT = 1000000;
   var FREE_SEARCH_DEFAULT = 10;
@@ -870,13 +902,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
   async function fetchAiQuota(force) {
     
-    if (!force && S.quota && (Date.now() - S.quotaFetchedAt) < 20000 && S._quotaInflight) {
+    if (!force && S.quota && (Date.now() - S.quotaFetchedAt) < AI_QUOTA_CACHE_MS && S._quotaInflight) {
       return S._quotaInflight;
     }
-    if (!force && S.quota && (Date.now() - S.quotaFetchedAt) < 15000) {
+    if (!force && S.quota && (Date.now() - S.quotaFetchedAt) < AI_QUOTA_CACHE_MS) {
       return S.quota;
     }
-    if (S._quotaInflight && (Date.now() - S._quotaInflightStartedAt) < 20000) return S._quotaInflight;
+    if (S._quotaInflight && (Date.now() - S._quotaInflightStartedAt) < AI_QUOTA_CACHE_MS) return S._quotaInflight;
     S._quotaInflightStartedAt = Date.now();
     var quotaOwner = customModelIdentity();
     var inflight = (async function() {
@@ -910,13 +942,39 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     S._quotaTimer = setInterval(function() {
       if (!S.active) return;
       fetchAiQuota(false);
-    }, QUOTA_POLL_MS);
+    }, AI_QUOTA_CACHE_MS);
   }
 
   function stopQuotaPolling() {
     if (S._quotaTimer) {
       try { clearInterval(S._quotaTimer); } catch (e) {}
       S._quotaTimer = null;
+    }
+  }
+
+  // ★ D-M4：三个轮询定时器（状态 60s、配置 5 分钟、配额 30s）统一启停。
+  //   切 tab 时 S.active 仍为 true，配额回调的 `if (!S.active) return`
+  //   拦不住、状态/配置回调根本没有守卫，所以 hide 时必须直接停掉，
+  //   restore 时重建。流式请求本身不受影响（只停轮询，流继续跑）。
+  function startAiPollTimers() {
+    if (S.statusTimer) {
+      try { clearInterval(S.statusTimer); } catch (e) {}
+    }
+    S.statusTimer = setInterval(updateAiStatus, 60000);
+    if (S._configRefreshTimer) { try { clearInterval(S._configRefreshTimer); } catch (e) {} }
+    S._configRefreshTimer = setInterval(function() { ensureConfig().then(applyConfigToUI).catch(function(){}); }, CONFIG_REFRESH_INTERVAL);
+    startQuotaPolling();
+  }
+
+  function stopAiPollTimers() {
+    stopQuotaPolling();
+    if (S.statusTimer) {
+      try { clearInterval(S.statusTimer); } catch (e) {}
+      S.statusTimer = null;
+    }
+    if (S._configRefreshTimer) {
+      try { clearInterval(S._configRefreshTimer); } catch (e) {}
+      S._configRefreshTimer = null;
     }
   }
 
@@ -1372,7 +1430,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // ★★★ 2026-09-15 修复（P0-2「工具已返回结果，动画仍一直转」）：
     //   原实现 `node.querySelector('.ai-search-status')` **只取第一个**匹配节点。
     //   而实际渲染中会先后插入多个状态容器：
-    //     search_status(8223) / multi_agent(8171) / search_supplement(8194)
+    //     search_status / multi_agent / search_supplement（行号会随文件增长过期，不再标注）
     //   —— 各自 replaceChild 时只处理自己那一个节点，于是同一气泡内可能
     //   同时存在 2~3 个 .ai-search-status，旧逻辑只收敛第一个，
     //   剩下的永久停留在"联网中…/正在搜索"，动画无限闪烁。
@@ -1432,6 +1490,21 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       return ({ png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', ico: 'image/x-icon', avif: 'image/avif', svg: 'image/svg+xml' })[ext] || 'image/png';
     }
     return '';
+  }
+
+  // C-9：扩展名之外再核对 file.type。类型与扩展名期望的 MIME 明显不符时
+  // 跳过官方 Files API 上传，回落本地文本解析——不阻止用户发送。
+  // 不做魔数检测；不上报 MIME 的系统（type 为空）、查不到期望 MIME 的
+  // 扩展名、通用 octet-stream 一律放行；csv 认常见的厂商别名。
+  var AI_FILE_MIME_ALIASES = { 'text/csv': ['text/csv', 'application/csv', 'application/vnd.ms-excel'] };
+  function aiFileMimeMatchesExt(name, type) {
+    var t = String(type || '').toLowerCase().split(';')[0].trim();
+    if (!t) return true;
+    var expected = mimeFromFilename(name);
+    if (!expected) return true;
+    if (t === expected || t === 'application/octet-stream') return true;
+    var aliases = AI_FILE_MIME_ALIASES[expected] || [];
+    return aliases.indexOf(t) >= 0;
   }
 
   function aiAttachmentBytes(file) {
@@ -2201,11 +2274,15 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     };
   }
 
-  function upgradeEmptyStateAvatar(scope) {
+  // B-06：只在确有头像 URL 时才升级重画。无 URL 时重画会把 buildEmptyState
+  // 刚画好的头像再刷成 SVG 默认图，造成一次闪烁；已有 URL 头像的节点也不重复画。
+  function upgradeEmptyStateAvatar(scope, avatarUrl, avatarVersion) {
     if (!scope || !scope.querySelectorAll) return;
+    if (!avatarUrl) return;
     var nodes = scope.querySelectorAll('.ai-chat-empty-emoji');
     for (var i = 0; i < nodes.length; i++) {
-      renderCatAvatarNode(nodes[i], 'ai-chat-empty-avatar');
+      if (nodes[i].querySelector('.ai-avatar-image')) continue;
+      renderCatAvatarNode(nodes[i], 'ai-chat-empty-avatar', avatarUrl, avatarVersion);
     }
   }
 
@@ -2213,7 +2290,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     if (!container) return null;
     var node = buildEmptyState(tipText);
     container.appendChild(node);
-    upgradeEmptyStateAvatar(container);
+    upgradeEmptyStateAvatar(container, S.config && S.config.avatar_url, S.config && S.config.avatar_version);
     return node;
   }
 
@@ -2438,6 +2515,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var attachmentCount = Math.min(10, currentAttachmentCount);
     var result = [];
     var charCap = Math.max(1, Number(maxChars) || MSG_MAX_CHARS_NORMAL);
+    // ★ D-H2：历史总字符预算（见 HISTORY_TOTAL_CHARS_MAX）。本循环由新到旧
+    //   遍历，先到的最新轮次优先保留；超预算的更旧轮次直接丢弃并计数。
+    var totalCharsBudget = Math.max(1, Number(HISTORY_TOTAL_CHARS_MAX) || 2000000);
+    var totalCharsUsed = 0;
+    var historyDropped = 0;
 
     for (var hi = candidates.length - 1; hi >= 0; hi--) {
       var item = candidates[hi];
@@ -2470,6 +2552,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var contextFeatures = managed ? assistantFeatures() : null;
       var entry = { role: itemRole, content: contextFeatures && contextFeatures.historyExcerpt ? contextFeatures.historyExcerpt(itemContent,charCap) : itemContent.slice(0,charCap) };
       if(managed){entry.context_id=String(item.client_request_id||item.id||'local-'+hi);if(itemContent.length>charCap)entry.context_truncated=true;}
+      // ★ D-H2：超总预算时丢弃本条及更旧的轮次（循环由新到旧，丢的都是最旧的）。
+      var entryChars = String(entry.content || '').length;
+      if (totalCharsUsed + entryChars > totalCharsBudget) { historyDropped++; continue; }
+      totalCharsUsed += entryChars;
       if (forwarded.length) entry.attachments = forwarded;
       if (Array.isArray(item.vision_urls) && item.vision_urls.length && !forwarded.length) {
         entry.vision_urls = [];
@@ -2484,6 +2570,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       result.push(entry);
     }
     result.reverse();
+    // ★ D-H2：超预算丢弃过更旧轮次时，在最旧的保留轮次上标记截断，
+    //   让调用方/服务端知道历史是不完整的（只保留了最近的部分）。
+    if (historyDropped > 0 && result.length) result[0].context_truncated = true;
     return result;
   }
 
@@ -2595,6 +2684,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (!str) return null;
       var obj = JSON.parse(str);
       if (!obj) return null;
+      // ★ D-M5：超过 TTL 的缓存视为过期，不再用于首屏绘制。无 cached_at 的
+      //   旧格式条目（cached_at 为 0）同样视为过期。
+      var cachedAt = (obj && obj.cached_at) || 0;
+      if (!cachedAt || (Date.now() - cachedAt) > AI_HISTORY_CACHE_TTL_MS) return null;
       var rawMsgs = Array.isArray(obj) ? obj : (obj.messages && Array.isArray(obj.messages) ? obj.messages : null);
       if (!rawMsgs || !rawMsgs.length) return null;
       if (obj.conversation_id && cid && obj.conversation_id !== cid && obj.conversation_id !== 'default') return null;
@@ -2637,7 +2730,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
   // ★ activeRenderers 按通道隔离：普通聊天与深页流式渲染共用同一个
   // S.activeRenderers，深页取消/完成时只能清理 deep 通道的渲染器，
-  // 否则会误伤普通聊天正在流式输出的渲染器（暂停/继续按钮与
+  // 否则会误伤普通聊天正在流式输出的渲染器（停止/继续按钮与
   // abortAllAiRequests 的 cancel 兜底都依赖数组中的活跃渲染器）。
   function resetActiveRenderersByChannel(channel) {
     var keep = [];
@@ -2718,7 +2811,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     S.activeRenderers = channelOnly
       ? (S.activeRenderers || []).filter(function(r) { return r && r.channel === 'deep'; })
       : [];
-    if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
+    if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '停止'; }
   }
 
   // 深入研究与主聊天共用 S 状态但互为独立流程：
@@ -2899,7 +2992,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       }
       if (!currentRequest()) return { ok: false, status: 0, error_code: 'aborted' };
       if (!resp.ok && !options.retry) {
-        try { console.warn('[AI] request failed', { method: method, url: url, status: resp.status, data: data }); } catch (e4) {}
+        try { console.warn('[AI] request failed', { method: method, url: url, status: resp.status, code: data && data.code }); } catch (e4) {}
       }
       return {
         ok: resp.ok && !(data && data.ok === false),
@@ -2959,7 +3052,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var pending = payload.filter(function(a) {
       return a && !a.file_id && !/^image\//i.test(String(a.type || '')) &&
         typeof a.data_url === 'string' && a.data_url.indexOf('data:') === 0 &&
-        /\.(pdf|docx?|pptx?|xlsx?|txt|md|csv|json|xml|yaml|ya?ml|log|epub|mobi|py|js|ts|java|c|cpp|h|sql|html?|css|rtf|srt|vtt)$/i.test(String(a.name || ''));
+        /\.(pdf|docx?|pptx?|xlsx?|txt|md|csv|json|xml|yaml|ya?ml|log|epub|mobi|py|js|ts|java|c|cpp|h|sql|html?|css|rtf|srt|vtt)$/i.test(String(a.name || '')) &&
+        aiFileMimeMatchesExt(a.name, a.type);
     });
     if (!pending.length) return;
     var cursor = 0;
@@ -4763,7 +4857,68 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   // ★ 重新生成：定位当前 assistant 消息之前最近的一条用户消息，重新发送
   //   live 会话中的用户消息带有 attachments（含图片 data URL），可原样复用；
   //   历史/跨端加载的消息无附件，则退回纯文本重发。
-  function triggerRegenerate(messagesEl, anchorMsg) {
+  // ★ A-M3：附件里是否还有可直接恢复的 data（可恢复预览/重发）。
+  function regenerateAttachmentsUsable(atts) {
+    return !!(atts && atts.some(function(a) { return a && (a.data_url || a.dataUrl); }));
+  }
+  // ★ A-M3：从本地 vision_urls 重建附件（与 loadHistory 的服务端重建同构）。
+  function rebuildAttachmentsFromVisionUrls(msg) {
+    if (!msg || !Array.isArray(msg.vision_urls) || !msg.vision_urls.length) return null;
+    var atts = [];
+    for (var vi = 0; vi < msg.vision_urls.length; vi++) {
+      var url = String(msg.vision_urls[vi] || '');
+      if (url.indexOf('data:') !== 0) continue;
+      var mime = 'image/png';
+      var mm = url.match(/^data:([^;,]+);/);
+      if (mm && mm[1]) mime = mm[1];
+      atts.push({ name: '图片' + (vi + 1), type: mime, data_url: url });
+    }
+    return atts.length ? atts : null;
+  }
+  // ★ A-M3：拉服务端历史，用该轮次重建的附件覆盖本地已被剥掉的附件。
+  //   先等正在进行的加载完成，再拉首屏历史（锚点轮次通常在最近 10 条内）；
+  //   按 client_request_id/id 找轮次，找不到时按去图后的纯文本兜底匹配。
+  async function rebuildRegenerateAttachments(messagesEl, userMsg, plain) {
+    var waited = 0;
+    while ((S.loading || S.loadingMore) && waited < 3000) {
+      await new Promise(function(resolve) { setTimeout(resolve, 100); });
+      waited += 100;
+    }
+    if (!S.loading && !S.loadingMore) {
+      try { await loadHistory(messagesEl); } catch (eHist) { return null; }
+    }
+    var key = userMsg && String(userMsg.client_request_id || userMsg.id || '');
+    var list = Array.isArray(S.messages) ? S.messages : [];
+    var textFallback = null;
+    for (var i = 0; i < list.length; i++) {
+      var m = list[i];
+      if (!m || m.role !== 'user') continue;
+      var match = false;
+      if (key) match = String(m.client_request_id || m.id || '') === key;
+      else if (m === userMsg) match = true;
+      if (!match && plain) {
+        var mPlain = String(m.content || '')
+          .replace(/!\[[^\]]*\]\(data:[^)]+\)/g, ' ')
+          .replace(/\[图片:[^\]]*\]/g, ' ')
+          .replace(/\[文件:[^\]]*\]/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+        if (mPlain === plain) textFallback = m;
+      }
+      if (!match) continue;
+      if (m.attachments && regenerateAttachmentsUsable(m.attachments)) return m.attachments;
+      var rebuilt = rebuildAttachmentsFromVisionUrls(m);
+      if (rebuilt) return rebuilt;
+      return null;
+    }
+    if (textFallback) {
+      if (textFallback.attachments && regenerateAttachmentsUsable(textFallback.attachments)) return textFallback.attachments;
+      return rebuildAttachmentsFromVisionUrls(textFallback);
+    }
+    return null;
+  }
+
+  async function triggerRegenerate(messagesEl, anchorMsg) {
     try {
       if (S.sending) { try { notify('请等待当前回复完成后重试'); } catch (eRg) {} return; }
       var msgs = Array.isArray(S.messages) ? S.messages : [];
@@ -4785,8 +4940,24 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         .trim();
       var atts = (userMsg.attachments && userMsg.attachments.length) ? userMsg.attachments : null;
       if (!plain && !atts) { try { notify('这条消息无法重新生成'); } catch (eEmp) {} return; }
+      // ★ A-M3：附件优先用服务端历史重建。缓存恢复的轮次附件 data_url 已被
+      //   sanitizeCacheMsgs 剥掉（只剩 data_unavailable），直接重发会静默丢图。
+      //   ① 本地 vision_urls 还有真实 data 时先重建；② 否则拉服务端历史
+      //   （loadHistory 会把 vision_urls 转回 attachments）再找该轮次；
+      //   ③ 确实找不回、且还有文字可发时明确提示，仅按文字重新生成。
+      var sendAtts = atts;
+      if (atts && !regenerateAttachmentsUsable(atts)) {
+        sendAtts = rebuildAttachmentsFromVisionUrls(userMsg);
+        if (!sendAtts) {
+          try { sendAtts = await rebuildRegenerateAttachments(messagesEl, userMsg, plain); } catch (eRebuild) { sendAtts = null; }
+        }
+        if (!sendAtts && plain) {
+          try { notify('原附件图片已无法恢复，将仅按文字重新生成'); } catch (eLost) {}
+        }
+      }
+      if (!plain && !sendAtts) { try { notify('这条消息无法重新生成'); } catch (eEmp2) {} return; }
       if (typeof S._resendFn === 'function') {
-        S._resendFn(plain || raw, atts);
+        S._resendFn(plain || raw, sendAtts);
       } else {
         try { notify('重新生成暂不可用，请手动重发'); } catch (eNoFn) {}
       }
@@ -5180,7 +5351,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           targetEl.__xtjStable = { html: stable, nodes: whole.childNodes.length };
         }
       }
-    } catch (_) { targetEl.innerHTML = html; targetEl.__xtjStable = null; }
+    } catch (_) {
+      // C-7：回退不再直接写原始 innerHTML。优先再过一次 sanitize 后写；
+      // 取不到 sanitizer 时只保留已有内容（textContent 自赋值不注入新 HTML）。
+      var _san = window.XtjAiCore && window.XtjAiCore.Markdown && window.XtjAiCore.Markdown.sanitize;
+      if (typeof _san === 'function') { try { targetEl.innerHTML = _san(html); } catch (eSan) { targetEl.textContent = targetEl.textContent; } }
+      else targetEl.textContent = targetEl.textContent;
+      targetEl.__xtjStable = null;
+    }
     targetEl.__xtjStreamHtml = html;
   }
 
@@ -7288,8 +7466,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       S._dtFetchTimeoutTimer = null;
     }
     var dtPauseBtn = document.getElementById('dtPauseBtn');
-    if (dtPauseBtn) { dtPauseBtn.style.display = 'none'; dtPauseBtn.textContent = '暂停'; }
-    if (!isDeepPageCancel && S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
+    if (dtPauseBtn) { dtPauseBtn.style.display = 'none'; dtPauseBtn.textContent = '停止'; }
+    if (!isDeepPageCancel && S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '停止'; }
     // Fire-and-forget cancel to server.
     try {
       var tokenPromise = typeof window.ensureUserToken === 'function'
@@ -8899,7 +9077,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           // rendering is complete. Do not mutate the normal-chat lock here.
           if (progressCard) { try { progressCard._done = true; } catch (e) {} }
           try {
-            finalModelRef.value = evt.model || 'deepseek-flash';
+            finalModelRef.value = evt.model || DEFAULT_AI_MODEL;
             finalThinkingModeRef.value = evt.thinking_mode || opts.defaultThinkingMode || 'max';
             aiContentRef.value = evt.sanitized_content || evt.content || '';
             if (finalMetaRef) finalMetaRef.value = evt;
@@ -9498,12 +9676,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (!S.sending) S.paused = false;
       resetActiveRenderersByChannel('deep');
       var dtPB = document.getElementById('dtPauseBtn');
-      if (dtPB) { dtPB.style.display = 'none'; dtPB.textContent = '暂停'; }
+      if (dtPB) { dtPB.style.display = 'none'; dtPB.textContent = '停止'; }
     }
 
-    // 显示暂停按钮
+    // 显示停止按钮
     var dtPauseBtn = document.getElementById('dtPauseBtn');
-    if (dtPauseBtn) { dtPauseBtn.style.display = ''; dtPauseBtn.textContent = '暂停'; }
+    if (dtPauseBtn) { dtPauseBtn.style.display = ''; dtPauseBtn.textContent = '停止'; }
 
     // 1. 追加 user 消息（手动创建 .dt-msg.user，不使用气泡）
     var empty = dtMessagesEl.querySelector('.dt-empty');
@@ -9598,7 +9776,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (!isCurrentDeepSend()) return;
       try { controller.abort('timeout'); } catch (e) {}
       controller._abortReason = 'timeout';
-    }, 1800000);
+    }, 300000);
     S._dtFetchTimeoutTimer = dtFetchTimeoutTimer;
     if (dtFetchTimeoutTimer && dtFetchTimeoutTimer.unref) dtFetchTimeoutTimer.unref();
 
@@ -9983,7 +10161,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var text = String(input.value || '').trim();
       var fData = _dtFileData;
       if (!text && !fData) return;
-      if (text.length > 50000) { notify('消息过长，最多 50000 字符'); return; }
+      if (text.length > 50000) { notify('消息过长，最多 50000 字符，请精简后重试'); return; }
       if (fData) {
         fData.onSuccess = function() {
           if (_dtFileData !== fData) return;
@@ -10006,7 +10184,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     function renderDtFiles(){
       if(!filePreview)return;filePreview.replaceChildren();var files=Array.isArray(_dtFileData)?_dtFileData:(_dtFileData?[_dtFileData]:[]);
       filePreview.style.display=files.length?'flex':'none';filePreview.style.flexWrap='wrap';
-      files.forEach(function(file,index){var chip=el('div',{class:'ai-file-chip'});if(String(file.type||'').startsWith('image/'))chip.appendChild(el('img',{class:'ai-file-thumb',src:file.dataUrl,alt:''}));chip.appendChild(el('span',{class:'ai-file-info',text:file.name+' · '+Math.ceil(aiAttachmentBytes(file)/1024)+'KB'}));var remove=el('button',{type:'button',class:'ai-file-remove','aria-label':'移除 '+file.name,text:'×'});remove.addEventListener('click',function(){_dtFileSelectionSeq++;_dtFilesLoading=false;var next=files.filter(function(_,i){return i!==index;});_dtFileData=next.length?next:null;renderDtFiles();});chip.appendChild(remove);filePreview.appendChild(chip);});
+      files.forEach(function(file,index){var chip=el('div',{class:'ai-file-chip'});if(String(file.type||'').startsWith('image/'))chip.appendChild(el('img',{class:'ai-file-thumb',src:file.dataUrl,alt:''}));chip.appendChild(el('span',{class:'ai-file-info',text:file.name+' · '+Math.ceil(aiAttachmentBytes(file)/1024)+'KB'}));var remove=el('button',{type:'button',class:'ai-file-remove','aria-label':'移除 '+file.name,text:'×'});remove.addEventListener('click',function(){_dtFileSelectionSeq++;_dtFilesLoading=false;var next=files.filter(function(_,i){return i!==index;});_dtFileData=next.length?next:null;renderDtFiles();});chip.appendChild(remove);filePreview.appendChild(chip);});if(files.length)filePreview.appendChild(el('div',{class:'ai-file-third-party-note',text:'文件将发送给第三方模型厂商处理'}));
     }
     function acceptDtFiles(rawFiles){
       var fileSeq=++_dtFileSelectionSeq,fileLife=S.dtLifecycleId,fileOwner=window.currentUser||'',fileAuthEpoch=readAiAuthEpoch();
@@ -10114,7 +10292,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
     if (sendBtn) addDtListener(sendBtn, 'click', dtDoSend);
 
-    // 暂停按钮：真正中止（取消）SSE 请求 + 暂停渲染
+    // 停止按钮：真正中止（取消）SSE 请求 + 停止渲染
     if (pauseBtn) {
       addDtListener(pauseBtn, 'click', function(ev) {
         ev.preventDefault();
@@ -11065,8 +11243,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   }
 
   async function handleSendMessage(input, sendBtn, messagesEl, fileData, onAccepted, options) {
-    var text = String(input.value || '').trim();
-    var originalUserText = text;
+    // ★ A-M2：继续生成是内部续写请求，模板句不是真实用户轮次——文本走
+    //   options.continuationText，不读/不写输入框，失败回填也不写模板句。
+    var isContinuation = !!(options && options.continuation);
+    var text = isContinuation
+      ? String((options && options.continuationText) || '请在上文基础上继续写完，不要重复已说内容。').trim()
+      : String(input.value || '').trim();
+    var originalUserText = isContinuation ? '' : text;
     // 发送动画的起点：点选项发送时用那个选项，普通发送用输入框；继续生成、重新生成这类程序触发的发送不做动画。
     var sendFlightFrom = null;
     try {
@@ -11078,7 +11261,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     if (S._aiChatFilesLoading && input === S.inputEl) { notify('正在读取附件，请稍候再发送'); return; }
     // ★ 多文件：支持数组（最多 10 个），兼容旧的单文件调用
     var fileList = Array.isArray(fileData) ? fileData.slice(0, 10) : (fileData ? [fileData] : []);
-    var sendFingerprint = originalUserText + '\u0000' + fileList.map(function(f) {
+    var sendFingerprint = text + '\u0000' + fileList.map(function(f) {
       return String(f.name || '') + ':' + String(f.dataUrl || '').length;
     }).join('|');
     if (S.sending && S.lastSendFingerprint === sendFingerprint && Date.now() - S.lastSendAt < 1500) {
@@ -11088,11 +11271,24 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // Empty/invalid drafts must never interrupt a reply. A distinct valid send
     // replaces the active turn synchronously, including its auth/preflight phase.
     if (!text && !fileList.some(function(f) { return f && f.dataUrl; })) return;
+    // ★ D-M6：断网前置判断。离线时 fetch 会立即抛 TypeError 才提示，且访客
+    //   预检（/guest-mode）也会先白跑一次；入口先判 navigator.onLine，
+    //   断网直接提示、不发请求。失败后的离线指示逻辑（S.serviceStatus）不动。
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) { notify('网络已断开，请检查网络后重试'); return; }
+    // ★ A-M1：访客预检窄窗口锁。ensureGuestAiMode() 的 await 期间 S.sending
+    //   仍为 false，访客首次发送时两次点击会各进一次预检、开出两条流。
+    //   预检前同步置锁，入口处先查锁；S.sending=true 接管后释放，预检失败
+    //   的早退路径同样释放。锁只覆盖预检窗口，不影响「再次发送=打断上一条」
+    //   （打断判断在预检之后、S.sending=true 之前，原位置不动）。
+    if (S._sendPreflight) { try { notify('已发送，请勿重复点击'); } catch (eDupPreflight) {} return; }
     // ★ 2026-11-14：游客先确认 /guest-mode，避免 S.guestAi 尚未初始化时误拦（含带附件发送）
-    if (!readUserName() && !S.guestAi) { await ensureGuestAiMode(); }
-    if (!readUserName() && !S.guestAi) { notify('请先登录后再和小猫聊天'); return; }
-    if (!S.active) { notify('聊天面板未就绪，请重新打开后再发送'); return; }
-    if (text.length > 50000) { notify('消息过长，最多 50000 字符，请精简后重试'); return; }
+    if (!readUserName() && !S.guestAi) {
+      S._sendPreflight = true;
+      await ensureGuestAiMode();
+    }
+    if (!readUserName() && !S.guestAi) { S._sendPreflight = false; notify('请先登录后再和小猫聊天'); return; }
+    if (!S.active) { S._sendPreflight = false; notify('聊天面板未就绪，请重新打开后再发送'); return; }
+    if (text.length > 50000) { S._sendPreflight = false; notify('消息过长，最多 50000 字符，请精简后重试'); return; }
     // ★ 2026-10-29（按用户确认恢复旧行为）：小猫 AI 正在回复时再次发送，
     //   语义是「打断上一条，直接回答新问题」，不做排队。
     //   被打断的回复保留已生成的部分内容（preserveInterruptedTurn），用户问题不丢。
@@ -11113,7 +11309,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var sendCustomCfg = isCustomModelId(sendSettings.model) ? Object.assign({}, resolveCustomModelConfig(sendSettings.model)) : null;
     // Lock synchronously before the first await (auth/token acquisition), so
     // two clicks in the same event loop cannot create two streams.
+    // ★ A-M1：S.sending 接管后释放访客预检锁（S._sendPreflight）。
     S.sending = true;
+    S._sendPreflight = false;
     setAiSendBtnDisabled(false);
     if (S.pauseBtnEl) S.pauseBtnEl.style.display = '';
     // ★ 修复：遥测不再上传提问内容（原 30 字符随行为记录上行，AI 提问可能含敏感信息）
@@ -11182,7 +11380,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         S.paused = false;
         resetActiveRenderersByChannel('chat');
         if(S._contextCapacity)S._contextCapacity.settle();
-        if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
+        if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '停止'; }
       }
     }
 
@@ -11245,6 +11443,27 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       restoreInputText();
       resetSendingIfCurrent();
     }
+    // ★ A-M6：令牌/身份过期早退时清理孤儿「生成中」节点。触发：用户在额度/
+    //   鉴权 await 的短暂窗口内切换模型（身份过期），且没有新发送接管本轮。
+    //   只清理「本轮仍是当前发送」的情形（sendToken 仍最新且 _currentReqId
+    //   未变）：被新发送接管时，新发送的 interruptCurrentChat 已同步调过
+    //   preserveInterruptedTurn 收尾节点，这里再删会误删已保留的部分回复；
+    //   用户主动停止（controller 已 abort）时中断路径同样已收尾，不动。
+    //   注意 resetSendingIfCurrent() 要求身份仍有效才复位，身份过期时它会
+    //   直接 no-op，所以这里直接复位 S.sending（本轮仍持有锁才安全）。
+    function abandonStaleSend() {
+      if (sendToken !== S.sendSeq || S._currentReqId !== reqId) return false;
+      if (controller && controller.signal && controller.signal.aborted) return false;
+      try { assistantNode.remove(); } catch (eStaleNode) {}
+      removeThisUserMessage();
+      restoreInputText();
+      if (S._interruptChat && S._interruptChat.reqId === reqId) S._interruptChat = null;
+      S.sending = false;
+      setAiSendBtnDisabled(false);
+      if (controller && S.abortController === controller) S.abortController = null;
+      if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '停止'; }
+      return true;
+    }
 
     // ============================================================
     // P1 修复: 立即显示用户消息和助手等待节点 (<=100ms)
@@ -11253,17 +11472,28 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var nowIso = new Date().toISOString();
     // ★ 记录附件（含图片 data URL），供「重新生成」时原样复用
     var userMsg = { role: 'user', content: displayText, created_at: nowIso, attachments: attachmentPayload || null, client_request_id: reqId, _pendingSync: true };
-    S.messages.push(userMsg);
-    // ★ 2026-09-29（审计 S1/S2）：登记"本轮本地消息"，供首屏历史到达时保留、
-    //   以及失败收尾时精确定位（不再盲 pop / 盲删最后一个用户气泡）。
-    S._pendingLocalMsgs = (Array.isArray(S._pendingLocalMsgs) ? S._pendingLocalMsgs : []).filter(function(m) { return m && S.messages.indexOf(m) >= 0; });
-    S._pendingLocalMsgs.push(userMsg);
-    if (S._pendingLocalMsgs.length > 40) S._pendingLocalMsgs = S._pendingLocalMsgs.slice(-40);
-    try { setAiHistoryCache(S.conversationId, S.messages); } catch (eUCache) {}
-    var userNode = appendMessage(messagesEl, userMsg);
-    S.autoScrollPinned = true;
-    scrollToBottom(messagesEl, true);
-    playUserSendFlight(userNode, sendFlightFrom);
+    // ★ A-M2：继续生成是内部续写请求，模板句不是真实用户轮次——不进
+    //   S.messages、不画用户气泡、不写历史缓存；只作为本次请求的 message
+    //   发给模型（服务端见 continuation 标记也不把它存为用户轮次）。
+    //   userMsg 本身仍保留为本次请求的“当前轮次”对象，供上下文拼装
+    //   （buildAiConversationHistory 本就会排除 currentUserMsg）与收尾
+    //   引用；失败移除时它不在数组里，按引用查找自然跳过。
+    var userNode = null;
+    if (isContinuation) {
+      userMsg._continuation = true;
+    } else {
+      S.messages.push(userMsg);
+      // ★ 2026-09-29（审计 S1/S2）：登记"本轮本地消息"，供首屏历史到达时保留、
+      //   以及失败收尾时精确定位（不再盲 pop / 盲删最后一个用户气泡）。
+      S._pendingLocalMsgs = (Array.isArray(S._pendingLocalMsgs) ? S._pendingLocalMsgs : []).filter(function(m) { return m && S.messages.indexOf(m) >= 0; });
+      S._pendingLocalMsgs.push(userMsg);
+      if (S._pendingLocalMsgs.length > 40) S._pendingLocalMsgs = S._pendingLocalMsgs.slice(-40);
+      try { setAiHistoryCache(S.conversationId, S.messages); } catch (eUCache) {}
+      userNode = appendMessage(messagesEl, userMsg);
+      S.autoScrollPinned = true;
+      scrollToBottom(messagesEl, true);
+      playUserSendFlight(userNode, sendFlightFrom);
+    }
 
     // ★ 全网深搜（required 态）：只在普通对话里强制深度联网，不渲染研究卡。
     //   研究卡流程属于「深入研究」页，深搜不复用它。下方内置/第三方链路会发送
@@ -11373,8 +11603,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       } catch (e) {}
     }
 
-    // 清空输入框
-    input.value = '';
+    // 清空输入框（继续生成不碰输入框：里面的草稿要原样保留）
+    if (!isContinuation) input.value = '';
     input.style.height = 'auto';
     updateInputMetrics();
     // Consume only an accepted draft, before any asynchronous failure can
@@ -11403,7 +11633,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     } catch (eQ) {}
     // A close/reopen can start a new send while this quota request is pending.
     // The stale send must not clear or reuse the newer send's state.
-    if (sendToken !== S.sendSeq || !customModelIdentityCurrent(sendIdentity)) return;
+    if (sendToken !== S.sendSeq || !customModelIdentityCurrent(sendIdentity)) { abandonStaleSend(); return; }
     if (!S.active) { abandonInactiveSend(); return; }
     var qGate = canSendWithQuota({ skipTokenCheck: !!sendCustomCfg });
     if (!qGate.ok) {
@@ -11416,7 +11646,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }
 
     var authOk = await ensureUserAuthOrNotify({ allowGuest: true, fastPath: true });
-    if (sendToken !== S.sendSeq || !customModelIdentityCurrent(sendIdentity) || S._currentReqId !== reqId) return;
+    if (sendToken !== S.sendSeq || !customModelIdentityCurrent(sendIdentity) || S._currentReqId !== reqId) { abandonStaleSend(); return; }
     if (!S.active) { abandonInactiveSend(); return; }
     if (!authOk) {
       // 认证失败 => 清理UI，恢复状态
@@ -11428,6 +11658,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }
 
     var aborted = false;
+    // ★ A-H3：SSE 溢出截断标记。单行事件 >2MB 被丢弃、或未闭合缓冲 >4MB
+    //   被迫中断时置位；收尾据此保留已收内容并提示，而不是整条删掉无提示。
+    var sseTruncated = false;
 
     // 创建 AbortController
     var controller = new AbortController();
@@ -11444,7 +11677,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         clientRequestId: 'cr_' + S.clientRequestId,
         // ★ 优化：后端深入研究/长思考最长 5 分钟，前端 120s 会提前掐断，
         // 对齐为 300s（SSE idle 看门狗 45s/120s 仍负责真正的假死检测）。
-        timeoutMs: 1800000
+        timeoutMs: 300000
       });
       sharedCtrl.start();
       window.XtjAiCore.RequestController.registerInFlight('cat_ai', sharedCtrl);
@@ -11469,7 +11702,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
     // ★ 2026-11-22 修复（资源泄漏）：sharedCtrl 创建之后的所有早退 return
     //   （鉴权失败/额度不足/被新请求抢占/超时等）此前会跳过函数尾部的
-    //   unregisterInFlight + dispose，泄漏 30 分钟绝对超时定时器与闭包。
+    //   unregisterInFlight + dispose，泄漏 300s 绝对超时定时器与闭包。
     //   用 try/finally 包住请求主体，将上述清理统一迁入 finally，幂等安全。
     try {
     // ★ 自定义第三方模型：走独立转发路由，不消耗本站配额
@@ -11482,7 +11715,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // 多智能体“深入研究”(deep-stream) 流程；是否更多搜索/工具协作由 webSearch / thinkMax 决定。
     var url = isCustomModel ? (API_BASE + '/custom-chat/stream') : (API_BASE + '/chat/stream');
     var auth = await getUserAuthPayload({ forceNoToken: false });
-    if ((sendToken !== S.sendSeq || !customModelIdentityCurrent(sendIdentity)) || (S._currentReqId !== reqId || !customModelIdentityCurrent(sendIdentity)) || !S.active || controller.signal.aborted) return;
+    if (!S.active) { abandonInactiveSend(); return; }
+    if ((sendToken !== S.sendSeq || !customModelIdentityCurrent(sendIdentity)) || (S._currentReqId !== reqId || !customModelIdentityCurrent(sendIdentity)) || controller.signal.aborted) { abandonStaleSend(); return; }
     var headers = withOpenRouterHint(auth.headers || {}, isCustomModel ? customCfg : null);
     var waitingThinking = assistantNode.querySelector('.ai-thinking[data-phase]');
     if (waitingThinking) { waitingThinking.dataset.phase = 'waiting'; setThinkingStatus(waitingThinking,'正在思考中'); }
@@ -11492,10 +11726,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var _fileHint = assistantNode.querySelector('.ai-thinking[data-phase]');
       if (_fileHint) { try { setThinkingStatus(_fileHint, '正在解析文件…'); } catch (_) {} }
       try { await ensureDeepSeekFileIds(attachmentPayload, headers, controller.signal); } catch (_) {}
-      if ((sendToken !== S.sendSeq || !customModelIdentityCurrent(sendIdentity)) || (S._currentReqId !== reqId) || !S.active || controller.signal.aborted) return;
+      if ((sendToken !== S.sendSeq || !customModelIdentityCurrent(sendIdentity)) || (S._currentReqId !== reqId) || !S.active || controller.signal.aborted) { if (!S.active) abandonInactiveSend(); else abandonStaleSend(); return; }
       if (_fileHint) { try { setThinkingStatus(_fileHint, '正在思考中'); } catch (_) {} }
     }
     var fetchBody;
+    // ★ A-H2 修复：发送前先补齐历史（见 ensureHistoryLoadedForSend）。
+    //   首屏只拉了 10 条时，直接拼装会让服务端只拿到最近 10 条上下文。
+    try { await ensureHistoryLoadedForSend(); } catch (eHistEnsure) {}
     if (isCustomModel && customCfg) {
       // ★ 思考Max 上下文拼装：开启时尽量保留全部上下文不压缩（榨干性能）；
       //   关闭时限制在 CONTEXT_LIMIT_NORMAL 条（256），超过即自动压缩丢弃更早内容，
@@ -11526,7 +11763,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         // ★ 修复：自定义模型通道此前漏发 attachments，文件内容无法传给模型
         attachments: attachmentPayload || undefined,
         client_request_id: reqId,
-        timeout_ms: 1800000
+        // ★ A-M2：内部续写请求带标记，服务端不把模板句存为用户轮次。
+        continuation: isContinuation || undefined,
+        timeout_ms: 300000
       });
     } else {
       // ★★★ 2026-09-17 修复（P0「内置模型上下文丢失」）：
@@ -11549,6 +11788,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         messages_include_current: false,followup_suggestions:false,context_estimate:true,
         context_management:sendSettings.contextManaged||undefined,context_window_tokens:sendSettings.contextManaged?sendSettings.contextWindowTokens:undefined,context_memory:sendSettings.contextManaged?sendSettings.contextMemory:undefined,
         client_request_id: reqId,
+        // ★ A-M2：内部续写请求带标记，服务端不把模板句存为用户轮次。
+        continuation: isContinuation || undefined,
         thinking_mode: _sendThinkingMode,
         thinking_max: sendSettings.thinkMax === true,
         work_mode: sendSettings.workMode === true,
@@ -11847,6 +12088,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         try { node.appendChild(el('div', { class: 'ai-error-note ai-stop-note' }, text)); } catch (eNote) {}
       }
 
+      // ★ A-H3：SSE 溢出截断提示。已收到的内容保留落定后，在气泡下方挂一条
+      //   截断说明，让用户知道后面被截掉了，而不是以为回复本来就这么短。
+      function appendTruncatedNote(node) {
+        if (!node || node.querySelector('.ai-truncated-note')) return;
+        try { node.appendChild(el('div', { class: 'ai-truncated-note ai-tail-reveal' }, '内容过长，已截断显示已收到的部分')); } catch (eNote) {}
+      }
+
       function attachContinueGenerateBtn(node, msgHost) {
         if (!node || node.querySelector('.ai-continue-btn')) return;
         var btn = el('button', { type: 'button', class: 'ai-continue-btn', text: '继续生成' });
@@ -11887,9 +12135,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           var inputEl = S.inputEl || document.getElementById('aiChatInput');
           var sendEl = S.sendBtnEl || document.getElementById('aiChatSend');
           var host = msgHost || S.messagesEl || document.getElementById('aiChatMessages');
-          if (inputEl) inputEl.value = '请在上文基础上继续写完，不要重复已说内容。';
+          // ★ A-M2：先把输入框里的草稿记进会话草稿表（不切换会话、不动输入框），
+          //   再发起不进历史的内部续写请求；模板句不再写进输入框、不再覆盖草稿。
+          try { if (typeof S._saveAiComposerDraft === 'function') S._saveAiComposerDraft(); } catch (eDraft) {}
           try {
-            if (typeof handleSendMessage === 'function') handleSendMessage(inputEl, sendEl, host, null, undefined, { noFlight: true });
+            if (typeof handleSendMessage === 'function') handleSendMessage(inputEl, sendEl, host, null, undefined, { noFlight: true, continuation: true, continuationText: '请在上文基础上继续写完，不要重复已说内容。' });
             else notify('无法继续，请手动重发');
           } catch (eSend) {
             notify('继续失败，请手动重发');
@@ -12100,6 +12350,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           })
         };
         S.messages.push(aiMsg);
+        // ★ D-H3：长会话实时发送也会无限追加，收尾同样按 500 条剪最旧的。
+        pruneAiHistory(messagesEl, []);
         if (hasContent && !(evt && evt.interrupted) && S._voiceConversation) S._voiceConversation.reply(content);
         // ★ 2026-09-29（审计 S1）：登记本轮的本地 assistant 消息，并把节点与消息
         //   互相关联，供首屏历史到达时按"是否本地未同步"保留气泡。
@@ -12667,8 +12919,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var _receivedAny = false;
       var _idleCheckTimer = setInterval(function() {
         if (timedOut || !S.active) return;
-        // 心跳会刷新 _lastDataTime。这里只判断连接真的没数据，绝对上限由 30 分钟控制器负责。
-        var idleThreshold = _receivedAny ? 180000 : 120000;
+        // ★ A-H1 修复：心跳事件不刷新 _lastDataTime（见下方解析处，只有
+        //   有意义的事件才刷新）。服务端每 2.5s 发一次心跳，旧逻辑每次
+        //   chunk 到达都刷新，看门狗在上游卡住时永不触发。这里只判断
+        //   连接真的没数据，绝对上限由 300s 控制器负责。
+        var idleThreshold = _receivedAny ? 120000 : 45000;
         if (Date.now() - _lastDataTime > idleThreshold) {
           timedOut = true;
           if (controller && controller.abort) { try { controller.abort(); } catch (e) {} }
@@ -12712,12 +12967,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         //   单行 512KB 上限只拦"已闭合的行"，残留在 buffer 的尾部才是无界增长点。
         if (buffer.length > 4 * 1024 * 1024) {
           console.warn('[AI] SSE buffer overflow, aborting stream, length=' + buffer.length);
+          // ★ A-H3 修复：记下截断，收尾保留已收到的内容并提示，不静默删整条。
+          sseTruncated = true;
           aborted = true;
           reader.cancel().catch(function(){});
           break;
         }
-        _lastDataTime = Date.now();
-        _receivedAny = true; // B 修复：已收到任意数据，放宽 idle 阈值到 120s
+        // ★ A-H1 修复：原始 chunk 到达不再刷新看门狗——chunk 里可能只有
+        //   心跳/注释行，上游卡住时心跳仍会持续到达。
         
         for (var li = 0; li < lines.length; li++) {
           var line = lines[li].trim();
@@ -12727,11 +12984,15 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           if (line === 'data: [DONE]' || line === 'done') { doneReceived = true; break; }
           var eventStr = line.slice(6);
           // ★ 修复：单行事件大小上限（深页循环有 512KB 上限，主循环此前没有）
-          if (eventStr.length > 2 * 1024 * 1024) { console.warn('[AI] oversized SSE line dropped, length=' + eventStr.length); continue; }
+          // ★ A-H3：超大单行事件丢弃时记下截断，done 收尾时提示用户内容被截断。
+          if (eventStr.length > 2 * 1024 * 1024) { console.warn('[AI] oversized SSE line dropped, length=' + eventStr.length); sseTruncated = true; continue; }
           var evtReceivedAt = typeof window !== 'undefined' && window.performance && performance.now ? performance.now() : Date.now();
           var evt;
           try { evt = JSON.parse(eventStr); } catch (e) { continue; }
           if (!evt) continue;
+          // ★ A-H1 修复：只有有意义的事件（content/reasoning/meta 等）才刷新
+          //   看门狗；心跳事件不算——否则服务端每 2.5s 的心跳会让看门狗永不触发。
+          if (evt.type !== 'heartbeat') { _lastDataTime = Date.now(); _receivedAny = true; }
           
           // 检查是否被新请求取代
           if ((S._currentReqId !== reqId || !customModelIdentityCurrent(sendIdentity))) { aborted = true; break; }
@@ -12750,7 +13011,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           }
           if(evt.type==='context_status'){if(S._contextCapacity)S._contextCapacity.stage(evt);continue;}
           
-          // 服务端心跳保活事件：仅用于保持连接与重置 idle 看门狗，无 UI 副作用
+          // 服务端心跳保活事件：仅用于保持连接，无 UI 副作用；
+          // ★ A-H1 修复：心跳不再重置 idle 看门狗（上游卡住时心跳仍会到达）。
           if (evt.type === 'heartbeat') {
             continue;
           }
@@ -12792,8 +13054,28 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             if(contentRenderer){contentRenderer.cancel();contentRenderer=null;}
             hideAssistantTyping();
             if (assistantBubble) try { assistantBubble.innerHTML = ''; } catch (e) {}
-            // ★ 修复：reasoning 节点引用一并失效。旧节点可能已随 supplement 被清理/脱管，
-            // 若继续复用脱离 DOM 的节点，新一轮 thinking 内容会插入已 detached 节点而不显示。
+            // ★ A-H4 修复：第一轮已封存的正文也要丢掉，只清当前气泡不够——
+            //   finishAiMessage 存的是 sealedContents.join('') + content，
+            //   不清 sealedContents，第一轮正文会进历史而屏幕上只有第二轮。
+            //   已封存的气泡段一并移出 DOM（叙述句在时间轴里，仍保留显示）。
+            sealedContents.length = 0;
+            if (assistantNode) {
+              try {
+                var _sealedSegs = assistantNode.querySelectorAll('.ai-content-segment');
+                for (var _ssi = 0; _ssi < _sealedSegs.length; _ssi++) _sealedSegs[_ssi].remove();
+              } catch (eSealedSeg) {}
+            }
+            // ★ A-H4 修复：第二轮按新轮次走，与 tool_calls 分支一致。
+            //   不复位时，第二轮首字不会正常交接思考面板（_thinkingSettledOnContent
+            //   仍为真），正文也不会按新一轮提升（answerCommitted 仍为真）。
+            answerCommitted = false;
+            _thinkingSettledOnContent = false;
+            // ★ 修复：收尾当前思考段的渲染器引用（closeReasoningSegment 已置空
+            //   reasoningRenderer / activeReasoningSegment）。reasoningContainer
+            //   本身不置空——本分支不摘除 .ai-thinking 节点，引用仍有效；真正防
+            //   脱管的是 finishAiMessage 的 isConnected 复核。
+            // 注意：aiReasoning 不清——本分支明确保留已显示的思考过程，
+            // 思考面板仍显示第一轮思考，存档的 reasoning 累积值与显示一致。
             aiContent = '';
             doneReceived = false;
             continue;
@@ -13781,7 +14063,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             //   的兜底重绘 —— 中间存在一帧空气泡。
             //   修法：把渲染器清理**挪到 finishAiMessage 之后**；finish() 已把最终内容
             //   写进气泡并置 finished=true，此后的 cancel() 不会再清空 DOM。
-            if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
+            if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '停止'; }
             if (_isTouchMobile) { try { input.blur(); } catch (e) {} }
             if (thinkingTimer) {
               finalThinkingElapsedMs = thinkingTimer.stop();
@@ -13958,6 +14240,23 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       }
 
       if (((S._currentReqId !== reqId || !customModelIdentityCurrent(sendIdentity)) || aborted) && !_finalized && !turnSettled) {
+        // ★ A-H3 修复：SSE 溢出截断不是用户取消/被新请求取代——已收到的内容要
+        //   保留落定并提示“内容过长已截断”，而不是整条删掉无提示。只有本轮
+        //   仍是当前请求时才落定；已被取代时仍走旧的删节点路径。
+        if (sseTruncated && (S._currentReqId === reqId && customModelIdentityCurrent(sendIdentity)) && (aiContent || aiReasoning || (sealedContents && sealedContents.length) || (assistantNode && assistantNode.querySelector('.ai-thinking, .ai-content-segment')))) {
+          hideAssistantTyping();
+          if (!_finalized) finishAiMessage(assistantNode, aiContent, aiReasoning, { interrupted: true });
+          appendTruncatedNote(assistantNode);
+          try { attachContinueGenerateBtn(assistantNode, messagesEl); } catch (eContTrunc) {}
+          notify('回复内容过长，已截断显示已收到的部分');
+          cleanupRenderers();
+          resetSendingIfCurrent();
+          return;
+        }
+        if (sseTruncated) {
+          // 溢出时尚未收到任何内容：无内容可保留，但仍要明确提示而非静默消失。
+          notify('回复内容过长，已截断，请换个更短的问法重试');
+        }
         // 被新请求取代，删除当前创建的任何节点
         // ★ 修复：若 error 事件已 finishAiMessage（_finalized=true，部分回复已保留并写入
         // S.messages），不得再删除节点，否则已渲染的回复会闪现后消失且服务端未保存。
@@ -13994,6 +14293,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         // （多半是连接被代理/网络切断，而非 AI 拒绝回答）。
         // 用户消息已回填输入框，可直接重发。
         notify('AI 连接中断或长时间未响应，请重试');
+      }
+      // ★ A-H3：单行超限事件被丢弃、但流随后正常 done/EOF 收尾时，也要让
+      //   用户知道回复被截断过（aborted 溢出分支已在上方单独处理并 return）。
+      if (sseTruncated && assistantNode && assistantNode.isConnected !== false) {
+        appendTruncatedNote(assistantNode);
+        notify('回复内容过长，已截断显示已收到的部分');
       }
     } catch (fetchErr) {
       if ((S._currentReqId !== reqId || !customModelIdentityCurrent(sendIdentity))) { try { clearInterval(_idleCheckTimer); } catch (e) {} return; }
@@ -14104,10 +14409,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     scrollToBottom(messagesEl, false);
   }
 
-  // 「正在加载聊天记录」占位：4 秒还没回来就换成明确的慢网提示，而不是一直原样转下去。
+  // 「正在加载聊天记录」占位：转圈指示 + 4 秒还没回来就换成明确的慢网提示，
+  // 而不是一直原样转下去。转圈让加载态与空态一眼区分（B-13）。
   function buildHistoryLoadingState() {
     var node = buildEmptyState('正在加载聊天记录…');
     node.classList.add('ai-history-loading');
+    var spinner = el('div', { class: 'ai-history-loading-spinner', 'aria-hidden': 'true' });
+    node.insertBefore(spinner, node.firstChild);
     setTimeout(function() {
       if (!node.isConnected) return;
       var tip = node.querySelector('.ai-chat-empty-tip');
@@ -14134,6 +14442,55 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     messagesEl.__xtjCachePainted = cachedMsgs;
     S.autoScrollPinned = true;
     scrollToBottom(messagesEl, true);
+  }
+
+  // ★ A-H2 修复：发送前把未加载的更早历史分页补齐，避免只带最近 10 条。
+  //   首屏只拉 HISTORY_PAGE_SIZE(10) 条就直接发送时，服务端优先用前端传的
+  //   历史，不会补全，长会话的上下文会被静默截断。
+  //   只补到发送上下文上限（CONTEXT_LIMIT_NORMAL 条）为止，最多 25 页；
+  //   单页失败、会话切换或仍在加载时不阻塞发送，调用方用已加载的历史继续。
+  async function ensureHistoryLoadedForSend() {
+    if (!S.conversationId || !S.hasMore || !S.messagesEl || !S.oldestCursor) return;
+    var convId = S.conversationId;
+    var maxPages = 25;
+    var waited = 0;
+    while ((S.loading || S.loadingMore) && waited < 2000) {
+      await new Promise(function(resolve) { setTimeout(resolve, 100); });
+      waited += 100;
+    }
+    while (S.hasMore && S.oldestCursor && S.messages.length < CONTEXT_LIMIT_NORMAL && maxPages-- > 0) {
+      if (!S.active || S.conversationId !== convId) return;
+      var beforeCount = S.messages.length;
+      try { await loadHistory(S.messagesEl, S.oldestCursor); } catch (eHistLoad) { return; }
+      if (S.conversationId !== convId || S.messages.length <= beforeCount) return;
+    }
+  }
+
+  // ★ D-H3：内存历史与 DOM 剪枝。超 AI_HISTORY_MAX_MESSAGES 条时剪掉最旧
+  //   的消息与节点，只保留最近的。keepNodes：本页刚加载的节点——它们是最旧
+  //   的，但刚加载完不能立刻剪掉（否则用户翻上来却看不到）；只剪它们之前
+  //   的旧内容。正在流式的 .generating 节点不剪。分页调用方须在滚动锚点
+  //   的 rAF 回调前同步执行，锚点 Δ（新 scrollHeight - 旧 scrollHeight）
+  //   自然包含剪掉的高度，视口仍停在原来那条消息上。
+  function pruneAiHistory(messagesEl, keepNodes) {
+    var total = Array.isArray(S.messages) ? S.messages.length : 0;
+    var over = total - AI_HISTORY_MAX_MESSAGES;
+    if (over <= 0) return;
+    var keepCount = Array.isArray(keepNodes) ? keepNodes.length : 0;
+    var drop = Math.min(over, Math.max(0, total - keepCount));
+    if (drop <= 0) return;
+    S.messages.splice(0, drop);
+    if (!messagesEl || !messagesEl.querySelectorAll) return;
+    var nodes = messagesEl.querySelectorAll('.ai-msg');
+    var removed = 0;
+    for (var i = 0; i < nodes.length && removed < drop; i++) {
+      var n = nodes[i];
+      if (!n || !n.parentNode) continue;
+      if (keepNodes && keepNodes.indexOf(n) >= 0) continue;
+      if (n.classList && n.classList.contains('generating')) continue;
+      n.parentNode.removeChild(n);
+      removed++;
+    }
   }
 
   async function loadHistory(messagesEl, before) {
@@ -14333,6 +14690,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           frag.appendChild(node);
         }
         messagesEl.insertBefore(frag, _existingFirstNode);
+        // ★ D-H3：超 500 条时剪最旧的节点与消息（本页新节点不剪；须在下方
+        //   rAF 锚点回调前同步完成，Δ 已含剪掉的高度，视口不跳）。
+        pruneAiHistory(messagesEl, _historyNodes);
         renderAiHistoryCards(messagesEl, msgs, _historyNodes, msgs.map(function() { return _existingFirstNode; }));
         try {
           requestAnimationFrame(function() {
@@ -14350,6 +14710,18 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         S.loadingMore = false;
         if (S.historyController === loadController) S.historyController = null;
         if (!before && messagesEl) messagesEl.removeAttribute('aria-busy');
+        // ★ A-L1：补拉一页。两种情形：① 上翻时正在加载，滚动处理记了
+        //   _historyPagePending，消费后补拉一次；② 分页加载完成时仍在顶部
+        //   且 hasMore、本页确实返回了新内容，自动续拉一页。锚点回调会把
+        //   scrollTop 抬到旧位置+新增高度，链条自然停止，不会一次拉全量；
+        //   要求 msgs.length>0 保证每次续拉都有进展，失败/空页不空转。
+        var _pagePending = S._historyPagePending;
+        S._historyPagePending = false;
+        if (before && messagesEl && messagesEl.offsetParent && !S.showingHistory
+            && messagesEl.scrollTop < 60 && S.hasMore && S.oldestCursor
+            && (_pagePending || (typeof msgs !== 'undefined' && msgs && msgs.length))) {
+          loadHistory(messagesEl, S.oldestCursor);
+        }
       }
     }
   }
@@ -15588,6 +15960,20 @@ function showChatMessages() {
       var part = target.closest('.ai-tool-step-detail, .ai-tool-step-title');
       if (part) toggleToolRow(part);
     });
+    // ★ B-02：Markdown 图片加载失败兜底。error 事件不冒泡，用捕获阶段在
+    //   消息容器上统一接住；破图隐藏并换成一行文字提示，不留破图图标撑开
+    //   气泡。内联 onerror 属性会被渲染器安全策略拦截，改用 JS 委托。
+    messagesEl.addEventListener('error', function(event) {
+      var t = event.target;
+      if (!t || t.tagName !== 'IMG' || !t.closest || !t.closest('.ai-msg-bubble')) return;
+      if (t.dataset && t.dataset.mdImgBroken) return;
+      try { if (t.dataset) t.dataset.mdImgBroken = '1'; } catch (e) {}
+      try { t.style.display = 'none'; } catch (eHide) {}
+      var note = document.createElement('span');
+      note.className = 'ai-md-img-broken-note';
+      note.textContent = '图片加载失败' + (t.alt ? '：' + String(t.alt).slice(0, 40) : '');
+      if (t.parentNode) t.parentNode.insertBefore(note, t.nextSibling);
+    }, true);
     messagesEl.addEventListener('keydown', function(event) {
       if (event.key !== 'Enter' && event.key !== ' ') return;
       var target = event.target;
@@ -15621,8 +16007,10 @@ function showChatMessages() {
       // ★ 修复 M2：历史会话列表页（messagesEl display:none）或 hasMore 残留时
       // 不得触发历史分页加载，避免拼接错乱/误拉取。offsetParent 为 null 表示元素不可见。
       if (S.showingHistory || !messagesEl.offsetParent) return;
-      if (messagesEl.scrollTop < 60 && S.hasMore && !S.loading && !S.loadingMore && S.oldestCursor) {
-        loadHistory(messagesEl, S.oldestCursor);
+      // ★ A-L1：加载中收到新的上翻请求不再丢弃，记待处理标志等本页完成再补拉一次。
+      if (messagesEl.scrollTop < 60 && S.hasMore && S.oldestCursor) {
+        if (S.loading || S.loadingMore) S._historyPagePending = true;
+        else loadHistory(messagesEl, S.oldestCursor);
       }
     }));
     root.appendChild(messagesEl);
@@ -16256,7 +16644,7 @@ function showChatMessages() {
             { value: 'max', label: '极致', description: '更高推理预算，耗时可能增加' }
           ];
       var current = kind === 'model'
-        ? (S.selectedModel || 'deepseek-flash')
+        ? (S.selectedModel || DEFAULT_AI_MODEL)
         : (S.thinkingMode || 'medium');
       var listEl = el('div', { class: 'ai-select-pop-list', role: 'listbox', 'aria-label': kind === 'model' ? '选择模型' : '选择思考程度' });
       if (kind === 'think') { listEl.classList.add('ai-thinking-rail'); listEl.setAttribute('aria-orientation','horizontal'); }
@@ -16872,7 +17260,7 @@ function showChatMessages() {
         var savePending = saveCustomModels(customs);
         if (editingUid === uid) resetForm();
         if (S.selectedModel === CUSTOM_MODEL_PREFIX + uid) {
-          S.selectedModel = 'deepseek-flash';
+          S.selectedModel = DEFAULT_AI_MODEL;
           try { scopedStorageSet('xtj_ai_model', S.selectedModel); } catch (err) {}
         }
         updateModelUI(true);
@@ -17328,6 +17716,8 @@ function showChatMessages() {
       id: 'aiChatMsgInput',
       placeholder: '问小猫',
       rows: '1',
+      // ★ D-M3：maxlength 与发送时 50000 校验一致，超长粘贴直接拦在输入框。
+      maxlength: '50000',
       'aria-label': '聊天输入框',
       inputmode: 'text',
       enterkeyhint: 'send',
@@ -17345,9 +17735,9 @@ function showChatMessages() {
       type: 'button',
       class: 'ai-chat-pause',
       id: 'aiChatPauseBtn',
-      'aria-label': '暂停',
+      'aria-label': '停止',
       style: 'display:none'
-    }, '暂停');
+    }, '停止');
 
     // ★ 新增：语音输入按钮（Web Speech API，点击开始/停止聆听）
     var voiceBtn = el('button', {
@@ -17426,11 +17816,18 @@ function showChatMessages() {
         var t = String(resendText || '').trim();
         if (!t && !(resendAttachments && resendAttachments.length)) return;
         if (_aiChatFiles.length) clearAiChatFilePreview();
-        if (resendAttachments && resendAttachments.length && resendAttachments[0] && resendAttachments[0].data_url) {
-          _aiChatFiles = resendAttachments.slice(0, 10).map(function(a) {
-            return { name: a.name || 'file', type: a.type || '', dataUrl: a.data_url, size: a.size || 0 };
-          });
-          renderAiMultiFilePreview(_aiChatFiles);
+        if (resendAttachments && resendAttachments.length) {
+          // ★ A-M3：恢复所有带 data_url 的可用附件（此前只看第 0 个，[0] 没
+          //   data 就静默丢掉整组）；全丢时明确提示，而不是静默按文字重发。
+          var usableResend = resendAttachments.filter(function(a) { return a && (a.data_url || a.dataUrl); });
+          if (usableResend.length) {
+            _aiChatFiles = usableResend.slice(0, 10).map(function(a) {
+              return { name: a.name || 'file', type: a.type || '', dataUrl: a.data_url || a.dataUrl, size: a.size || 0 };
+            });
+            renderAiMultiFilePreview(_aiChatFiles);
+          } else {
+            notify('原附件图片已无法恢复，将仅按文字重新生成');
+          }
         }
         input.value = t;
         autoresize();
@@ -17442,7 +17839,7 @@ function showChatMessages() {
     };
     S._askPreservingDraft = function(text,attachments) {
       if(!S.active || !input.isConnected || voiceLifecycle!==S.lifecycleId)return Promise.reject(Error('当前聊天已关闭，请重新打开'));
-      if(S.sending)return Promise.reject(Error('请先暂停当前回复，再发送推荐问题或分析资料'));
+      if(S.sending)return Promise.reject(Error('请先停止当前回复，再发送推荐问题或分析资料'));
       var draft=nodeForAuxiliarySend(text),accepted=false;
       return handleSendMessage(draft,sendBtn,messagesEl,attachments||[],function(){accepted=true;}).then(function(){if(!accepted)throw Error('消息未开始发送，资料与草稿已保留');});
     };
@@ -17451,7 +17848,7 @@ function showChatMessages() {
     function featureCurrent(){return S.active && input.isConnected && voiceLifecycle===S.lifecycleId && customModelIdentityCurrent(featureIdentity);}
     var menuGroup=panelShell.querySelector('.ai-panel-menu-list .ai-panel-group:last-child');
     function addFeatureEntry(label,action){var button=el('button',{type:'button',class:'ai-panel-row'});var icon=el('span',{class:'ai-panel-row-icon','aria-hidden':'true'});icon.innerHTML=ICO.compare;button.appendChild(icon);button.appendChild(el('span',{class:'ai-panel-row-title',text:label}));button.addEventListener('click',function(){closePanel(true);action();});menuGroup.appendChild(button);return button;}
-    addFeatureEntry('双模型对比',function(){var features=assistantFeatures();if(!features)return;if(S.sending){notify('当前回复完成或暂停后，可以开始双模型对比');return;}var models=[{id:'deepseek-flash',label:'DeepSeek-V4.1-Flash-1017'},{id:'deepseek-v4-pro',label:'V4 Pro'}];loadCustomModels().forEach(function(config){if((config.key_configured||config.server_managed)&&config.model)models.push({id:'custom:'+config.uid,label:config.label||config.model,config:Object.assign({},config)});});var latestUser=S.messages.slice().reverse().find(function(m){return m.role==='user';});if(S._modelCompare)S._modelCompare.dispose();S._modelCompare=features.openCompare({models:models,thinkingMode:S.thinkingMode,question:input.value.trim() || latestUser&&latestUser.content || '',current:featureCurrent,notify:notify,renderMarkdown:renderMarkdown,context:function(){return buildAiConversationHistory(CONTEXT_LIMIT_NORMAL,MSG_MAX_CHARS_NORMAL,null,null);},run:runModelComparison});});
+    addFeatureEntry('双模型对比',function(){var features=assistantFeatures();if(!features)return;if(S.sending){notify('当前回复完成或停止后，可以开始双模型对比');return;}var models=[{id:'deepseek-flash',label:'DeepSeek-V4.1-Flash-1017'},{id:'deepseek-v4-pro',label:'V4 Pro'}];loadCustomModels().forEach(function(config){if((config.key_configured||config.server_managed)&&config.model)models.push({id:'custom:'+config.uid,label:config.label||config.model,config:Object.assign({},config)});});var latestUser=S.messages.slice().reverse().find(function(m){return m.role==='user';});if(S._modelCompare)S._modelCompare.dispose();S._modelCompare=features.openCompare({models:models,thinkingMode:S.thinkingMode,question:input.value.trim() || latestUser&&latestUser.content || '',current:featureCurrent,notify:notify,renderMarkdown:renderMarkdown,context:function(){return buildAiConversationHistory(CONTEXT_LIMIT_NORMAL,MSG_MAX_CHARS_NORMAL,null,null);},run:runModelComparison});});
     var capacity=el('div',{class:'ai-context-capacity',id:'aiContextCapacity'}),capacityWidget=null,lastContextBudget=null,capacityModel='',capacityConversation='';
     function contextMemory(){for(var i=S.messages.length-1;i>=0;i--){var memory=S.messages[i]&&S.messages[i].context_memory;if(memory&&memory.v===1&&memory.conversation_id===S.conversationId&&typeof memory.summary==='string'&&memory.summary.trim()&&memory.summary.length<=8000)return memory;}return null;}
     function contextWindowTokens(){if(S.thinkMax===true)return 131072;var value=Number(scopedStorageGet('xtj_ai_context_window_'+S.selectedModel));return [32768,65536,131072].indexOf(value)>=0?value:65536;}
@@ -17468,6 +17865,14 @@ function showChatMessages() {
     var capacityFeatures=assistantFeatures();if(capacityFeatures&&capacityFeatures.createCapacity)capacityWidget=capacityFeatures.createCapacity(capacity,{current:featureCurrent,configuredWindowTokens:contextWindowTokens,onWindowChange:function(value){try{localStorage.setItem('xtj_ai_context_window_'+S.selectedModel+'__'+aiStorageScopeName(),String(value));}catch(_){}updateCapacity();}});
     S._contextCapacity=capacityWidget;S._contextManaged=!!capacityWidget;S._contextWindowTokens=contextWindowTokens;S._contextMemoryResolver=contextMemory;
     input.addEventListener('input',function(){updateCapacity();});S._updateContextCapacity=updateCapacity;updateCapacity();
+    // ★ D-M3：粘贴超长时给一次提示（不要静默截断无提示）。maxlength 会拦住
+    //   超出部分但浏览器不提示；只在「粘贴前未满、粘贴后已满」的跨越时提示一次。
+    input.addEventListener('paste', function() {
+      var _beforeLen = input.value.length;
+      setTimeout(function() {
+        if (_beforeLen < 50000 && input.value.length >= 50000) notify('消息过长，最多 50000 字符，请精简后重试');
+      }, 0);
+    });
     async function runModelComparison(model,text,history,signal,onEvent){
       var config=model.config,body={message:text,messages:history,messages_include_current:false,context_management:true,context_window_tokens:contextWindowTokens(),model:model.id,thinking_mode:model.thinkingMode,client_request_id:'compare_'+Date.now()+'_'+Math.random().toString(36).slice(2),web_search:false,network_mode:networkSettings().networkMode,followup_suggestions:false};
       if(config)Object.assign(body,{provider:config.provider,api_key:undefined,model_uid:config.uid,model:config.model,base_url:config.base_url,reasoning_effort_supported:config.reasoning_effort_supported===true});
@@ -17526,6 +17931,13 @@ function showChatMessages() {
       composerDrafts.delete(cid || '');
       if (cid === S.conversationId) { input.value = ''; autoresize(); }
     };
+    // ★ A-M2：把当前输入框草稿记进会话草稿表（不切换会话、不动输入框），
+    //   供“继续生成”等程序触发的发送先保存草稿再发；切会话回来仍能恢复。
+    S._saveAiComposerDraft = function() {
+      if (!input.value) return;
+      composerDrafts.set(S.conversationId || '', { text: input.value, start: input.selectionStart, end: input.selectionEnd });
+      while (composerDrafts.size > 50) composerDrafts.delete(composerDrafts.keys().next().value);
+    };
     S._aiChatFileSelectionVersion = function() { return _aiChatFileSelectionSeq; };
     // ★ 加固：_aiChatFiles 是 renderAiRoot 的闭包变量，closeAiChat 在外部作用域无法直接访问，
     //   此前关闭聊天/登出后附件数组不会被清理（会话残留）。此处把清理函数挂到 S 上，
@@ -17573,6 +17985,8 @@ function showChatMessages() {
       filePreview.appendChild(thumb);
       filePreview.appendChild(info);
       filePreview.appendChild(removeBtn);
+      // C-9：上传披露——文件会发给第三方模型厂商处理。
+      filePreview.appendChild(el('div', { class: 'ai-file-third-party-note', text: '文件将发送给第三方模型厂商处理' }));
       filePreview.style.display = 'flex';
       updateInputMetrics();
     }
@@ -17689,6 +18103,8 @@ function showChatMessages() {
       try { document.body.style.overflow = ''; } catch (eStaleOverflow) {}
       window.__xtjAiChatActive = false;
       updateSecondaryPageState(false, 'ai-chat');
+      // ★ D-M4：登录失败残留的面板切走时同样停掉轮询定时器。
+      stopAiPollTimers();
       return true;
     }
     var researchPanel = document.getElementById('panelDeepThink');
@@ -17699,6 +18115,10 @@ function showChatMessages() {
     //   AI 切走后用户从顶栏「AI 工具 → 深入研究」打开研究页，再切 tab 时
     //   本函数直接返回，研究页就一直浮在帖子/照片墙之上。
     //   重复执行只是重复摘 class，成本极低，因此改成幂等。
+    // ★ D-M4：切走 tab 时停掉三个轮询定时器（状态/配置/配额），只隐藏面板、
+    //   流继续跑；恢复时由 restoreHiddenAiChat 重建。不要依赖 S.active 做
+    //   守卫——切 tab 时它仍为 true。
+    stopAiPollTimers();
     S._tabHidden = true;
     if (researchVisible) S._tabHiddenResearch = true;
     var panel = document.getElementById('panelAiChat');
@@ -17764,6 +18184,8 @@ function showChatMessages() {
         else scrollToBottom(S.messagesEl, true);
       } catch (eScroll) {}
     });
+    // ★ D-M4：切回 tab 时重建三个轮询定时器（hide 时已停掉）。
+    startAiPollTimers();
     return true;
   }
 
@@ -17827,13 +18249,8 @@ function showChatMessages() {
     updateInputMetrics();
     setAiRootState('ai-idle');
 
-    if (S.statusTimer) {
-      try { clearInterval(S.statusTimer); } catch (e2) {}
-    }
-    S.statusTimer = setInterval(updateAiStatus, 60000);
-    if (S._configRefreshTimer) { try { clearInterval(S._configRefreshTimer); } catch(e) {} }
-    S._configRefreshTimer = setInterval(function() { ensureConfig().then(applyConfigToUI).catch(function(){}); }, CONFIG_REFRESH_INTERVAL);
-    startQuotaPolling();
+    // ★ D-M4：三个轮询定时器统一由 startAiPollTimers 重建。
+    startAiPollTimers();
     if (readUserName() && r.messagesEl) {
       r.messagesEl.innerHTML = '';
       var openingCache = null;
@@ -18025,7 +18442,7 @@ function showChatMessages() {
     S._interruptChat = null;
     S.paused = false;
     S.activeRenderers = [];
-    if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
+    if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '停止'; }
     S.messages = [];
     S.conversations = [];
     S._conversationsFreshUntil = 0;

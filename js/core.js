@@ -10606,6 +10606,10 @@ function renderProfileActivityList(kind) {
             }
             window.isSystemPost = isSystemPost;
 
+            // ★ E-H1 修复：回退查询的显式字段白名单，与 /api/feed 的
+            //   selectFields 对齐但去掉 actor_key（前端不需要，也不应
+            //   把内部键拉到浏览器）。此前这里用 select("*") 整行拉取。
+            var FEED_FALLBACK_SELECT = 'id, user_name, media_type, media_url, content, created_at, updated_at, visibility, is_deleted, views, is_pinned, pinned_at, location_name, location_province, location_city, location_district, location_level, ip_province, ip_city, ip_region_text, ip_region_status, ip_lookup_started_at';
             function getFeedBasePostQuery() {
                 if (!sb) {
                     return {
@@ -10613,7 +10617,7 @@ function renderProfileActivityList(kind) {
                     };
                 }
                 return applyVisiblePostQueryFilters(
-                    sb.from("posts").select("*")
+                    sb.from("posts").select(FEED_FALLBACK_SELECT)
                 ).order("created_at", { ascending: false });
             }
 
@@ -10764,7 +10768,13 @@ function renderProfileActivityList(kind) {
                 if (!usedApi) {
                     // 回退：Supabase 直连（RLS 仅返回公开帖子）
                     // VPN 下 supabase.co 也可能半开连接，必须有硬超时，否则永久转圈
+                    // ★ E-H1 修复：回退路径也要执行与 /api/feed 相同的访客限制
+                    //   （GUEST_FEED_LIMIT=10）。此前 API 失败后访客可无限翻页。
+                    var fallbackIsGuest = !knownUser && !hasToken;
+                    var fallbackGuestLimit = 10;
+                    if (fallbackIsGuest) feedGuestLimited = true;
                     var end = start + FEED_PAGE_SIZE - 1;
+                    if (fallbackIsGuest) end = Math.min(end, fallbackGuestLimit - 1);
                     var fallbackQuery = getFeedBasePostQuery();
                     // E-M4: 回退也全程走游标。offset/range 翻页在并发发帖/删帖时会
                     // 漂移（重复或漏帖）。无游标时不用 offset 翻页：已加载过帖子
@@ -10780,17 +10790,20 @@ function renderProfileActivityList(kind) {
                         fallbackQuery = fallbackQuery
                             .or('created_at.lt.' + fallbackCursor.created_at + ',and(created_at.eq.' + fallbackCursor.created_at + ',id.lt.' + fallbackCursor.id + ')')
                             .order('id', { ascending: false })
-                            .limit(FEED_PAGE_SIZE);
+                            .limit(fallbackIsGuest ? Math.max(1, fallbackGuestLimit - start) : FEED_PAGE_SIZE);
                     } else if (start > 0) {
                         fallbackQuery = fallbackQuery.range(0, FEED_PAGE_SIZE - 1);
                     } else {
                         fallbackQuery = fallbackQuery.range(start, end);
                     }
-                    var postRes = await withTimeout(
-                        fallbackQuery,
-                        FEED_NET_TIMEOUT_MS,
-                        'feed-supabase'
-                    );
+                    // 访客已到 10 条上限：不再发查询，直接空页并结束，末尾显示登录入口。
+                    var postRes = (fallbackIsGuest && start >= fallbackGuestLimit)
+                        ? { data: [], error: null }
+                        : await withTimeout(
+                            fallbackQuery,
+                            FEED_NET_TIMEOUT_MS,
+                            'feed-supabase'
+                        );
                     if (requestId && requestId !== feedLoadRequestId) return null;
                     if (postRes.error) throw postRes.error;
                     var fallbackPosts = postRes.data || [];
@@ -14181,16 +14194,27 @@ function renderProfileActivityList(kind) {
                 if (typeof window.xtjProtectedFetch !== "function") return;
                 dmBroadcast.epoch += 1;
                 var myEpoch = dmBroadcast.epoch;
+                // ★ F-H1 修复：topic 拉取失败也要指数退避重试（与通道错误同款）。
+                //   此前失败即 return，Broadcast 起不来就一直起不来，只能等用户切 tab。
+                function scheduleDmBroadcastRetry() {
+                    dmBroadcast.attempts += 1;
+                    var backoff = Math.min(1000 * Math.pow(2, dmBroadcast.attempts), 30000);
+                    setTimeout(function () {
+                        // 代次校验：期间若已重建订阅，旧定时器必须彻底放弃。
+                        if (myEpoch !== dmBroadcast.epoch || owner !== window.currentUser) return;
+                        subscribeToDmBroadcast();
+                    }, backoff);
+                }
                 try {
                     if (!dmBroadcast.topic) {
                         var resp = await window.xtjProtectedFetch("/api/dm/realtime-topic");
-                        if (!resp || !resp.ok) { console.warn("[dm-realtime] topic fetch", resp && resp.status); return; }
+                        if (!resp || !resp.ok) { console.warn("[dm-realtime] topic fetch", resp && resp.status); scheduleDmBroadcastRetry(); return; }
                         var data = await resp.json().catch(function () { return {}; });
-                        if (!data || !data.ok || !data.topic) return;
+                        if (!data || !data.ok || !data.topic) { scheduleDmBroadcastRetry(); return; }
                         if (myEpoch !== dmBroadcast.epoch || owner !== window.currentUser) return;
                         dmBroadcast.topic = data.topic;
                     }
-                } catch (e) { return; }
+                } catch (e) { scheduleDmBroadcastRetry(); return; }
                 if (myEpoch !== dmBroadcast.epoch || owner !== window.currentUser) return;
                 try {
                     if (dmBroadcast.channel) { sb.removeChannel(dmBroadcast.channel); dmBroadcast.channel = null; }
@@ -14432,6 +14456,11 @@ function renderProfileActivityList(kind) {
                     if (!chatRealtime || chatRealtime.state === 'closed') {
                         subscribeToMessages();
                     }
+                    // ★ F-H1 修复：切回前台立即补拉一次——Broadcast 若仍断着，
+                    //   光重建订阅不够，隐藏期间的消息要等下一轮 300s 轮询。
+                    //   Broadcast 正常时 SUBSCRIBED 后 180ms 也会刷新一次，
+                    //   pollDmNow 自带进行中守卫，不会重复拉取。
+                    pollDmNow();
                     // ★ 恢复所有暂停的轮询
                     // Phase 3-P0-5: 原循环体为空，页面恢复可见时未触发立即轮询。
                     // 现遍历存活的轮询任务，从 __catAiPollStatus 取出 postId 后调用
@@ -14500,33 +14529,40 @@ function renderProfileActivityList(kind) {
                     if (!chatRealtime || chatRealtime.state === 'closed') {
                         subscribeToMessages();
                     }
+                    // ★ F-H1 修复：与 visibilitychange 一致，重新显示时立即补拉一次。
+                    pollDmNow();
                 }
             });
 
+            // ★ F-H1 修复：单次 DM 补拉抽成 pollDmNow，供轮询定时器与
+            //   切回前台的立即补拉共用（此前 pollNow 只活在闭包里，
+            //   前台恢复时 Broadcast 若仍断着，隐藏期间的消息要等下一轮 300s）。
+            var _dmPolling = false;
+            async function pollDmNow() {
+                if (!window.currentUser || document.hidden || _dmPolling) return;
+                _dmPolling = true;
+                try {
+                    await updateUnreadBadge();
+                    if (currentDockTab === 'chat' && typeof dockChatActiveUser !== 'undefined' && dockChatActiveUser) {
+                        // ★ 2026-09-25：轮询属于后台刷新，禁止动 loading 骨架/空状态，
+                        //   否则回包会把用户当前界面顶掉重画（闪屏）。
+                        await loadDockChatMessages(dockChatActiveUser, false, true);
+                    }
+                } catch(e) {} finally { _dmPolling = false; }
+            }
+
             function startDMPolling(interval, skipImmediate) {
                 // Broadcast is immediate; polling is only the fallback.
-                // 会话内 60 秒、列表 5 分钟必须按调用方传入的间隔生效，不能再夹到 30 秒。
+                // 下限 30s：调用方当前最小就是 30s（会话内），列表 5 分钟、
+                // 会话 60s 都按传入值生效。
                 interval = Math.max(30000, Number(interval) || 30000);
                 if (dmpollTimer) {
                     if (dmpollInterval === interval) return;
                     clearInterval(dmpollTimer); dmpollTimer = null;
                 }
                 dmpollInterval = interval;
-                var polling = false;
-                async function pollNow() {
-                    if (!window.currentUser || document.hidden || polling) return;
-                    polling=true;
-                    try {
-                        await updateUnreadBadge();
-                        if (currentDockTab === 'chat' && typeof dockChatActiveUser !== 'undefined' && dockChatActiveUser) {
-                            // ★ 2026-09-25：轮询属于后台刷新，禁止动 loading 骨架/空状态，
-                            //   否则回包会把用户当前界面顶掉重画（闪屏）。
-                            await loadDockChatMessages(dockChatActiveUser, false, true);
-                        }
-                    } catch(e) {} finally { polling=false; }
-                }
-                if (!skipImmediate) pollNow();
-                dmpollTimer = setInterval(pollNow, interval);
+                if (!skipImmediate) pollDmNow();
+                dmpollTimer = setInterval(pollDmNow, interval);
             }
 
             function stopDMPolling() {
