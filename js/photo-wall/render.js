@@ -300,7 +300,12 @@
     // images can still intersect the viewport. Do not start hidden work.
     var panel = document.getElementById('panelAi');
     if (panel && !panel.classList.contains('active')) return;
-    if (activeLoads >= MAX_LOADS || slowImages.size >= Math.max(2, MAX_LOADS) || !pendingImgs.length) return;
+    // G-M1: 慢图不再计入阻塞条件。超时的图 30 秒后已 settle、释放了
+    // activeLoads 槽位，只是在后台继续下载等最终 load/error；旧条件
+    // slowImages.size >= MAX_LOADS 会在槽位全空时仍堵死整条队列，
+    // 后面已进视口的图片只能停在骨架上。并发仍由 activeLoads <= 4 限流。
+    // slowImages 只保留追踪用途：超时后迟到加载/失败时移出、重渲染时清理。
+    if (activeLoads >= MAX_LOADS || !pendingImgs.length) return;
     var item = pendingImgs.shift();
     if (!item || !item.target) return pumpImages();
     var img = item.target;
