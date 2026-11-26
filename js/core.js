@@ -9715,7 +9715,11 @@ function renderProfileActivityList(kind) {
                     var validDims = width > 0 && height > 0 && width <= 20000 && height <= 20000;
                     var ratio = validDims ? width + ' / ' + height : '4 / 3';
                     var aspect = validDims ? width / height : 4 / 3;
-                    var singleSize = '--post-single-max-width:' + (aspect * 520) + 'px;--post-single-viewport-width:' + (aspect * 65) + 'vh;';
+                    // E-L5: 单图宽 = min(100%, aspect*520px, aspect*65vh)，1:10 的图只剩约 52px。
+                    // 尺寸宽高比下限 200/520，保证单图至少 200px 宽；真实比例（--post-image-ratio）
+                    // 不变，不拉伸图片；正常比例的图片不受影响。
+                    var sizeAspect = Math.max(aspect, 200 / 520);
+                    var singleSize = '--post-single-max-width:' + (sizeAspect * 520) + 'px;--post-single-viewport-width:' + (sizeAspect * 65) + 'vh;';
                     var attrs = 'data-post-id="' + escapeHtml(String(post.id)) + '" data-post-media-index="' + index + '" data-media-url="' + escapeHtml(url) + '"' +
                         ' data-post-user="' + escapeHtml(post.user_name || '') + '" data-post-created-at="' + escapeHtml(post.created_at || '') + '" data-post-views="' + escapeHtml(String(post.views || 0)) + '"' +
                         ' data-file-size="' + escapeHtml(String(item.file_size || '')) + '" data-actor-key="' + escapeHtml(post.actor_key || '') + '" data-can-delete="' + (canDeletePost(post) ? '1' : '0') + '"';
@@ -9772,8 +9776,10 @@ function renderProfileActivityList(kind) {
                 if (!cell || !img.naturalWidth || !img.naturalHeight) return;
                 var ratio = img.naturalWidth / img.naturalHeight;
                 cell.style.setProperty('--post-image-ratio', img.naturalWidth + ' / ' + img.naturalHeight);
-                cell.style.setProperty('--post-single-max-width', (ratio * 520) + 'px');
-                cell.style.setProperty('--post-single-viewport-width', (ratio * 65) + 'vh');
+                // E-L5: 同上，真实尺寸同步时尺寸宽高比下限 200/520，单图至少 200px 宽。
+                var sizeRatio = Math.max(ratio, 200 / 520);
+                cell.style.setProperty('--post-single-max-width', (sizeRatio * 520) + 'px');
+                cell.style.setProperty('--post-single-viewport-width', (sizeRatio * 65) + 'vh');
             };
 
             var expandedPostComments = new Set(), expandedCommentsOwner = currentUser;

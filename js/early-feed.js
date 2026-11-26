@@ -197,7 +197,9 @@
               items.slice(0, 9).map(function(item) {
                 var w = Number(item.width), h = Number(item.height);
                 var ratio = w > 0 && h > 0 && w <= 20000 && h <= 20000 ? w + ' / ' + h : '4 / 3';
-                return '<span class="post-media-cell" style="--post-image-ratio:' + ratio + ';--post-single-max-width:' + ((w > 0 && h > 0 ? w / h : 4 / 3) * 520) + 'px;--post-single-viewport-width:' + ((w > 0 && h > 0 ? w / h : 4 / 3) * 65) + 'vh"></span>';
+                // E-L5: 尺寸宽高比下限 200/520，单图至少 200px 宽；真实比例不变。
+                var sizeAspect = Math.max(w > 0 && h > 0 ? w / h : 4 / 3, 200 / 520);
+                return '<span class="post-media-cell" style="--post-image-ratio:' + ratio + ';--post-single-max-width:' + (sizeAspect * 520) + 'px;--post-single-viewport-width:' + (sizeAspect * 65) + 'vh"></span>';
               }).join('') + '</div>';
           }
         }
