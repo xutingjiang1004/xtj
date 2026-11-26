@@ -9770,13 +9770,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     S.deepThinkJob = controller;
     S.currentStreamAborted = false;
     // 深入研究 fetch 无独立超时：服务端持续发 heartbeat 时 45s idle watchdog 永不触发，
-    // 请求可无限挂起。这里加 300s 绝对超时兜底（后端最长 5 分钟思考，
-    // 此前 120s 会在后端完成前被前端掐断。超时只 abort 本次，不清理全局状态）。
+    // 请求可无限挂起。这里加绝对超时兜底（服务端 deep-stream 默认/上限就是
+    // 1800000ms，上一轮的 300s 会在后端完成前掐断长研究。超时只 abort 本次，不清理全局状态）。
     var dtFetchTimeoutTimer = setTimeout(function() {
       if (!isCurrentDeepSend()) return;
       try { controller.abort('timeout'); } catch (e) {}
       controller._abortReason = 'timeout';
-    }, 300000);
+    }, 1800000);
     S._dtFetchTimeoutTimer = dtFetchTimeoutTimer;
     if (dtFetchTimeoutTimer && dtFetchTimeoutTimer.unref) dtFetchTimeoutTimer.unref();
 
@@ -11675,9 +11675,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       sharedCtrl = window.XtjAiCore.RequestController.create({
         requestId: reqId,
         clientRequestId: 'cr_' + S.clientRequestId,
-        // ★ 优化：后端深入研究/长思考最长 5 分钟，前端 120s 会提前掐断，
-        // 对齐为 300s（SSE idle 看门狗 45s/120s 仍负责真正的假死检测）。
-        timeoutMs: 300000
+        // ★ 第二轮修复（点-2）：绝对超时改回 1800000ms（30 分钟），与服务端
+        // callDeepSeek 的 TOTAL_TIMEOUT_MS 对齐。上一轮砍到 300s 会掐断
+        // 超过 5 分钟的正常长思考；真正假死仍由 SSE idle 看门狗
+        //（首包 120s、收到数据后 300s 无意义事件）负责检测。
+        timeoutMs: 1800000
       });
       sharedCtrl.start();
       window.XtjAiCore.RequestController.registerInFlight('cat_ai', sharedCtrl);
@@ -11687,7 +11689,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       }
       // ★ 双 AbortController 统一：fetch 始终绑定本地 controller.signal，
       // sharedCtrl 的超时/取消通过 externalSignal 转发到同一个 controller（参考 sendOnce 转发模式），
-      // 避免看门狗 abort 落空导致 300s 绝对超时失效。
+      // 避免看门狗 abort 落空导致 1800s 绝对超时失效。
       if (sharedCtrl && sharedCtrl.signal) {
         sharedAbortHandler = function() {
           try {
@@ -11702,7 +11704,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
     // ★ 2026-11-22 修复（资源泄漏）：sharedCtrl 创建之后的所有早退 return
     //   （鉴权失败/额度不足/被新请求抢占/超时等）此前会跳过函数尾部的
-    //   unregisterInFlight + dispose，泄漏 300s 绝对超时定时器与闭包。
+    //   unregisterInFlight + dispose，泄漏 1800s 绝对超时定时器与闭包。
     //   用 try/finally 包住请求主体，将上述清理统一迁入 finally，幂等安全。
     try {
     // ★ 自定义第三方模型：走独立转发路由，不消耗本站配额
@@ -11765,7 +11767,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         client_request_id: reqId,
         // ★ A-M2：内部续写请求带标记，服务端不把模板句存为用户轮次。
         continuation: isContinuation || undefined,
-        timeout_ms: 300000
+        timeout_ms: 1800000
       });
     } else {
       // ★★★ 2026-09-17 修复（P0「内置模型上下文丢失」）：
@@ -12912,8 +12914,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       
       // H-25: 普通对话 idle 看门狗 — 无数据视为超时，中止等待并清理，
       // 避免服务端/provider 挂起时界面永久停在"处理中"。
-      // B 修复：收到首个数据块前用 45s（防连接假死）；一旦收到任何事件（含 reasoning/content），
-      // 说明连接存活、AI 正在工作，放宽到 120s，容忍慢模型在思考阶段的静默，避免误判"AI中断"。
+      // B 修复 + 第二轮（点-2）：收到首个数据块前用 120s（防连接假死；
+      // 服务端思考态首包可达 1800s，上一轮的 45s 太紧）；一旦收到任何
+      // 事件（含 reasoning/content），说明连接存活、AI 正在工作，放宽到
+      // 300s，容忍慢模型在思考/工具编排阶段的长时间静默，避免误判"AI中断"。
       var _lastDataTime = Date.now();
       var timedOut = false;
       var _receivedAny = false;
@@ -12922,8 +12926,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         // ★ A-H1 修复：心跳事件不刷新 _lastDataTime（见下方解析处，只有
         //   有意义的事件才刷新）。服务端每 2.5s 发一次心跳，旧逻辑每次
         //   chunk 到达都刷新，看门狗在上游卡住时永不触发。这里只判断
-        //   连接真的没数据，绝对上限由 300s 控制器负责。
-        var idleThreshold = _receivedAny ? 120000 : 45000;
+        //   连接真的没数据，绝对上限由 1800s 控制器负责。
+        var idleThreshold = _receivedAny ? 300000 : 120000;
         if (Date.now() - _lastDataTime > idleThreshold) {
           timedOut = true;
           if (controller && controller.abort) { try { controller.abort(); } catch (e) {} }
@@ -14365,17 +14369,18 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           if (telemetry) { telemetry.finalize('error', { code: 'STREAM_INTERRUPTED', phase: 'stream_read', message: String(fetchErr && fetchErr.message || '') }); }
         }
       } else {
-        // AbortError: 用户主动停止，或 sharedCtrl 300s 绝对超时
+        // AbortError: 用户主动停止，或 sharedCtrl 1800s 绝对超时
         var sharedTimedOut = !!(sharedCtrl && typeof sharedCtrl.getCancelReason === 'function' && sharedCtrl.getCancelReason() === 'timeout');
         var ctrlReason = (controller && controller._abortReason) || '';
-        var timedOut300 = sharedTimedOut || ctrlReason === 'timeout';
+        var timedOutAbs = sharedTimedOut || ctrlReason === 'timeout';
         if (sharedCtrl) {
-          sharedCtrl.cancel(timedOut300 ? 'timeout' : 'user_cancelled');
-          if (telemetry) { telemetry.finalize(timedOut300 ? 'timeout' : 'cancelled', { code: timedOut300 ? 'REQUEST_TIMEOUT' : 'REQUEST_CANCELLED', phase: 'stream_read', message: timedOut300 ? '思考超时' : '用户取消' }); }
+          sharedCtrl.cancel(timedOutAbs ? 'timeout' : 'user_cancelled');
+          if (telemetry) { telemetry.finalize(timedOutAbs ? 'timeout' : 'cancelled', { code: timedOutAbs ? 'REQUEST_TIMEOUT' : 'REQUEST_CANCELLED', phase: 'stream_read', message: timedOutAbs ? '思考超时' : '用户取消' }); }
         }
-        // ★ 300s 绝对超时与用户取消区分：给出明确提示，避免用户误以为
+        // ★ 1800s 绝对超时与用户取消区分：给出明确提示，避免用户误以为
+        //   是自己点的停止。
         // AI 未回复而重发导致重复扣费/重复请求。
-        stopNoteKind = timedOut300 ? 'timeout' : 'stopped';
+        stopNoteKind = timedOutAbs ? 'timeout' : 'stopped';
         if (aiContent || aiReasoning || (sealedContents && sealedContents.length) || (assistantNode && assistantNode.querySelector('.ai-thinking, .ai-content-segment'))) {
           if (!_finalized) finishAiMessage(assistantNode, aiContent, aiReasoning, { interrupted: true });
           appendStoppedNote(assistantNode, stopNoteKind);
@@ -14386,7 +14391,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           // ★ 与其他中止/失败分支保持一致：无内容中断时也要回填输入框原文与附件，
           //   否则用户主动停止/超时后输入框内容丢失（preserveFailedTurn 只处理消息节点）。
           restoreInputText();
-          if (timedOut300) notify('请求超时，可点击继续');
+          if (timedOutAbs) notify('请求超时，可点击继续');
         }
       }
     }
