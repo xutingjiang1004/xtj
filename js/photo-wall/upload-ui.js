@@ -34,6 +34,25 @@
   var CONCURRENCY = 3;
   var PHOTO_UPLOAD_TIMEOUT_MS = 25000;
 
+  // G-H3: 按整批总字节算并发上限（纯函数，挂 window 上供回归测试调用）。
+  // 12 张手机原图一批可达 120MB：并发 3 时弱网下多路同时超时、集体进
+  // pending 确认；总量大时降到 2 路、1 路，失败率更低。原图本身不压缩、
+  // 不转码（产品决定：原图字节永不改写），只调并发。
+  function batchWorkerLimit(jobs) {
+    var totalBytes = 0, largeFiles = false;
+    (jobs || []).forEach(function(job) {
+      var size = job && job.file && job.file.size || 0;
+      totalBytes += size;
+      if (size > 20 * 1024 * 1024) largeFiles = true;
+    });
+    var limit = CONCURRENCY;
+    if (totalBytes > 60 * 1024 * 1024) limit = 1;
+    else if (totalBytes > 30 * 1024 * 1024) limit = 2;
+    if (largeFiles) limit = Math.min(limit, 2);
+    return Math.max(1, limit);
+  }
+  window.__xtjPhotoWallBatchWorkerLimit = batchWorkerLimit;
+
   function byId(id){ return document.getElementById(id); }
 
   function apiUrl(path) {
@@ -1276,8 +1295,7 @@
       }).then(runOne, runOne);  // ★ 修复：补上 reject 回调，防止 onProgress 等回调抛错时整条 worker 链断掉，导致剩余文件永不上传
     }
     var workers = [];
-    var largeFiles = jobs.some(function(job){ return job.file && job.file.size > 20 * 1024 * 1024; });
-    var workerLimit = largeFiles ? 2 : CONCURRENCY;
+    var workerLimit = batchWorkerLimit(jobs);
     for (var w = 0; w < Math.min(workerLimit, Math.max(1, total)); w++) workers.push(runOne());
     return Promise.all(workers).then(function(){ return { processed: processed, ok: ok, fail: fail, cancelled: cancelled, total: total }; }).finally(function(){clearInterval(identityTimer);});
   }

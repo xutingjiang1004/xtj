@@ -11,6 +11,12 @@ function sourceInfo(data) {
 function previewTag(bucket, path, tag, variant = '') {
   return '"xtj-' + crypto.createHash('sha256').update(VARIANT + variant + '\0' + bucket + '\0' + path + '\0' + tag).digest('hex') + '"';
 }
+// G-H3: 落盘缩略图的确定性路径，与 render-api/photo-create.js 的
+// getPhotoDerivativePaths().thumbnailPath 用同一派生规则（sha256(原图路径)），
+// 删除/去重清理已按该规则引用它。原图本身永不改写，只落盘这一份派生预览。
+function photoThumbPath(storagePath) {
+  return 'photos/thumbs/' + crypto.createHash('sha256').update(String(storagePath || '')).digest('hex') + '.webp';
+}
 // 缩略图与列表大图分开出图：个人动态只要 96px，没必要排进 1080px 的队列，
 // 更没必要让微信去抓 1.2MB 的原图。
 const WIDTHS = [240, 480, 1080];
@@ -117,6 +123,29 @@ function createMediaPreviews({ supabase, sharp, fetchImpl = fetch, traffic = med
       return Buffer.concat(chunks, total);
     } finally { clearTimeout(timer); signal.removeEventListener('abort', aborted); if (reader) { await reader.cancel().catch(() => {}); reader.releaseLock(); } }
   }
+  // G-H3: 读上传时落盘的缩略图。任何异常（不存在、类型不对、超限、客户端无
+  // download 方法）都返回 null，调用方回退实时编码，绝不因此失败请求。
+  async function readPersistedThumb(bucket, path, signal) {
+    signal.throwIfAborted();
+    const store = supabase.storage.from(bucket);
+    if (!store || typeof store.download !== 'function') return null;
+    const result = await store.download(photoThumbPath(path));
+    if (!result || result.error || !result.data) return null;
+    const blob = result.data;
+    if (blob.type && !/^image\//i.test(blob.type)) return null;
+    const buf = Buffer.from(await blob.arrayBuffer());
+    if (buf.length <= 0 || buf.length > maxBytes) return null;
+    return buf;
+  }
+  // G-H3: 把编码好的 1080/webp 副本落盘。尽力而为：失败就当没写过，
+  // 预览路由会在首次访问时实时编码并重建，绝不阻塞上传响应。
+  async function persistThumb(bucket, path, buffer) {
+    try {
+      const store = supabase.storage.from(bucket);
+      if (!store || typeof store.upload !== 'function') return;
+      await store.upload(photoThumbPath(path), buffer, { contentType: 'image/webp', upsert: true });
+    } catch (_) { /* best-effort only */ }
+  }
   function untilAborted(promise, signal) {
     return new Promise((resolve, reject) => {
       const aborted = () => { signal.removeEventListener('abort', aborted); reject(signal.reason); };
@@ -138,6 +167,16 @@ function createMediaPreviews({ supabase, sharp, fetchImpl = fetch, traffic = med
         // display copy instead of downloading its original again for a retry.
         const ready = get(key);
         if (ready) { traffic.previewHit(); return ready; }
+        // G-H3: 先读上传时落盘的缩略图（photos/thumbs/<sha256>.webp，1080/webp）。
+        // 冷启动/进程重启后不再重新下载原图再编码；读不到或不合规则就回退实时编码。
+        // 只用于默认档（1080/webp），240/480/jpeg 仍实时编码。原图路径唯一、
+        // upsert:false，同一路径的原图字节不会被替换，落盘件不会过期。
+        if (width === 1080 && format === 'webp') {
+          try {
+            const persisted = await readPersistedThumb(bucket, path, entry.controller.signal);
+            if (persisted) { put(key, persisted); traffic.previewHit(); return persisted; }
+          } catch (_) { /* fall through to live encode */ }
+        }
         const input = await download(bucket, path, source, entry.controller.signal);
         entry.controller.signal.throwIfAborted();
         const result = await encode(input, width, format);
@@ -197,7 +236,13 @@ function createMediaPreviews({ supabase, sharp, fetchImpl = fetch, traffic = med
       if (working || queue.length) return;
       // The display copy is an optimisation: encoding it must not hold the upload response. The queue is bounded and a
       // failed or skipped encode is rebuilt on first view (the preview route already handles a miss).
-      schedule(async () => { put(previewTag(bucket, path, tag), await encode(input)); }).catch(() => {});
+      // G-H3: 编码好的副本同时落盘到 photos/thumbs/，进程重启/冷启动后直接读
+      // 落盘件，不再重新下载原图再编码；落盘失败也不影响本次上传与内存缓存。
+      schedule(async () => {
+        const encoded = await encode(input);
+        put(previewTag(bucket, path, tag), encoded);
+        await persistThumb(bucket, path, encoded);
+      }).catch(() => {});
     },
     async inspectedUpload(bucket, path, owner) {
       const item = recent.get(bucket + '\0' + path);
@@ -210,4 +255,4 @@ function createMediaPreviews({ supabase, sharp, fetchImpl = fetch, traffic = med
     inspect: () => ({ bytes, entries: cache.size, pending: pending.size, queued: queue.length })
   };
 }
-module.exports = { createMediaPreviews, previewTag, sourceInfo, VARIANT };
+module.exports = { createMediaPreviews, previewTag, photoThumbPath, sourceInfo, VARIANT };
