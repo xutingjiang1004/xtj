@@ -1,9 +1,11 @@
 'use strict';
 // A-L2 回归：注释与代码多处漂移（只改注释，不改代码行为）。
 // 核对结果：
-//  ① 看门狗注释 45s/120s 与代码 idleThreshold（未收到数据 45000、收到后
-//     120000）已一致——A-H1 修代码时已顺带对齐；
-//  ② 300s 注释与 timeoutMs: 300000 已一致——A-H1 同样已顺带修完；
+//  ① 看门狗注释 120s/300s 与代码 idleThreshold（未收到数据 120000、收到后
+//     300000）已一致——点-2 把首包 120s、收到后 300s（上一轮 45s/120s
+//     会误杀长静默思考）；
+//  ② 1800s 注释与 timeoutMs: 1800000 已一致——点-2 把绝对超时改回 30 分钟
+//     对齐服务端 TOTAL_TIMEOUT_MS（上一轮 300s 会掐断长思考）；
 //  ③ search_supplement 分支注释仍漂移：称「reasoning 节点引用一并失效」，
 //     但代码从未置空 reasoningContainer，只有关闭段渲染器引用，真正防脱管
 //     的是 finishAiMessage 的 isConnected 复核；另 settleSearchStatus 注释
@@ -16,23 +18,23 @@ const path = require('node:path');
 
 const src = fs.readFileSync(path.join(__dirname, '..', 'js', 'ai-agent.js'), 'utf8');
 
-test('A-L2: 看门狗注释 45s/120s 与代码一致（A-H1 已顺带修完）', () => {
-  assert.ok(src.includes('var idleThreshold = _receivedAny ? 120000 : 45000;'),
-    '代码应为未收到数据 45s、收到后 120s');
-  const codeIdx = src.indexOf('var idleThreshold = _receivedAny ? 120000 : 45000;');
+test('A-L2: 看门狗注释 120s/300s 与代码一致（点-2 已改为首包 120s、收到后 300s）', () => {
+  assert.ok(src.includes('var idleThreshold = _receivedAny ? 300000 : 120000;'),
+    '代码应为未收到数据 120s、收到后 300s');
+  const codeIdx = src.indexOf('var idleThreshold = _receivedAny ? 300000 : 120000;');
   const comment = src.slice(codeIdx - 700, codeIdx);
-  assert.ok(comment.includes('45s') && comment.includes('120s'),
-    '看门狗注释应写明首包前 45s、收到数据后 120s');
+  assert.ok(comment.includes('120s') && comment.includes('300s'),
+    '看门狗注释应写明首包前 120s、收到数据后 300s');
   assert.ok(!comment.includes('180s') && !comment.includes('180000'),
     '注释里不应再有旧的 180s 漂移值');
 });
 
-test('A-L2: 300s 注释与 timeoutMs: 300000 一致（A-H1 已顺带修完）', () => {
-  const codeIdx = src.indexOf('timeoutMs: 300000');
-  assert.ok(codeIdx >= 0, '绝对超时应为 timeoutMs: 300000');
+test('A-L2: 1800s 注释与 timeoutMs: 1800000 一致（点-2 改回 30 分钟对齐服务端）', () => {
+  const codeIdx = src.indexOf('timeoutMs: 1800000');
+  assert.ok(codeIdx >= 0, '绝对超时应为 timeoutMs: 1800000');
   const comment = src.slice(codeIdx - 400, codeIdx);
-  assert.ok(comment.includes('300s'), '注释应写明对齐为 300s');
-  assert.ok(!src.includes('timeoutMs: 1800000'), '不应再有旧的 1800000（30 分钟）绝对超时');
+  assert.ok(comment.includes('1800000ms') || comment.includes('1800s') || comment.includes('30 分钟'), '注释应写明对齐为 1800s/30 分钟');
+  assert.ok(!src.includes('timeoutMs: 300000'), '不应再有上一轮的 300000 绝对超时');
 });
 
 test('A-L2: search_supplement 注释不再谎称 reasoning 引用已失效', () => {
