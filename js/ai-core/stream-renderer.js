@@ -287,7 +287,13 @@
     try {
       var holder = document.createElement('div'); holder.innerHTML = html;
       children(targetEl, holder, 0);
-    } catch (_) { targetEl.innerHTML = html; }
+    } catch (_) {
+      // C-7：回退不再直接写原始 innerHTML。优先再过一次 sanitize 后写；
+      // 取不到 sanitizer 时只保留已有内容（textContent 自赋值不注入新 HTML）。
+      var _md = getMarkdown();
+      if (_md && typeof _md.sanitize === 'function') { try { targetEl.innerHTML = _md.sanitize(html); } catch (eSan) { targetEl.textContent = targetEl.textContent; } }
+      else targetEl.textContent = targetEl.textContent;
+    }
     targetEl.__xtjStreamHtml = html;
   }
 

@@ -5335,7 +5335,14 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           targetEl.__xtjStable = { html: stable, nodes: whole.childNodes.length };
         }
       }
-    } catch (_) { targetEl.innerHTML = html; targetEl.__xtjStable = null; }
+    } catch (_) {
+      // C-7：回退不再直接写原始 innerHTML。优先再过一次 sanitize 后写；
+      // 取不到 sanitizer 时只保留已有内容（textContent 自赋值不注入新 HTML）。
+      var _san = window.XtjAiCore && window.XtjAiCore.Markdown && window.XtjAiCore.Markdown.sanitize;
+      if (typeof _san === 'function') { try { targetEl.innerHTML = _san(html); } catch (eSan) { targetEl.textContent = targetEl.textContent; } }
+      else targetEl.textContent = targetEl.textContent;
+      targetEl.__xtjStable = null;
+    }
     targetEl.__xtjStreamHtml = html;
   }
 

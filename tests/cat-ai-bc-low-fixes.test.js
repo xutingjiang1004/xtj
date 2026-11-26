@@ -150,3 +150,23 @@ test('C-1 model key drafts are cleared once the server confirms the save', () =>
   // 服务端保存成功且返回 stored_reference 时删除对应草稿（已有行为，回归哨兵）
   assert.match(source, /if\s*\(m\.stored_reference\)\s*modelKeyDrafts\(\)\.delete\(String\(m\.uid\)\)/);
 });
+
+// C-7: XSS 纵深防御 —— sanitizeHtml 的 BLOCKED_TAGS_RE 补 input/button/
+// select/textarea/keygen；两处 patchInnerHTML 的 catch 回退不再直接写原始
+// innerHTML，改为重新 sanitize 后再写，取不到 sanitizer 时只保留已有内容。
+test('C-7 sanitize blocks form controls that could smuggle interaction', () => {
+  const m = markdownRenderer.match(/var BLOCKED_TAGS_RE = (\/[^;]+;)/);
+  assert.ok(m, 'missing BLOCKED_TAGS_RE');
+  for (const tag of ['input', 'button', 'select', 'textarea', 'keygen']) {
+    assert.ok(m[1].includes(tag), 'BLOCKED_TAGS_RE missing ' + tag);
+  }
+});
+
+test('C-7 patchInnerHTML fallbacks never write raw HTML', () => {
+  assert.doesNotMatch(source, /catch\s*\(_\)\s*\{\s*targetEl\.innerHTML = html;/);
+  assert.doesNotMatch(streamRenderer, /catch\s*\(_\)\s*\{\s*targetEl\.innerHTML = html;/);
+  for (const src of [source, streamRenderer]) {
+    assert.match(src, /Markdown\.sanitize|md\.sanitize|_san\b/);
+    assert.match(src, /targetEl\.textContent = targetEl\.textContent/);
+  }
+});
