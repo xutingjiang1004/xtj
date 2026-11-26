@@ -745,7 +745,7 @@
             //   通过 window.isMsgReadByMe 调用必然 TypeError，DM 未读角标恒为 0。
             window.isMsgReadByMe = isMsgReadByMe;
 
-            async function markMessagesRead(senderName, messages, pendingUpdates) {
+            async function markMessagesRead(senderName, messages, pendingUpdates, allowRetry) {
                 if (!window.currentUser || !senderName) return;
                 var owner = window.currentUser, epoch = _authStateEpoch;
                 var updates = Array.isArray(pendingUpdates) ? pendingUpdates.slice() : [];
@@ -757,17 +757,29 @@
                 }
                 if (updates.length) {
                     // 服务端一次最多处理 200 个 ID，超出的会被静默截掉、永远留在未读；这里按 200 分批。
+                    // F-M2：任一批失败不再整批丢弃 —— 服务端按批返回 partial/failed_ids，
+                    // 失败的批只记下 id 继续跑后面的批，跑完再把失败的 id 补推一次；
+                    // 之前是第一批 throw 就中止后续所有批。
                     var readRows = [];
+                    var failedIds = [];
                     for (var offset = 0; offset < updates.length; offset += 200) {
-                        var response = await window.xtjProtectedFetch('/api/dm/read', {
-                            method: 'POST',
-                            authOwner: owner, authEpoch: epoch,
-                            body: JSON.stringify({ message_ids: updates.slice(offset, offset + 200).map(function(update) { return update.id; }) })
-                        });
-                        var result = await response.json().catch(function() { return {}; });
-                        if (owner !== window.currentUser || epoch !== _authStateEpoch) return;
-                        if (!response.ok || !result.ok) throw new Error(result.error || 'DM read update failed');
-                        if (Array.isArray(result.data)) readRows = readRows.concat(result.data);
+                        var batchIds = updates.slice(offset, offset + 200).map(function(update) { return update.id; });
+                        try {
+                            var response = await window.xtjProtectedFetch('/api/dm/read', {
+                                method: 'POST',
+                                authOwner: owner, authEpoch: epoch,
+                                body: JSON.stringify({ message_ids: batchIds })
+                            });
+                            var result = await response.json().catch(function() { return {}; });
+                            if (owner !== window.currentUser || epoch !== _authStateEpoch) return;
+                            if (!response.ok || !result.ok) throw new Error(result.error || 'DM read update failed');
+                            if (Array.isArray(result.failed_ids)) failedIds = failedIds.concat(result.failed_ids.map(String));
+                            if (Array.isArray(result.data)) readRows = readRows.concat(result.data);
+                        } catch (e) {
+                            if (owner !== window.currentUser || epoch !== _authStateEpoch) return;
+                            console.warn('[DM] 已读标记本批失败，稍后重试:', e && e.message);
+                            failedIds = failedIds.concat(batchIds.map(String));
+                        }
                     }
                     var readById = new Map(readRows.map(function(row) { return [String(row.id), row]; }));
                     var cacheKey = getDockChatCacheKey(senderName);
@@ -777,6 +789,15 @@
                         return authoritative ? reconcileDockChatMessage(message, authoritative) : message;
                     });
                     if (dockChatActiveUser === senderName) renderDockMessages(senderName, _chatCache[cacheKey], false);
+                    if (failedIds.length && allowRetry !== false && typeof setTimeout === 'function') {
+                        // 失败的 id 下次打开会话/轮询本来就会重算，但用户一直停留
+                        // 在本会话时不会再有触发点；只补推一次，避免无声丢已读。
+                        var retryIds = failedIds.filter(function(id, i, arr) { return arr.indexOf(id) === i; });
+                        setTimeout(function() {
+                            if (owner !== window.currentUser || epoch !== _authStateEpoch) return;
+                            markMessagesRead(senderName, [], retryIds.map(function(id) { return { id: id }; }), false).catch(function() {});
+                        }, 5000);
+                    }
                 }
                 scheduleDockChatListRefresh(updates.length ? 120 : 40);
                 updateUnreadBadge();

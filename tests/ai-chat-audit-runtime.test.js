@@ -90,3 +90,48 @@ test('XHR 401 awaiting refresh refuses replacement identity token and progress',
 test('SSE accepts CR-only and CRLF split across chunks without duplicate dispatch',async()=>{const c={window:{},TextDecoder,URL,Promise};vm.createContext(c);vm.runInContext(fs.readFileSync('js/ai-core/transport.js','utf8'),c);for(const chunks of [['event: delta\rdata: first\r\revent: delta\rdata: second\r\r'],['data: one\r','\n\r','\ndata: two\r','\n\r','\n']]){const events=[];const body=new ReadableStream({start(controller){chunks.forEach(x=>controller.enqueue(new TextEncoder().encode(x)));controller.close();}});await c.window.XtjAiCore.Transport.readSSEStream({body},e=>events.push(e));assert.deepEqual(events.map(e=>e.data),chunks.length===1?['first','second']:['one','two']);}});
 test('multi-window push suppression matches the visible client peer rather than unrelated visible page',async()=>{const handlers={},shown=[],clients=[{id:'chat',url:'https://xtj.test/',visibilityState:'hidden'},{id:'home',url:'https://xtj.test/',visibilityState:'visible'}];let state={owner:'A',clients:{chat:{owner:'A',peer:'P'},home:{owner:'A',peer:''}}};const c={self:{location:{origin:'https://xtj.test'},addEventListener:(k,f)=>handlers[k]=f,clients:{matchAll:async()=>clients},registration:{showNotification:async(t,n)=>shown.push(n)}},caches:{open:async()=>({match:async()=>new Response(JSON.stringify(state)),put:async(u,r)=>state=await r.json()})},Response,URL,Set};vm.createContext(c);c.Request=Request;c.Headers=Headers;c.importScripts=file=>vm.runInContext(fs.readFileSync(require('node:path').join(process.cwd(),file),'utf8'),c);vm.runInContext(fs.readFileSync('chat-notifications-sw.js','utf8'),c);const push=async()=>{let p;handlers.push({data:{json:()=>({type:'chat-message',owner:'A',peer:'P',id:'id'})},waitUntil:x=>p=x});await p;};await push();assert.equal(shown.length,1);clients[0].visibilityState='visible';await push();assert.equal(shown.length,1);let p;handlers.message({source:clients[0],data:{type:'XTJ_CHAT_PUSH_STATE',owner:'B',peer:'P'},waitUntil:x=>p=x});await p;assert.equal(state.clients.chat.owner,'B');assert.equal(state.clients.home.owner,'A');});
 test('pending push synchronization reruns for account B after delayed A config finishes',async()=>{const d=deferred(),posts=[],subscriptions=[],registration={active:{postMessage:m=>posts.push(m)},pushManager:{getSubscription:async()=>({options:{},toJSON:()=>({endpoint:'test'})})}},storage=new Map([['xtj_chat_push_A','on'],['xtj_chat_push_B','on']]);const c={currentUser:'A',_authStateEpoch:1,currentDockTab:'chat',dockChatActiveUser:'P',localStorage:{getItem:k=>storage.get(k)},navigator:{serviceWorker:{getRegistration:async()=>registration,register:async()=>registration,ready:Promise.resolve(registration)}},Notification:{permission:'granted'},Uint8Array,Promise,btoa:x=>Buffer.from(x).toString('base64'),atob:x=>Buffer.from(x,'base64').toString(),window:{}};c.window={isSecureContext:true,PushManager:class{},Notification:c.Notification,get currentUser(){return c.currentUser;},xtjProtectedFetch:async(path,opts)=>{if(path.endsWith('/config') && opts.authOwner==='A')return d.promise;if(path.endsWith('/subscribe'))subscriptions.push(opts.authOwner);return{ok:true,json:async()=>({ok:true,public_key:'YQ=='})};},__xtjSyncChatPush:()=>{c.followup=c.syncChatPushState();}};vm.createContext(c);vm.runInContext(extract('            var _chatPushSyncing=', '            async function toggleChatPush()'),c);const first=c.syncChatPushState();await new Promise(r=>setImmediate(r));c.currentUser='B';c._authStateEpoch++;await c.syncChatPushState();d.resolve({ok:true,json:async()=>({ok:true,public_key:'YQ=='})});await first;await c.followup;assert.deepEqual(subscriptions,['B']);assert.equal(posts.at(-1).owner,'B');});
+test('F-M2: 已读分批失败不中止后续批，失败 id 只补推一次', async () => {
+  const calls = [], timers = [];
+  const ids = Array.from({ length: 450 }, (_, i) => ({ id: 'id' + i }));
+  const c = {
+    _authStateEpoch: 1, dockChatActiveUser: 'peer',
+    _chatCache: { peer: [{ id: 'id200', content: '{}' }] },
+    getDockChatCacheKey: () => 'peer',
+    getDMMessageReadAt: () => null,
+    reconcileDockChatMessage: (local, authoritative) => authoritative,
+    renderDockMessages() {}, scheduleDockChatListRefresh() {}, updateUnreadBadge() {},
+    console: { warn() {} },
+    setTimeout(fn, ms) { timers.push({ fn, ms }); return timers.length; }
+  };
+  c.window = {
+    get currentUser() { return 'A'; },
+    xtjProtectedFetch: async (path, opts) => {
+      const body = JSON.parse(opts.body);
+      calls.push(body.message_ids);
+      if (calls.length === 1) return { ok: false, json: async () => ({ ok: false, error: 'boom' }) };
+      if (calls.length === 2) return { ok: true, json: async () => ({ ok: true, data: [{ id: 'id200', content: '{"read_at":"t"}' }], failed_ids: ['id250'] }) };
+      return { ok: true, json: async () => ({ ok: true, data: [], failed_ids: [] }) };
+    }
+  };
+  vm.createContext(c);
+  const stats = fs.readFileSync('js/core-parts/05-feed-stats.js', 'utf8');
+  const a = stats.indexOf('            async function markMessagesRead(');
+  const b = stats.indexOf('            window.markMessagesRead =', a);
+  vm.runInContext(stats.slice(a, b), c);
+  // 旧实现：第一批 throw 会中止，后两批永远发不出去
+  await c.markMessagesRead('peer', [], ids);
+  assert.equal(calls.length, 3, '三批必须全部发出');
+  assert.equal(calls[0].length, 200);
+  assert.equal(calls[1].length, 200);
+  assert.equal(calls[2].length, 50);
+  assert.equal(JSON.parse(c._chatCache.peer[0].content).read_at, 't', '成功批的行必须用服务端权威值回填');
+  assert.equal(timers.length, 1, '失败 id 必须安排一次补推');
+  assert.equal(timers[0].ms, 5000);
+  await timers[0].fn();
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(calls.length, 5, '补推的 201 个 id 按 200 分批发出');
+  assert.equal(calls[3].length, 200);
+  assert.deepEqual(calls[4], ['id250'], '补推第二批只有第二批失败的那 1 个');
+  assert.ok(calls[3].includes('id0'));
+  assert.equal(timers.length, 1, '补推不再安排第二次定时器，避免无限重试');
+});
