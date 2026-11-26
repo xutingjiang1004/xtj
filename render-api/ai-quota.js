@@ -20,10 +20,6 @@ var V4_PRO_TOKEN_MULTIPLIER = Math.max(1, Number(process.env.AI_PRO_MODEL_MULTIP
   
 function getModelTokenMultiplier(model) {
   return /pro/i.test(String(model || '')) ? V4_PRO_TOKEN_MULTIPLIER : 1;
-  var m = String(model || '').toLowerCase();
-  if (!m) return 1;
-  if (m.indexOf('pro') >= 0) return V4_PRO_TOKEN_MULTIPLIER;
-  return 1;
 }
 
 function limits() {
@@ -50,7 +46,6 @@ function computeBillableTokens(usage, opts) {
   var completion = Math.max(0, Math.floor(Number(usage.completion_tokens) || Number(usage.output_tokens) || 0));
   // Details are a subset of completion/output, not an extra billable category.
   // Keep the legacy independent top-level reasoning field supported
-  var total = Math.max(0, Math.floor(Number(usage.total_tokens) || 0));
   var total = Math.max(0, Math.floor(Number(usage.total_tokens) || 0));
   var reasoningIncluded = usage.reasoning_included_in_completion === true || (total > 0 && prompt + completion === total);
   var reasoning = reasoningIncluded ? 0 : Math.max(0, Math.floor(Number(usage.reasoning_tokens) || 0));
