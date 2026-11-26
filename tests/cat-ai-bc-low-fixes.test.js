@@ -32,3 +32,13 @@ test('B-06 appendEmptyState passes the configured avatar URL into the upgrade', 
   const body = fnBody(source, 'function appendEmptyState(');
   assert.match(body, /upgradeEmptyStateAvatar\(container, S\.config && S\.config\.avatar_url, S\.config && S\.config\.avatar_version\)/);
 });
+
+// B-07: 14px 输入框在 iOS 聚焦会触发系统自动缩放。两个聊天输入框改 16px：
+// .ai-chat-input 与 .dt-input 都是 flex:1 的 textarea，min-height 只是下限，
+// 字号变大只让输入栏自身长高约 4px，不挤压固定宽度的发送/暂停按钮。
+test('B-07 chat composers use 16px font to avoid iOS auto-zoom', () => {
+  const chatInput = css.slice(css.indexOf('.ai-chat-input {'), css.indexOf('.ai-chat-input::placeholder'));
+  assert.match(chatInput, /font-size:\s*16px/);
+  const dtInput = css.slice(css.indexOf('.dt-input {'), css.indexOf('.dt-input::placeholder'));
+  assert.match(dtInput, /font-size:\s*16px/);
+});
