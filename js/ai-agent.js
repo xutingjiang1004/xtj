@@ -584,6 +584,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     deletingConversations: new Set(),
     loading: false,
     loadingMore: false,
+    // ★ A-L1：历史分页待处理标志。上翻时若正在加载，记下来等本页完成再补拉一次。
+    _historyPagePending: false,
     thinkingMode: resolveInitialThinkingMode(),
     // Normal chat has a bounded, tool-aware middle gear.  It is intentionally
     // separate from deep research so the latter remains a dedicated flow.
@@ -14625,6 +14627,18 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         S.loadingMore = false;
         if (S.historyController === loadController) S.historyController = null;
         if (!before && messagesEl) messagesEl.removeAttribute('aria-busy');
+        // ★ A-L1：补拉一页。两种情形：① 上翻时正在加载，滚动处理记了
+        //   _historyPagePending，消费后补拉一次；② 分页加载完成时仍在顶部
+        //   且 hasMore、本页确实返回了新内容，自动续拉一页。锚点回调会把
+        //   scrollTop 抬到旧位置+新增高度，链条自然停止，不会一次拉全量；
+        //   要求 msgs.length>0 保证每次续拉都有进展，失败/空页不空转。
+        var _pagePending = S._historyPagePending;
+        S._historyPagePending = false;
+        if (before && messagesEl && messagesEl.offsetParent && !S.showingHistory
+            && messagesEl.scrollTop < 60 && S.hasMore && S.oldestCursor
+            && (_pagePending || (typeof msgs !== 'undefined' && msgs && msgs.length))) {
+          loadHistory(messagesEl, S.oldestCursor);
+        }
       }
     }
   }
@@ -15910,8 +15924,10 @@ function showChatMessages() {
       // ★ 修复 M2：历史会话列表页（messagesEl display:none）或 hasMore 残留时
       // 不得触发历史分页加载，避免拼接错乱/误拉取。offsetParent 为 null 表示元素不可见。
       if (S.showingHistory || !messagesEl.offsetParent) return;
-      if (messagesEl.scrollTop < 60 && S.hasMore && !S.loading && !S.loadingMore && S.oldestCursor) {
-        loadHistory(messagesEl, S.oldestCursor);
+      // ★ A-L1：加载中收到新的上翻请求不再丢弃，记待处理标志等本页完成再补拉一次。
+      if (messagesEl.scrollTop < 60 && S.hasMore && S.oldestCursor) {
+        if (S.loading || S.loadingMore) S._historyPagePending = true;
+        else loadHistory(messagesEl, S.oldestCursor);
       }
     }));
     root.appendChild(messagesEl);
