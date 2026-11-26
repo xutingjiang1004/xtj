@@ -10087,7 +10087,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var text = String(input.value || '').trim();
       var fData = _dtFileData;
       if (!text && !fData) return;
-      if (text.length > 50000) { notify('消息过长，最多 50000 字符'); return; }
+      if (text.length > 50000) { notify('消息过长，最多 50000 字符，请精简后重试'); return; }
       if (fData) {
         fData.onSuccess = function() {
           if (_dtFileData !== fData) return;
