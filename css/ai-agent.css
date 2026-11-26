@@ -1445,6 +1445,7 @@ html[data-xtj-motion="off"] .ai-voice-status, html[data-xtj-motion="off"] .ai-ch
 .ai-chat-input-bar {
   flex: 0 0 auto;
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-end;
   gap: 8px;
   padding: 8px 12px max(10px, env(safe-area-inset-bottom));
@@ -5859,6 +5860,16 @@ html.xtj-reduce-motion .ai-copy-menu .ai-reply-menu-panel { animation: none; }
   flex-shrink: 0;
   max-width: 260px;
   box-sizing: border-box;
+}
+/* ★ B-05：附件预览独占一行，不再与输入框抢同一行宽度。360px 屏上
+   固定件（+40/语音 52/发送 50/边距 20/间距 32）已占 194px，剩 166px
+   既放不下预览（内容下限约 88px）也放不下可用输入框（约 100px），
+   单行内再怎么收缩都会把输入框压到接近 0；改为预览整行显示，输入行
+   恢复完整宽度。只作用于聊天输入栏，.dt-file-preview（思考页）不受影响。 */
+.ai-chat-input-bar .ai-chat-file-preview {
+  flex: 1 1 100%;
+  min-width: 0;
+  max-width: 100%;
 }
 .ai-file-thumb {
   width: 32px; height: 32px;
