@@ -600,7 +600,15 @@
         if (!data.has_more) break;
         last = lastServerMessage(conv);
       }
-    } catch (_) {
+    } catch (error) {
+      // F-M4：之前是 catch(_){} 静默吞掉 —— 新消息拉不到，界面上毫无提示。
+      // 轮询 tick（4s/12s）本来就会重试，这里只记日志并 30 秒内最多提示一次，
+      // 避免离线时每几秒弹一次 toast。
+      console.warn('[group] fetchNewer failed:', error && error.message);
+      if (state.active === conv && Date.now() - (conv.fetchFailedToastAt || 0) > 30000) {
+        conv.fetchFailedToastAt = Date.now();
+        toast('群消息同步失败，稍后自动重试');
+      }
     } finally {
       conv.fetching = false;
       if (conv.refetch && state.active === conv) { conv.refetch = false; fetchNewer(conv); }
@@ -610,16 +618,27 @@
   async function fetchOlder(conv) {
     if (!conv || conv.loadingOlder || !conv.hasMore) return;
     var first = firstServerMessage(conv); if (!first) return;
-    conv.loadingOlder = true; $('groupOlder').hidden = false;
+    conv.loadingOlder = true;
+    var olderEl = $('groupOlder');
+    if (olderEl) { olderEl.innerHTML = '<span class="grp-spinner"></span>'; olderEl.hidden = false; }
     var box = $('groupChatMessages'), before = box.scrollHeight - box.scrollTop;
+    var showRetry = false;
     try {
       var data = await api('/' + conv.id + '/messages?limit=40' + cursorQuery(first, 'before'), { owner: conv.owner, epoch: conv.epoch });
       if (state.active !== conv) return;
       conv.hasMore = !!data.has_more;
       mergeMessages(conv, data.messages, 'prepend');
       box.scrollTop = box.scrollHeight - before; // keep the reader anchored
-    } catch (_) {
-    } finally { conv.loadingOlder = false; $('groupOlder').hidden = true; }
+    } catch (error) {
+      // F-M4：之前静默吞掉 —— 上滑翻历史失败后既无提示也无重试入口。
+      // 在 older 槽位放一个重试按钮（复用 data-grp 委托处理，见 retry-older）。
+      console.warn('[group] fetchOlder failed:', error && error.message);
+      showRetry = true;
+      if (olderEl && state.active === conv) {
+        olderEl.innerHTML = '<div class="grp-load-error">历史加载失败<button type="button" data-grp="retry-older">重试</button></div>';
+        olderEl.hidden = false;
+      }
+    } finally { conv.loadingOlder = false; if (!showRetry) $('groupOlder').hidden = true; }
   }
 
   function markRead(conv) {
@@ -632,7 +651,19 @@
     clearTimeout(conv.readTimer);
     conv.readTimer = setTimeout(function () {
       if (state.active !== conv) return;
-      api('/' + conv.id + '/actions', { method: 'POST', json: { action: 'mark_read' }, owner: conv.owner, epoch: conv.epoch }).catch(function () {});
+      api('/' + conv.id + '/actions', { method: 'POST', json: { action: 'mark_read' }, owner: conv.owner, epoch: conv.epoch }).catch(function (error) {
+        // F-M4：之前先清角标、POST 失败空吞 —— 角标清了但服务端仍记未读，
+        // 下次列表刷新角标又会跳回来。失败只补发一次，再失败就刷新列表，
+        // 让角标回到服务端真实值，而不是一直错着。
+        console.warn('[group] mark_read failed:', error && error.message);
+        if (state.active !== conv) return;
+        setTimeout(function () {
+          if (state.active !== conv) return;
+          api('/' + conv.id + '/actions', { method: 'POST', json: { action: 'mark_read' }, owner: conv.owner, epoch: conv.epoch }).catch(function () {
+            scheduleListRefresh(0);
+          });
+        }, 5000);
+      });
     }, 400);
   }
 
@@ -1138,6 +1169,7 @@
         else if (what === 'image') view.querySelector('#groupImageInput').click();
         else if (what === 'cancel-reply') setReply(null);
         else if (what === 'retry' && conv) fetchLatest(conv);
+        else if (what === 'retry-older' && conv) fetchOlder(conv);
         else if (what === 'dismiss-announce') { event.stopPropagation(); dismissAnnouncement(); }
         return;
       }
