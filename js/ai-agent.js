@@ -11734,7 +11734,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var fetchBody;
     // ★ A-H2 修复：发送前先补齐历史（见 ensureHistoryLoadedForSend）。
     //   首屏只拉了 10 条时，直接拼装会让服务端只拿到最近 10 条上下文。
-    try { await ensureHistoryLoadedForSend(); } catch (eHistEnsure) {}
+    //   托管模式才需要补到 256 条，其余只补到服务端实际会用的 24 条。
+    try { await ensureHistoryLoadedForSend(sendSettings.contextManaged); } catch (eHistEnsure) {}
     if (isCustomModel && customCfg) {
       // ★ 思考Max 上下文拼装：开启时尽量保留全部上下文不压缩（榨干性能）；
       //   关闭时限制在 CONTEXT_LIMIT_NORMAL 条（256），超过即自动压缩丢弃更早内容，
@@ -14452,18 +14453,27 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   // ★ A-H2 修复：发送前把未加载的更早历史分页补齐，避免只带最近 10 条。
   //   首屏只拉 HISTORY_PAGE_SIZE(10) 条就直接发送时，服务端优先用前端传的
   //   历史，不会补全，长会话的上下文会被静默截断。
-  //   只补到发送上下文上限（CONTEXT_LIMIT_NORMAL 条）为止，最多 25 页；
-  //   单页失败、会话切换或仍在加载时不阻塞发送，调用方用已加载的历史继续。
-  async function ensureHistoryLoadedForSend() {
+  //   ★ 第二轮修复（点-3）：服务端只用最近 24 条前端历史
+  //   （render-api/server.js 的 AI_CHAT_HISTORY_FETCH_BUFFER=24），补到
+  //   256 条纯属浪费；上一轮最多串行拉 25 页，每页一次往返 + DOM 前插，
+  //   首 token 被拖慢。非托管模式最多补 2 页（首屏 10 + 20 = 30 条，
+  //   覆盖 24 条历史 + 当前一条）；托管模式服务端用到 256 条，保留
+  //   25 页上限，但全程加时间预算，超时即发，不阻塞发送。
+  async function ensureHistoryLoadedForSend(contextManaged) {
     if (!S.conversationId || !S.hasMore || !S.messagesEl || !S.oldestCursor) return;
     var convId = S.conversationId;
-    var maxPages = 25;
+    var maxPages = contextManaged ? 25 : 2;
+    var budgetMs = contextManaged ? 5000 : 1500;
+    var deadline = Date.now() + budgetMs;
+    // S.messages 已含当前一条用户消息；服务端去当前条后只取最近 24 条，
+    // 非托管模式补到 25 条即饱和，多了服务端也会丢掉。
+    var targetCount = contextManaged ? CONTEXT_LIMIT_NORMAL : 25;
     var waited = 0;
-    while ((S.loading || S.loadingMore) && waited < 2000) {
+    while ((S.loading || S.loadingMore) && waited < 500 && Date.now() < deadline) {
       await new Promise(function(resolve) { setTimeout(resolve, 100); });
       waited += 100;
     }
-    while (S.hasMore && S.oldestCursor && S.messages.length < CONTEXT_LIMIT_NORMAL && maxPages-- > 0) {
+    while (S.hasMore && S.oldestCursor && S.messages.length < targetCount && maxPages-- > 0 && Date.now() < deadline) {
       if (!S.active || S.conversationId !== convId) return;
       var beforeCount = S.messages.length;
       try { await loadHistory(S.messagesEl, S.oldestCursor); } catch (eHistLoad) { return; }
