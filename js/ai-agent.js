@@ -11065,8 +11065,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   }
 
   async function handleSendMessage(input, sendBtn, messagesEl, fileData, onAccepted, options) {
-    var text = String(input.value || '').trim();
-    var originalUserText = text;
+    // ★ A-M2：继续生成是内部续写请求，模板句不是真实用户轮次——文本走
+    //   options.continuationText，不读/不写输入框，失败回填也不写模板句。
+    var isContinuation = !!(options && options.continuation);
+    var text = isContinuation
+      ? String((options && options.continuationText) || '请在上文基础上继续写完，不要重复已说内容。').trim()
+      : String(input.value || '').trim();
+    var originalUserText = isContinuation ? '' : text;
     // 发送动画的起点：点选项发送时用那个选项，普通发送用输入框；继续生成、重新生成这类程序触发的发送不做动画。
     var sendFlightFrom = null;
     try {
@@ -11078,7 +11083,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     if (S._aiChatFilesLoading && input === S.inputEl) { notify('正在读取附件，请稍候再发送'); return; }
     // ★ 多文件：支持数组（最多 10 个），兼容旧的单文件调用
     var fileList = Array.isArray(fileData) ? fileData.slice(0, 10) : (fileData ? [fileData] : []);
-    var sendFingerprint = originalUserText + '\u0000' + fileList.map(function(f) {
+    var sendFingerprint = text + '\u0000' + fileList.map(function(f) {
       return String(f.name || '') + ':' + String(f.dataUrl || '').length;
     }).join('|');
     if (S.sending && S.lastSendFingerprint === sendFingerprint && Date.now() - S.lastSendAt < 1500) {
@@ -11253,17 +11258,28 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var nowIso = new Date().toISOString();
     // ★ 记录附件（含图片 data URL），供「重新生成」时原样复用
     var userMsg = { role: 'user', content: displayText, created_at: nowIso, attachments: attachmentPayload || null, client_request_id: reqId, _pendingSync: true };
-    S.messages.push(userMsg);
-    // ★ 2026-09-29（审计 S1/S2）：登记"本轮本地消息"，供首屏历史到达时保留、
-    //   以及失败收尾时精确定位（不再盲 pop / 盲删最后一个用户气泡）。
-    S._pendingLocalMsgs = (Array.isArray(S._pendingLocalMsgs) ? S._pendingLocalMsgs : []).filter(function(m) { return m && S.messages.indexOf(m) >= 0; });
-    S._pendingLocalMsgs.push(userMsg);
-    if (S._pendingLocalMsgs.length > 40) S._pendingLocalMsgs = S._pendingLocalMsgs.slice(-40);
-    try { setAiHistoryCache(S.conversationId, S.messages); } catch (eUCache) {}
-    var userNode = appendMessage(messagesEl, userMsg);
-    S.autoScrollPinned = true;
-    scrollToBottom(messagesEl, true);
-    playUserSendFlight(userNode, sendFlightFrom);
+    // ★ A-M2：继续生成是内部续写请求，模板句不是真实用户轮次——不进
+    //   S.messages、不画用户气泡、不写历史缓存；只作为本次请求的 message
+    //   发给模型（服务端见 continuation 标记也不把它存为用户轮次）。
+    //   userMsg 本身仍保留为本次请求的“当前轮次”对象，供上下文拼装
+    //   （buildAiConversationHistory 本就会排除 currentUserMsg）与收尾
+    //   引用；失败移除时它不在数组里，按引用查找自然跳过。
+    var userNode = null;
+    if (isContinuation) {
+      userMsg._continuation = true;
+    } else {
+      S.messages.push(userMsg);
+      // ★ 2026-09-29（审计 S1/S2）：登记"本轮本地消息"，供首屏历史到达时保留、
+      //   以及失败收尾时精确定位（不再盲 pop / 盲删最后一个用户气泡）。
+      S._pendingLocalMsgs = (Array.isArray(S._pendingLocalMsgs) ? S._pendingLocalMsgs : []).filter(function(m) { return m && S.messages.indexOf(m) >= 0; });
+      S._pendingLocalMsgs.push(userMsg);
+      if (S._pendingLocalMsgs.length > 40) S._pendingLocalMsgs = S._pendingLocalMsgs.slice(-40);
+      try { setAiHistoryCache(S.conversationId, S.messages); } catch (eUCache) {}
+      userNode = appendMessage(messagesEl, userMsg);
+      S.autoScrollPinned = true;
+      scrollToBottom(messagesEl, true);
+      playUserSendFlight(userNode, sendFlightFrom);
+    }
 
     // ★ 全网深搜（required 态）：只在普通对话里强制深度联网，不渲染研究卡。
     //   研究卡流程属于「深入研究」页，深搜不复用它。下方内置/第三方链路会发送
@@ -11373,8 +11389,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       } catch (e) {}
     }
 
-    // 清空输入框
-    input.value = '';
+    // 清空输入框（继续生成不碰输入框：里面的草稿要原样保留）
+    if (!isContinuation) input.value = '';
     input.style.height = 'auto';
     updateInputMetrics();
     // Consume only an accepted draft, before any asynchronous failure can
@@ -11532,6 +11548,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         // ★ 修复：自定义模型通道此前漏发 attachments，文件内容无法传给模型
         attachments: attachmentPayload || undefined,
         client_request_id: reqId,
+        // ★ A-M2：内部续写请求带标记，服务端不把模板句存为用户轮次。
+        continuation: isContinuation || undefined,
         timeout_ms: 300000
       });
     } else {
@@ -11555,6 +11573,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         messages_include_current: false,followup_suggestions:false,context_estimate:true,
         context_management:sendSettings.contextManaged||undefined,context_window_tokens:sendSettings.contextManaged?sendSettings.contextWindowTokens:undefined,context_memory:sendSettings.contextManaged?sendSettings.contextMemory:undefined,
         client_request_id: reqId,
+        // ★ A-M2：内部续写请求带标记，服务端不把模板句存为用户轮次。
+        continuation: isContinuation || undefined,
         thinking_mode: _sendThinkingMode,
         thinking_max: sendSettings.thinkMax === true,
         work_mode: sendSettings.workMode === true,
@@ -11900,9 +11920,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           var inputEl = S.inputEl || document.getElementById('aiChatInput');
           var sendEl = S.sendBtnEl || document.getElementById('aiChatSend');
           var host = msgHost || S.messagesEl || document.getElementById('aiChatMessages');
-          if (inputEl) inputEl.value = '请在上文基础上继续写完，不要重复已说内容。';
+          // ★ A-M2：先把输入框里的草稿记进会话草稿表（不切换会话、不动输入框），
+          //   再发起不进历史的内部续写请求；模板句不再写进输入框、不再覆盖草稿。
+          try { if (typeof S._saveAiComposerDraft === 'function') S._saveAiComposerDraft(); } catch (eDraft) {}
           try {
-            if (typeof handleSendMessage === 'function') handleSendMessage(inputEl, sendEl, host, null, undefined, { noFlight: true });
+            if (typeof handleSendMessage === 'function') handleSendMessage(inputEl, sendEl, host, null, undefined, { noFlight: true, continuation: true, continuationText: '请在上文基础上继续写完，不要重复已说内容。' });
             else notify('无法继续，请手动重发');
           } catch (eSend) {
             notify('继续失败，请手动重发');
@@ -17611,6 +17633,13 @@ function showChatMessages() {
     S._forgetAiComposerDraft = function(cid) {
       composerDrafts.delete(cid || '');
       if (cid === S.conversationId) { input.value = ''; autoresize(); }
+    };
+    // ★ A-M2：把当前输入框草稿记进会话草稿表（不切换会话、不动输入框），
+    //   供“继续生成”等程序触发的发送先保存草稿再发；切会话回来仍能恢复。
+    S._saveAiComposerDraft = function() {
+      if (!input.value) return;
+      composerDrafts.set(S.conversationId || '', { text: input.value, start: input.selectionStart, end: input.selectionEnd });
+      while (composerDrafts.size > 50) composerDrafts.delete(composerDrafts.keys().next().value);
     };
     S._aiChatFileSelectionVersion = function() { return _aiChatFileSelectionSeq; };
     // ★ 加固：_aiChatFiles 是 renderAiRoot 的闭包变量，closeAiChat 在外部作用域无法直接访问，

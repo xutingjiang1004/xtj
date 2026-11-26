@@ -4152,15 +4152,10 @@ async function finishStream(res, opt) {
       var seqAssistant = (opt.streamSeq || 0) + 2;
       var userCreatedAt = new Date(nowSave).toISOString();
       var assistantCreatedAt = new Date(nowSave + 1).toISOString();
-      var saveResult = await supabase.from('posts').insert([
-        {
-          user_name: opt.userName,
-          content: res._aiVisionUrls && res._aiVisionUrls.length ? res._aiVisionRawText : opt.message,
-          media_type: AI_AGENT_MESSAGE_MARKER,
-          media_url: buildMsgMeta('user', opt.convId, null, null, seqUser, null, null, { client_request_id: res._aiClientRequestId, vision_urls: res._aiVisionUrls || opt.visionUrls }),
-          actor_key: 'ai_msg_conv_' + opt.convId + '_user_' + opt.userName + '_' + nowSave,
-          created_at: userCreatedAt
-        },
+      // ★ A-M2：内部续写请求（continuation）不把模板句存为用户轮次，只存
+      //   续写的助手回复；否则刷新历史会凭空多出一条模板“用户消息”。
+      var isContinuation = opt.continuation === true || res._aiContinuation === true;
+      var _saveRows = [
         {
           user_name: opt.userName,
           content: content,
@@ -4169,7 +4164,16 @@ async function finishStream(res, opt) {
           actor_key: 'ai_msg_conv_' + opt.convId + '_agent_' + opt.userName + '_' + (nowSave + 1),
           created_at: assistantCreatedAt
         }
-      ]);
+      ];
+      if (!isContinuation) _saveRows.unshift({
+        user_name: opt.userName,
+        content: res._aiVisionUrls && res._aiVisionUrls.length ? res._aiVisionRawText : opt.message,
+        media_type: AI_AGENT_MESSAGE_MARKER,
+        media_url: buildMsgMeta('user', opt.convId, null, null, seqUser, null, null, { client_request_id: res._aiClientRequestId, vision_urls: res._aiVisionUrls || opt.visionUrls }),
+        actor_key: 'ai_msg_conv_' + opt.convId + '_user_' + opt.userName + '_' + nowSave,
+        created_at: userCreatedAt
+      });
+      var saveResult = await supabase.from('posts').insert(_saveRows);
       // ★ P2 修复：insert 失败时不再谎报 saved:true——done 事件和会话摘要更新
       // 都以 saved 为准，未落库必须如实上报。
       if (saveResult && saveResult.error) {
@@ -4189,6 +4193,7 @@ async function finishStream(res, opt) {
       marker: AI_AGENT_MESSAGE_MARKER, thinkingElapsedMs, visionUrls: res._aiVisionUrls || opt.visionUrls,
       contextMemory:res._aiContextMemory,contextBudget:res._aiContextBudget,
       startedAt: res._aiStartedAt || opt.startTime, requestId: res._aiClientRequestId,
+      continuation: opt.continuation === true || res._aiContinuation === true,
       finishReason });
   }
 
@@ -23651,7 +23656,9 @@ app.post('/api/agent/custom-chat/stream', guestOpenRouterAuth, aiChatConcurrency
       var customSaved = await saveCustomChatTurn({ db: supabase, userName: req.userName, convId: customConvId,
         message: customFinalText, content: finalAssistantContent, reasoning: reasoningText, model: chosenModel,
         thinkingMode: _thinkMode, webSearch: _webSearch, processEvents: getProcessEvents(res), cards: customSiteCards,
-        visionUrls: customVisionUrls, requestId: reqId, usage:customUsageReported?Object.assign({},customUsage):null,followups: _customParts.followups,contextMemory:res._aiContextMemory,contextBudget:res._aiContextBudget, buildMeta: buildMsgMeta, marker: AI_AGENT_MESSAGE_MARKER, thinkingElapsedMs: res._aiThinkingElapsedMs || 0 });
+        visionUrls: customVisionUrls, requestId: reqId, usage:customUsageReported?Object.assign({},customUsage):null,followups: _customParts.followups,contextMemory:res._aiContextMemory,contextBudget:res._aiContextBudget, buildMeta: buildMsgMeta, marker: AI_AGENT_MESSAGE_MARKER, thinkingElapsedMs: res._aiThinkingElapsedMs || 0,
+        // ★ A-M2：内部续写请求不把模板句存为用户轮次，只存续写的助手回复。
+        continuation: req.body && req.body.continuation === true });
       }
       // thinking-only 轮次没有 content 结算点，这里补结算，避免下发 0。
       settleThinkingElapsed(res);
@@ -23720,6 +23727,8 @@ app.post('/api/agent/custom-chat/stream', guestOpenRouterAuth, aiChatConcurrency
         visionUrls: customVisionUrls, buildMeta: buildMsgMeta, marker: AI_AGENT_MESSAGE_MARKER,
         contextMemory:res._aiContextMemory,contextBudget:res._aiContextBudget,
         thinkingElapsedMs: res._aiThinkingElapsedMs || 0, startedAt: customStartedAt, requestId: reqId,
+        // ★ A-M2：内部续写请求中断时也不把模板句存为用户轮次。
+        continuation: req.body && req.body.continuation === true,
         finishReason: aborted ? 'cancelled' : 'upstream_error' });
     }
     }
@@ -24541,6 +24550,7 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, guestAwar
       contextMemory:res._aiContextMemory,contextBudget:res._aiContextBudget,
       marker: AI_AGENT_MESSAGE_MARKER, thinkingElapsedMs: res._aiThinkingElapsedMs || 0,
       startedAt: T0, requestId: clientReqId || ('server_' + T0),
+      continuation: res._aiContinuation === true,
       finishReason: aborted ? 'cancelled' : 'upstream_error' });
     interruptedSave.then(function(saved) { if (!saved) console.warn('[AGENT-STREAM] interrupted history save failed'); }).catch(function(saveError) { console.warn('[AGENT-STREAM] interrupted history save rejected:', saveError && saveError.message); });
   });
@@ -24612,6 +24622,10 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, guestAwar
       //   避免前端收尾判断链落入 !doneReceived 兜底而误报「连接中断」。
       return terminateWithError({ type: 'error', error: (message && message.error) || '消息内容不能为空或过长' });
     }
+
+    // ★ A-M2：继续生成是内部续写请求，模板句不是真实用户轮次——记到 res 上，
+    //   供 finishStream、Responses 分支保存与中断保存共用：只存助手回复。
+    res._aiContinuation = req.body && req.body.continuation === true;
 
     // ★ 多模态：在 extractChatAttachments overwrite message 之前，先取出可内联的
     //   图片 data URL，并保留用户原始文本（供视觉模型以 image_url 内容块直传）。
@@ -25328,14 +25342,8 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, guestAwar
       }
       if (!req.guestAi) {
         try {
-          var _responsesSaveResult = await supabase.from('posts').insert([
-            {
-              user_name: userName,
-              content: message,
-              media_type: AI_AGENT_MESSAGE_MARKER,
-              media_url: buildMsgMeta('user', convId, null, null, 1, null, 0, _userSaveExtra),
-              actor_key: 'ai_msg_conv_' + convId + '_user_' + userName + '_' + nowTs
-            },
+          // ★ A-M2：内部续写请求不把模板句存为用户轮次，只存续写的助手回复。
+          var _responsesSaveRows = [
             {
               user_name: userName,
               content: responsesContent,
@@ -25343,7 +25351,15 @@ app.post('/api/agent/chat/stream', guestAiAuth, aiChatConcurrencyGate, guestAwar
               media_url: buildMsgMeta('assistant', convId, usageToStore, responsesReasoning, 2, searchMetaToStore, res._aiThinkingElapsedMs || 0, { chat_mode: 'normal', web_search: webSearchEnabled, process_events: getProcessEvents(res), site_cards: responsesSiteCards,client_request_id:res._aiClientRequestId,followups:responsesParts.followups,context_memory:res._aiContextMemory,context_budget:res._aiContextBudget }),
               actor_key: 'ai_msg_conv_' + convId + '_agent_' + userName + '_' + (nowTs + 1)
             }
-          ]);
+          ];
+          if (res._aiContinuation !== true) _responsesSaveRows.unshift({
+            user_name: userName,
+            content: message,
+            media_type: AI_AGENT_MESSAGE_MARKER,
+            media_url: buildMsgMeta('user', convId, null, null, 1, null, 0, _userSaveExtra),
+            actor_key: 'ai_msg_conv_' + convId + '_user_' + userName + '_' + nowTs
+          });
+          var _responsesSaveResult = await supabase.from('posts').insert(_responsesSaveRows);
           if (_responsesSaveResult && _responsesSaveResult.error) {
             console.error('[AGENT-STREAM] save failed:', _responsesSaveResult.error && _responsesSaveResult.error.message, 'userName:', userName, 'convId:', String(convId).slice(0, 8));
           } else {
