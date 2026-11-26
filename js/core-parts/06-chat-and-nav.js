@@ -5860,6 +5860,10 @@
                 openDockChatSocialSheet('blocks');
             };
 
+            // ★ 第二轮修复（聊-2）：建群选人空态的“去添加好友”从
+            //   chat-groups.js 跳过来，打开「联系人」搜索页。
+            window.__xtjOpenChatSocial = openDockChatSocialSheet;
+
             function closeDockChatSocialSheet() {
                 var sheet = document.getElementById('dockChatSocialSheet');
                 if (!sheet) return;
@@ -6170,6 +6174,11 @@
                 }
             }
 
+            // ★ 第二轮修复（聊-3）：好友关系变动后，建群选人用的 30 秒好友
+            //   缓存必须立即失效，否则刚加的好友 30 秒内进不了建群名单。
+            function invalidateChatGroupsFriendsCache() {
+                try { if (window.__xtjChatGroups && typeof window.__xtjChatGroups.invalidateFriends === 'function') window.__xtjChatGroups.invalidateFriends(); } catch (_) {}
+            }
             async function handleDockChatSocialAction(button) {
                 var action = button.getAttribute('data-chat-social-action') || '';
                 var peer = button.getAttribute('data-peer') || '';
@@ -6205,6 +6214,7 @@
                     try {
                         await requestDockChatSocial('/friends/' + encodeURIComponent(peer), { method: 'DELETE' });
                         await refreshChatFriendNotes(true);
+                        invalidateChatGroupsFriendsCache();
                         if (dockChatActiveUser === peer) updateDockChatComposerPermission(peer);
                         showToast('已删除好友，历史聊天保留');
                         renderDockChatSocialTab('friends');
@@ -6216,6 +6226,7 @@
                     try {
                         await requestDockChatSocial('/blocks/' + encodeURIComponent(peer), { method: 'POST', body: '{}' });
                         await refreshChatFriendNotes(true);
+                        invalidateChatGroupsFriendsCache();
                         refreshChatSocialBadge(true);
                         if (dockChatActiveUser === peer) updateDockChatComposerPermission(peer);
                         showToast('已拉黑该用户');
@@ -6239,6 +6250,7 @@
                         var resultStatus = response.result && response.result.status;
                         if (resultStatus === 'accepted') {
                             showToast('已添加好友');
+                            invalidateChatGroupsFriendsCache();
                             await refreshChatFriendNotes(true);
                             if (dockChatActiveUser === peer) updateDockChatComposerPermission(peer);
                         } else {

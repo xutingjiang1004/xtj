@@ -323,7 +323,7 @@
       '<div class="grp-pick-list" id="grpPickList">' + (candidates.length ? candidates.map(function (f) {
         return '<label class="grp-pick-row" data-name="' + esc(f.name.toLowerCase() + ' ' + f.note.toLowerCase()) + '"><input type="checkbox" value="' + esc(f.name) + '">' +
           avatarHtml(f.name) + '<span class="grp-pick-name">' + esc(f.note || f.name) + (f.note ? '<small>' + esc(f.name) + '</small>' : '') + '</span><i class="grp-check" aria-hidden="true"></i></label>';
-      }).join('') : '<p class="grp-empty">' + (friends.length ? '好友都已经在群里了' : '还没有好友，先在「联系人」里添加好友吧') + '</p>') + '</div>';
+      }).join('') : '<p class="grp-empty">' + (friends.length ? '好友都已经在群里了' : '还没有好友，先在「联系人」里添加好友吧') + '</p>' + (!friends.length ? '<button type="button" class="grp-primary grp-pick-empty-action" id="grpGoAddFriend">去添加好友</button>' : '')) + '</div>';
     return new Promise(function (resolve) {
       var resolved = false;
       var layer = openSheet(options.title, body, {
@@ -359,6 +359,14 @@
         resolved = true;
         var nameInput = root.querySelector('#grpCreateName');
         resolve({ members: Array.from(selected), name: nameInput ? nameInput.value.trim() : '', layer: layer, button: confirmBtn });
+      });
+      // ★ 第二轮修复（聊-2）：建群选人空态不再是死胡同。关掉选人表，
+      //   打开「联系人」搜索页去加好友；onClose 会把 pickFriends 以
+      //   null 结算，调用方直接返回，不会误建群。
+      var goAddFriend = root.querySelector('#grpGoAddFriend');
+      if (goAddFriend) goAddFriend.addEventListener('click', function () {
+        layer.close();
+        setTimeout(function () { if (typeof window.__xtjOpenChatSocial === 'function') window.__xtjOpenChatSocial('search'); }, 200);
       });
     });
   }
@@ -1937,6 +1945,9 @@
 
   window.__xtjChatGroups = {
     open: openGroup, close: closeGroup, reload: loadGroups, create: openCreateSheet,
+    // ★ 第二轮修复（聊-3）：好友关系变动（接受/删除/拉黑）后立即失效
+    //   30 秒好友缓存，建群选人不用等缓存过期。
+    invalidateFriends: function () { state.friends = null; state.friendsAt = 0; },
     state: function () { return state; }
   };
   window.__xtjResetChatGroups = resetForAccount;

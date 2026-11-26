@@ -23,6 +23,7 @@ const MESSAGES = {
   forbidden: [403, '只有群主或管理员可以进行此操作'],
   group_full: [409, '群成员已达上限（1000 人）'],
   members_required: [400, '请至少选择一位好友'],
+  invalid_members: [400, '成员名单无效，请重新选择'],
   friend_required: [403, '只能邀请互相是好友且未拉黑的用户'],
   already_member: [409, '所选好友都已经在群里了'],
   invalid_name: [400, '群名称需为 1～30 个字'],
@@ -134,7 +135,11 @@ function createChatGroupsRouter(options) {
       const name = cleanText(body.name, 30);
       const members = cleanNames(body.members, 999);
       if (name === null) return fail(res, 'invalid_name');
-      if (!members || !members.length) return fail(res, members && members.length === 0 ? 'members_required' : 'group_full');
+      // ★ 第二轮修复（聊-8）：成员名单非法（非数组/超长/含空名）时 cleanNames
+      //   返回 null，旧代码把它当成 group_full（“群成员已达上限”）报给用户，
+      //   文案张冠李戴。非法与空名单分开报。
+      if (!members) return fail(res, 'invalid_members');
+      if (!members.length) return fail(res, 'members_required');
       const data = await rpc('chat_group_create', { p_actor: req.userName, p_name: name.trim(), p_members: members });
       if (!data.ok) return fail(res, data.code, { rejected: data.rejected || [] });
       notify(data.notify, { kind: 'created', group_id: data.group_id });
