@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
 const crypto = require('node:crypto'), express = require('express'), request = require('supertest'), sharp = require('sharp');
-const { createMediaPreviews, sourceInfo } = require('../render-api/media-previews');
+const { createMediaPreviews, photoThumbPath, sourceInfo } = require('../render-api/media-previews');
 const { createPhotoAccess, PHOTO_BUCKET } = require('../render-api/photo-access');
 const { createMediaTraffic } = require('../render-api/media-traffic');
 const { EventEmitter } = require('node:events');
@@ -9,13 +9,17 @@ const A='11111111-1111-4111-8111-111111111111', origin='https://project.supabase
 async function fixture() {
   const input = await sharp({ create:{ width:2800,height:1800,channels:3,background:'#78bba4' } }).jpeg({quality:98}).toBuffer();
   let body=input, unavailable=false, downloads=0, probes=0;
+  // G-H3: 内存里的 Storage 对象（含落盘的缩略图），供落盘/回读测试。
+  const stored = new Map();
   const row={id:A,user_name:'owner',media_type:'__photo_wall__',media_url:origin+'/storage/v1/object/public/photo-wall/photos/a.jpg',content:'{}',visibility:'public'};
   const tag=()=>crypto.createHash('md5').update(body).digest('hex');
   const db={from(table){const q={select(){return q},eq(){return q},in(){return q},order(){return q},maybeSingle:async()=>unavailable?{error:Error('quota')}:{data:row},then(resolve,reject){return Promise.resolve(unavailable?{error:Error('quota')}:{data:table==='posts'?[row]:[]}).then(resolve,reject)}};return q},
     storage:{from(bucket){return {
       exists:async()=>({data:bucket===PHOTO_BUCKET}),
       info:async()=>{probes++;return unavailable?{error:Error('quota')}:{data:{size:body.length,etag:tag(),content_type:'image/jpeg'}}},
-      createSignedUrl:async path=>({data:{signedUrl:origin+'/'+bucket+'/'+path}})
+      createSignedUrl:async path=>({data:{signedUrl:origin+'/'+bucket+'/'+path}}),
+      upload:async (p, buf) => { stored.set(bucket + '\0' + p, Buffer.from(buf)); return { data:{ path:p } }; },
+      download:async (p) => { const b = stored.get(bucket + '\0' + p); return b ? { data:new Blob([b], { type:'image/webp' }) } : { error:Error('not found') }; }
     };}}};
   const fetchImpl=async()=>{downloads++;return new Response(body,{headers:{'Content-Type':'image/jpeg','Content-Length':body.length,ETag:'"'+tag()+'"'}})};
   const traffic=createMediaTraffic(), create=()=>createMediaPreviews({supabase:db,sharp,fetchImpl,traffic});
@@ -24,7 +28,7 @@ async function fixture() {
   const app=express();app.use(express.json());
   const auth=(req,res,next)=>{if(!req.headers.authorization)return res.status(401).end();req.userName=req.headers.authorization;next()};
   createPhotoAccess({app,supabase:db,supabaseUrl:origin,secret:'local-test',authenticateUser:auth,optionalAuth:(req,res,next)=>{req.userName=req.headers.authorization;next()},rateLimit:()=> (req,res,next)=>next(),previews:delegate,fetchImpl});
-  return {app,input,row,db,traffic,get previews(){return previews},replacePreviewProcess(){previews=create()},get downloads(){return downloads},get probes(){return probes},setBody:b=>body=b,fail:v=>unavailable=v};
+  return {app,input,row,db,traffic,stored,get previews(){return previews},replacePreviewProcess(){previews=create()},get downloads(){return downloads},get probes(){return probes},setBody:b=>body=b,fail:v=>unavailable=v};
 }
 test('high-quality display copies preserve originals, bound dimensions and share a single cold download',async()=>{
   const f=await fixture(), route='/api/photo/'+A+'/media?preview=1';
@@ -57,6 +61,31 @@ test('fresh upload metadata and display copies reuse received bytes without a St
   await request(f.app).get('/api/photo/'+A+'/media?preview=1').set('Authorization','reader').expect(200);assert.equal(f.downloads,0);
   f.fail(true);await assert.rejects(()=>f.previews.inspectedUpload(PHOTO_BUCKET,'photos/a.jpg','owner'),error=>error.transient===true);f.fail(false);
   f.setBody(Buffer.from('replaced'));assert.equal(await f.previews.inspectedUpload(PHOTO_BUCKET,'photos/a.jpg','owner'),null);
+});
+test('G-H3: 上传时生成的 1080 预览落盘到 photos/thumbs，进程重启后直接读落盘件、不再下载原图重编码', async () => {
+  const f = await fixture(), metadata = await sharp(f.input).metadata();
+  await f.previews.rememberUpload({ bucket: PHOTO_BUCKET, path: 'photos/a.jpg', owner: 'owner', input: f.input, metadata });
+  // 落盘在后台队列里跑：等它出现再断言（上限 5 秒）。
+  const thumbKey = PHOTO_BUCKET + '\0' + photoThumbPath('photos/a.jpg');
+  const deadline = Date.now() + 5000;
+  while (!f.stored.has(thumbKey) && Date.now() < deadline) await new Promise(r => setTimeout(r, 50));
+  assert.ok(f.stored.has(thumbKey), 'rememberUpload 应把 1080/webp 副本落盘到 ' + photoThumbPath('photos/a.jpg'));
+  assert.equal(photoThumbPath('photos/a.jpg'), 'photos/thumbs/' + crypto.createHash('sha256').update('photos/a.jpg').digest('hex') + '.webp');
+  const meta = await sharp(f.stored.get(thumbKey)).metadata();
+  assert.equal(meta.format, 'webp'); assert.equal(meta.width, 1080);
+  // 模拟进程重启：全新预览进程（内存缓存清空），落盘件仍在。
+  f.replacePreviewProcess();
+  const before = f.downloads;
+  const res = await request(f.app).get('/api/photo/' + A + '/media?preview=1').set('Authorization', 'reader').expect(200);
+  assert.equal(f.downloads, before, '重启后应读落盘缩略图，不再下载原图');
+  assert.equal((await sharp(res.body).metadata()).format, 'webp');
+  assert.deepEqual(res.body, f.stored.get(thumbKey), '返回的正是落盘的缩略图字节');
+});
+test('G-H3: 落盘件缺失时回退实时编码，预览仍可用', async () => {
+  const f = await fixture(), route = '/api/photo/' + A + '/media?preview=1';
+  const res = await request(f.app).get(route).set('Authorization', 'reader').expect(200);
+  assert.equal(f.downloads, 1, '无落盘件时仍下载原图实时编码');
+  assert.equal((await sharp(res.body).metadata()).format, 'webp');
 });
 test('a shared preview is bound to the exact live grant and still opens the separate original URL',async()=>{
   const f=await fixture();

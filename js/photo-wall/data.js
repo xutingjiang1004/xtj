@@ -5,6 +5,13 @@
   var CACHE_KEY = 'xtj_photos';
   var CACHE_OWNER_KEY = 'xtj_photos_owner';
   var DELETED_KEY = 'xtj_photos_deleted';
+  // G-M4: 删除墓碑按时间 + 容量双重淘汰。旧实现只留最新 500 条纯 id，
+  // 删图超过 500 后最旧的墓碑被丢弃，滞后快照里的已删照片会“复活”。
+  // 改为 [{id, at}] 带时间戳保存：30 天过期 + 最多 2000 条。服务端
+  // RPC/分页已过滤 is_deleted，墓碑只是防滞后快照的补偿，30 天足够
+  // 覆盖一次全量同步的间隔；旧格式纯字符串数组迁移时按写入时计。
+  var DELETED_TOMBSTONE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+  var DELETED_TOMBSTONE_MAX = 2000;
   var SYNC_KEY = 'xtj_photo_sync_data';
   var PAGE_SIZE = 60;
 
@@ -115,19 +122,40 @@
     try { window.safeStorage.set(key, JSON.stringify(value)); } catch (_) {}
   }
 
-  function getDeletedIds(){
+  function readDeletedTombstones(){
     var list = readJson(DELETED_KEY, []);
-    return Array.isArray(list) ? list.map(String) : [];
+    if (!Array.isArray(list)) return [];
+    var now = Date.now();
+    var out = [];
+    list.forEach(function(entry){
+      if (typeof entry === 'string') {
+        if (entry) out.push({ id: entry, at: now });
+      } else if (entry && entry.id != null) {
+        out.push({ id: String(entry.id), at: Number(entry.at) || 0 });
+      }
+    });
+    return out;
+  }
+
+  // G-M4: 先按时间淘汰（未知时间戳的不淘汰，宁可多留），再按容量取最新。
+  function pruneDeletedTombstones(list, now){
+    var fresh = list.filter(function(entry){ return !entry.at || now - entry.at <= DELETED_TOMBSTONE_TTL_MS; });
+    if (fresh.length > DELETED_TOMBSTONE_MAX) fresh = fresh.slice(-DELETED_TOMBSTONE_MAX);
+    return fresh;
+  }
+
+  function getDeletedIds(){
+    return pruneDeletedTombstones(readDeletedTombstones(), Date.now()).map(function(entry){ return entry.id; });
   }
 
   function addDeletedPhotoId(id){
     if (id == null) return;
-    var list = getDeletedIds();
+    var now = Date.now();
+    var list = pruneDeletedTombstones(readDeletedTombstones(), now);
     var key = String(id);
-    if (list.indexOf(key) < 0) {
-      list.push(key);
-      writeJson(DELETED_KEY, list.slice(-500));
-    }
+    if (list.some(function(entry){ return entry.id === key; })) return;
+    list.push({ id: key, at: now });
+    writeJson(DELETED_KEY, pruneDeletedTombstones(list, now));
   }
 
   function addPendingDeletedPhotoId(id){
@@ -300,8 +328,13 @@
     function stamp(photo){var s=String(photo.created_at||'');var m=s.match(/^(.*:\d{2})(?:\.(\d+))?(?:Z|\+00:00)$/);var ts=Number(photo.timestamp);return m?m[1]+'.'+String(m[2]||'').padEnd(6,'0'):new Date(Number.isFinite(ts)?ts:0).toISOString();}
     var ascending=key==='date_asc'||key==='name',direction=ascending?1:-1,primary=0;
     if(key==='name'){
-      var x=Array.from(String(a.sort_name!=null?a.sort_name:a.username||'')),y=Array.from(String(b.sort_name!=null?b.sort_name:b.username||''));
-      for(var i=0;i<Math.min(x.length,y.length);i++){primary=x[i].codePointAt(0)-y[i].codePointAt(0);if(primary)break;}if(!primary)primary=x.length-y.length;
+      // G-L6: 按用户排序用中文拼音序。旧实现按码点逐字比较，中文用户名
+      // 按 Unicode 码点排（与用户预期的拼音/首字母序不符）；与服务端
+      // server.js 已有的 user_name localeCompare(..., 'zh-CN') 保持一致。
+      // 服务端 RPC 仍用 COLLATE "C"（改它需迁移，见需决定清单），客户端
+      // 全量重排后展示序是拼音序。
+      var x=String(a.sort_name!=null?a.sort_name:a.username||''),y=String(b.sort_name!=null?b.sort_name:b.username||'');
+      primary=x.localeCompare(y,'zh-CN');
     }else if(key==='size')primary=(Number(a.fileSize)||0)-(Number(b.fileSize)||0);
     else if(key==='views')primary=(Number(a.views)||0)-(Number(b.views)||0);
     if(!primary)primary=stamp(a).localeCompare(stamp(b));
@@ -972,6 +1005,7 @@
 
   window.setPhotoWallSyncStatus = setPhotoWallSyncStatus;
   window.addDeletedPhotoId = addDeletedPhotoId;
+  window.__xtjGetDeletedPhotoIds = getDeletedIds;
   window.pendingDeletedPhotoIds = pendingDeletedPhotoIds;
   window.saveLocalPhotoWallData = saveLocalPhotoWallData;
   window.normalizePhotoWallRow = normalizePhotoWallRow;

@@ -236,7 +236,11 @@ test('a delayed delete blocks stale force-refresh snapshots until the server con
   resolveDelete();
   await deletion;
   assert.equal(runtime.window.pendingDeletedPhotoIds.size, 0, 'pending deletion must clear after success');
-  assert.deepEqual(JSON.parse(runtime.storage.get('xtj_photos_deleted') || '[]'), ['p-pending']);
+  // G-M4: 墓碑改存 [{id, at}]（时间 + 容量双重淘汰），旧断言 ['p-pending'] 随之更新。
+  var tombstones = JSON.parse(runtime.storage.get('xtj_photos_deleted') || '[]');
+  assert.equal(tombstones.length, 1);
+  assert.equal(tombstones[0].id, 'p-pending');
+  assert.ok(Number.isFinite(tombstones[0].at) && tombstones[0].at <= Date.now() && Date.now() - tombstones[0].at < 60000);
 });
 
 test('delete tombstone rejects stale cloud snapshots during resume reconciliation', async () => {

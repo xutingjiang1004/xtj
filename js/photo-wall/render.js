@@ -6,6 +6,10 @@
   var ERROR_IMG = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400"%3E%3Crect fill="%23f0f0f0" width="400" height="400"/%3E%3Cg text-anchor="middle" font-family="sans-serif"%3E%3Ctext x="200" y="190" font-size="26" fill="%23c0392b"%3E%E5%8A%A0%E8%BD%BD%E5%A4%B1%E8%B4%A5%3C/text%3E%3Ctext x="200" y="230" font-size="16" fill="%2395a5a0"%3E%E7%82%B9%E5%87%BB%E9%87%8D%E8%AF%95%3C/text%3E%3C/g%3E%3C/svg%3E';
   // P6: DOM 卡片数量上限 — 超过后不再 append 新卡片，避免数组/DOM 无限增长
   var MAX_DOM_PHOTOS = 500;
+  // G-M2: “下一批”翻页单次时间预算。稀疏分组逐页试探时，旧循环固定 30 次、
+  // 单页 10 秒超时，最坏 300 秒才停；改为 20 秒预算（加一页在途时间，
+  // 最坏约 30 秒），到点即停并提示继续查找。
+  var BATCH_LOAD_TIME_BUDGET_MS = 20000;
   var photoBatchStart = 0;
   var recentPhotos=new Map(),recentBytes=0,recentOwner=String(window.currentUser || "");
   function retireRecentPhoto(id){
@@ -72,7 +76,8 @@
         photos.sort(function(a, b){ return (a.timestamp || 0) - (b.timestamp || 0); });
         break;
       case 'name':
-        photos.sort(function(a, b){ return String(a.username || a.id || '').localeCompare(String(b.username || b.id || '')); });
+        // G-L6: 兜底排序也用中文拼音序，与 data.js comparePhotoOrder 一致。
+        photos.sort(function(a, b){ return String(a.username || a.id || '').localeCompare(String(b.username || b.id || ''), 'zh-CN'); });
         break;
       case 'size':
         photos.sort(function(a, b){ return (b.fileSize || 0) - (a.fileSize || 0); });
@@ -203,7 +208,11 @@
         var ratio = Math.max(3 / 4, Math.min(4 / 3, p.width / p.height));
         aspectStyle = '--pw-aspect:' + (Math.round(1000 * ratio) / 1000) + ';';
       }
-      html += '<div class="photo-wall-item pw-stagger-enter" role="button" tabindex="0" aria-label="' + esc(username + '的照片，' + time + (p.caption ? '，' + p.caption : '')) + '" data-photo-id="' + esc(String(p.id)) + '" style="' + aspectStyle + 'animation-delay:' + delay + 'ms" onclick="openPhotoWallPreviewAt(' + index + ', this)" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();(this.querySelector(\'img\')||this).click();}">';
+      // G-L5: 键盘 Enter/空格直接点卡片本身（打开预览），不再经过 img。
+      // 图片加载失败时 img.onclick 已被改成重试加载并 stopPropagation，
+      // 旧写法 (img||card).click() 会让键盘 Enter 变成重试，与鼠标点
+      // 卡片其他区域（打开预览）不一致；图片重试仍可鼠标点图本身触发。
+      html += '<div class="photo-wall-item pw-stagger-enter" role="button" tabindex="0" aria-label="' + esc(username + '的照片，' + time + (p.caption ? '，' + p.caption : '')) + '" data-photo-id="' + esc(String(p.id)) + '" style="' + aspectStyle + 'animation-delay:' + delay + 'ms" onclick="openPhotoWallPreviewAt(' + index + ', this)" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();this.click();}">';
       var recent=recentPhotos.get(String(p.id));
       html += recent ? '<img src="' + safeUrl(recent.url) + '" alt="photo" class="pw-blur-done" data-recent-upload-id="' + esc(String(p.id)) + '" loading="eager" decoding="async">' : '<img src="' + esc(FALLBACK_IMG) + '" alt="photo" class="pw-blur-in" data-src="' + safeUrl(realUrl) + '" loading="lazy" decoding="async">';
       html += '<span class="pw-skeleton" aria-hidden="true"></span>';
@@ -212,11 +221,19 @@
     return html;
   }
 
+  // G-L2: 相册日期 key 统一用 UTC。服务端 created_at 是 UTC；旧实现用本地
+  // getFullYear/getMonth/getDate，跨时区/夏令时同一张照片会进不同日期组。
+  // albumTitle 与 doLoadMore 的日期 key 必须用同一口径，否则标题与分组
+  // 对不上、翻页时新页照片匹配不到当前分组。
+  function photoDateKey(d){
+    return d.getUTCFullYear() + '-' + String(d.getUTCMonth() + 1).padStart(2, '0') + '-' + String(d.getUTCDate()).padStart(2, '0');
+  }
+
   // "10 月 31 日 · 周五" (the year is added only for earlier years); the ISO date stays the group key.
   function albumTitle(d){
-    var week = ['周日','周一','周二','周三','周四','周五','周六'][d.getDay()];
-    var year = d.getFullYear() === new Date().getFullYear() ? '' : d.getFullYear() + ' 年 ';
-    return year + (d.getMonth() + 1) + ' 月 ' + d.getDate() + ' 日 · ' + week;
+    var week = ['周日','周一','周二','周三','周四','周五','周六'][d.getUTCDay()];
+    var year = d.getUTCFullYear() === new Date().getUTCFullYear() ? '' : d.getUTCFullYear() + ' 年 ';
+    return year + (d.getUTCMonth() + 1) + ' 月 ' + d.getUTCDate() + ' 日 · ' + week;
   }
 
   function groupByDate(photos){
@@ -226,7 +243,7 @@
       if (!photo) return;
       var d = new Date(photo.timestamp || Date.now());
       if (isNaN(d.getTime())) d = new Date();
-      var key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+      var key = photoDateKey(d);
       if (!map[key]) {
         map[key] = { key:key, title:albumTitle(d), photos:[] };
         groups.push(map[key]);
@@ -300,7 +317,12 @@
     // images can still intersect the viewport. Do not start hidden work.
     var panel = document.getElementById('panelAi');
     if (panel && !panel.classList.contains('active')) return;
-    if (activeLoads >= MAX_LOADS || slowImages.size >= Math.max(2, MAX_LOADS) || !pendingImgs.length) return;
+    // G-M1: 慢图不再计入阻塞条件。超时的图 30 秒后已 settle、释放了
+    // activeLoads 槽位，只是在后台继续下载等最终 load/error；旧条件
+    // slowImages.size >= MAX_LOADS 会在槽位全空时仍堵死整条队列，
+    // 后面已进视口的图片只能停在骨架上。并发仍由 activeLoads <= 4 限流。
+    // slowImages 只保留追踪用途：超时后迟到加载/失败时移出、重渲染时清理。
+    if (activeLoads >= MAX_LOADS || !pendingImgs.length) return;
     var item = pendingImgs.shift();
     if (!item || !item.target) return pumpImages();
     var img = item.target;
@@ -519,6 +541,15 @@
     renderSorted(sortPhotoWallData(window.photoWallData || [], window.pwSortKey || 'date_desc'), true);
   }
 
+  // G-M2: 取消本次“下一批”翻页加载。只让循环在当前在途页跑完后退出
+  // （不中断在途请求），并把哨兵文案改回可点击重试；loadingMore 立即
+  // 释放，避免取消后卡死。切视图/登出等仍走原有的 current() 失效路径。
+  function cancelBatchLoad(){
+    loadMoreGeneration++;
+    loadingMore = false;
+    resetSentinelText(document.getElementById('photoGrid'), '已取消加载，点击继续查找', true);
+  }
+
   async function showNextPhotoBatch(){
     if (loadingMore) return;
     var generation = ++loadMoreGeneration;
@@ -535,11 +566,21 @@
     }
     if (typeof window.hasMorePhotos !== 'function' || !window.hasMorePhotos() || typeof window.loadMorePhotos !== 'function') return;
     loadingMore = true;
-    resetSentinelText(document.getElementById('photoGrid'), '正在加载下一批…', false);
+    var batchStartAt = Date.now();
+    resetSentinelText(document.getElementById('photoGrid'), '正在加载下一批…（点击取消）', false);
+    // G-M2: 加载中哨兵可点取消（resetSentinelText 刚把 onclick 置空，这里补上）。
+    var batchGrid = document.getElementById('photoGrid');
+    var batchSent = batchGrid && batchGrid.querySelector('.pw-load-more-sentinel');
+    if (batchSent) {
+      batchSent.onclick = cancelBatchLoad;
+      batchSent.setAttribute('role', 'button');
+      batchSent.setAttribute('tabindex', '0');
+    }
     try {
       // An album detail may need several server pages before its date appears.
       // Bound each click so sparse groups cannot keep the UI busy indefinitely.
-      for (var attempt = 0; attempt < 30; attempt++) {
+      // G-M2: 30 次上限之外再加时间预算，到点即停（见 BATCH_LOAD_TIME_BUDGET_MS）。
+      for (var attempt = 0; attempt < 30 && Date.now() - batchStartAt < BATCH_LOAD_TIME_BUDGET_MS; attempt++) {
         await window.loadMorePhotos();
         if (!current()) return;
         sorted = sortPhotoWallData(window.photoWallData || [], window.pwSortKey || 'date_desc');
@@ -628,7 +669,7 @@
               if (!mp) continue;
               var md = new Date(mp.timestamp || Date.now());
               if (isNaN(md.getTime())) md = new Date();
-              var mKey = md.getFullYear() + '-' + String(md.getMonth() + 1).padStart(2, '0') + '-' + String(md.getDate()).padStart(2, '0');
+              var mKey = photoDateKey(md);
               if (mKey === window.pwAlbumGroupKey) { hasGroupPhoto = true; break; }
             }
             if (!hasGroupPhoto) {
@@ -749,6 +790,13 @@
     if (typeof window.hasMorePhotos !== 'function' || !window.hasMorePhotos()) {
       if (loadMoreObserver) loadMoreObserver.disconnect();
       sentinel.remove();
+      return;
+    }
+    // G-L3: 已达 500 张 DOM 上限且服务端仍有更多时，直接写明触顶状态并
+    // 保留点击入口；否则用户滚到底只看到通用的“加载更多…”，要等哨兵
+    // 进视口、IO 回调触发后才出现明确入口，容易误以为墙到底了。
+    if (domPhotoLimitReached()) {
+      resetSentinelText(grid, '已达当前渲染上限，点击继续加载', true);
       return;
     }
     resetSentinelText(grid, window.IntersectionObserver ? '加载更多...' : '点击加载更多', !window.IntersectionObserver);
@@ -1001,6 +1049,7 @@
   window.renderPhotoWallWithoutReload = renderPhotoWallWithoutReload;
   window.showPreviousPhotoBatch = showPreviousPhotoBatch;
   window.showNextPhotoBatch = showNextPhotoBatch;
+  window.__xtjCancelPhotoWallBatchLoad = cancelBatchLoad;
   var albumAnimation=null,albumMotionSequence=0;
   function changeAlbumView(change){
     var grid=document.getElementById('photoGrid'),sequence=++albumMotionSequence;
