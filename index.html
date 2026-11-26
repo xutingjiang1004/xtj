@@ -1271,7 +1271,10 @@
          was a single point of failure on restricted/mobile networks and could
          leave the feed permanently unavailable. `defer` preserves script order
          so the client exists before core.js starts, without blocking HTML parsing.
-         core.js also listens for `xtj:supabase-ready` as a fallback. -->
+         core.js also listens for `xtj:supabase-ready` as a fallback.
+         ★ D-L4：vendor 包版本 supabase-js 2.106.2，与 package.json 的
+         @supabase/supabase-js 一致（包内嵌 X-Client-Info 版本戳核对过：
+         supabase-js/storage-js/gotrue-js/realtime-js 均为 2.106.2）。 -->
     <script defer src="js/vendor/supabase.min.js?v=e8c548fa1b"></script>
     <script defer src="js/config.min.js?v=a25ee62d18"></script>
     <script defer src="js/performance.min.js?v=8606d6dc9d"></script>
