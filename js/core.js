@@ -13216,7 +13216,11 @@ function renderProfileActivityList(kind) {
                     dmNotificationIds.add(id);
                 });
                 dmSnapshotReady=true;
-                while(dmNotificationIds.size>500)dmNotificationIds.delete(dmNotificationIds.values().next().value);
+                // F-L5：去重集合之前只留 500 条就按插入顺序淘汰最旧的；一个会话里
+                // 收到 500 条以上私信时，被淘汰的旧消息再出现在快照里会重复弹通知。
+                // 集合存的只是短 id 字符串，2000 条内存可忽略，把上限放宽到 2000，
+                // 把重复弹通知的窗口缩到原来的 1/4；淘汰方式（留最新的）不变。
+                while(dmNotificationIds.size>2000)dmNotificationIds.delete(dmNotificationIds.values().next().value);
             }
 
             // Incoming message from a realtime event: show the banner unless the sender is muted. When the mute list has not
