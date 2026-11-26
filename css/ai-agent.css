@@ -5754,14 +5754,16 @@ html.xtj-reduce-motion .ai-copy-menu .ai-reply-menu-panel { animation: none; }
   text-align: left;
 }
 .ai-interrupt-note,
-.ai-filtered-note {
+.ai-filtered-note,
+.ai-truncated-note {
   text-align: center;
   padding: 6px 12px;
   font-size: 11px;
   border-radius: 6px;
   margin: 4px 0;
 }
-.ai-interrupt-note {
+.ai-interrupt-note,
+.ai-truncated-note {
   background: rgba(200,160,60,0.1);
   color: #a87d2a;
 }

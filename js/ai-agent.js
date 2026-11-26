@@ -11428,6 +11428,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }
 
     var aborted = false;
+    // ★ A-H3：SSE 溢出截断标记。单行事件 >2MB 被丢弃、或未闭合缓冲 >4MB
+    //   被迫中断时置位；收尾据此保留已收内容并提示，而不是整条删掉无提示。
+    var sseTruncated = false;
 
     // 创建 AbortController
     var controller = new AbortController();
@@ -11848,6 +11851,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (!node || node.querySelector('.ai-stop-note')) return;
         var text = kind === 'timeout' ? '请求超时，可点击继续' : '已停止，可点击继续';
         try { node.appendChild(el('div', { class: 'ai-error-note ai-stop-note' }, text)); } catch (eNote) {}
+      }
+
+      // ★ A-H3：SSE 溢出截断提示。已收到的内容保留落定后，在气泡下方挂一条
+      //   截断说明，让用户知道后面被截掉了，而不是以为回复本来就这么短。
+      function appendTruncatedNote(node) {
+        if (!node || node.querySelector('.ai-truncated-note')) return;
+        try { node.appendChild(el('div', { class: 'ai-truncated-note ai-tail-reveal' }, '内容过长，已截断显示已收到的部分')); } catch (eNote) {}
       }
 
       function attachContinueGenerateBtn(node, msgHost) {
@@ -12718,6 +12728,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         //   单行 512KB 上限只拦"已闭合的行"，残留在 buffer 的尾部才是无界增长点。
         if (buffer.length > 4 * 1024 * 1024) {
           console.warn('[AI] SSE buffer overflow, aborting stream, length=' + buffer.length);
+          // ★ A-H3 修复：记下截断，收尾保留已收到的内容并提示，不静默删整条。
+          sseTruncated = true;
           aborted = true;
           reader.cancel().catch(function(){});
           break;
@@ -12733,7 +12745,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           if (line === 'data: [DONE]' || line === 'done') { doneReceived = true; break; }
           var eventStr = line.slice(6);
           // ★ 修复：单行事件大小上限（深页循环有 512KB 上限，主循环此前没有）
-          if (eventStr.length > 2 * 1024 * 1024) { console.warn('[AI] oversized SSE line dropped, length=' + eventStr.length); continue; }
+          // ★ A-H3：超大单行事件丢弃时记下截断，done 收尾时提示用户内容被截断。
+          if (eventStr.length > 2 * 1024 * 1024) { console.warn('[AI] oversized SSE line dropped, length=' + eventStr.length); sseTruncated = true; continue; }
           var evtReceivedAt = typeof window !== 'undefined' && window.performance && performance.now ? performance.now() : Date.now();
           var evt;
           try { evt = JSON.parse(eventStr); } catch (e) { continue; }
@@ -13986,6 +13999,23 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       }
 
       if (((S._currentReqId !== reqId || !customModelIdentityCurrent(sendIdentity)) || aborted) && !_finalized && !turnSettled) {
+        // ★ A-H3 修复：SSE 溢出截断不是用户取消/被新请求取代——已收到的内容要
+        //   保留落定并提示“内容过长已截断”，而不是整条删掉无提示。只有本轮
+        //   仍是当前请求时才落定；已被取代时仍走旧的删节点路径。
+        if (sseTruncated && (S._currentReqId === reqId && customModelIdentityCurrent(sendIdentity)) && (aiContent || aiReasoning || (sealedContents && sealedContents.length) || (assistantNode && assistantNode.querySelector('.ai-thinking, .ai-content-segment')))) {
+          hideAssistantTyping();
+          if (!_finalized) finishAiMessage(assistantNode, aiContent, aiReasoning, { interrupted: true });
+          appendTruncatedNote(assistantNode);
+          try { attachContinueGenerateBtn(assistantNode, messagesEl); } catch (eContTrunc) {}
+          notify('回复内容过长，已截断显示已收到的部分');
+          cleanupRenderers();
+          resetSendingIfCurrent();
+          return;
+        }
+        if (sseTruncated) {
+          // 溢出时尚未收到任何内容：无内容可保留，但仍要明确提示而非静默消失。
+          notify('回复内容过长，已截断，请换个更短的问法重试');
+        }
         // 被新请求取代，删除当前创建的任何节点
         // ★ 修复：若 error 事件已 finishAiMessage（_finalized=true，部分回复已保留并写入
         // S.messages），不得再删除节点，否则已渲染的回复会闪现后消失且服务端未保存。
@@ -14022,6 +14052,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         // （多半是连接被代理/网络切断，而非 AI 拒绝回答）。
         // 用户消息已回填输入框，可直接重发。
         notify('AI 连接中断或长时间未响应，请重试');
+      }
+      // ★ A-H3：单行超限事件被丢弃、但流随后正常 done/EOF 收尾时，也要让
+      //   用户知道回复被截断过（aborted 溢出分支已在上方单独处理并 return）。
+      if (sseTruncated && assistantNode && assistantNode.isConnected !== false) {
+        appendTruncatedNote(assistantNode);
+        notify('回复内容过长，已截断显示已收到的部分');
       }
     } catch (fetchErr) {
       if ((S._currentReqId !== reqId || !customModelIdentityCurrent(sendIdentity))) { try { clearInterval(_idleCheckTimer); } catch (e) {} return; }
