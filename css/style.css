@@ -6798,6 +6798,17 @@
             border-radius: 2px;
             transition: width 0.15s ease-out;
         }
+        /* G-H1: 下载进行中可取消（中止 fetch，不再只能干等）。 */
+        .pp-download-cancel-btn {
+            margin-top: 4px;
+            padding: 8px 22px;
+            border-radius: 999px;
+            border: 1px solid rgba(255,255,255,0.4);
+            background: rgba(255,255,255,0.12);
+            color: #fff;
+            font-size: 14px;
+            cursor: pointer;
+        }
         /* 下载确认弹窗 */
         .pp-download-confirm-overlay {
             position: absolute;

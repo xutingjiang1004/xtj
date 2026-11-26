@@ -10,6 +10,8 @@
         opacity: 1
     }, P = null, E = !1, L = Object.create(null);
     var pendingPreviewDeletes = new Set();
+    // G-H1: 进行中下载的 AbortController；无下载时为 null。取消按钮用它中止 fetch。
+    var downloadAbort = null;
     window.addEventListener('xtj:visual-viewport-change', function(){if(e){M();if(s){s.style.transition="none";s.style.transform="translate3d("+-a+"px,0,0)";}l=0;}});
     window.addEventListener('xtj:permissions-ready', function() { if (e && t) j(i); });
     function T(e) {
@@ -877,7 +879,7 @@
             var _ = document.getElementById("photoPreviewOverlay");
             if (!_) {
                 var H = document.createElement("div");
-                H.className = "photo-preview-overlay", H.id = "photoPreviewOverlay", H.innerHTML = '<div class="pp-ambient-bg" id="ppAmbientBg"></div><div class="pp-dots" id="ppDots"></div><button class="photo-preview-close" onclick="closePhotoPreview()" aria-label="关闭预览">' + T("close") + '</button><button class="pp-nav-arrow pp-nav-prev" id="ppPrevBtn" onclick="window.ppPrevPhoto()" aria-label="上一张"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M12 4L6 10L12 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button><button class="pp-nav-arrow pp-nav-next" id="ppNextBtn" onclick="window.ppNextPhoto()" aria-label="下一张"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M8 4L14 10L8 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button><div class="photo-preview-image-wrapper" id="ppImageWrapper"><div id="ppSlideTrack" class="pp-slide-track"><div class="pp-slide-slot pp-prev-slot"><img id="ppPrevImg" class="pp-slide-img" alt="prev"/></div><div class="pp-slide-slot pp-cur-slot"><img id="photoPreviewImage" class="pp-slide-img" alt="current"/></div><div class="pp-slide-slot pp-next-slot"><img id="ppNextImg" class="pp-slide-img" alt="next"/></div></div></div><button class="pp-zoom-btn pp-zoom-out" id="ppZoomOutBtn" title="缩小" onclick="window.zoomOut()"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"></path></svg></span></button><button class="pp-zoom-btn pp-zoom-in" id="ppZoomInBtn" title="放大" onclick="window.zoomIn()"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg></span></button><div class="pp-preview-toolbar"><button class="pp-info-btn" id="ppInfoBtn" title="照片信息" onclick="showPhotoInfo()">' + T("info") + '</button><button class="pp-share-btn" id="ppShareBtn" title="分享" onclick="window.shareCurrentPhoto()">' + T("share") + '</button><button class="pp-rotate-btn" id="ppRotateBtn" title="旋转 90 度" onclick="window.ppRotatePhoto()">' + T("rotate") + '</button><button hidden id="ppDeleteBtn" class="pp-delete-btn" onclick="window.deletePhotoFromPreview()">' + T("delete") + '</button></div><div class="photo-preview-info"><span class="pp-user" id="photoPreviewUser"></span><span class="pp-time" id="photoPreviewTime"></span><span class="pp-views" id="photoPreviewViews"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.8 12s3.2-5.5 9.2-5.5S21.2 12 21.2 12s-3.2 5.5-9.2 5.5S2.8 12 2.8 12Z"/><circle cx="12" cy="12" r="2.6"/></svg><span id="photoPreviewViewsCount">0</span></span></div><div class="pp-download-overlay" id="ppDownloadOverlay" style="display:none;"><div class="pp-download-content"><div class="pp-download-spinner"></div><div class="pp-download-text" id="ppDownloadText">正在下载...</div><div class="pp-download-progress"><div class="pp-download-progress-bar" id="ppDownloadProgressBar"></div></div></div></div>',
+                H.className = "photo-preview-overlay", H.id = "photoPreviewOverlay", H.innerHTML = '<div class="pp-ambient-bg" id="ppAmbientBg"></div><div class="pp-dots" id="ppDots"></div><button class="photo-preview-close" onclick="closePhotoPreview()" aria-label="关闭预览">' + T("close") + '</button><button class="pp-nav-arrow pp-nav-prev" id="ppPrevBtn" onclick="window.ppPrevPhoto()" aria-label="上一张"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M12 4L6 10L12 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button><button class="pp-nav-arrow pp-nav-next" id="ppNextBtn" onclick="window.ppNextPhoto()" aria-label="下一张"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M8 4L14 10L8 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button><div class="photo-preview-image-wrapper" id="ppImageWrapper"><div id="ppSlideTrack" class="pp-slide-track"><div class="pp-slide-slot pp-prev-slot"><img id="ppPrevImg" class="pp-slide-img" alt="prev"/></div><div class="pp-slide-slot pp-cur-slot"><img id="photoPreviewImage" class="pp-slide-img" alt="current"/></div><div class="pp-slide-slot pp-next-slot"><img id="ppNextImg" class="pp-slide-img" alt="next"/></div></div></div><button class="pp-zoom-btn pp-zoom-out" id="ppZoomOutBtn" title="缩小" onclick="window.zoomOut()"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"></path></svg></span></button><button class="pp-zoom-btn pp-zoom-in" id="ppZoomInBtn" title="放大" onclick="window.zoomIn()"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg></span></button><div class="pp-preview-toolbar"><button class="pp-info-btn" id="ppInfoBtn" title="照片信息" onclick="showPhotoInfo()">' + T("info") + '</button><button class="pp-share-btn" id="ppShareBtn" title="分享" onclick="window.shareCurrentPhoto()">' + T("share") + '</button><button class="pp-rotate-btn" id="ppRotateBtn" title="旋转 90 度" onclick="window.ppRotatePhoto()">' + T("rotate") + '</button><button hidden id="ppDeleteBtn" class="pp-delete-btn" onclick="window.deletePhotoFromPreview()">' + T("delete") + '</button></div><div class="photo-preview-info"><span class="pp-user" id="photoPreviewUser"></span><span class="pp-time" id="photoPreviewTime"></span><span class="pp-views" id="photoPreviewViews"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.8 12s3.2-5.5 9.2-5.5S21.2 12 21.2 12s-3.2 5.5-9.2 5.5S2.8 12 2.8 12Z"/><circle cx="12" cy="12" r="2.6"/></svg><span id="photoPreviewViewsCount">0</span></span></div><div class="pp-download-overlay" id="ppDownloadOverlay" style="display:none;"><div class="pp-download-content"><div class="pp-download-spinner"></div><div class="pp-download-text" id="ppDownloadText">正在下载...</div><div class="pp-download-progress"><div class="pp-download-progress-bar" id="ppDownloadProgressBar"></div></div><button class="pp-download-cancel-btn" id="ppDownloadCancelBtn" type="button" onclick="window.ppCancelDownload()">取消</button></div></div>',
                 document.body.appendChild(H), _ = H;
             }
             _ && function(e) {
@@ -1528,6 +1530,14 @@
         window.showToast && window.showToast("当前预览不支持旋转");
     }, window.ppCancelDownload = function() {
         try {
+            // G-H1: 下载进行中时取消按钮改为中止下载（遮罩由下载收尾清理）；
+            // 未开始下载时仍是关闭确认弹窗的旧行为。
+            if (downloadAbort) {
+                var ctrl = downloadAbort;
+                downloadAbort = null;
+                try { ctrl.abort(); } catch (e) {}
+                return;
+            }
             te();
         } catch (e) {
             console.error("Error in cancel download:", e);
@@ -1535,10 +1545,18 @@
     }, window.ppConfirmDownload = function() {
         try {
             te(), async function() {
+                // G-H1: 停滞看门狗（60 秒无数据即中止），避免上游卡住时无限挂起；
+                // 慢但一直在传的下载不受影响（只看停滞，不设绝对总时长）。
+                var stallTimer = null, stalled = false;
+                function clearStallTimer() {
+                    if (stallTimer) { clearTimeout(stallTimer); stallTimer = null; }
+                }
                 try {
                     if (E) return;
                     var e = t;
                     if (!e || !e.imageUrl) return void window.showToast("没有可下载的照片");
+                    var ctrl = ('AbortController' in window) ? new AbortController() : null;
+                    downloadAbort = ctrl;
                     if (E = !0, function() {
                         try {
                             var e = document.getElementById("ppDownloadOverlay");
@@ -1546,15 +1564,43 @@
                         } catch (e) {
                             console.error("Error showing download overlay:", e);
                         }
-                    }(), ee(10, "正在下载..."), window.XTJHaptics) window.XTJHaptics.play('impact');
-                    var o = setInterval(function() {
-                        var e = document.getElementById("ppDownloadProgressBar");
-                        if (e) {
-                            var t = parseInt(e.style.width) || 10;
-                            t < 85 && ee(t + 2);
-                        } else clearInterval(o);
-                    }, 150); var fetchRes = await fetch(e.imageUrl);
-                    if (clearInterval(o), !fetchRes.ok) throw new Error("HTTP error " + fetchRes.status);
+                    }(), ee(0, "正在下载..."), window.XTJHaptics) window.XTJHaptics.play('impact');
+                    var fetchRes = await fetch(e.imageUrl, ctrl ? { signal: ctrl.signal } : undefined);
+                    if (!fetchRes.ok) throw new Error("HTTP error " + fetchRes.status);
+                    // G-H1: 流式读取真实进度（有 Content-Length 时按收到字节算，不再
+                    // 假推到 85%）；分块拼成 Blob，避免 response.blob() 再持一份全量拷贝。
+                    var total = 0;
+                    try { total = Number(fetchRes.headers && fetchRes.headers.get('content-length')) || 0; } catch (err) {}
+                    var chunks = [], received = 0;
+                    function armStallTimer() {
+                        clearStallTimer();
+                        stallTimer = setTimeout(function() {
+                            stalled = true;
+                            if (ctrl) { try { ctrl.abort(); } catch (err) {} }
+                        }, 60000);
+                    }
+                    armStallTimer();
+                    if (fetchRes.body && typeof fetchRes.body.getReader === 'function') {
+                        var reader = fetchRes.body.getReader();
+                        for (;;) {
+                            var part = await reader.read();
+                            if (part.done) break;
+                            if (part.value) {
+                                chunks.push(part.value);
+                                received += part.value.byteLength || part.value.length || 0;
+                                armStallTimer();
+                                if (total > 0) ee(Math.min(99, Math.floor(received / total * 100)), "正在下载...");
+                            }
+                        }
+                    } else {
+                        // 旧浏览器无 ReadableStream：仍走 blob，但同样受 signal/停滞看门狗保护。
+                        var fallbackBlob = await fetchRes.blob();
+                        chunks = [fallbackBlob];
+                        received = fallbackBlob.size || 0;
+                    }
+                    clearStallTimer();
+                    downloadAbort = null;
+                    var blob = chunks.length === 1 && chunks[0] instanceof Blob ? chunks[0] : new Blob(chunks, { type: (fetchRes.headers && fetchRes.headers.get('content-type')) || '' });
                     ee(90, "正在保存..."), function(e, t) {
                         try {
                             var o = window.URL.createObjectURL(e), n = document.createElement("a");
@@ -1581,9 +1627,19 @@
                         } catch (e) {
                             console.error("Blob download error:", e), $(), E = !1, window.showToast("下载失败，请重试");
                         }
-                    }(await fetchRes.blob(), e.imageUrl);
+                    }(blob, e.imageUrl);
                 } catch (t) {
-                    clearInterval(o), console.error("Download error:", t), $(), E = !1;
+                    clearStallTimer();
+                    downloadAbort = null;
+                    $(), E = !1;
+                    // G-H1: 用户取消/停滞超时不再走“新窗口打开图片地址”兜底——
+                    // 那会把失败伪装成成功，且 401 时用户看到的是 JSON 错误页。
+                    // 取消也不记 console.error，避免每次主动取消都刷一条报错。
+                    if (t && t.name === 'AbortError') {
+                        window.showToast(stalled ? "下载超时，请重试" : "下载已取消");
+                        return;
+                    }
+                    console.error("Download error:", t);
                     try {
                         var i = document.createElement("a");
                         // ★ 安全修复：兜底分支会立即 click()，此前把 imageUrl 原样写入 href，
