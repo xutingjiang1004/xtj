@@ -1283,6 +1283,23 @@ html.xtj-reduce-motion .ai-rail-beat.is-open .ai-rail-reason {
   opacity: 0.72;
 }
 
+/* B-13：历史加载态的转圈指示，与空态区分开。 */
+.ai-history-loading-spinner {
+  width: 28px;
+  height: 28px;
+  margin: 0 auto 12px;
+  border-radius: 50%;
+  border: 3px solid rgba(66, 155, 122, 0.18);
+  border-top-color: #3a9271;
+  animation: ai-history-spin 0.8s linear infinite;
+}
+@keyframes ai-history-spin {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ai-history-loading-spinner { animation: none; }
+}
+
 .ai-history-cache-banner {
   display: flex;
   align-items: center;

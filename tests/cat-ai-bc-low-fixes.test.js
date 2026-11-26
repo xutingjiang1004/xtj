@@ -109,3 +109,15 @@ test('B-12 live header controls keep their CSS', () => {
     assert.ok(css.includes(live), 'live CSS missing: ' + live);
   }
 });
+
+// B-13: 历史加载态与空态长得一样 —— buildHistoryLoadingState 只复用
+// buildEmptyState + 一句文案。加载态加一个转圈指示，与空态区分开。
+test('B-13 history loading state shows a spinner distinct from the empty state', () => {
+  const body = fnBody(source, 'function buildHistoryLoadingState()');
+  assert.match(body, /ai-history-loading-spinner/);
+  assert.match(body, /classList\.add\('ai-history-loading'\)/);
+  assert.match(css, /\.ai-history-loading-spinner\s*\{[^}]*animation:\s*ai-history-spin/);
+  assert.match(css, /@keyframes ai-history-spin/);
+  assert.ok(css.includes('@media (prefers-reduced-motion: reduce) {\n  .ai-history-loading-spinner { animation: none; }\n}'),
+    'spinner must stop under prefers-reduced-motion');
+});

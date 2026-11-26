@@ -14377,10 +14377,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     scrollToBottom(messagesEl, false);
   }
 
-  // 「正在加载聊天记录」占位：4 秒还没回来就换成明确的慢网提示，而不是一直原样转下去。
+  // 「正在加载聊天记录」占位：转圈指示 + 4 秒还没回来就换成明确的慢网提示，
+  // 而不是一直原样转下去。转圈让加载态与空态一眼区分（B-13）。
   function buildHistoryLoadingState() {
     var node = buildEmptyState('正在加载聊天记录…');
     node.classList.add('ai-history-loading');
+    var spinner = el('div', { class: 'ai-history-loading-spinner', 'aria-hidden': 'true' });
+    node.insertBefore(spinner, node.firstChild);
     setTimeout(function() {
       if (!node.isConnected) return;
       var tip = node.querySelector('.ai-chat-empty-tip');
