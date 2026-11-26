@@ -1387,7 +1387,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // ★★★ 2026-09-15 修复（P0-2「工具已返回结果，动画仍一直转」）：
     //   原实现 `node.querySelector('.ai-search-status')` **只取第一个**匹配节点。
     //   而实际渲染中会先后插入多个状态容器：
-    //     search_status(8223) / multi_agent(8171) / search_supplement(8194)
+    //     search_status / multi_agent / search_supplement（行号会随文件增长过期，不再标注）
     //   —— 各自 replaceChild 时只处理自己那一个节点，于是同一气泡内可能
     //   同时存在 2~3 个 .ai-search-status，旧逻辑只收敛第一个，
     //   剩下的永久停留在"联网中…/正在搜索"，动画无限闪烁。
@@ -12992,8 +12992,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             //   仍为真），正文也不会按新一轮提升（answerCommitted 仍为真）。
             answerCommitted = false;
             _thinkingSettledOnContent = false;
-            // ★ 修复：reasoning 节点引用一并失效。旧节点可能已随 supplement 被清理/脱管，
-            // 若继续复用脱离 DOM 的节点，新一轮 thinking 内容会插入已 detached 节点而不显示。
+            // ★ 修复：收尾当前思考段的渲染器引用（closeReasoningSegment 已置空
+            //   reasoningRenderer / activeReasoningSegment）。reasoningContainer
+            //   本身不置空——本分支不摘除 .ai-thinking 节点，引用仍有效；真正防
+            //   脱管的是 finishAiMessage 的 isConnected 复核。
             // 注意：aiReasoning 不清——本分支明确保留已显示的思考过程，
             // 思考面板仍显示第一轮思考，存档的 reasoning 累积值与显示一致。
             aiContent = '';
