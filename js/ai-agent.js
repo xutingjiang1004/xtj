@@ -678,7 +678,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     selectedModel: resolveInitialModel(),
     _userPickedThinkingMode: false,
     _userPickedModel: false,
-    // AI 额度 / Pro（服务端权威；前端 90s 轮询 + done 事件即时刷新）
+    // AI 额度 / Pro（服务端权威；前端 20s 轮询 + done 事件即时刷新）
     quota: null,
     quotaFetchedAt: 0,
     _quotaTimer: null,
@@ -686,7 +686,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     _quotaInflightStartedAt: 0
   };
 
-  var QUOTA_POLL_MS = 30000;
+  // ★ D-L2：配额缓存窗口统一常量 20000ms。三处原值：fetchAiQuota 内
+  //   20000ms（inflight 复用/去重）与 15000ms（缓存直返）两档、轮询
+  //   30000ms。取 20000ms 的理由：三处已有两处用它，只改动两处；轮询由
+  //   30s 加密到 20s，额度显示最多滞后 20s、更及时，/quota 是轻量 GET；
+  //   缓存窗口 15s→20s，与轮询周期对齐，轮询到达时缓存刚过期、恰好拉新。
+  var AI_QUOTA_CACHE_MS = 20000;
   var FREE_TOKEN_DEFAULT = 100000;
   var PRO_TOKEN_DEFAULT = 1000000;
   var FREE_SEARCH_DEFAULT = 10;
@@ -888,13 +893,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
   async function fetchAiQuota(force) {
     
-    if (!force && S.quota && (Date.now() - S.quotaFetchedAt) < 20000 && S._quotaInflight) {
+    if (!force && S.quota && (Date.now() - S.quotaFetchedAt) < AI_QUOTA_CACHE_MS && S._quotaInflight) {
       return S._quotaInflight;
     }
-    if (!force && S.quota && (Date.now() - S.quotaFetchedAt) < 15000) {
+    if (!force && S.quota && (Date.now() - S.quotaFetchedAt) < AI_QUOTA_CACHE_MS) {
       return S.quota;
     }
-    if (S._quotaInflight && (Date.now() - S._quotaInflightStartedAt) < 20000) return S._quotaInflight;
+    if (S._quotaInflight && (Date.now() - S._quotaInflightStartedAt) < AI_QUOTA_CACHE_MS) return S._quotaInflight;
     S._quotaInflightStartedAt = Date.now();
     var quotaOwner = customModelIdentity();
     var inflight = (async function() {
@@ -928,7 +933,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     S._quotaTimer = setInterval(function() {
       if (!S.active) return;
       fetchAiQuota(false);
-    }, QUOTA_POLL_MS);
+    }, AI_QUOTA_CACHE_MS);
   }
 
   function stopQuotaPolling() {
