@@ -11230,6 +11230,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // Empty/invalid drafts must never interrupt a reply. A distinct valid send
     // replaces the active turn synchronously, including its auth/preflight phase.
     if (!text && !fileList.some(function(f) { return f && f.dataUrl; })) return;
+    // ★ D-M6：断网前置判断。离线时 fetch 会立即抛 TypeError 才提示，且访客
+    //   预检（/guest-mode）也会先白跑一次；入口先判 navigator.onLine，
+    //   断网直接提示、不发请求。失败后的离线指示逻辑（S.serviceStatus）不动。
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) { notify('网络已断开，请检查网络后重试'); return; }
     // ★ A-M1：访客预检窄窗口锁。ensureGuestAiMode() 的 await 期间 S.sending
     //   仍为 false，访客首次发送时两次点击会各进一次预检、开出两条流。
     //   预检前同步置锁，入口处先查锁；S.sending=true 接管后释放，预检失败
