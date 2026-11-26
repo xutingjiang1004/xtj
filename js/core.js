@@ -17990,7 +17990,11 @@ function renderProfileActivityList(kind) {
                         // ★ 2026-10-31：连发时不再弹「已排队」提示，也不让消息消失一段时间。
                         //   气泡立刻出现在会话里（带发送中状态），上一条完成后按原顺序自动发出，
                         //   沿用同一个气泡和幂等键，不会重复也不会乱序。
-                        var queuedTempId = 'temp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+                        // F-L1：随机部分之前只有 4 位 base36（约 168 万种），同毫秒
+                        // 内连发两条就可能撞号 —— 而这个 tempId 同时是幂等键，
+                        // 撞号会让第二条被服务端当成重发去重掉。改成 8 位（与站内
+                        // 其他临时 id 的写法一致），只改长度，不改格式与前缀。
+                        var queuedTempId = 'temp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10);
                         var queuedCreatedAt = new Date().toISOString();
                         var queuedTarget = dockChatActiveUser;
                         var queuedMessage = {
@@ -18043,7 +18047,7 @@ function renderProfileActivityList(kind) {
                 // 把真实的发送状态告诉 ux-features 的指示器（它此前是假的 1.8 秒计时）
                 try { if (typeof window.__xtjNotifyChatSending === 'function') window.__xtjNotifyChatSending(true); } catch (e) {}
                 var capturedContent = content;
-                var tempId = queuedSend && retryOptions.tempId || 'temp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+                var tempId = queuedSend && retryOptions.tempId || 'temp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10);
                 // ★ 2026-09-27 修复（审计 S5：发送请求缺幂等键）：
                 //   /api/dm/send 此前只带 target_user + content，服务端无法区分
                 //   「用户真的发了两条一模一样的话」和「同一条消息被重发了一次」。
