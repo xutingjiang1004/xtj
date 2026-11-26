@@ -935,6 +935,32 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }
   }
 
+  // ★ D-M4：三个轮询定时器（状态 60s、配置 5 分钟、配额 30s）统一启停。
+  //   切 tab 时 S.active 仍为 true，配额回调的 `if (!S.active) return`
+  //   拦不住、状态/配置回调根本没有守卫，所以 hide 时必须直接停掉，
+  //   restore 时重建。流式请求本身不受影响（只停轮询，流继续跑）。
+  function startAiPollTimers() {
+    if (S.statusTimer) {
+      try { clearInterval(S.statusTimer); } catch (e) {}
+    }
+    S.statusTimer = setInterval(updateAiStatus, 60000);
+    if (S._configRefreshTimer) { try { clearInterval(S._configRefreshTimer); } catch (e) {} }
+    S._configRefreshTimer = setInterval(function() { ensureConfig().then(applyConfigToUI).catch(function(){}); }, CONFIG_REFRESH_INTERVAL);
+    startQuotaPolling();
+  }
+
+  function stopAiPollTimers() {
+    stopQuotaPolling();
+    if (S.statusTimer) {
+      try { clearInterval(S.statusTimer); } catch (e) {}
+      S.statusTimer = null;
+    }
+    if (S._configRefreshTimer) {
+      try { clearInterval(S._configRefreshTimer); } catch (e) {}
+      S._configRefreshTimer = null;
+    }
+  }
+
   function isSearchUnlimited(q) {
     return !!(q && (q.search_unlimited === true || Number(q.search_limit) < 0));
   }
@@ -18020,6 +18046,8 @@ function showChatMessages() {
       try { document.body.style.overflow = ''; } catch (eStaleOverflow) {}
       window.__xtjAiChatActive = false;
       updateSecondaryPageState(false, 'ai-chat');
+      // ★ D-M4：登录失败残留的面板切走时同样停掉轮询定时器。
+      stopAiPollTimers();
       return true;
     }
     var researchPanel = document.getElementById('panelDeepThink');
@@ -18030,6 +18058,10 @@ function showChatMessages() {
     //   AI 切走后用户从顶栏「AI 工具 → 深入研究」打开研究页，再切 tab 时
     //   本函数直接返回，研究页就一直浮在帖子/照片墙之上。
     //   重复执行只是重复摘 class，成本极低，因此改成幂等。
+    // ★ D-M4：切走 tab 时停掉三个轮询定时器（状态/配置/配额），只隐藏面板、
+    //   流继续跑；恢复时由 restoreHiddenAiChat 重建。不要依赖 S.active 做
+    //   守卫——切 tab 时它仍为 true。
+    stopAiPollTimers();
     S._tabHidden = true;
     if (researchVisible) S._tabHiddenResearch = true;
     var panel = document.getElementById('panelAiChat');
@@ -18095,6 +18127,8 @@ function showChatMessages() {
         else scrollToBottom(S.messagesEl, true);
       } catch (eScroll) {}
     });
+    // ★ D-M4：切回 tab 时重建三个轮询定时器（hide 时已停掉）。
+    startAiPollTimers();
     return true;
   }
 
@@ -18158,13 +18192,8 @@ function showChatMessages() {
     updateInputMetrics();
     setAiRootState('ai-idle');
 
-    if (S.statusTimer) {
-      try { clearInterval(S.statusTimer); } catch (e2) {}
-    }
-    S.statusTimer = setInterval(updateAiStatus, 60000);
-    if (S._configRefreshTimer) { try { clearInterval(S._configRefreshTimer); } catch(e) {} }
-    S._configRefreshTimer = setInterval(function() { ensureConfig().then(applyConfigToUI).catch(function(){}); }, CONFIG_REFRESH_INTERVAL);
-    startQuotaPolling();
+    // ★ D-M4：三个轮询定时器统一由 startAiPollTimers 重建。
+    startAiPollTimers();
     if (readUserName() && r.messagesEl) {
       r.messagesEl.innerHTML = '';
       var openingCache = null;
