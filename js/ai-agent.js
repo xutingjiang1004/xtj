@@ -9036,7 +9036,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           // rendering is complete. Do not mutate the normal-chat lock here.
           if (progressCard) { try { progressCard._done = true; } catch (e) {} }
           try {
-            finalModelRef.value = evt.model || 'deepseek-flash';
+            finalModelRef.value = evt.model || DEFAULT_AI_MODEL;
             finalThinkingModeRef.value = evt.thinking_mode || opts.defaultThinkingMode || 'max';
             aiContentRef.value = evt.sanitized_content || evt.content || '';
             if (finalMetaRef) finalMetaRef.value = evt;
@@ -16600,7 +16600,7 @@ function showChatMessages() {
             { value: 'max', label: '极致', description: '更高推理预算，耗时可能增加' }
           ];
       var current = kind === 'model'
-        ? (S.selectedModel || 'deepseek-flash')
+        ? (S.selectedModel || DEFAULT_AI_MODEL)
         : (S.thinkingMode || 'medium');
       var listEl = el('div', { class: 'ai-select-pop-list', role: 'listbox', 'aria-label': kind === 'model' ? '选择模型' : '选择思考程度' });
       if (kind === 'think') { listEl.classList.add('ai-thinking-rail'); listEl.setAttribute('aria-orientation','horizontal'); }
@@ -17216,7 +17216,7 @@ function showChatMessages() {
         var savePending = saveCustomModels(customs);
         if (editingUid === uid) resetForm();
         if (S.selectedModel === CUSTOM_MODEL_PREFIX + uid) {
-          S.selectedModel = 'deepseek-flash';
+          S.selectedModel = DEFAULT_AI_MODEL;
           try { scopedStorageSet('xtj_ai_model', S.selectedModel); } catch (err) {}
         }
         updateModelUI(true);
