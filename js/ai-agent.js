@@ -17635,6 +17635,8 @@ function showChatMessages() {
       id: 'aiChatMsgInput',
       placeholder: '问小猫',
       rows: '1',
+      // ★ D-M3：maxlength 与发送时 50000 校验一致，超长粘贴直接拦在输入框。
+      maxlength: '50000',
       'aria-label': '聊天输入框',
       inputmode: 'text',
       enterkeyhint: 'send',
@@ -17782,6 +17784,14 @@ function showChatMessages() {
     var capacityFeatures=assistantFeatures();if(capacityFeatures&&capacityFeatures.createCapacity)capacityWidget=capacityFeatures.createCapacity(capacity,{current:featureCurrent,configuredWindowTokens:contextWindowTokens,onWindowChange:function(value){try{localStorage.setItem('xtj_ai_context_window_'+S.selectedModel+'__'+aiStorageScopeName(),String(value));}catch(_){}updateCapacity();}});
     S._contextCapacity=capacityWidget;S._contextManaged=!!capacityWidget;S._contextWindowTokens=contextWindowTokens;S._contextMemoryResolver=contextMemory;
     input.addEventListener('input',function(){updateCapacity();});S._updateContextCapacity=updateCapacity;updateCapacity();
+    // ★ D-M3：粘贴超长时给一次提示（不要静默截断无提示）。maxlength 会拦住
+    //   超出部分但浏览器不提示；只在「粘贴前未满、粘贴后已满」的跨越时提示一次。
+    input.addEventListener('paste', function() {
+      var _beforeLen = input.value.length;
+      setTimeout(function() {
+        if (_beforeLen < 50000 && input.value.length >= 50000) notify('消息过长，最多 50000 字符，请精简后重试');
+      }, 0);
+    });
     async function runModelComparison(model,text,history,signal,onEvent){
       var config=model.config,body={message:text,messages:history,messages_include_current:false,context_management:true,context_window_tokens:contextWindowTokens(),model:model.id,thinking_mode:model.thinkingMode,client_request_id:'compare_'+Date.now()+'_'+Math.random().toString(36).slice(2),web_search:false,network_mode:networkSettings().networkMode,followup_suggestions:false};
       if(config)Object.assign(body,{provider:config.provider,api_key:undefined,model_uid:config.uid,model:config.model,base_url:config.base_url,reasoning_effort_supported:config.reasoning_effort_supported===true});
