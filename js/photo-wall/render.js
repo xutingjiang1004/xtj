@@ -216,11 +216,19 @@
     return html;
   }
 
+  // G-L2: 相册日期 key 统一用 UTC。服务端 created_at 是 UTC；旧实现用本地
+  // getFullYear/getMonth/getDate，跨时区/夏令时同一张照片会进不同日期组。
+  // albumTitle 与 doLoadMore 的日期 key 必须用同一口径，否则标题与分组
+  // 对不上、翻页时新页照片匹配不到当前分组。
+  function photoDateKey(d){
+    return d.getUTCFullYear() + '-' + String(d.getUTCMonth() + 1).padStart(2, '0') + '-' + String(d.getUTCDate()).padStart(2, '0');
+  }
+
   // "10 月 31 日 · 周五" (the year is added only for earlier years); the ISO date stays the group key.
   function albumTitle(d){
-    var week = ['周日','周一','周二','周三','周四','周五','周六'][d.getDay()];
-    var year = d.getFullYear() === new Date().getFullYear() ? '' : d.getFullYear() + ' 年 ';
-    return year + (d.getMonth() + 1) + ' 月 ' + d.getDate() + ' 日 · ' + week;
+    var week = ['周日','周一','周二','周三','周四','周五','周六'][d.getUTCDay()];
+    var year = d.getUTCFullYear() === new Date().getUTCFullYear() ? '' : d.getUTCFullYear() + ' 年 ';
+    return year + (d.getUTCMonth() + 1) + ' 月 ' + d.getUTCDate() + ' 日 · ' + week;
   }
 
   function groupByDate(photos){
@@ -230,7 +238,7 @@
       if (!photo) return;
       var d = new Date(photo.timestamp || Date.now());
       if (isNaN(d.getTime())) d = new Date();
-      var key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+      var key = photoDateKey(d);
       if (!map[key]) {
         map[key] = { key:key, title:albumTitle(d), photos:[] };
         groups.push(map[key]);
@@ -656,7 +664,7 @@
               if (!mp) continue;
               var md = new Date(mp.timestamp || Date.now());
               if (isNaN(md.getTime())) md = new Date();
-              var mKey = md.getFullYear() + '-' + String(md.getMonth() + 1).padStart(2, '0') + '-' + String(md.getDate()).padStart(2, '0');
+              var mKey = photoDateKey(md);
               if (mKey === window.pwAlbumGroupKey) { hasGroupPhoto = true; break; }
             }
             if (!hasGroupPhoto) {
