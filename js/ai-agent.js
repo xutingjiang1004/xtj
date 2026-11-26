@@ -2662,7 +2662,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
   // ★ activeRenderers 按通道隔离：普通聊天与深页流式渲染共用同一个
   // S.activeRenderers，深页取消/完成时只能清理 deep 通道的渲染器，
-  // 否则会误伤普通聊天正在流式输出的渲染器（暂停/继续按钮与
+  // 否则会误伤普通聊天正在流式输出的渲染器（停止/继续按钮与
   // abortAllAiRequests 的 cancel 兜底都依赖数组中的活跃渲染器）。
   function resetActiveRenderersByChannel(channel) {
     var keep = [];
@@ -2743,7 +2743,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     S.activeRenderers = channelOnly
       ? (S.activeRenderers || []).filter(function(r) { return r && r.channel === 'deep'; })
       : [];
-    if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
+    if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '停止'; }
   }
 
   // 深入研究与主聊天共用 S 状态但互为独立流程：
@@ -7390,8 +7390,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       S._dtFetchTimeoutTimer = null;
     }
     var dtPauseBtn = document.getElementById('dtPauseBtn');
-    if (dtPauseBtn) { dtPauseBtn.style.display = 'none'; dtPauseBtn.textContent = '暂停'; }
-    if (!isDeepPageCancel && S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
+    if (dtPauseBtn) { dtPauseBtn.style.display = 'none'; dtPauseBtn.textContent = '停止'; }
+    if (!isDeepPageCancel && S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '停止'; }
     // Fire-and-forget cancel to server.
     try {
       var tokenPromise = typeof window.ensureUserToken === 'function'
@@ -9600,12 +9600,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (!S.sending) S.paused = false;
       resetActiveRenderersByChannel('deep');
       var dtPB = document.getElementById('dtPauseBtn');
-      if (dtPB) { dtPB.style.display = 'none'; dtPB.textContent = '暂停'; }
+      if (dtPB) { dtPB.style.display = 'none'; dtPB.textContent = '停止'; }
     }
 
-    // 显示暂停按钮
+    // 显示停止按钮
     var dtPauseBtn = document.getElementById('dtPauseBtn');
-    if (dtPauseBtn) { dtPauseBtn.style.display = ''; dtPauseBtn.textContent = '暂停'; }
+    if (dtPauseBtn) { dtPauseBtn.style.display = ''; dtPauseBtn.textContent = '停止'; }
 
     // 1. 追加 user 消息（手动创建 .dt-msg.user，不使用气泡）
     var empty = dtMessagesEl.querySelector('.dt-empty');
@@ -10216,7 +10216,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
 
     if (sendBtn) addDtListener(sendBtn, 'click', dtDoSend);
 
-    // 暂停按钮：真正中止（取消）SSE 请求 + 暂停渲染
+    // 停止按钮：真正中止（取消）SSE 请求 + 停止渲染
     if (pauseBtn) {
       addDtListener(pauseBtn, 'click', function(ev) {
         ev.preventDefault();
@@ -11300,7 +11300,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         S.paused = false;
         resetActiveRenderersByChannel('chat');
         if(S._contextCapacity)S._contextCapacity.settle();
-        if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
+        if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '停止'; }
       }
     }
 
@@ -11381,7 +11381,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       S.sending = false;
       setAiSendBtnDisabled(false);
       if (controller && S.abortController === controller) S.abortController = null;
-      if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
+      if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '停止'; }
       return true;
     }
 
@@ -13981,7 +13981,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             //   的兜底重绘 —— 中间存在一帧空气泡。
             //   修法：把渲染器清理**挪到 finishAiMessage 之后**；finish() 已把最终内容
             //   写进气泡并置 finished=true，此后的 cancel() 不会再清空 DOM。
-            if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
+            if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '停止'; }
             if (_isTouchMobile) { try { input.blur(); } catch (e) {} }
             if (thinkingTimer) {
               finalThinkingElapsedMs = thinkingTimer.stop();
@@ -17634,9 +17634,9 @@ function showChatMessages() {
       type: 'button',
       class: 'ai-chat-pause',
       id: 'aiChatPauseBtn',
-      'aria-label': '暂停',
+      'aria-label': '停止',
       style: 'display:none'
-    }, '暂停');
+    }, '停止');
 
     // ★ 新增：语音输入按钮（Web Speech API，点击开始/停止聆听）
     var voiceBtn = el('button', {
@@ -17738,7 +17738,7 @@ function showChatMessages() {
     };
     S._askPreservingDraft = function(text,attachments) {
       if(!S.active || !input.isConnected || voiceLifecycle!==S.lifecycleId)return Promise.reject(Error('当前聊天已关闭，请重新打开'));
-      if(S.sending)return Promise.reject(Error('请先暂停当前回复，再发送推荐问题或分析资料'));
+      if(S.sending)return Promise.reject(Error('请先停止当前回复，再发送推荐问题或分析资料'));
       var draft=nodeForAuxiliarySend(text),accepted=false;
       return handleSendMessage(draft,sendBtn,messagesEl,attachments||[],function(){accepted=true;}).then(function(){if(!accepted)throw Error('消息未开始发送，资料与草稿已保留');});
     };
@@ -17747,7 +17747,7 @@ function showChatMessages() {
     function featureCurrent(){return S.active && input.isConnected && voiceLifecycle===S.lifecycleId && customModelIdentityCurrent(featureIdentity);}
     var menuGroup=panelShell.querySelector('.ai-panel-menu-list .ai-panel-group:last-child');
     function addFeatureEntry(label,action){var button=el('button',{type:'button',class:'ai-panel-row'});var icon=el('span',{class:'ai-panel-row-icon','aria-hidden':'true'});icon.innerHTML=ICO.compare;button.appendChild(icon);button.appendChild(el('span',{class:'ai-panel-row-title',text:label}));button.addEventListener('click',function(){closePanel(true);action();});menuGroup.appendChild(button);return button;}
-    addFeatureEntry('双模型对比',function(){var features=assistantFeatures();if(!features)return;if(S.sending){notify('当前回复完成或暂停后，可以开始双模型对比');return;}var models=[{id:'deepseek-flash',label:'DeepSeek-V4.1-Flash-1017'},{id:'deepseek-v4-pro',label:'V4 Pro'}];loadCustomModels().forEach(function(config){if((config.key_configured||config.server_managed)&&config.model)models.push({id:'custom:'+config.uid,label:config.label||config.model,config:Object.assign({},config)});});var latestUser=S.messages.slice().reverse().find(function(m){return m.role==='user';});if(S._modelCompare)S._modelCompare.dispose();S._modelCompare=features.openCompare({models:models,thinkingMode:S.thinkingMode,question:input.value.trim() || latestUser&&latestUser.content || '',current:featureCurrent,notify:notify,renderMarkdown:renderMarkdown,context:function(){return buildAiConversationHistory(CONTEXT_LIMIT_NORMAL,MSG_MAX_CHARS_NORMAL,null,null);},run:runModelComparison});});
+    addFeatureEntry('双模型对比',function(){var features=assistantFeatures();if(!features)return;if(S.sending){notify('当前回复完成或停止后，可以开始双模型对比');return;}var models=[{id:'deepseek-flash',label:'DeepSeek-V4.1-Flash-1017'},{id:'deepseek-v4-pro',label:'V4 Pro'}];loadCustomModels().forEach(function(config){if((config.key_configured||config.server_managed)&&config.model)models.push({id:'custom:'+config.uid,label:config.label||config.model,config:Object.assign({},config)});});var latestUser=S.messages.slice().reverse().find(function(m){return m.role==='user';});if(S._modelCompare)S._modelCompare.dispose();S._modelCompare=features.openCompare({models:models,thinkingMode:S.thinkingMode,question:input.value.trim() || latestUser&&latestUser.content || '',current:featureCurrent,notify:notify,renderMarkdown:renderMarkdown,context:function(){return buildAiConversationHistory(CONTEXT_LIMIT_NORMAL,MSG_MAX_CHARS_NORMAL,null,null);},run:runModelComparison});});
     var capacity=el('div',{class:'ai-context-capacity',id:'aiContextCapacity'}),capacityWidget=null,lastContextBudget=null,capacityModel='',capacityConversation='';
     function contextMemory(){for(var i=S.messages.length-1;i>=0;i--){var memory=S.messages[i]&&S.messages[i].context_memory;if(memory&&memory.v===1&&memory.conversation_id===S.conversationId&&typeof memory.summary==='string'&&memory.summary.trim()&&memory.summary.length<=8000)return memory;}return null;}
     function contextWindowTokens(){if(S.thinkMax===true)return 131072;var value=Number(scopedStorageGet('xtj_ai_context_window_'+S.selectedModel));return [32768,65536,131072].indexOf(value)>=0?value:65536;}
@@ -18328,7 +18328,7 @@ function showChatMessages() {
     S._interruptChat = null;
     S.paused = false;
     S.activeRenderers = [];
-    if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
+    if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '停止'; }
     S.messages = [];
     S.conversations = [];
     S._conversationsFreshUntil = 0;
