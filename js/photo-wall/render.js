@@ -1015,11 +1015,16 @@
 
   async function renderPhotoWall(options){
     if (!window.currentUser) { renderSorted([]); return; }
-    pendingForce = pendingForce || !!(options && options.force);
+    var _force = !!(options && options.force);
     if (rendering) {
-      pendingRender = true;
+      // ★ 第二轮修复（重-2）：在途渲染已覆盖本次请求时不再排队第二遍。
+      //   旧逻辑任何并发调用都置 pendingRender，第二遍先写 loading 占位
+      //   再重建——切回慢加载时 100ms 兜底与首轮重叠，同一份数据被建两次、
+      //   在途下载被抛弃。只有 force 请求才需要第二遍。
+      if (_force) { pendingForce = true; pendingRender = true; }
       return _renderPromise;
     }
+    pendingForce = _force;
     rendering = true;
     _renderPromise = Promise.resolve().then(async function() {
       try {
