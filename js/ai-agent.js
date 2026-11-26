@@ -17509,8 +17509,14 @@ function showChatMessages() {
     function autoApi(method, path, body) {
       return apiRequest(method, '/scheduled-tasks' + path, body, { background: true });
     }
-    function autoRenderList(box, tasks) {
+    function autoRenderList(box, tasks, isError) {
       if (!box) return;
+      // ★ 第二轮修复（定-5）：加载失败（503 等）别再显示“还没有定时任务”——
+      //   用户会以为自己没建过任务。失败时显示错误态 + 重试。
+      if (isError) {
+        box.innerHTML = '<div class="ai-auto-empty">定时任务列表加载失败，请稍后重试。<br><button type="button" data-auto-retry>重试</button></div>';
+        return;
+      }
       if (!tasks || !tasks.length) {
         box.innerHTML = '<div class="ai-auto-empty">还没有定时任务。<br>直接在小猫对话框里说一句，例如「每天早上 9 点帮我搜 AI 新闻并整理成简报」，它会自己建好。</div>';
         return;
@@ -17587,13 +17593,15 @@ function showChatMessages() {
       function loadTasks() {
         autoApi('GET', '').then(function(r) {
           if (r && r.ok && r.data && r.data.ok) autoRenderList(listBox, r.data.tasks || []);
-          else autoRenderList(listBox, []);
-        }).catch(function() { autoRenderList(listBox, []); });
+          else autoRenderList(listBox, [], true);
+        }).catch(function() { autoRenderList(listBox, [], true); });
       }
 
       modal.addEventListener('click', function(e) {
         if (e.target === modal) { autoClose(); return; }
         if (e.target.closest('.ai-auto-close')) { autoClose(); return; }
+        // ★ 第二轮修复（定-5）：加载失败态的重试按钮。
+        if (e.target.closest('[data-auto-retry]')) { loadTasks(); return; }
         if (e.target.closest('#aiAutoNewBtn')) {
           form.hidden = !form.hidden;
           syncFormKind();

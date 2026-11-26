@@ -29791,9 +29791,16 @@ _httpServer = app.listen(port, () => {
   startDmUnreadNotifier();
   // ★ 2026-11-14（用户要求：定时任务 / 自动化）：启动常驻调度器。
   //   每 30s 扫描 ai_scheduled_tasks 里到点的任务；未执行迁移时只会打一条告警，不影响主服务。
+  // ★ 第二轮修复（定-6）：启动时先探查表是否存在再打“已启动”——表缺失
+  //   时原地打“已启动”会误导人以为调度正常。探查失败明确告警缺迁移。
   try {
     aiTaskScheduler.start();
-    console.log('[SCHEDULER] 定时任务调度器已启动（每 30s 扫描 ai_scheduled_tasks）');
+    supabase.from('ai_scheduled_tasks').select('id').limit(1).then(function (res) {
+      if (res && res.error) console.warn('[SCHEDULER] ai_scheduled_tasks 表不可用，定时任务不会执行：请在 Supabase 执行 supabase/migrations/20261114000000_ai_scheduled_tasks.sql（' + (res.error.message || res.error) + '）');
+      else console.log('[SCHEDULER] 定时任务调度器已启动（每 30s 扫描 ai_scheduled_tasks）');
+    }).catch(function (eProbe) {
+      console.warn('[SCHEDULER] 定时任务表探查失败：', eProbe && eProbe.message);
+    });
   } catch (eSched) {
     console.warn('[SCHEDULER] 启动失败:', eSched && eSched.message);
   }
