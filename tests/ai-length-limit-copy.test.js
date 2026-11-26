@@ -13,12 +13,14 @@ const path = require('node:path');
 const src = fs.readFileSync(path.join(__dirname, '..', 'js', 'ai-agent.js'), 'utf8');
 
 test('D-M2: 四处 50000 字符校验的提示文案完全一致', () => {
-  const checks = src.match(/text\.length > 50000/g) || [];
+  // 只数紧跟 text.length > 50000 校验的提示：D-M3 的粘贴提示复用同一文案，
+  // 不属于四处发送校验，不计入。
+  const checks = Array.from(src.matchAll(/text\.length > 50000/g));
   assert.equal(checks.length, 4, '应有 4 处 50000 字符校验，实得 ' + checks.length + ' 处');
-  const msgs = src.match(/消息过长，最多 50000 字符[^'"]*/g) || [];
-  assert.equal(msgs.length, 4, '四处校验都应有提示文案，实得 ' + msgs.length + ' 处');
-  msgs.forEach(function(m) {
-    assert.equal(m, '消息过长，最多 50000 字符，请精简后重试', '提示文案应统一含「请精简后重试」，实得「' + m + '」');
+  checks.forEach(function(m) {
+    const near = src.slice(m.index, m.index + 200);
+    assert.ok(near.includes('消息过长，最多 50000 字符，请精简后重试'),
+      '每处校验后的提示都应统一含「请精简后重试」，附近文案：' + near.slice(0, 120));
   });
 });
 
