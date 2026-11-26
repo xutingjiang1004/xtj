@@ -48,7 +48,7 @@
   var PASSTHROUGH_VOID = { br:1, hr:1, img:1 };
   var PASSTHROUGH_ATTRS = {
     a: { href:1, title:1, target:1, rel:1 },
-    img: { src:1, alt:1, title:1, loading:1 },
+    img: { src:1, alt:1, title:1, loading:1, class:1 },
     code: { class:1 },
     span: { title:1 }
   };
@@ -197,7 +197,7 @@
       return { ok: false, url: '#' };
     }
     // 6. Images: ![alt](url)
-    s = s.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, function (_, alt, url) { var h = safeHref(url, true); if (!h.ok) return _escapeHtml(alt || '图片'); return stashInline('<img src="' + _escapeHtml(h.url) + '" alt="' + _escapeHtml(alt).replace(/"/g, '&quot;') + '" loading="lazy" />'); });
+    s = s.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, function (_, alt, url) { var h = safeHref(url, true); if (!h.ok) return _escapeHtml(alt || '图片'); return stashInline('<img class="ai-md-img" src="' + _escapeHtml(h.url) + '" alt="' + _escapeHtml(alt).replace(/"/g, '&quot;') + '" loading="lazy" />'); });
     s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function (_, text, url) { var h = safeHref(url, false); if (!h.ok) return stashInline('<span title="' + _escapeHtml(h.url) + '">' + _escapeHtml(text) + '</span>'); return stashInline('<a href="' + _escapeHtml(h.url) + '" target="_blank" rel="noopener noreferrer">' + _escapeHtml(text) + '</a>'); });
     
     // 3. Bold: **text** / __text__；Italic: *text* / _text_；Bold+Italic: ***text*** / ___text___

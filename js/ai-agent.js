@@ -15828,6 +15828,20 @@ function showChatMessages() {
       var part = target.closest('.ai-tool-step-detail, .ai-tool-step-title');
       if (part) toggleToolRow(part);
     });
+    // ★ B-02：Markdown 图片加载失败兜底。error 事件不冒泡，用捕获阶段在
+    //   消息容器上统一接住；破图隐藏并换成一行文字提示，不留破图图标撑开
+    //   气泡。内联 onerror 属性会被渲染器安全策略拦截，改用 JS 委托。
+    messagesEl.addEventListener('error', function(event) {
+      var t = event.target;
+      if (!t || t.tagName !== 'IMG' || !t.closest || !t.closest('.ai-msg-bubble')) return;
+      if (t.dataset && t.dataset.mdImgBroken) return;
+      try { if (t.dataset) t.dataset.mdImgBroken = '1'; } catch (e) {}
+      try { t.style.display = 'none'; } catch (eHide) {}
+      var note = document.createElement('span');
+      note.className = 'ai-md-img-broken-note';
+      note.textContent = '图片加载失败' + (t.alt ? '：' + String(t.alt).slice(0, 40) : '');
+      if (t.parentNode) t.parentNode.insertBefore(note, t.nextSibling);
+    }, true);
     messagesEl.addEventListener('keydown', function(event) {
       if (event.key !== 'Enter' && event.key !== ' ') return;
       var target = event.target;
