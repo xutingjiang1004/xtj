@@ -848,18 +848,9 @@
     if (isChatPhoto) parts.push(infoRow('来源', '聊天图片'));
     if (!parts.length) parts.push(infoRow('状态', '这张图片没有可显示的元数据'));
     var html = '<div class="pp-info-section"><div class="pp-info-section-title">照片信息</div>' + parts.join('') + '</div>';
-    var exif = photo.exif || null;
-    if (exif) {
-      var exifRows = [];
-      if (exif.model || exif.make) exifRows.push(infoRow('设备', exif.model || exif.make));
-      if (exif.fNumber) exifRows.push(infoRow('光圈', 'f/' + exif.fNumber));
-      if (exif.exposureTime) exifRows.push(infoRow('快门', exif.exposureTime));
-      if (exif.iso) exifRows.push(infoRow('ISO', exif.iso));
-      if (exif.focalLength) exifRows.push(infoRow('焦距', exif.focalLength + 'mm'));
-      if (exifRows.length) {
-        html += '<div class="pp-info-divider"></div><div class="pp-info-section"><div class="pp-info-section-title">EXIF</div>' + exifRows.join('') + '</div>';
-      }
-    }
+    // G-L4: 删死 EXIF 块——服务端 inspectPhotoOriginal 只存 { orientation }，
+    // make/model/fNumber/exposureTime/iso/focalLength 永不存在，这些行
+    // 永远不显示。
     return html;
   }
 

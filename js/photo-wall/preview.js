@@ -732,13 +732,11 @@
         o += K("作者", G(e.username, "--")), o += K("时间", G(t, "--")), o += K("浏览", G(null != e.views ? e.views : 0, "0"));
         var n = "";
         n += K("大小", G(Z(e.fileSize), "--")), e.originalSize && Number(e.originalSize) > 0 && Number(e.originalSize) !== Number(e.fileSize || 0) && (n += K("原始大小", G(Z(e.originalSize), "--")));
-        var i = "";
-        e.exif && ((e.exif.make || e.exif.model) && (i += K("设备", G(e.exif.model || e.exif.make, "--"))),
-        e.exif.fNumber && (i += K("光圈", G("f/" + e.exif.fNumber, "--"))), e.exif.exposureTime && (i += K("快门", G(e.exif.exposureTime, "--"))),
-        e.exif.iso && (i += K("ISO", G(e.exif.iso, "--"))), e.exif.focalLength && (i += K("焦距", G(e.exif.focalLength + "mm", "--"))));
+        // G-L4: 删死 EXIF 块——服务端 inspectPhotoOriginal 只存 { orientation }，
+        // make/model/fNumber/exposureTime/iso/focalLength 永不存在，这些行
+        // 永远不显示。
         var a = '<div class="pp-info-section"><div class="pp-info-section-title">照片信息</div>' + o + '</div><div class="pp-info-divider"></div><div class="pp-info-section"><div class="pp-info-section-title">文件信息</div>' + n + "</div>";
-        return i && (a += '<div class="pp-info-divider"></div><div class="pp-info-section"><div class="pp-info-section-title">EXIF 数据</div>' + i + "</div>"),
-        a;
+        return a;
     }
     // P4: known duplicate — this function Q declaration is hoisted and later
     // overwritten by `Q = function() { ... }` in the assignment chain (~line 655).
@@ -784,12 +782,9 @@
                 s += x("作者", I(e.username, "--")), s += x("时间", I(r, "--")), s += x("浏览", I(e.views || 0, "0"));
                 var l = "";
                 l += x("大小", I(i, "--"));
-                var c = "";
-                e.exif && ((e.exif.make || e.exif.model) && (c += x("设备", I(e.exif.model || e.exif.make, "--"))),
-                e.exif.fNumber && (c += x("光圈", I("f/" + e.exif.fNumber, "--"))), e.exif.exposureTime && (c += x("快门", I(e.exif.exposureTime, "--"))),
-                e.exif.iso && (c += x("ISO", I(e.exif.iso, "--"))), e.exif.focalLength && (c += x("焦距", I(e.exif.focalLength + "mm", "--"))));
+                // G-L4: 删死 EXIF 块（同 J，见上）——本函数体是已注明死代码的
+                // hoisted Q 副本，字段永不存在。
                 var d = '<div class="pp-info-section"><div class="pp-info-section-title">照片信息</div>' + s + '</div><div class="pp-info-divider"></div><div class="pp-info-section"><div class="pp-info-section-title">文件信息</div>' + l + "</div>";
-                c && (d += '<div class="pp-info-divider"></div><div class="pp-info-section"><div class="pp-info-section-title">EXIF 数据</div>' + c + "</div>");
                 var p = document.getElementById("ppInfoModalBody");
                 p && (p.innerHTML = d), o._closeTimeout && (clearTimeout(o._closeTimeout), o._closeTimeout = null);
                 var u = o.querySelector(".pp-info-modal-content"), f = document.getElementById("ppInfoBtn"), m = null;
