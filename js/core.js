@@ -13216,7 +13216,11 @@ function renderProfileActivityList(kind) {
                     dmNotificationIds.add(id);
                 });
                 dmSnapshotReady=true;
-                while(dmNotificationIds.size>500)dmNotificationIds.delete(dmNotificationIds.values().next().value);
+                // F-L5：去重集合之前只留 500 条就按插入顺序淘汰最旧的；一个会话里
+                // 收到 500 条以上私信时，被淘汰的旧消息再出现在快照里会重复弹通知。
+                // 集合存的只是短 id 字符串，2000 条内存可忽略，把上限放宽到 2000，
+                // 把重复弹通知的窗口缩到原来的 1/4；淘汰方式（留最新的）不变。
+                while(dmNotificationIds.size>2000)dmNotificationIds.delete(dmNotificationIds.values().next().value);
             }
 
             // Incoming message from a realtime event: show the banner unless the sender is muted. When the mute list has not
@@ -13905,7 +13909,7 @@ function renderProfileActivityList(kind) {
             //   通过 window.isMsgReadByMe 调用必然 TypeError，DM 未读角标恒为 0。
             window.isMsgReadByMe = isMsgReadByMe;
 
-            async function markMessagesRead(senderName, messages, pendingUpdates) {
+            async function markMessagesRead(senderName, messages, pendingUpdates, allowRetry) {
                 if (!window.currentUser || !senderName) return;
                 var owner = window.currentUser, epoch = _authStateEpoch;
                 var updates = Array.isArray(pendingUpdates) ? pendingUpdates.slice() : [];
@@ -13917,17 +13921,29 @@ function renderProfileActivityList(kind) {
                 }
                 if (updates.length) {
                     // 服务端一次最多处理 200 个 ID，超出的会被静默截掉、永远留在未读；这里按 200 分批。
+                    // F-M2：任一批失败不再整批丢弃 —— 服务端按批返回 partial/failed_ids，
+                    // 失败的批只记下 id 继续跑后面的批，跑完再把失败的 id 补推一次；
+                    // 之前是第一批 throw 就中止后续所有批。
                     var readRows = [];
+                    var failedIds = [];
                     for (var offset = 0; offset < updates.length; offset += 200) {
-                        var response = await window.xtjProtectedFetch('/api/dm/read', {
-                            method: 'POST',
-                            authOwner: owner, authEpoch: epoch,
-                            body: JSON.stringify({ message_ids: updates.slice(offset, offset + 200).map(function(update) { return update.id; }) })
-                        });
-                        var result = await response.json().catch(function() { return {}; });
-                        if (owner !== window.currentUser || epoch !== _authStateEpoch) return;
-                        if (!response.ok || !result.ok) throw new Error(result.error || 'DM read update failed');
-                        if (Array.isArray(result.data)) readRows = readRows.concat(result.data);
+                        var batchIds = updates.slice(offset, offset + 200).map(function(update) { return update.id; });
+                        try {
+                            var response = await window.xtjProtectedFetch('/api/dm/read', {
+                                method: 'POST',
+                                authOwner: owner, authEpoch: epoch,
+                                body: JSON.stringify({ message_ids: batchIds })
+                            });
+                            var result = await response.json().catch(function() { return {}; });
+                            if (owner !== window.currentUser || epoch !== _authStateEpoch) return;
+                            if (!response.ok || !result.ok) throw new Error(result.error || 'DM read update failed');
+                            if (Array.isArray(result.failed_ids)) failedIds = failedIds.concat(result.failed_ids.map(String));
+                            if (Array.isArray(result.data)) readRows = readRows.concat(result.data);
+                        } catch (e) {
+                            if (owner !== window.currentUser || epoch !== _authStateEpoch) return;
+                            console.warn('[DM] 已读标记本批失败，稍后重试:', e && e.message);
+                            failedIds = failedIds.concat(batchIds.map(String));
+                        }
                     }
                     var readById = new Map(readRows.map(function(row) { return [String(row.id), row]; }));
                     var cacheKey = getDockChatCacheKey(senderName);
@@ -13937,6 +13953,15 @@ function renderProfileActivityList(kind) {
                         return authoritative ? reconcileDockChatMessage(message, authoritative) : message;
                     });
                     if (dockChatActiveUser === senderName) renderDockMessages(senderName, _chatCache[cacheKey], false);
+                    if (failedIds.length && allowRetry !== false && typeof setTimeout === 'function') {
+                        // 失败的 id 下次打开会话/轮询本来就会重算，但用户一直停留
+                        // 在本会话时不会再有触发点；只补推一次，避免无声丢已读。
+                        var retryIds = failedIds.filter(function(id, i, arr) { return arr.indexOf(id) === i; });
+                        setTimeout(function() {
+                            if (owner !== window.currentUser || epoch !== _authStateEpoch) return;
+                            markMessagesRead(senderName, [], retryIds.map(function(id) { return { id: id }; }), false).catch(function() {});
+                        }, 5000);
+                    }
                 }
                 scheduleDockChatListRefresh(updates.length ? 120 : 40);
                 updateUnreadBadge();
@@ -14055,6 +14080,8 @@ function renderProfileActivityList(kind) {
             //   Broadcast 的频道名由服务端 HMAC 派生、只发给本人，天然按人隔离。
             //   收到消息后**直接把 payload 写进缓存并增量渲染**（复审 P2-02 的建议形态），
             //   不再因为一条新消息就回拉 180 条历史。
+            //   F-H2：payload 只含 message_id + sender（不含正文），取回正文后
+            //   再走同一条增量路径；取不到时只刷新列表与角标。
             // ══════════════════════════════════════════════════════════════════
             var dmBroadcast = { channel: null, topic: null, owner: '', epoch: 0, attempts: 0 };
             window.__xtjResetDmBroadcast = function() {
@@ -14130,6 +14157,29 @@ function renderProfileActivityList(kind) {
                 } catch (e) { console.warn("[dm-realtime] apply failed:", e && e.message); }
             }
 
+            // F-H2：新版服务端 Broadcast 只发 {message_id, sender}，正文不在
+            // 广播里。收到 id 后走已鉴权的 /api/dm/messages 取回该条消息，再走
+            // applyRealtimeDmMessage 的同一条增量渲染路径；取不到（竞态/失败）
+            // 就只刷新列表与角标，轮询兜底仍会补上。
+            async function applyRealtimeDmId(messageId, sender) {
+                try {
+                    if (!messageId || !sender || sender === window.currentUser) return;
+                    if (typeof window.xtjProtectedFetch !== 'function') { window.dockChatListCacheTime = 0; return; }
+                    var resp = await window.xtjProtectedFetch('/api/dm/messages?target=' + encodeURIComponent(sender) + '&limit=30', { timeoutMs: 12000 });
+                    if (!resp || !resp.ok) { window.dockChatListCacheTime = 0; loadDockChatList(); updateUnreadBadge(); return; }
+                    var data = await resp.json().catch(function () { return {}; });
+                    var rows = (data && Array.isArray(data.data)) ? data.data : [];
+                    var msg = null;
+                    for (var i = 0; i < rows.length; i++) {
+                        if (rows[i] && String(rows[i].id) === String(messageId)) { msg = rows[i]; break; }
+                    }
+                    if (msg) { applyRealtimeDmMessage(msg); return; }
+                    window.dockChatListCacheTime = 0;
+                    loadDockChatList();
+                    updateUnreadBadge();
+                } catch (e) { console.warn('[dm-realtime] apply id failed:', e && e.message); }
+            }
+
             async function subscribeToDmBroadcast() {
                 var owner=window.currentUser || '';
                 if (dmBroadcast.owner !== owner) {
@@ -14158,8 +14208,12 @@ function renderProfileActivityList(kind) {
                     dmBroadcast.channel = sb.channel(dmBroadcast.topic, { config: { broadcast: { self: false } } })
                         .on("broadcast", { event: "dm" }, function (payload) {
                             if (myEpoch !== dmBroadcast.epoch) return;
-                            var msg = payload && payload.payload && payload.payload.message;
-                            applyRealtimeDmMessage(msg);
+                            var p = payload && payload.payload;
+                            if (!p) return;
+                            // F-H2：新版只发 {message_id, sender}，正文走鉴权接口取回；
+                            // 旧版全量 message 仍兼容（部署窗口期内可能收到）。
+                            if (p.message) { applyRealtimeDmMessage(p.message); return; }
+                            if (p.message_id && p.sender) { applyRealtimeDmId(p.message_id, p.sender); }
                         })
                         .on("broadcast", { event: "chat-state" }, function(payload) {
                             if (myEpoch !== dmBroadcast.epoch) return;
@@ -17940,7 +17994,11 @@ function renderProfileActivityList(kind) {
                         // ★ 2026-10-31：连发时不再弹「已排队」提示，也不让消息消失一段时间。
                         //   气泡立刻出现在会话里（带发送中状态），上一条完成后按原顺序自动发出，
                         //   沿用同一个气泡和幂等键，不会重复也不会乱序。
-                        var queuedTempId = 'temp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+                        // F-L1：随机部分之前只有 4 位 base36（约 168 万种），同毫秒
+                        // 内连发两条就可能撞号 —— 而这个 tempId 同时是幂等键，
+                        // 撞号会让第二条被服务端当成重发去重掉。改成 8 位（与站内
+                        // 其他临时 id 的写法一致），只改长度，不改格式与前缀。
+                        var queuedTempId = 'temp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10);
                         var queuedCreatedAt = new Date().toISOString();
                         var queuedTarget = dockChatActiveUser;
                         var queuedMessage = {
@@ -17993,7 +18051,7 @@ function renderProfileActivityList(kind) {
                 // 把真实的发送状态告诉 ux-features 的指示器（它此前是假的 1.8 秒计时）
                 try { if (typeof window.__xtjNotifyChatSending === 'function') window.__xtjNotifyChatSending(true); } catch (e) {}
                 var capturedContent = content;
-                var tempId = queuedSend && retryOptions.tempId || 'temp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+                var tempId = queuedSend && retryOptions.tempId || 'temp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10);
                 // ★ 2026-09-27 修复（审计 S5：发送请求缺幂等键）：
                 //   /api/dm/send 此前只带 target_user + content，服务端无法区分
                 //   「用户真的发了两条一模一样的话」和「同一条消息被重发了一次」。
@@ -18295,7 +18353,10 @@ function renderProfileActivityList(kind) {
             //   现在墓碑按账号同步到服务端（/api/dm/deleted），localStorage 退化为
             //   本地快取：启动时与服务端合并，删除时回推，离线删除在下次同步补传。
             var DM_DELETED_KEY_PREFIX = 'xtj_dm_deleted_';
-            var DM_DELETED_MAX = 8000;
+            // F-M3：与服务端 cleanDmDeletedIds、merge_dm_deleted_ids 单次
+            // 3000 条上限对齐。之前这里是 8000，服务端只留 500，超出的删
+            // 除在换设备后会悄悄复活；且推送时不校验服务端返回的合并结果。
+            var DM_DELETED_MAX = 3000;
             // ★ 2026-09-27 修复（审计 C12）：
             //   _dmDeletedSyncedUsers 的键此前只用"对手 userName" u，但墓碑实际是
             //   **账号级**的（DM_DELETED_KEY_PREFIX + currentUser，服务端 /api/dm/deleted
@@ -18407,7 +18468,22 @@ function renderProfileActivityList(kind) {
                 }).then(function(resp) {
                     if (!current()) return false;
                     if (!resp || !resp.ok) throw new Error('dm_deleted_sync_failed');
-                    clearDmDeletedPendingForCurrentAccount(list);
+                    return resp.json();
+                }).then(function(data) {
+                    if (!current()) return false;
+                    // F-M3：只清服务端合并结果里确实有的 id —— 旧实现 resp.ok 就
+                    // 全清待补传队列，服务端截断/合并丢掉的 id 会被误认为已同步，
+                    // 换设备后又出现。没进合并结果的 id 留在待补传队列里。
+                    var merged = (data && Array.isArray(data.ids)) ? data.ids : null;
+                    if (!merged) throw new Error('dm_deleted_sync_unverified');
+                    var confirmed = list.filter(function(id) { return merged.indexOf(id) >= 0; });
+                    if (confirmed.length) clearDmDeletedPendingForCurrentAccount(confirmed);
+                    var missing = list.filter(function(id) { return merged.indexOf(id) < 0; });
+                    if (missing.length) {
+                        console.warn('[DM] 删除记录部分未被服务端合并，保留待补传:', missing.length);
+                        enqueueDmDeletedPending(missing);
+                        return false;
+                    }
                     return true;
                 }).catch(function(err) {
                     if (!current()) return false;

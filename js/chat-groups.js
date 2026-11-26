@@ -600,7 +600,15 @@
         if (!data.has_more) break;
         last = lastServerMessage(conv);
       }
-    } catch (_) {
+    } catch (error) {
+      // F-M4：之前是 catch(_){} 静默吞掉 —— 新消息拉不到，界面上毫无提示。
+      // 轮询 tick（4s/12s）本来就会重试，这里只记日志并 30 秒内最多提示一次，
+      // 避免离线时每几秒弹一次 toast。
+      console.warn('[group] fetchNewer failed:', error && error.message);
+      if (state.active === conv && Date.now() - (conv.fetchFailedToastAt || 0) > 30000) {
+        conv.fetchFailedToastAt = Date.now();
+        toast('群消息同步失败，稍后自动重试');
+      }
     } finally {
       conv.fetching = false;
       if (conv.refetch && state.active === conv) { conv.refetch = false; fetchNewer(conv); }
@@ -610,16 +618,27 @@
   async function fetchOlder(conv) {
     if (!conv || conv.loadingOlder || !conv.hasMore) return;
     var first = firstServerMessage(conv); if (!first) return;
-    conv.loadingOlder = true; $('groupOlder').hidden = false;
+    conv.loadingOlder = true;
+    var olderEl = $('groupOlder');
+    if (olderEl) { olderEl.innerHTML = '<span class="grp-spinner"></span>'; olderEl.hidden = false; }
     var box = $('groupChatMessages'), before = box.scrollHeight - box.scrollTop;
+    var showRetry = false;
     try {
       var data = await api('/' + conv.id + '/messages?limit=40' + cursorQuery(first, 'before'), { owner: conv.owner, epoch: conv.epoch });
       if (state.active !== conv) return;
       conv.hasMore = !!data.has_more;
       mergeMessages(conv, data.messages, 'prepend');
       box.scrollTop = box.scrollHeight - before; // keep the reader anchored
-    } catch (_) {
-    } finally { conv.loadingOlder = false; $('groupOlder').hidden = true; }
+    } catch (error) {
+      // F-M4：之前静默吞掉 —— 上滑翻历史失败后既无提示也无重试入口。
+      // 在 older 槽位放一个重试按钮（复用 data-grp 委托处理，见 retry-older）。
+      console.warn('[group] fetchOlder failed:', error && error.message);
+      showRetry = true;
+      if (olderEl && state.active === conv) {
+        olderEl.innerHTML = '<div class="grp-load-error">历史加载失败<button type="button" data-grp="retry-older">重试</button></div>';
+        olderEl.hidden = false;
+      }
+    } finally { conv.loadingOlder = false; if (!showRetry) $('groupOlder').hidden = true; }
   }
 
   function markRead(conv) {
@@ -632,7 +651,19 @@
     clearTimeout(conv.readTimer);
     conv.readTimer = setTimeout(function () {
       if (state.active !== conv) return;
-      api('/' + conv.id + '/actions', { method: 'POST', json: { action: 'mark_read' }, owner: conv.owner, epoch: conv.epoch }).catch(function () {});
+      api('/' + conv.id + '/actions', { method: 'POST', json: { action: 'mark_read' }, owner: conv.owner, epoch: conv.epoch }).catch(function (error) {
+        // F-M4：之前先清角标、POST 失败空吞 —— 角标清了但服务端仍记未读，
+        // 下次列表刷新角标又会跳回来。失败只补发一次，再失败就刷新列表，
+        // 让角标回到服务端真实值，而不是一直错着。
+        console.warn('[group] mark_read failed:', error && error.message);
+        if (state.active !== conv) return;
+        setTimeout(function () {
+          if (state.active !== conv) return;
+          api('/' + conv.id + '/actions', { method: 'POST', json: { action: 'mark_read' }, owner: conv.owner, epoch: conv.epoch }).catch(function () {
+            scheduleListRefresh(0);
+          });
+        }, 5000);
+      });
     }, 400);
   }
 
@@ -934,6 +965,24 @@
   async function sendImages(files) {
     var conv = state.active; if (!conv) return;
     var list = Array.prototype.slice.call(files || [], 0, 9);
+    // F-M8：之前 9 张图串行 await deliverImage，总耗时是单张之和。
+    // 现在最多 3 路并行上传；失败仍由 deliverImage 内 catch 调 failLocal
+    // 单张标记，不阻塞其他图。本地气泡仍按原顺序逐个创建，用户切走
+    // 会话时后面的图不再建气泡（与之前一致）。
+    var queue = [], inFlight = 0, stopped = false, drainResolve = null;
+    var drained = new Promise(function (resolve) { drainResolve = resolve; });
+    function pump() {
+      while (inFlight < 3 && queue.length && !stopped) {
+        var job = queue.shift();
+        inFlight++;
+        deliverImage(conv, job.msg, job.file, job.replyId).catch(function () {}).then(function () {
+          inFlight--;
+          if (!queue.length && !inFlight) drainResolve();
+          else pump();
+        });
+      }
+      if (!queue.length && !inFlight) drainResolve();
+    }
     for (var i = 0; i < list.length; i++) {
       var file = list[i];
       // 修复：仅允许常见光栅图，拒绝 image/svg+xml（SVG 可内嵌脚本造成 XSS）
@@ -943,13 +992,18 @@
       var dims = await new Promise(function (resolve) { var probe = new Image(); probe.onload = function () { resolve([probe.naturalWidth, probe.naturalHeight]); }; probe.onerror = function () { resolve([0, 0]); }; probe.src = preview; });
       if (state.active !== conv) {
         try { URL.revokeObjectURL(preview); } catch (_) {}
+        stopped = true;
+        drainResolve();
         return;
       }
       var msg = localMessage(conv, 'image', '', { __preview: preview, meta: { width: dims[0], height: dims[1] } });
       var replyId = conv.reply && conv.reply.id; setReply(null);
       addLocal(conv, msg);
-      await deliverImage(conv, msg, file, replyId);
+      queue.push({ msg: msg, file: file, replyId: replyId });
+      pump();
     }
+    pump();
+    await drained;
   }
 
   async function deliverImage(conv, msg, file, replyId) {
@@ -1138,6 +1192,7 @@
         else if (what === 'image') view.querySelector('#groupImageInput').click();
         else if (what === 'cancel-reply') setReply(null);
         else if (what === 'retry' && conv) fetchLatest(conv);
+        else if (what === 'retry-older' && conv) fetchOlder(conv);
         else if (what === 'dismiss-announce') { event.stopPropagation(); dismissAnnouncement(); }
         return;
       }
@@ -1836,7 +1891,11 @@
     handleJoinLink();
     // Account changes: the core bumps _authStateEpoch and fires auth events.
     ['auth-ready', 'xtj-auth-changed', 'storage'].forEach(function (name) { window.addEventListener(name, function () { setTimeout(syncAccount, 0); }); });
-    setInterval(syncAccount, 1500);
+    // F-M7：之前每 1.5 秒空转一次 syncAccount，整个页面生命周期不停。
+    // 账号变化本来就有 auth-ready / xtj-auth-changed / storage 事件即时
+    // 触发同步，这里的定时器只是防漏网的兜底；改成 10 秒一次、页面隐藏
+    // 时跳过，兜底仍在，唤醒次数降到原来的约 1/7。
+    setInterval(function () { if (document.visibilityState !== 'hidden') syncAccount(); }, 10000);
     document.addEventListener('visibilitychange', function () {
       if (document.visibilityState === 'visible' && me()) { scheduleListRefresh(100); if (state.active) fetchNewer(state.active); }
     });

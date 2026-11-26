@@ -56,7 +56,11 @@
                     dmNotificationIds.add(id);
                 });
                 dmSnapshotReady=true;
-                while(dmNotificationIds.size>500)dmNotificationIds.delete(dmNotificationIds.values().next().value);
+                // F-L5：去重集合之前只留 500 条就按插入顺序淘汰最旧的；一个会话里
+                // 收到 500 条以上私信时，被淘汰的旧消息再出现在快照里会重复弹通知。
+                // 集合存的只是短 id 字符串，2000 条内存可忽略，把上限放宽到 2000，
+                // 把重复弹通知的窗口缩到原来的 1/4；淘汰方式（留最新的）不变。
+                while(dmNotificationIds.size>2000)dmNotificationIds.delete(dmNotificationIds.values().next().value);
             }
 
             // Incoming message from a realtime event: show the banner unless the sender is muted. When the mute list has not
@@ -745,7 +749,7 @@
             //   通过 window.isMsgReadByMe 调用必然 TypeError，DM 未读角标恒为 0。
             window.isMsgReadByMe = isMsgReadByMe;
 
-            async function markMessagesRead(senderName, messages, pendingUpdates) {
+            async function markMessagesRead(senderName, messages, pendingUpdates, allowRetry) {
                 if (!window.currentUser || !senderName) return;
                 var owner = window.currentUser, epoch = _authStateEpoch;
                 var updates = Array.isArray(pendingUpdates) ? pendingUpdates.slice() : [];
@@ -757,17 +761,29 @@
                 }
                 if (updates.length) {
                     // 服务端一次最多处理 200 个 ID，超出的会被静默截掉、永远留在未读；这里按 200 分批。
+                    // F-M2：任一批失败不再整批丢弃 —— 服务端按批返回 partial/failed_ids，
+                    // 失败的批只记下 id 继续跑后面的批，跑完再把失败的 id 补推一次；
+                    // 之前是第一批 throw 就中止后续所有批。
                     var readRows = [];
+                    var failedIds = [];
                     for (var offset = 0; offset < updates.length; offset += 200) {
-                        var response = await window.xtjProtectedFetch('/api/dm/read', {
-                            method: 'POST',
-                            authOwner: owner, authEpoch: epoch,
-                            body: JSON.stringify({ message_ids: updates.slice(offset, offset + 200).map(function(update) { return update.id; }) })
-                        });
-                        var result = await response.json().catch(function() { return {}; });
-                        if (owner !== window.currentUser || epoch !== _authStateEpoch) return;
-                        if (!response.ok || !result.ok) throw new Error(result.error || 'DM read update failed');
-                        if (Array.isArray(result.data)) readRows = readRows.concat(result.data);
+                        var batchIds = updates.slice(offset, offset + 200).map(function(update) { return update.id; });
+                        try {
+                            var response = await window.xtjProtectedFetch('/api/dm/read', {
+                                method: 'POST',
+                                authOwner: owner, authEpoch: epoch,
+                                body: JSON.stringify({ message_ids: batchIds })
+                            });
+                            var result = await response.json().catch(function() { return {}; });
+                            if (owner !== window.currentUser || epoch !== _authStateEpoch) return;
+                            if (!response.ok || !result.ok) throw new Error(result.error || 'DM read update failed');
+                            if (Array.isArray(result.failed_ids)) failedIds = failedIds.concat(result.failed_ids.map(String));
+                            if (Array.isArray(result.data)) readRows = readRows.concat(result.data);
+                        } catch (e) {
+                            if (owner !== window.currentUser || epoch !== _authStateEpoch) return;
+                            console.warn('[DM] 已读标记本批失败，稍后重试:', e && e.message);
+                            failedIds = failedIds.concat(batchIds.map(String));
+                        }
                     }
                     var readById = new Map(readRows.map(function(row) { return [String(row.id), row]; }));
                     var cacheKey = getDockChatCacheKey(senderName);
@@ -777,6 +793,15 @@
                         return authoritative ? reconcileDockChatMessage(message, authoritative) : message;
                     });
                     if (dockChatActiveUser === senderName) renderDockMessages(senderName, _chatCache[cacheKey], false);
+                    if (failedIds.length && allowRetry !== false && typeof setTimeout === 'function') {
+                        // 失败的 id 下次打开会话/轮询本来就会重算，但用户一直停留
+                        // 在本会话时不会再有触发点；只补推一次，避免无声丢已读。
+                        var retryIds = failedIds.filter(function(id, i, arr) { return arr.indexOf(id) === i; });
+                        setTimeout(function() {
+                            if (owner !== window.currentUser || epoch !== _authStateEpoch) return;
+                            markMessagesRead(senderName, [], retryIds.map(function(id) { return { id: id }; }), false).catch(function() {});
+                        }, 5000);
+                    }
                 }
                 scheduleDockChatListRefresh(updates.length ? 120 : 40);
                 updateUnreadBadge();
@@ -895,6 +920,8 @@
             //   Broadcast 的频道名由服务端 HMAC 派生、只发给本人，天然按人隔离。
             //   收到消息后**直接把 payload 写进缓存并增量渲染**（复审 P2-02 的建议形态），
             //   不再因为一条新消息就回拉 180 条历史。
+            //   F-H2：payload 只含 message_id + sender（不含正文），取回正文后
+            //   再走同一条增量路径；取不到时只刷新列表与角标。
             // ══════════════════════════════════════════════════════════════════
             var dmBroadcast = { channel: null, topic: null, owner: '', epoch: 0, attempts: 0 };
             window.__xtjResetDmBroadcast = function() {
@@ -970,6 +997,29 @@
                 } catch (e) { console.warn("[dm-realtime] apply failed:", e && e.message); }
             }
 
+            // F-H2：新版服务端 Broadcast 只发 {message_id, sender}，正文不在
+            // 广播里。收到 id 后走已鉴权的 /api/dm/messages 取回该条消息，再走
+            // applyRealtimeDmMessage 的同一条增量渲染路径；取不到（竞态/失败）
+            // 就只刷新列表与角标，轮询兜底仍会补上。
+            async function applyRealtimeDmId(messageId, sender) {
+                try {
+                    if (!messageId || !sender || sender === window.currentUser) return;
+                    if (typeof window.xtjProtectedFetch !== 'function') { window.dockChatListCacheTime = 0; return; }
+                    var resp = await window.xtjProtectedFetch('/api/dm/messages?target=' + encodeURIComponent(sender) + '&limit=30', { timeoutMs: 12000 });
+                    if (!resp || !resp.ok) { window.dockChatListCacheTime = 0; loadDockChatList(); updateUnreadBadge(); return; }
+                    var data = await resp.json().catch(function () { return {}; });
+                    var rows = (data && Array.isArray(data.data)) ? data.data : [];
+                    var msg = null;
+                    for (var i = 0; i < rows.length; i++) {
+                        if (rows[i] && String(rows[i].id) === String(messageId)) { msg = rows[i]; break; }
+                    }
+                    if (msg) { applyRealtimeDmMessage(msg); return; }
+                    window.dockChatListCacheTime = 0;
+                    loadDockChatList();
+                    updateUnreadBadge();
+                } catch (e) { console.warn('[dm-realtime] apply id failed:', e && e.message); }
+            }
+
             async function subscribeToDmBroadcast() {
                 var owner=window.currentUser || '';
                 if (dmBroadcast.owner !== owner) {
@@ -998,8 +1048,12 @@
                     dmBroadcast.channel = sb.channel(dmBroadcast.topic, { config: { broadcast: { self: false } } })
                         .on("broadcast", { event: "dm" }, function (payload) {
                             if (myEpoch !== dmBroadcast.epoch) return;
-                            var msg = payload && payload.payload && payload.payload.message;
-                            applyRealtimeDmMessage(msg);
+                            var p = payload && payload.payload;
+                            if (!p) return;
+                            // F-H2：新版只发 {message_id, sender}，正文走鉴权接口取回；
+                            // 旧版全量 message 仍兼容（部署窗口期内可能收到）。
+                            if (p.message) { applyRealtimeDmMessage(p.message); return; }
+                            if (p.message_id && p.sender) { applyRealtimeDmId(p.message_id, p.sender); }
                         })
                         .on("broadcast", { event: "chat-state" }, function(payload) {
                             if (myEpoch !== dmBroadcast.epoch) return;

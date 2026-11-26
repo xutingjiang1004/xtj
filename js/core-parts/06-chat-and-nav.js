@@ -3073,7 +3073,11 @@
                         // ★ 2026-10-31：连发时不再弹「已排队」提示，也不让消息消失一段时间。
                         //   气泡立刻出现在会话里（带发送中状态），上一条完成后按原顺序自动发出，
                         //   沿用同一个气泡和幂等键，不会重复也不会乱序。
-                        var queuedTempId = 'temp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+                        // F-L1：随机部分之前只有 4 位 base36（约 168 万种），同毫秒
+                        // 内连发两条就可能撞号 —— 而这个 tempId 同时是幂等键，
+                        // 撞号会让第二条被服务端当成重发去重掉。改成 8 位（与站内
+                        // 其他临时 id 的写法一致），只改长度，不改格式与前缀。
+                        var queuedTempId = 'temp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10);
                         var queuedCreatedAt = new Date().toISOString();
                         var queuedTarget = dockChatActiveUser;
                         var queuedMessage = {
@@ -3126,7 +3130,7 @@
                 // 把真实的发送状态告诉 ux-features 的指示器（它此前是假的 1.8 秒计时）
                 try { if (typeof window.__xtjNotifyChatSending === 'function') window.__xtjNotifyChatSending(true); } catch (e) {}
                 var capturedContent = content;
-                var tempId = queuedSend && retryOptions.tempId || 'temp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+                var tempId = queuedSend && retryOptions.tempId || 'temp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10);
                 // ★ 2026-09-27 修复（审计 S5：发送请求缺幂等键）：
                 //   /api/dm/send 此前只带 target_user + content，服务端无法区分
                 //   「用户真的发了两条一模一样的话」和「同一条消息被重发了一次」。
@@ -3428,7 +3432,10 @@
             //   现在墓碑按账号同步到服务端（/api/dm/deleted），localStorage 退化为
             //   本地快取：启动时与服务端合并，删除时回推，离线删除在下次同步补传。
             var DM_DELETED_KEY_PREFIX = 'xtj_dm_deleted_';
-            var DM_DELETED_MAX = 8000;
+            // F-M3：与服务端 cleanDmDeletedIds、merge_dm_deleted_ids 单次
+            // 3000 条上限对齐。之前这里是 8000，服务端只留 500，超出的删
+            // 除在换设备后会悄悄复活；且推送时不校验服务端返回的合并结果。
+            var DM_DELETED_MAX = 3000;
             // ★ 2026-09-27 修复（审计 C12）：
             //   _dmDeletedSyncedUsers 的键此前只用"对手 userName" u，但墓碑实际是
             //   **账号级**的（DM_DELETED_KEY_PREFIX + currentUser，服务端 /api/dm/deleted
@@ -3540,7 +3547,22 @@
                 }).then(function(resp) {
                     if (!current()) return false;
                     if (!resp || !resp.ok) throw new Error('dm_deleted_sync_failed');
-                    clearDmDeletedPendingForCurrentAccount(list);
+                    return resp.json();
+                }).then(function(data) {
+                    if (!current()) return false;
+                    // F-M3：只清服务端合并结果里确实有的 id —— 旧实现 resp.ok 就
+                    // 全清待补传队列，服务端截断/合并丢掉的 id 会被误认为已同步，
+                    // 换设备后又出现。没进合并结果的 id 留在待补传队列里。
+                    var merged = (data && Array.isArray(data.ids)) ? data.ids : null;
+                    if (!merged) throw new Error('dm_deleted_sync_unverified');
+                    var confirmed = list.filter(function(id) { return merged.indexOf(id) >= 0; });
+                    if (confirmed.length) clearDmDeletedPendingForCurrentAccount(confirmed);
+                    var missing = list.filter(function(id) { return merged.indexOf(id) < 0; });
+                    if (missing.length) {
+                        console.warn('[DM] 删除记录部分未被服务端合并，保留待补传:', missing.length);
+                        enqueueDmDeletedPending(missing);
+                        return false;
+                    }
                     return true;
                 }).catch(function(err) {
                     if (!current()) return false;

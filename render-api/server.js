@@ -15987,7 +15987,10 @@ app.post('/api/avatar/status', authenticateUser, rateLimit(60000, 30), async (re
 //   与自定义模型一致采用"先立后破"：先插入新快照，成功后再删旧行）。
 //   注意：这是"对我隐藏"，不是"撤回"——撤回仍走 /api/dm/withdraw（3 分钟窗口，
 //   会真正改掉消息内容）。两者语义不同，不要混用。
-var DM_DELETED_MAX = 500;
+// F-M3：与前端墓碑上限、merge_dm_deleted_ids 单次 3000 条上限对齐。
+// 之前这里是 500，前端是 8000：读快照只回前 500，POST 入参也只留前 500，
+// 超出的删除在换设备后会悄悄复活；且前端 resp.ok 就全清待补传队列。
+var DM_DELETED_MAX = 3000;
 
 function cleanDmDeletedIds(list) {
   if (!Array.isArray(list)) return [];
@@ -17123,7 +17126,11 @@ app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res
   }
 });
 
-// POST /api/dm/withdraw - 撤回私信（发送者3分钟内，管理员10分钟内）
+// POST /api/dm/withdraw - 撤回私信（仅发送者本人，发送后 3 分钟内）
+// F-M5：旧注释写了另一档不存在的时限，是误导 —— 实现里没有任何管理员分支，
+// 仅发送者可撤回、时限固定 3 分钟（见下方的 timeLimit 与 user_name 校验，
+// 前端 canWithdraw 也是同一口径）。不要按旧注释去“补”管理员撤回，
+// 那是没立过项的产品行为。
 // ══════════════════════════════════════════════════════════════════════════════
 // H-1 实时投递（2026-09-25）
 //   背景（实测，非推测）：DM 的 Realtime 订阅从来没能投递过 ——
@@ -17162,9 +17169,12 @@ app.get('/api/dm/realtime-topic', authenticateUser, rateLimit(60000, 60), async 
 });
 
 // 把一条私信发布到收件人的频道。**永不阻塞、永不抛错**：投递失败不能影响发送本身。
+// F-H2：Broadcast 只发消息 id + 发送人，不发正文/媒体签名地址。频道名只是
+// 128 bit 确定性 HMAC，一旦正文进了 payload，任何拿到频道名的人都能读到私信
+// 内容。客户端收到 id 后走已鉴权的 /api/dm/messages 取回正文（与群聊只发 id 一致）。
 function publishDmRealtime(targetUser, message) {
-  var outgoing = { ...message };
-  void dmPrivateStorage.hydrateMessage(outgoing).then(() => publishChatEvent(targetUser,'dm',{message:outgoing})).catch(() => publishChatEvent(targetUser,'chat-state',{kind:'refresh'}));
+  if (!message || !message.id) return;
+  publishChatEvent(targetUser, 'dm', { message_id: String(message.id), sender: message.user_name || '' });
 }
 
 function publishChatEvent(targetUser,event,payload) {
