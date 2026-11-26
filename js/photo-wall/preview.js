@@ -1157,6 +1157,14 @@
                     J.style.transition = "transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-radius 0.2s cubic-bezier(0.16, 1, 0.3, 1)",
                     J.style.transform = "translate(0, 0) scale(1)", J.style.borderRadius = "0px", $ = setTimeout(re, 220)) : (J.style.opacity = "1",
                     $ = setTimeout(re, 150));
+                    // ★ 第二轮修复（预-1）：打开动画的收尾只靠 220ms 的 re() 定时器；时序一错
+                    //   （定时器被清、切图打断）图片会冻在起始态（小图+大圆角椭圆）。
+                    //   600ms 后再强制清一次 inline 起始态——此时动画早该结束，清掉只会
+                    //   回到正确终态，不会打断正常动画；已切图/已关闭时守卫直接返回。
+                    setTimeout(function() {
+                        if (!J || !J.isConnected || J._ppUrl !== S.imageUrl) return;
+                        if (J.style.transform || J.style.borderRadius) { J.style.transition = ""; J.style.transform = ""; J.style.transformOrigin = ""; J.style.borderRadius = ""; }
+                    }, 600);
                 } else if (hasThumb) {
                     // ★ 2026-09-23 原图提速：原先走 fetch→Blob→objectURL，必须等原图 100%
                     //   下载完才能替换显示，慢网下大图要干等数秒（期间一直看缩略图），

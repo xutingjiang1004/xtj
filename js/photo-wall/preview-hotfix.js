@@ -1591,10 +1591,15 @@
   var fitTick = 0;
   function syncPreviewImageFit(img) {
     var root=overlay(); if (!root || !img || !img.naturalWidth || !img.naturalHeight) return;
-    var fitSig=(img.currentSrc||img.src)+'|'+img.naturalWidth+'x'+img.naturalHeight+'|'+fitTick;
+    // ★ 第二轮修复（预-4）：旋转 90°/270° 后图片视觉宽高互换，但签名里
+    //   没有旋转角，缓存会跳过必要的重算，横图转竖后溢出视口。签名加
+    //   入旋转角，fit 用互换后的尺寸算。
+    var _rot=((state.rotation%180)+180)%180;
+    var fitSig=(img.currentSrc||img.src)+'|'+img.naturalWidth+'x'+img.naturalHeight+'|'+fitTick+'|'+_rot;
     if (img.__ppFitSig===fitSig && img.style.getPropertyValue('width') && img.style.getPropertyValue('height')) return;
     img.__ppFitSig=fitSig;
-    var fit=Math.min(root.clientWidth/img.naturalWidth,root.clientHeight/img.naturalHeight);
+    var _rotated=_rot===90;
+    var fit=Math.min(root.clientWidth/(_rotated?img.naturalHeight:img.naturalWidth),root.clientHeight/(_rotated?img.naturalWidth:img.naturalHeight));
     var width=(img.naturalWidth*fit)+'px',height=(img.naturalHeight*fit)+'px';
     if(img.style.width!==width)img.style.setProperty('width',width,'important');
     if(img.style.height!==height)img.style.setProperty('height',height,'important');
@@ -1885,6 +1890,10 @@
   window.ppRotatePhoto = function () {
     state.rotation = (state.rotation + 90) % 360;
     applyImageTransform(true);
+    // ★ 第二轮修复（预-4）：旋转后立即按新角度重算 fit，否则缓存签名
+    //   不变会跳过重算，图片溢出视口。
+    var _rotImg = previewImage();
+    if (_rotImg) syncPreviewImageFit(_rotImg);
     if (window.showToast) window.showToast('已旋转');
   };
 
