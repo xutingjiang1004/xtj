@@ -43,8 +43,8 @@ test('增量补丁必须保留未变化节点（这是性能保证的核心）',
     '未变化节点必须跳过，否则等于整段重建');
   // 不同的才替换
   assert.match(seg, /replaceChild\(/, '变化节点必须用 replaceChild 就地替换');
-  // 结构异常兜底：整段替换，保证显示正确性
-  assert.match(seg, /targetEl\.innerHTML = html/, '必须保留整段替换兜底');
+  // 结构异常兜底：整段替换，保证显示正确性（C-7：先过 sanitize 再写，不得直接写原始 html）
+  assert.match(seg, /targetEl\.innerHTML = (_san\(html\)|html)/, '必须保留整段替换兜底');
   // 节点数骤减说明发生重排 —— 直接整段替换
   assert.match(seg, /for \(; pos < old\.length; pos\+\+\)/, '结构收缩时必须移除旧的尾部节点');
 });
