@@ -181,3 +181,46 @@ test('C-8 failed-request log carries only code/status, not the full payload', ()
   assert.match(line, /code:\s*data && data\.code/);
   assert.match(line, /status:\s*resp\.status/);
 });
+
+// C-9: 文件上传只有扩展名过滤、未告知发给第三方。两部分：
+// (1) 上传 UI 上加一行披露（文件会发给第三方模型厂商处理）；
+// (2) ensureDeepSeekFileIds 的扩展名校验之外，再核对 file.type 与扩展名
+// 期望的 MIME 是否一致，不一致时跳过官方 Files API 上传、回落本地解析，
+// 不阻止用户发送。不做魔数检测；全格式上传本身（isSupportedAiFile）不动。
+function extractFn(src, signature) {
+  const start = src.indexOf(signature);
+  assert.notEqual(start, -1, 'missing ' + signature);
+  return src.slice(start, src.indexOf('\n  }\n', start) + 5);
+}
+test('C-9 MIME type is checked against the extension before Files API upload', () => {
+  const mimeFn = extractFn(source, 'function mimeFromFilename(');
+  const aliasLine = source.match(/var AI_FILE_MIME_ALIASES = \{[^}]*\};/);
+  assert.ok(aliasLine, 'missing AI_FILE_MIME_ALIASES');
+  const fn = extractFn(source, 'function aiFileMimeMatchesExt(');
+  const check = new Function(mimeFn + '\n' + aliasLine[0] + '\n' + fn + '; return aiFileMimeMatchesExt;')();
+  assert.equal(check('a.pdf', 'application/pdf'), true);
+  assert.equal(check('a.pdf', 'image/png'), false);
+  assert.equal(check('a.pdf', ''), true, 'systems that report no MIME must still pass');
+  assert.equal(check('a.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'), true);
+  assert.equal(check('a.csv', 'application/vnd.ms-excel'), true, 'csv vendor alias');
+  assert.equal(check('a.txt', 'application/octet-stream'), true, 'generic octet-stream passes');
+  assert.equal(check('a.xyz', 'image/png'), true, 'unknown extension cannot be verified');
+  const body = fnBody(source, 'function ensureDeepSeekFileIds(');
+  assert.match(body, /aiFileMimeMatchesExt\(a\.name, a\.type\)/);
+});
+
+test('C-9 upload previews disclose that files go to a third-party model vendor', () => {
+  // renderAiMultiFilePreview 是 renderAiRoot 内的嵌套函数（4 空格缩进），按
+  // 下一个同级 function 切片，避免通用 fnBody 切到外层函数
+  const mStart = source.indexOf('function renderAiMultiFilePreview(');
+  assert.notEqual(mStart, -1, 'missing renderAiMultiFilePreview');
+  const multi = source.slice(mStart, source.indexOf('\n    function ', mStart));
+  assert.match(multi, /ai-file-third-party-note/);
+  assert.match(multi, /第三方模型厂商/);
+  const dStart = source.indexOf('function renderDtFiles');
+  assert.notEqual(dStart, -1, 'missing renderDtFiles');
+  const dt = source.slice(dStart, source.indexOf('\n    function ', dStart));
+  assert.match(dt, /ai-file-third-party-note/);
+  assert.match(dt, /第三方模型厂商/);
+  assert.match(css, /\.ai-file-third-party-note\s*\{/);
+});

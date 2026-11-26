@@ -1492,6 +1492,21 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     return '';
   }
 
+  // C-9：扩展名之外再核对 file.type。类型与扩展名期望的 MIME 明显不符时
+  // 跳过官方 Files API 上传，回落本地文本解析——不阻止用户发送。
+  // 不做魔数检测；不上报 MIME 的系统（type 为空）、查不到期望 MIME 的
+  // 扩展名、通用 octet-stream 一律放行；csv 认常见的厂商别名。
+  var AI_FILE_MIME_ALIASES = { 'text/csv': ['text/csv', 'application/csv', 'application/vnd.ms-excel'] };
+  function aiFileMimeMatchesExt(name, type) {
+    var t = String(type || '').toLowerCase().split(';')[0].trim();
+    if (!t) return true;
+    var expected = mimeFromFilename(name);
+    if (!expected) return true;
+    if (t === expected || t === 'application/octet-stream') return true;
+    var aliases = AI_FILE_MIME_ALIASES[expected] || [];
+    return aliases.indexOf(t) >= 0;
+  }
+
   function aiAttachmentBytes(file) {
     if (file && typeof file.size === 'number' && Number.isFinite(file.size) && file.size >= 0) return file.size;
     var data = String(file && file.dataUrl || ''), comma = data.indexOf(',');
@@ -3037,7 +3052,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var pending = payload.filter(function(a) {
       return a && !a.file_id && !/^image\//i.test(String(a.type || '')) &&
         typeof a.data_url === 'string' && a.data_url.indexOf('data:') === 0 &&
-        /\.(pdf|docx?|pptx?|xlsx?|txt|md|csv|json|xml|yaml|ya?ml|log|epub|mobi|py|js|ts|java|c|cpp|h|sql|html?|css|rtf|srt|vtt)$/i.test(String(a.name || ''));
+        /\.(pdf|docx?|pptx?|xlsx?|txt|md|csv|json|xml|yaml|ya?ml|log|epub|mobi|py|js|ts|java|c|cpp|h|sql|html?|css|rtf|srt|vtt)$/i.test(String(a.name || '')) &&
+        aiFileMimeMatchesExt(a.name, a.type);
     });
     if (!pending.length) return;
     var cursor = 0;
@@ -10168,7 +10184,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     function renderDtFiles(){
       if(!filePreview)return;filePreview.replaceChildren();var files=Array.isArray(_dtFileData)?_dtFileData:(_dtFileData?[_dtFileData]:[]);
       filePreview.style.display=files.length?'flex':'none';filePreview.style.flexWrap='wrap';
-      files.forEach(function(file,index){var chip=el('div',{class:'ai-file-chip'});if(String(file.type||'').startsWith('image/'))chip.appendChild(el('img',{class:'ai-file-thumb',src:file.dataUrl,alt:''}));chip.appendChild(el('span',{class:'ai-file-info',text:file.name+' · '+Math.ceil(aiAttachmentBytes(file)/1024)+'KB'}));var remove=el('button',{type:'button',class:'ai-file-remove','aria-label':'移除 '+file.name,text:'×'});remove.addEventListener('click',function(){_dtFileSelectionSeq++;_dtFilesLoading=false;var next=files.filter(function(_,i){return i!==index;});_dtFileData=next.length?next:null;renderDtFiles();});chip.appendChild(remove);filePreview.appendChild(chip);});
+      files.forEach(function(file,index){var chip=el('div',{class:'ai-file-chip'});if(String(file.type||'').startsWith('image/'))chip.appendChild(el('img',{class:'ai-file-thumb',src:file.dataUrl,alt:''}));chip.appendChild(el('span',{class:'ai-file-info',text:file.name+' · '+Math.ceil(aiAttachmentBytes(file)/1024)+'KB'}));var remove=el('button',{type:'button',class:'ai-file-remove','aria-label':'移除 '+file.name,text:'×'});remove.addEventListener('click',function(){_dtFileSelectionSeq++;_dtFilesLoading=false;var next=files.filter(function(_,i){return i!==index;});_dtFileData=next.length?next:null;renderDtFiles();});chip.appendChild(remove);filePreview.appendChild(chip);});if(files.length)filePreview.appendChild(el('div',{class:'ai-file-third-party-note',text:'文件将发送给第三方模型厂商处理'}));
     }
     function acceptDtFiles(rawFiles){
       var fileSeq=++_dtFileSelectionSeq,fileLife=S.dtLifecycleId,fileOwner=window.currentUser||'',fileAuthEpoch=readAiAuthEpoch();
@@ -17969,6 +17985,8 @@ function showChatMessages() {
       filePreview.appendChild(thumb);
       filePreview.appendChild(info);
       filePreview.appendChild(removeBtn);
+      // C-9：上传披露——文件会发给第三方模型厂商处理。
+      filePreview.appendChild(el('div', { class: 'ai-file-third-party-note', text: '文件将发送给第三方模型厂商处理' }));
       filePreview.style.display = 'flex';
       updateInputMetrics();
     }

@@ -5735,6 +5735,7 @@ html.xtj-reduce-motion .ai-copy-menu .ai-reply-menu-panel { animation: none; }
   border-radius: 10px;
   font-size: 12px;
   flex-shrink: 0;
+  flex-wrap: wrap;
   max-width: 260px;
   box-sizing: border-box;
 }
@@ -5772,6 +5773,18 @@ html.xtj-reduce-motion .ai-copy-menu .ai-reply-menu-panel { animation: none; }
 [data-theme="dark"] .ai-file-info,
 .dark .ai-file-info {
   color: #d6ece5;
+}
+/* C-9：上传披露行，独占一行（容器已 flex-wrap）。 */
+.ai-file-third-party-note {
+  flex: 1 1 100%;
+  min-width: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #4e5e59;
+}
+[data-theme="dark"] .ai-file-third-party-note,
+.dark .ai-file-third-party-note {
+  color: #c2d8d0;
 }
 [data-theme="dark"] #panelDeepThink,
 .dark #panelDeepThink {
