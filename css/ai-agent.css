@@ -537,11 +537,11 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  color: rgba(95, 116, 113, 0.72);
+  color: #4e5e59;
 }
 
 .ai-msg-footer .ai-msg-time {
-  color: rgba(116, 128, 132, 0.72);
+  color: #4e5e59;
 }
 
 .ai-msg-thinking-badge {
@@ -549,7 +549,7 @@
   padding: 1px 5px;
   border-radius: 3px;
   background: rgba(127, 187, 172, 0.12);
-  color: rgba(95, 116, 113, 0.82);
+  color: #4e5e59;
   line-height: 1.4;
 }
 
@@ -1229,7 +1229,7 @@ html.xtj-reduce-motion .ai-rail-beat.is-open .ai-rail-reason {
   max-width: 280px;
   font-size: 12px;
   line-height: 1.58;
-  color: rgba(102, 118, 116, 0.92);
+  color: #4e5e59;
 }
 
 /* AI 对话与站内搜索均为独立二级页面，避免占用或切换底部私聊 Dock。 */
@@ -1645,7 +1645,7 @@ html[data-xtj-motion="off"] .ai-chat-input-bar {
 }
 
 .ai-chat-input::placeholder {
-  color: rgba(113, 127, 132, 0.74);
+  color: #4e5e59;
 }
 
 .ai-chat-input:focus {
@@ -8320,7 +8320,7 @@ html.xtj-ios-viewport.xtj-keyboard-open .ai-chat-input-bar { padding-bottom:8px!
 .ai-think-answer pre { white-space: pre; }
 .ai-msg.assistant .ai-msg-bubble code,
 .ai-think-answer code { white-space: pre-wrap; }
-.ai-msg-footer .ai-msg-agent-badge { font-size: 11px; line-height: 1.35; color: rgba(95,116,113,.72); }
+.ai-msg-footer .ai-msg-agent-badge { font-size: 11px; line-height: 1.35; color: #4e5e59; }
 [data-theme="dark"] .ai-msg-footer .ai-msg-agent-badge { color: rgba(197,216,210,.72); }
 
 /* Keep the research surface isolated while Safari recomposites for its keyboard. */

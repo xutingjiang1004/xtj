@@ -56,3 +56,35 @@ test('B-09 main AI buttons have a visible keyboard focus outline', () => {
   const block = css.slice(idx, css.indexOf('}', idx));
   assert.match(block, /outline:\s*3px solid/);
 });
+
+// B-10: 11px 浅灰小字对比度不足（实测 2.55–3.92:1，WCAG 要求 4.5:1）。
+// 四处浅底小字统一改深为 #4e5e59（白底 6.84:1、浅底 #f4fcf9 上 6.56:1）。
+// 深色主题已有各自的浅色覆盖规则，不动。
+function wcagContrast(fg, bg) {
+  const f = (c) => { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+  const lum = (rgb) => 0.2126 * f(rgb[0]) + 0.7152 * f(rgb[1]) + 0.0722 * f(rgb[2]);
+  const a = lum(fg), b = lum(bg);
+  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+}
+test('B-10 small muted text meets WCAG 4.5:1 on light backgrounds', () => {
+  assert.ok(wcagContrast([78, 94, 89], [255, 255, 255]) >= 4.5, '#4e5e59 on white');
+  assert.ok(wcagContrast([78, 94, 89], [244, 252, 249]) >= 4.5, '#4e5e59 on pale');
+  for (const [sel, prop] of [
+    ['.ai-msg-footer .ai-msg-usage', 'color: #4e5e59'],
+    ['.ai-msg-footer .ai-msg-time', 'color: #4e5e59'],
+    ['.ai-msg-thinking-badge', 'color: #4e5e59'],
+    ['.ai-chat-empty-tip', 'color: #4e5e59'],
+    ['.ai-chat-input::placeholder', 'color: #4e5e59'],
+    ['.ai-msg-footer .ai-msg-agent-badge', 'color: #4e5e59'],
+  ]) {
+    const idx = css.indexOf(sel + ' {');
+    assert.notEqual(idx, -1, 'missing rule ' + sel);
+    const block = css.slice(idx, css.indexOf('}', idx));
+    assert.ok(block.includes(prop), sel + ' should use ' + prop + ', got: ' + block.trim());
+  }
+  // 浅底上不再残留这四处低对比度的半透明灰
+  assert.doesNotMatch(css, /color: rgba\(95, 116, 113, 0\.72\)/);
+  assert.doesNotMatch(css, /color: rgba\(116, 128, 132, 0\.72\)/);
+  assert.doesNotMatch(css, /color: rgba\(102, 118, 116, 0\.92\)/);
+  assert.doesNotMatch(css, /color: rgba\(113, 127, 132, 0\.74\)/);
+});
