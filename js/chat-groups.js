@@ -965,6 +965,24 @@
   async function sendImages(files) {
     var conv = state.active; if (!conv) return;
     var list = Array.prototype.slice.call(files || [], 0, 9);
+    // F-M8：之前 9 张图串行 await deliverImage，总耗时是单张之和。
+    // 现在最多 3 路并行上传；失败仍由 deliverImage 内 catch 调 failLocal
+    // 单张标记，不阻塞其他图。本地气泡仍按原顺序逐个创建，用户切走
+    // 会话时后面的图不再建气泡（与之前一致）。
+    var queue = [], inFlight = 0, stopped = false, drainResolve = null;
+    var drained = new Promise(function (resolve) { drainResolve = resolve; });
+    function pump() {
+      while (inFlight < 3 && queue.length && !stopped) {
+        var job = queue.shift();
+        inFlight++;
+        deliverImage(conv, job.msg, job.file, job.replyId).catch(function () {}).then(function () {
+          inFlight--;
+          if (!queue.length && !inFlight) drainResolve();
+          else pump();
+        });
+      }
+      if (!queue.length && !inFlight) drainResolve();
+    }
     for (var i = 0; i < list.length; i++) {
       var file = list[i];
       // 修复：仅允许常见光栅图，拒绝 image/svg+xml（SVG 可内嵌脚本造成 XSS）
@@ -974,13 +992,18 @@
       var dims = await new Promise(function (resolve) { var probe = new Image(); probe.onload = function () { resolve([probe.naturalWidth, probe.naturalHeight]); }; probe.onerror = function () { resolve([0, 0]); }; probe.src = preview; });
       if (state.active !== conv) {
         try { URL.revokeObjectURL(preview); } catch (_) {}
+        stopped = true;
+        drainResolve();
         return;
       }
       var msg = localMessage(conv, 'image', '', { __preview: preview, meta: { width: dims[0], height: dims[1] } });
       var replyId = conv.reply && conv.reply.id; setReply(null);
       addLocal(conv, msg);
-      await deliverImage(conv, msg, file, replyId);
+      queue.push({ msg: msg, file: file, replyId: replyId });
+      pump();
     }
+    pump();
+    await drained;
   }
 
   async function deliverImage(conv, msg, file, replyId) {
