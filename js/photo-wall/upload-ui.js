@@ -33,6 +33,13 @@
   var MAX_BATCH_BYTES = 120 * 1024 * 1024;
   var CONCURRENCY = 3;
   var PHOTO_UPLOAD_TIMEOUT_MS = 25000;
+  // G-M7: pending/低频队列上限 50 → 200。旧上限下连续几批状态不确定的
+  // 上传（超时/断网）会把最旧的记录静默丢弃，对应 Storage 孤儿文件再
+  // 无人清理。注意这里不能按时间淘汰——pending 记录必须活到对账完成，
+  // 7 天老化已有低频队列流程处理。彻底解法是放 IndexedDB/服务端对账
+  // 表（需立项），200 条只是把漏清理窗口缩小 4 倍；单条约 0.5KB，
+  // 200 条约 100KB，localStorage 足够。
+  var PENDING_QUEUE_MAX = 200;
 
   // G-H3: 按整批总字节算并发上限（纯函数，挂 window 上供回归测试调用）。
   // 12 张手机原图一批可达 120MB：并发 3 时弱网下多路同时超时、集体进
@@ -116,7 +123,7 @@
       return kept.has(entry.uploadId);
     }).map(function(entry){return snapshot.has(entry.uploadId)&&snapshot.get(entry.uploadId)===JSON.stringify(entry)?kept.get(entry.uploadId):entry;});
     remaining.forEach(function(entry){if(!snapshot.has(entry.uploadId)&&!merged.some(function(item){return item.uploadId===entry.uploadId;}))merged.push(entry);});
-    writeJson(key,merged.slice(-50));
+    writeJson(key,merged.slice(-PENDING_QUEUE_MAX));
   }
 
   // G5 修复：除拒绝 SVG 外，仅允许位图 MIME 白名单（与后端 photo-create.js 一致）。
@@ -335,8 +342,8 @@
           stale: false
         });
       }
-      // 保留最近 50 条
-      writeJson('xtj_photo_upload_pending', pending.slice(-50));
+      // G-M7: 保留最近 200 条（见 PENDING_QUEUE_MAX），不是 50 条。
+      writeJson('xtj_photo_upload_pending', pending.slice(-PENDING_QUEUE_MAX));
     } catch(e) {}
   }
 
@@ -1711,6 +1718,7 @@
   window.setPhotoUploadResult = setUploadResult;
   window.setPhotoUploadResultState = setUploadResultState;
   window.clearPhotoUploadResult = clearUploadResult;
+  window.__xtjSavePendingPhotoUpload = savePendingPhotoUpload;
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
   else boot();
