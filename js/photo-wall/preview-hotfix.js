@@ -732,6 +732,18 @@
         toolbar.appendChild(button);
       }
     });
+    // ★ 第二轮修复（预-3）：工具栏四个按钮也用 inline !important 钉住横排
+    //   布局（position:relative + inset:auto）。photo-preview.css 未加载
+    //   时，style.css 的旧绝对定位规则会把它们散到四个角（左下/右下/居中/
+    //   右上）；样式表正常时这里的值与表内规则一致，无可见变化。
+    ['ppDeleteBtn', 'ppInfoBtn', 'ppShareBtn', 'ppRotateBtn'].forEach(function (id) {
+      var tbBtn = toolbar.querySelector('#' + id);
+      if (!tbBtn) return;
+      ['position:relative', 'left:auto', 'right:auto', 'top:auto', 'bottom:auto',
+        'width:44px', 'height:44px', 'min-width:44px', 'min-height:44px', 'margin:0',
+        'transform:none'
+      ].forEach(function (rule) { var i = rule.indexOf(':'); tbBtn.style.setProperty(rule.slice(0, i), rule.slice(i + 1), 'important'); });
+    });
     // 2026-10-31：用户要求把放大／缩小图标放回来（此前为避免「不明按钮」被隐藏）。
     //   现在它们是右侧的一对 + / −，叠在底部工具栏上方，不再被塞进工具栏，也不会遮住左下角的作者信息。
     //   必须用 setProperty(..., 'important')：style.css 里还有带 !important 的旧定位规则。

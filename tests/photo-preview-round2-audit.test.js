@@ -49,6 +49,10 @@ test('预-3: 工具栏样式表与内联样式收敛成同一布局（右下角�
   assert.ok(active.includes('transform: none;'), '激活态也不应再居中位移');
   assert.ok(hotfixSrc.includes("setImportant(toolbar, 'right', 'max(14px, env(safe-area-inset-right, 0px))');"),
     '内联样式仍应钉住右下角，两边一致');
+  assert.ok(hotfixSrc.includes("['ppDeleteBtn', 'ppInfoBtn', 'ppShareBtn', 'ppRotateBtn'].forEach(function (id) {"),
+    '工具栏四个按钮应被移入工具栏');
+  assert.ok(hotfixSrc.includes("'position:relative', 'left:auto', 'right:auto', 'top:auto', 'bottom:auto',"),
+    '工具栏按钮应有 inline !important 横排兜底，样式表失效时也不散到四角');
 });
 
 test('预-4: fit 缓存含旋转角，旋转后重算且宽高互换', () => {

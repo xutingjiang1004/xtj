@@ -298,7 +298,8 @@ function createChatGroupsRouter(options) {
       if (body.message_id !== undefined) { if (!UUID_RE.test(String(body.message_id))) return fail(res, 'message_not_found'); args.message_id = String(body.message_id); }
       if (body.request_id !== undefined) { if (!UUID_RE.test(String(body.request_id))) return fail(res, 'request_not_found'); args.request_id = String(body.request_id); }
       if (body.user_name !== undefined) { const n = String(body.user_name).trim(); if (!n || n.length > 80) return fail(res, 'member_not_found'); args.user_name = n; }
-      if (body.members !== undefined) { const m = cleanNames(body.members, 999); if (!m) return fail(res, 'group_full'); args.members = m; }
+      // ★ 第二轮修复（聊-8，同款）：改成员路径的非法名单也不能报 group_full。
+      if (body.members !== undefined) { const m = cleanNames(body.members, 999); if (!m) return fail(res, 'invalid_members'); args.members = m; }
       if (body.name !== undefined) { const n = cleanText(body.name, 30); if (n === null) return fail(res, 'invalid_name'); args.name = n; }
       if (body.nickname !== undefined) { const n = cleanText(body.nickname, 20); if (n === null) return fail(res, 'invalid_nickname'); args.nickname = n; }
       if (body.announcement !== undefined) { const n = cleanText(body.announcement, 2000); if (n === null) return fail(res, 'announcement_too_long'); args.announcement = n; }

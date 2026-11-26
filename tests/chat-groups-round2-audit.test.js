@@ -56,4 +56,8 @@ test('聊-8: 成员名单非法不再报 group_full', () => {
     '空名单仍报 members_required');
   assert.ok(serverSrc.includes("invalid_members: [400, '成员名单无效，请重新选择']"),
     'invalid_members 应有对应的中文文案');
+  assert.ok(!serverSrc.includes("if (!m) return fail(res, 'group_full')"),
+    '改成员路径的非法名单也不得再报 group_full（V1 复核发现的第二处）');
+  assert.ok(serverSrc.includes("if (!m) return fail(res, 'invalid_members')"),
+    '改成员路径的非法名单应报 invalid_members');
 });
