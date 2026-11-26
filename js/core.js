@@ -6881,11 +6881,23 @@ function renderProfileActivityList(kind) {
                     return 'unknown';
                 }
             }
+            // E-H4: 写操作（删帖/置顶/改可见性/发布）成功后，v8 由 clearFeedCache()
+            // 清掉，但 early-feed 的 v1 缓存（7 天）不受影响，下次回访服务器慢时
+            // 已删/已私密的旧帖子会从 v1 里再画出来。写操作走这里同时清 v1；
+            // 7 天离线兜底本身不动，搜索/筛选切换仍只清 v8。
+            function clearEarlyFeedCacheV1() {
+                if (typeof window.__xtjClearEarlyFeedCache === 'function') { try { window.__xtjClearEarlyFeedCache(); } catch (e) {} }
+                else { try { localStorage.removeItem('xtj_feed_cache_v1'); } catch (e) {} }
+            }
+            function invalidateFeedCaches() {
+                if (typeof clearFeedCache === 'function') { try { clearFeedCache(); } catch (e) {} }
+                clearEarlyFeedCacheV1();
+            }
             function applyConfirmedPostDeletion(postId, session) {
                 removeDeletedPostFromFeed(postId);
                 if (typeof window.__xtjRemoveAuthorPost === 'function') window.__xtjRemoveAuthorPost(postId);
                 if (String(window.__xtjPostDetailCurrentId || '') === String(postId) && typeof window.closeModal === 'function') window.closeModal('postDetailModal');
-                if (typeof clearFeedCache === 'function') { try { clearFeedCache(); } catch (e) {} }
+                invalidateFeedCaches();
 
                 // 删除只过渡合成属性，完成后一次移除节点，避免连续重算整张卡片的布局。
                 if (session.postEl && session.postEl.parentNode) {
@@ -10357,7 +10369,7 @@ function renderProfileActivityList(kind) {
                     });
                     var updResult = await updResp.json();
                     if (!updResp.ok || !updResult.ok) { showToast('更新失败，请稍后重试', 'error'); throw new Error(updResult.error); }
-                    clearFeedCache();
+                    invalidateFeedCaches();
                     showToast(nextPinned ? '帖子已置顶' : '已取消置顶');
                     await loadFeed(true);
                 } catch (e) {
@@ -10397,7 +10409,7 @@ function renderProfileActivityList(kind) {
                         showToast('置顶失败: ' + ((updateRes.error && updateRes.error.message) || '未知错误'));
                         return;
                     }
-                    clearFeedCache();
+                    invalidateFeedCaches();
                     await loadFeed(true);
                     showToast(nextPinned ? '帖子已置顶' : '已取消置顶');
                 } catch (e) {
@@ -11427,7 +11439,7 @@ function renderProfileActivityList(kind) {
                     if (serverSucceeded) {
                         console.error('[pin] render failed after server success', e);
                         showToast('置顶已更新，正在尝试恢复界面同步');
-                        clearFeedCache();
+                        invalidateFeedCaches();
                         loadFeed(true).catch(function(err){ console.error('loadFeed failed in catch', err); });
                         refreshPostDetailIfActive(normalizedPostId).catch(function(err){ console.error('refreshPostDetailIfActive failed in catch', err); });
                     } else {
@@ -11489,7 +11501,7 @@ function renderProfileActivityList(kind) {
                         showToast("操作失败: " + ((result.error && result.error.message) || "未知错误"));
                         return;
                     }
-                    clearFeedCache();
+                    invalidateFeedCaches();
                     showToast(nextVisibility === "private" ? "已设为私密" : "已设为公开");
                     var visibilityFeed = document.getElementById('feed');
                     var visibilitySurface = getActualScrollSurface(visibilityFeed);
@@ -12270,11 +12282,12 @@ function renderProfileActivityList(kind) {
                     showToast(insertRes.fallback ? "发布成功，已兼容旧数据结构" : "发布成功");
                     if (window.XTJHaptics) window.XTJHaptics.play('success');
                     if (!insertPublishedPostIntoFeed(insertRes.data, !!publishMotion)) {
-                        clearFeedCache();
+                        invalidateFeedCaches();
                         await loadFeed(true);
                         assertPostPublishIdentity(flight);
                     } else {
                         writeFeedCacheSnapshot();
+                        clearEarlyFeedCacheV1();
                     }
                     if (publishMotion) window.XtjPostPublishMotion.play(publishMotion, findBySafePostSelector(insertRes.data && insertRes.data.id));
                     if (insertRes.data && insertRes.data.id) {

@@ -340,6 +340,12 @@
       else localStorage.removeItem(FEED_CACHE_KEY);
     } catch (_) {}
   }
+  // E-H4: 写操作（删帖/置顶/改可见性/发布）成功后 core 只清 v8 缓存，
+  // v1（7 天）不受影响，下次回访服务器慢时旧帖子会再画出来。
+  // core 的失效入口调这个函数顺带清 v1；7 天离线兜底本身不动。
+  window.__xtjClearEarlyFeedCache = function () {
+    try { localStorage.removeItem(FEED_CACHE_KEY); } catch (_) {}
+  };
   function serveStale(cached) {
     servedStale = true;
     state.stale = true;
