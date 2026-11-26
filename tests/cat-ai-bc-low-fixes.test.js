@@ -88,3 +88,24 @@ test('B-10 small muted text meets WCAG 4.5:1 on light backgrounds', () => {
   assert.doesNotMatch(css, /color: rgba\(102, 118, 116, 0\.92\)/);
   assert.doesNotMatch(css, /color: rgba\(113, 127, 132, 0\.74\)/);
 });
+
+// B-12: 死 CSS —— 头部头像/信息、思考按钮/菜单等规则在 JS/HTML 里已无创建者
+// （当前顶栏用 .ai-chat-header-title/.ai-chat-header-cat 与
+// .ai-study-toggle/.ai-deep-think-toggle），删除前已 grep 确认无引用。
+// 历史注释里提及旧类名不算引用，故先剥离注释再断言。
+test('B-12 dead header/think-menu CSS is removed', () => {
+  const stripped = css.replace(/\/\*[\s\S]*?\*\//g, '');
+  for (const dead of ['ai-chat-header-avatar', 'ai-chat-header-info', 'ai-chat-header-name',
+    'ai-chat-header-status', 'ai-chat-think-btn', 'ai-chat-think-menu',
+    'ai-chat-think-opt', 'ai-chat-think-wrap']) {
+    assert.ok(!stripped.includes(dead), 'dead CSS remains: ' + dead);
+  }
+});
+
+test('B-12 live header controls keep their CSS', () => {
+  for (const live of ['.ai-cat-avatar', '.ai-chat-hist-btn', '.ai-chat-new-btn',
+    '.ai-chat-del-btn', '.ai-chat-back', '.ai-deep-think-toggle', '.ai-study-toggle',
+    '.ai-chat-header-title']) {
+    assert.ok(css.includes(live), 'live CSS missing: ' + live);
+  }
+});
