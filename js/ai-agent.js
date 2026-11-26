@@ -11363,6 +11363,27 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       restoreInputText();
       resetSendingIfCurrent();
     }
+    // ★ A-M6：令牌/身份过期早退时清理孤儿「生成中」节点。触发：用户在额度/
+    //   鉴权 await 的短暂窗口内切换模型（身份过期），且没有新发送接管本轮。
+    //   只清理「本轮仍是当前发送」的情形（sendToken 仍最新且 _currentReqId
+    //   未变）：被新发送接管时，新发送的 interruptCurrentChat 已同步调过
+    //   preserveInterruptedTurn 收尾节点，这里再删会误删已保留的部分回复；
+    //   用户主动停止（controller 已 abort）时中断路径同样已收尾，不动。
+    //   注意 resetSendingIfCurrent() 要求身份仍有效才复位，身份过期时它会
+    //   直接 no-op，所以这里直接复位 S.sending（本轮仍持有锁才安全）。
+    function abandonStaleSend() {
+      if (sendToken !== S.sendSeq || S._currentReqId !== reqId) return false;
+      if (controller && controller.signal && controller.signal.aborted) return false;
+      try { assistantNode.remove(); } catch (eStaleNode) {}
+      removeThisUserMessage();
+      restoreInputText();
+      if (S._interruptChat && S._interruptChat.reqId === reqId) S._interruptChat = null;
+      S.sending = false;
+      setAiSendBtnDisabled(false);
+      if (controller && S.abortController === controller) S.abortController = null;
+      if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
+      return true;
+    }
 
     // ============================================================
     // P1 修复: 立即显示用户消息和助手等待节点 (<=100ms)
@@ -11532,7 +11553,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     } catch (eQ) {}
     // A close/reopen can start a new send while this quota request is pending.
     // The stale send must not clear or reuse the newer send's state.
-    if (sendToken !== S.sendSeq || !customModelIdentityCurrent(sendIdentity)) return;
+    if (sendToken !== S.sendSeq || !customModelIdentityCurrent(sendIdentity)) { abandonStaleSend(); return; }
     if (!S.active) { abandonInactiveSend(); return; }
     var qGate = canSendWithQuota({ skipTokenCheck: !!sendCustomCfg });
     if (!qGate.ok) {
@@ -11545,7 +11566,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }
 
     var authOk = await ensureUserAuthOrNotify({ allowGuest: true, fastPath: true });
-    if (sendToken !== S.sendSeq || !customModelIdentityCurrent(sendIdentity) || S._currentReqId !== reqId) return;
+    if (sendToken !== S.sendSeq || !customModelIdentityCurrent(sendIdentity) || S._currentReqId !== reqId) { abandonStaleSend(); return; }
     if (!S.active) { abandonInactiveSend(); return; }
     if (!authOk) {
       // 认证失败 => 清理UI，恢复状态
@@ -11614,7 +11635,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     // 多智能体“深入研究”(deep-stream) 流程；是否更多搜索/工具协作由 webSearch / thinkMax 决定。
     var url = isCustomModel ? (API_BASE + '/custom-chat/stream') : (API_BASE + '/chat/stream');
     var auth = await getUserAuthPayload({ forceNoToken: false });
-    if ((sendToken !== S.sendSeq || !customModelIdentityCurrent(sendIdentity)) || (S._currentReqId !== reqId || !customModelIdentityCurrent(sendIdentity)) || !S.active || controller.signal.aborted) return;
+    if (!S.active) { abandonInactiveSend(); return; }
+    if ((sendToken !== S.sendSeq || !customModelIdentityCurrent(sendIdentity)) || (S._currentReqId !== reqId || !customModelIdentityCurrent(sendIdentity)) || controller.signal.aborted) { abandonStaleSend(); return; }
     var headers = withOpenRouterHint(auth.headers || {}, isCustomModel ? customCfg : null);
     var waitingThinking = assistantNode.querySelector('.ai-thinking[data-phase]');
     if (waitingThinking) { waitingThinking.dataset.phase = 'waiting'; setThinkingStatus(waitingThinking,'正在思考中'); }
@@ -11624,7 +11646,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var _fileHint = assistantNode.querySelector('.ai-thinking[data-phase]');
       if (_fileHint) { try { setThinkingStatus(_fileHint, '正在解析文件…'); } catch (_) {} }
       try { await ensureDeepSeekFileIds(attachmentPayload, headers, controller.signal); } catch (_) {}
-      if ((sendToken !== S.sendSeq || !customModelIdentityCurrent(sendIdentity)) || (S._currentReqId !== reqId) || !S.active || controller.signal.aborted) return;
+      if ((sendToken !== S.sendSeq || !customModelIdentityCurrent(sendIdentity)) || (S._currentReqId !== reqId) || !S.active || controller.signal.aborted) { if (!S.active) abandonInactiveSend(); else abandonStaleSend(); return; }
       if (_fileHint) { try { setThinkingStatus(_fileHint, '正在思考中'); } catch (_) {} }
     }
     var fetchBody;
