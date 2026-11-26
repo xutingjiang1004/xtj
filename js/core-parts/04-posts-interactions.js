@@ -3127,43 +3127,37 @@
                 return Array.isArray(feedAllPosts) ? feedAllPosts.length : 0;
             }
             function updateFeedStats() {
-    // 统一统计口径：优先使用内存全量数据（feedAll* 缓存），
-    // 避免筛选/分页后 DOM 只含部分帖子导致统计数字错乱；内存数据缺失时回退 DOM 统计。
+    // 统一统计口径：只认内存全量数据（feedAll* 缓存）的精确计数。
+    // E-M6: 去掉 DOM 文本正则兜底——筛选/分页后 DOM 只含部分帖子，
+    // 正则猜出来的数字与详情页的精确 count 对不上；内存数据缺失时
+    // 显示 —，不猜数字。
     var posts = [];
     var totalLikes = 0, totalComments = 0, totalViews = 0;
-    // feedAll* 是与 updateFeedStats 同作用域的闭包变量（let 声明），直接访问；
-    // 未初始化（undefined）时回退 DOM 统计，避免筛选/分页后统计错乱。
+    // feedAll* 是与 updateFeedStats 同作用域的闭包变量（let 声明），直接访问。
     var hasFullData = Array.isArray(feedAllPosts) && Array.isArray(feedAllLikes) && Array.isArray(feedAllComments);
-    if (hasFullData) {
-        posts = feedAllPosts;
-        var visibleIds = new Set(feedAllPosts.map(function(post) { return String(post && post.id); }));
-        feedAllLikes.forEach(function(like) {
-            if (like && visibleIds.has(String(like.post_id)) && !(like.is_like === false || like.like_type === 'unlike')) totalLikes += 1;
-        });
-        totalComments = feedAllComments.filter(function(comment) { return comment && visibleIds.has(String(comment.post_id)); }).length;
-        posts.forEach(function(p) {
-            if (p && Number(p.views)) totalViews += Number(p.views);
-        });
-    } else {
-        posts = Array.prototype.slice.call(document.querySelectorAll('.post'));
-        posts.forEach(function(p) {
-            var text = (p.querySelector('.post-stats-text') || {}).textContent || '';
-            var matchV = text.match(/(?:浏览|👁)\s*(\d+)/);
-            if (matchV) totalViews += parseInt(matchV[1], 10) || 0;
-            var matchL = text.match(/(?:点赞|❤)\s*(\d+)/);
-            if (matchL) totalLikes += parseInt(matchL[1], 10) || 0;
-            var matchC = text.match(/(?:评论|💬)\s*(\d+)/);
-            if (matchC) totalComments += parseInt(matchC[1], 10) || 0;
-        });
+    // 缓存引用前先校验节点仍在文档中，避免节点被 innerHTML 重写后写入已脱离文档的旧节点
+    var sPosts = (_cachedSPosts && document.body.contains(_cachedSPosts)) ? _cachedSPosts : (_cachedSPosts = document.getElementById('sPosts'));
+    var sViews = (_cachedSViews && document.body.contains(_cachedSViews)) ? _cachedSViews : (_cachedSViews = document.getElementById('sViews'));
+    var sLikes = (_cachedSLikes && document.body.contains(_cachedSLikes)) ? _cachedSLikes : (_cachedSLikes = document.getElementById('sLikes'));
+    if (sPosts) sPosts.textContent = resolveTotalPostCount();
+    if (!hasFullData) {
+        if (sViews) sViews.textContent = '—';
+        // 只显示点赞数；互动合计见统计弹层文案
+        if (sLikes) sLikes.textContent = '—';
+        return;
     }
-                // 缓存引用前先校验节点仍在文档中，避免节点被 innerHTML 重写后写入已脱离文档的旧节点
-                var sPosts = (_cachedSPosts && document.body.contains(_cachedSPosts)) ? _cachedSPosts : (_cachedSPosts = document.getElementById('sPosts'));
-                var sViews = (_cachedSViews && document.body.contains(_cachedSViews)) ? _cachedSViews : (_cachedSViews = document.getElementById('sViews'));
-                var sLikes = (_cachedSLikes && document.body.contains(_cachedSLikes)) ? _cachedSLikes : (_cachedSLikes = document.getElementById('sLikes'));
-                if (sPosts) sPosts.textContent = resolveTotalPostCount();
-                if (sViews) sViews.textContent = totalViews;
-                // 只显示点赞数；互动合计见统计弹层文案
-                if (sLikes) sLikes.textContent = totalLikes;
+    posts = feedAllPosts;
+    var visibleIds = new Set(feedAllPosts.map(function(post) { return String(post && post.id); }));
+    feedAllLikes.forEach(function(like) {
+        if (like && visibleIds.has(String(like.post_id)) && !(like.is_like === false || like.like_type === 'unlike')) totalLikes += 1;
+    });
+    totalComments = feedAllComments.filter(function(comment) { return comment && visibleIds.has(String(comment.post_id)); }).length;
+    posts.forEach(function(p) {
+        if (p && Number(p.views)) totalViews += Number(p.views);
+    });
+    if (sViews) sViews.textContent = totalViews;
+    // 只显示点赞数；互动合计见统计弹层文案
+    if (sLikes) sLikes.textContent = totalLikes;
             }
 
             async function initialLoad(skipCache = false) {
