@@ -814,6 +814,44 @@
       setImportant(dots, 'z-index', '11');
       setImportant(dots, 'pointer-events', 'none');
     }
+    // ★ 首帧竞态修复：photo-preview.min.css 是按需动态注入的（index.html 只在 meta 登记），
+    //   在它到位之前，style.css 旧版 .photo-preview-info 的居中胶囊布局 + ppInfoEnter
+    //   动画会先渲染，打开瞬间出现"帖子卡片式居中小浮层"，约 200-650ms 后才跳到左下角。
+    //   这里给信息条写一套与 photo-preview.css .pp-story 一致的终态 inline !important，
+    //   使异步 CSS 未加载时也直接呈左下角终态，消除首帧跳变。样式表到位后这些值与之相同，无可见变化。
+    var info = root.querySelector('.photo-preview-info');
+    if (info) {
+      setImportant(info, 'position', 'absolute');
+      setImportant(info, 'left', 'max(16px, env(safe-area-inset-left, 0px))');
+      setImportant(info, 'right', 'max(16px, env(safe-area-inset-right, 0px))');
+      setImportant(info, 'bottom', 'calc(18px + env(safe-area-inset-bottom, 0px))');
+      setImportant(info, 'top', 'auto');
+      setImportant(info, 'width', 'auto');
+      setImportant(info, 'max-width', 'none');
+      setImportant(info, 'transform', 'none');
+      setImportant(info, 'animation', 'none');
+      setImportant(info, 'transition', 'none');
+      setImportant(info, 'opacity', '1');
+      setImportant(info, 'display', 'flex');
+      setImportant(info, 'flex-direction', 'column');
+      setImportant(info, 'align-items', 'flex-start');
+      setImportant(info, 'gap', '8px');
+      setImportant(info, 'padding', '0');
+      setImportant(info, 'border', '0');
+      setImportant(info, 'border-radius', '0');
+      setImportant(info, 'background', 'transparent');
+      setImportant(info, 'box-shadow', 'none');
+      setImportant(info, 'backdrop-filter', 'none');
+      setImportant(info, '-webkit-backdrop-filter', 'none');
+      setImportant(info, 'text-align', 'left');
+      setImportant(info, 'z-index', '23');
+      setImportant(info, 'pointer-events', 'none');
+      // 信息条整体不吃事件，但内部按钮（点赞/评论/展开）必须可点，
+      // 与 photo-preview.css 的 .pp-story button{pointer-events:auto} 保持一致。
+      info.querySelectorAll('button').forEach(function (btn) {
+        setImportant(btn, 'pointer-events', 'auto');
+      });
+    }
     return toolbar;
   }
 

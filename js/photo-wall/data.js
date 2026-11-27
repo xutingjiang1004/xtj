@@ -996,6 +996,17 @@
     if (now - _lastVisibilitySync < 5000) return; // 5秒内不重复
     _lastVisibilitySync = now;
     subscribePhotoWallRealtime();
+    // ★ 修复（切回浪费流量）：从后台/别的 App 回来不必每次都 force 重拉。
+    //   列表有实时订阅 + BroadcastChannel 兜底，只有距上次成功拉取超过缓存 TTL
+    //   或本地根本没有数据时才需要重新拉；否则直接复用内存数据、只补懒加载泵。
+    var needFresh = !Array.isArray(window.photoWallData) || !window.photoWallData.length ||
+      !lastSuccessfulLoadedAt || (now - lastSuccessfulLoadedAt >= LOAD_CACHE_TTL_MS);
+    if (!needFresh) {
+      if (typeof window.loadVisiblePhotoWallImages === 'function') {
+        window.loadVisiblePhotoWallImages(document.getElementById('photoGrid'), 6);
+      }
+      return Promise.resolve();
+    }
     return loadPhotoWallData(true).then(function(){
       if (typeof window.renderPhotoWallWithoutReload === 'function') window.renderPhotoWallWithoutReload();
     });

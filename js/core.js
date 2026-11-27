@@ -14918,7 +14918,18 @@ function renderProfileActivityList(kind) {
                 var hasSkeleton = hasVisiblePhotoWallSkeleton(grid);
                 var hasEmptyState = !!grid.querySelector('.photo-wall-empty');
                 var hasPhotoData = Array.isArray(window.photoWallData) && window.photoWallData.length > 0;
-                if (opts.forceReload || !hasRenderedPhotos || hasSkeleton || (!hasPhotoData && !hasEmptyState)) {
+                // ★ 修复（切板块回来照片全部重新加载 + 空白方块）：
+                //   骨架（.pw-blur-in）是懒加载/慢加载的正常中间态，看到骨架只说明
+                //   图片还没轮到加载，绝不能当成"数据过期"去 force 拉数据 + 全量重建——
+                //   那样每次切回都会把已加载的图全部退回骨架、重新下载，既闪方块又烧流量。
+                //   渲染卡片还在时，仅补一次懒加载泵让骨架自然消失，不碰数据与 DOM。
+                if (hasRenderedPhotos && hasSkeleton && !opts.forceReload) {
+                    if (typeof window.loadVisiblePhotoWallImages === 'function') {
+                        window.loadVisiblePhotoWallImages(grid, 6);
+                    }
+                    hasSkeleton = false;
+                }
+                if (opts.forceReload || !hasRenderedPhotos || (!hasPhotoData && !hasEmptyState)) {
                     if (typeof window.loadPhotoWallData === 'function') {
                         await window.loadPhotoWallData(true);
                     }
