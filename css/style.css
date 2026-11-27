@@ -17291,3 +17291,38 @@ html.perf-lite .profile-detail-info-item {
   margin-left: auto;
   margin-right: auto;
 }
+
+/* ★ 2026-11-27 照片墙卡片「图片下方空白 + 竖向亮带色差」修复
+   卡片高度由 --pw-aspect（照片原比例）决定；但 iOS Safari 对「高度由
+   aspect-ratio 推断的父容器」里的 img{height:100%} 百分比高度解析会失效，
+   img 退回占位图固有的 1:1 正方形：竖图卡片(0.8)比正方形高 -> 底部露出
+   一截空白，横图卡片(1.333)比正方形矮 -> 反而铺满，于是出现「大小不一
+   + 有的下面空白」。同时 .pw-skeleton 是 display:inline 且带 nth-child
+   固定比例，无法铺满卡片。
+   修法：img 绝对定位到左上角、width:100%、height:auto，并用自身
+   aspect-ratio:var(--pw-aspect) 算出确定高度（与卡片同比例），完全不
+   依赖父容器的百分比高度解析——这是 iOS Safari 上唯一稳的写法；实测
+   「强制 height:auto 模拟百分比失效」下空白仍为 0。骨架 span 是非替换
+   元素，用 absolute inset:0 即可铺满；不写 display，避免盖掉 finishImg()
+   隐藏骨架用的 display:none。另把骨架扫光从 0.34 白降到 0.10，消除未
+   加载态那道刺眼的竖向亮带（用户反馈的「色差」）。 */
+.photo-wall-item > img {
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100% !important;
+  height: auto !important;
+  aspect-ratio: var(--pw-aspect, 1 / 1) !important;
+  object-fit: cover !important;
+}
+.photo-wall-item > .pw-skeleton {
+  position: absolute !important;
+  inset: 0 !important;
+  width: auto !important;
+  height: auto !important;
+  aspect-ratio: auto !important;
+  border-radius: 0 !important;
+}
+.photo-wall-item > .pw-skeleton::after {
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .10), transparent) !important;
+}

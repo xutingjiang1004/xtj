@@ -66,7 +66,7 @@
             }
         } catch (_) {}
     </script>
-    <link rel="stylesheet" href="css/style.min.css?v=a237251330" />
+    <link rel="stylesheet" href="css/style.min.css?v=141350ea5f" />
     <!-- 次要样式异步加载，避免阻塞首屏（style.min.css 已可达 300KB+） -->
     <!-- ★ 2026-09-22 响应式修复：下面两个 CSS 是「media="print" onload 切 all」的异步加载，
          浏览器要等 onload 后才知道它们是样式表 → 应用前后存在两阶段布局跳变（CLS）。
@@ -98,7 +98,7 @@
     <!-- 照片墙与图片预览同样是按需模块。实测它们会被首屏图片请求挤住，
          表现为「点照片墙没反应」「点开照片几秒后黑屏」。这几个模块合计约 130KB
          （gzip 后 30KB 上下），提前取下来比让用户卡在空面板里划算。 -->
-    <link rel="preload" as="script" href="js/photo-wall/data.min.js?v=b4d4fc77ab" />
+    <link rel="preload" as="script" href="js/photo-wall/data.min.js?v=ca49cbdb26" />
     <link rel="preload" as="script" href="js/photo-wall/render.min.js?v=d91215bb27" />
     <link rel="preload" as="script" href="js/photo-wall/photo-wall.min.js?v=af904af583" />
     <link rel="preload" as="script" href="js/photo-wall/preview.min.js?v=efffda6113" />
@@ -111,7 +111,7 @@
     <meta name="xtj-module-photo-preview" content="js/photo-wall/preview.min.js?v=efffda6113">
     <meta name="xtj-module-photo-preview-hotfix" content="js/photo-wall/preview-hotfix.min.js?v=bfd50d134a">
     <meta name="xtj-module-photo-upload" content="js/photo-wall/upload-ui.min.js?v=592a42694b">
-    <meta name="xtj-module-photo-data" content="js/photo-wall/data.min.js?v=b4d4fc77ab">
+    <meta name="xtj-module-photo-data" content="js/photo-wall/data.min.js?v=ca49cbdb26">
     <meta name="xtj-module-photo-render" content="js/photo-wall/render.min.js?v=d91215bb27">
     <meta name="xtj-module-photo-main" content="js/photo-wall/photo-wall.min.js?v=af904af583">
     <meta name="xtj-module-core-animations" content="js/core-animations.min.js?v=3e2514d352">

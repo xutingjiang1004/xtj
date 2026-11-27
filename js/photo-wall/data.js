@@ -32,8 +32,14 @@
   var lastFailureAt = 0;
   // ★ 第二轮修复（重-4）：列表缓存 20s 太短，切走几十秒回来必定重新拉
   //   列表。实时订阅 + BroadcastChannel 本就会即时推送新增/删除，列表
-  //   拉取只是兜底，放宽到 60s 不影响新鲜度。
-  var LOAD_CACHE_TTL_MS = 60000;
+  //   拉取只是兜底。
+  // ★ 2026-11-27：放宽到 10 分钟，减少反复切板块时的列表请求（省流量）。
+  //   新鲜度由实时订阅 + 下面独立的 RESUME_SYNC_TTL_MS（从后台回来强制同步）
+  //   保证，两者解耦：普通切 tab 省请求，离线回来仍能及时同步新增/删除。
+  var LOAD_CACHE_TTL_MS = 600000;
+  // 从后台/别的 App 回来时，若距上次成功拉取超过这个阈值就强制同步一次，
+  // 防止离线期间错过删除/新增事件。独立于列表 TTL，不随其放宽而变长。
+  var RESUME_SYNC_TTL_MS = 60000;
   var photoLoadGeneration = 0;
   var activePhotoLoadController = null;
   var loadMoreController = null;
@@ -997,10 +1003,13 @@
     _lastVisibilitySync = now;
     subscribePhotoWallRealtime();
     // ★ 修复（切回浪费流量）：从后台/别的 App 回来不必每次都 force 重拉。
-    //   列表有实时订阅 + BroadcastChannel 兜底，只有距上次成功拉取超过缓存 TTL
+    //   列表有实时订阅 + BroadcastChannel 兜底，只有距上次成功拉取超过同步窗口
     //   或本地根本没有数据时才需要重新拉；否则直接复用内存数据、只补懒加载泵。
+    // ★ 2026-11-27：与列表 TTL 解耦——用独立的 RESUME_SYNC_TTL_MS，这样列表
+    //   TTL 放宽到 10 分钟省请求，但离线回来超过同步窗口仍会强制同步一次，
+    //   不会因 TTL 变长而错过离线期间的删除/新增。
     var needFresh = !Array.isArray(window.photoWallData) || !window.photoWallData.length ||
-      !lastSuccessfulLoadedAt || (now - lastSuccessfulLoadedAt >= LOAD_CACHE_TTL_MS);
+      !lastSuccessfulLoadedAt || (now - lastSuccessfulLoadedAt >= RESUME_SYNC_TTL_MS);
     if (!needFresh) {
       if (typeof window.loadVisiblePhotoWallImages === 'function') {
         window.loadVisiblePhotoWallImages(document.getElementById('photoGrid'), 6);
