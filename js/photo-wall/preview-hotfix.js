@@ -855,6 +855,54 @@
     return toolbar;
   }
 
+  // 2026-11-27 首帧头像大方块修复：story.js 的 .pp-story-avatar 与其中异步
+  // 插入的头像 <img> 尺寸约束原本只在异步注入的 photo-preview.min.css，
+  // 首次打开、首次点照片时该 CSS 尚未到位，无尺寸属性的 <img> 会按原图固有
+  // 尺寸渲染成左下角大方块。这里用 inline !important 把 36x36 钉死，且用
+  // MutationObserver 兜住 story.js 的任何异步插入；样式表到位后值与之一致。
+  function pinStoryAvatar(root) {
+    root = root || overlay();
+    if (!root) return;
+    var avatar = root.querySelector('.pp-story-avatar') || root.querySelector('#ppStoryAvatar');
+    if (!avatar) return;
+    var a = avatar.style;
+    a.setProperty('width', '36px', 'important');
+    a.setProperty('height', '36px', 'important');
+    a.setProperty('min-width', '36px', 'important');
+    a.setProperty('min-height', '36px', 'important');
+    a.setProperty('border-radius', '50%', 'important');
+    a.setProperty('overflow', 'hidden', 'important');
+    a.setProperty('display', 'grid', 'important');
+    a.setProperty('place-items', 'center', 'important');
+    var img = avatar.querySelector('img');
+    if (img) {
+      var s = img.style;
+      s.setProperty('width', '100%', 'important');
+      s.setProperty('height', '100%', 'important');
+      s.setProperty('object-fit', 'cover', 'important');
+      s.setProperty('display', 'block', 'important');
+    }
+  }
+
+  function installStoryAvatarPin() {
+    var root = overlay();
+    if (!root) return;
+    pinStoryAvatar(root);
+    if (!window.MutationObserver) return;
+    var lastImgCount = -1;
+    var observer = new MutationObserver(function () {
+      var avatar = root.querySelector('.pp-story-avatar') || root.querySelector('#ppStoryAvatar');
+      if (!avatar) return;
+      var img = avatar.querySelector('img');
+      var count = img ? 1 : 0;
+      if (count !== lastImgCount) {
+        pinStoryAvatar(root);
+        lastImgCount = count;
+      }
+    });
+    observer.observe(root, { childList: true, subtree: true });
+  }
+
   function formatFileSize(size) {
     if (!size && size !== 0) return '--';
     if (size >= 1048576) return (size / 1048576).toFixed(2) + ' MB';
@@ -1701,6 +1749,7 @@
     clearInteractionState();
     cleanupLegacyControls();
     ensurePreviewToolbar();
+    pinStoryAvatar(root || overlay());
     bindCloseButton();
     bindInfoButton();
     bindInfoModal();
@@ -1951,6 +2000,7 @@
     installFinalStyle();
     cleanupLegacyControls();
     ensurePreviewToolbar();
+    installStoryAvatarPin();
     bindCloseButton();
     bindInfoButton();
     bindInfoModal();

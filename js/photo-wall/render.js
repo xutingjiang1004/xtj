@@ -4,8 +4,12 @@
   var FALLBACK_IMG = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400"%3E%3Crect fill="%23f0f0f0" width="400" height="400"/%3E%3Cpath fill="%23c9d5cf" d="M86 285h228L248 198l-42 55-31-39-89 71Z"/%3E%3Ccircle cx="132" cy="128" r="28" fill="%23bccbc4"/%3E%3C/svg%3E';
   // P6: 加载超时后的内置占位图（"加载失败 / 点击重试"），点击卡片可重试原 URL
   var ERROR_IMG = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400"%3E%3Crect fill="%23f0f0f0" width="400" height="400"/%3E%3Cg text-anchor="middle" font-family="sans-serif"%3E%3Ctext x="200" y="190" font-size="26" fill="%23c0392b"%3E%E5%8A%A0%E8%BD%BD%E5%A4%B1%E8%B4%A5%3C/text%3E%3Ctext x="200" y="230" font-size="16" fill="%2395a5a0"%3E%E7%82%B9%E5%87%BB%E9%87%8D%E8%AF%95%3C/text%3E%3C/g%3E%3C/svg%3E';
-  // P6: DOM 卡片数量上限 — 超过后不再 append 新卡片，避免数组/DOM 无限增长
-  var MAX_DOM_PHOTOS = 500;
+  // 2026-11-27：照片墙改为「全部显示」。旧的 500 张 DOM 分批上限已放宽到
+  // 实际不可达——用户明确要求不要「第 N 批 / 下一批」、拉到底自动全部加载。
+  // 服务端分页（loadMorePhotos）+ 哨兵自动续拉 + 增量追加 负责加载更多；
+  // 保留本常量与下方 max 分支的结构（兼容既有加载/取消逻辑与契约），但常量
+  // 设为极大值后这些分支恒不触发，photoBatchStart 恒为 0，索引不会错位。
+  var MAX_DOM_PHOTOS = 1000000000;
   // G-M2: “下一批”翻页单次时间预算。稀疏分组逐页试探时，旧循环固定 30 次、
   // 单页 10 秒超时，最坏 300 秒才停；改为 20 秒预算（加一页在途时间，
   // 最坏约 30 秒），到点即停并提示继续查找。
@@ -203,16 +207,15 @@
       var time = formatPhotoTime(p.timestamp);
       var index = base + i;
       var delay = Math.min(index * 30, 300);
-      var aspectStyle = '';
-      if (p.width && p.height && p.width > 0 && p.height > 0) {
-        var ratio = Math.max(3 / 4, Math.min(4 / 3, p.width / p.height));
-        aspectStyle = '--pw-aspect:' + (Math.round(1000 * ratio) / 1000) + ';';
-      }
+      // 2026-11-27：恢复上个月「统一方形填充」预览，不再内联 --pw-aspect。
+      // 旧版用照片真实宽高比（clamp 3/4~4/3）决定每张卡首帧高度，导致
+      // 高低不齐、大小不一；现在卡片高度恒由 CSS aspect-ratio:1/1 决定，
+      // 图片 object-fit:cover 铺满裁剪，整墙回到整齐方格。
       // G-L5: 键盘 Enter/空格直接点卡片本身（打开预览），不再经过 img。
       // 图片加载失败时 img.onclick 已被改成重试加载并 stopPropagation，
       // 旧写法 (img||card).click() 会让键盘 Enter 变成重试，与鼠标点
       // 卡片其他区域（打开预览）不一致；图片重试仍可鼠标点图本身触发。
-      html += '<div class="photo-wall-item pw-stagger-enter" role="button" tabindex="0" aria-label="' + esc(username + '的照片，' + time + (p.caption ? '，' + p.caption : '')) + '" data-photo-id="' + esc(String(p.id)) + '" style="' + aspectStyle + 'animation-delay:' + delay + 'ms" onclick="openPhotoWallPreviewAt(' + index + ', this)" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();this.click();}">';
+      html += '<div class="photo-wall-item pw-stagger-enter" role="button" tabindex="0" aria-label="' + esc(username + '的照片，' + time + (p.caption ? '，' + p.caption : '')) + '" data-photo-id="' + esc(String(p.id)) + '" style="animation-delay:' + delay + 'ms" onclick="openPhotoWallPreviewAt(' + index + ', this)" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();this.click();}">';
       var recent=recentPhotos.get(String(p.id));
       html += recent ? '<img src="' + safeUrl(recent.url) + '" alt="photo" class="pw-blur-done" data-recent-upload-id="' + esc(String(p.id)) + '" loading="eager" decoding="async">' : '<img src="' + esc(FALLBACK_IMG) + '" alt="photo" class="pw-blur-in" data-src="' + safeUrl(realUrl) + '" loading="lazy" decoding="async">';
       html += '<span class="pw-skeleton" aria-hidden="true"></span>';
@@ -297,7 +300,10 @@
     var _sk = img.nextElementSibling;
     if (_sk && _sk.classList && _sk.classList.contains('pw-skeleton')) _sk.style.display = 'none';
     if (imgObserver) imgObserver.unobserve(img);
-    applyPhotoWallAspect(img);
+    // 2026-11-27：恢复上个月「统一方形填充」预览，不再按照片真实宽高比
+    // 改变卡片高度（旧版会导致高低不齐、下面留白、大小不一）。卡片高度
+    // 现在恒由 CSS 的 aspect-ratio:1/1 决定，图片 object-fit:cover 铺满裁剪。
+    // applyPhotoWallAspect 仍保留导出以兼容外部调用，但这里不再触发它。
   }
 
   // P6: 点击加载失败的占位图，重新加载原 URL
@@ -528,16 +534,10 @@
   }
 
   function photoBatchNavHtml(list){
-    var total = (list || []).length;
-    if (!total) return '';
-    var batch = Math.floor(photoBatchStart / MAX_DOM_PHOTOS) + 1;
-    var nextAvailable = photoBatchStart + MAX_DOM_PHOTOS < total || (typeof window.hasMorePhotos === 'function' && window.hasMorePhotos());
-    if (photoBatchStart === 0 && !nextAvailable) return '';
-    return '<div class="pw-batch-nav" aria-label="照片分页">' +
-      (photoBatchStart > 0 ? '<button type="button" onclick="window.showPreviousPhotoBatch()">上一批</button>' : '') +
-      '<span>第 ' + batch + ' 批</span>' +
-      (nextAvailable ? '<button type="button" onclick="window.showNextPhotoBatch()">下一批</button>' : '') +
-      '</div>';
+    // 2026-11-27：彻底移除「第 N 批 / 上一批 / 下一批」UI。照片墙现在一次性
+    // 渲染全部已加载照片，滚动到底由加载哨兵自动续拉（服务端分页），不再
+    // 把 500 张的 DOM 保护预算暴露成分批交互。保留函数签名与空返回，兼容调用点。
+    return '';
   }
 
   function currentPhotoWallViewKey(){
@@ -855,6 +855,9 @@
     var existingCount = domIds.length;
     var newOnes = list.slice(photoBatchStart + existingCount, photoBatchStart + MAX_DOM_PHOTOS);
     if (!newOnes.length) {
+      // ★ 2026-11-27：即使没有新卡片，也要把签名同步到当前完整列表，
+      //   否则后续轻量重渲染因 __xtjPwSig 与重算签名不一致而全量重建。
+      grid.__xtjPwSig = computeRenderSignature(list, window.currentUser, photoBatchStart);
       refreshBatchNavigation(grid, list);
       refreshLoadMoreSentinel(grid);
       syncAlbumDetailCount(list);
@@ -874,6 +877,13 @@
       newCards[k].classList.remove('pw-stagger-enter');
     }
     observeAppendedImages(grid);
+    // ★ 2026-11-27（往上翻重新加载）：增量追加后必须同步渲染签名到"完整列表"。
+    //   旧实现只追加 DOM、不改 __xtjPwSig；此后任何轻量重渲染
+    //   （resume / realtime / 浏览数对账 / 切回）重算签名时，因 photos.length
+    //   变了、签名不再相等 → renderSorted 走 grid.innerHTML= 全量重建 →
+    //   所有已加载图片退回 pw-blur-in 骨架重新下载，往上翻就全部重载。
+    //   这里用同一套签名字段重算并写回，让后续重渲染直接命中"数据没变跳过"。
+    grid.__xtjPwSig = computeRenderSignature(list, window.currentUser, photoBatchStart);
     refreshBatchNavigation(grid, list);
     refreshLoadMoreSentinel(grid);
     syncAlbumDetailCount(list);
@@ -922,6 +932,16 @@
       (err && err.retryable === false ? '' : '<button type="button" onclick="window.initPhotoWall(true)">重新加载</button>') + '</div>';
   }
 
+  // 2026-11-27：统一渲染签名算法。renderSorted 用它判断是否可跳过重建；
+  // appendNewPhotoCards 增量追加后用同一算法写回 __xtjPwSig，避免下一次
+  // 轻量重渲染签名失配触发全量重建、图片全部重载。浏览数不计入（定点更新）。
+  function computeRenderSignature(list, owner, batchStart){
+    var photos = Array.isArray(list) ? list : [];
+    return (owner || '') + '|' + (batchStart || 0) + '|' + photos.length + '|' + photos.map(function(p) {
+      return (p && (p.cloudId || p.id)) + ':' + (p.thumbUrl || p.imageUrl || '') + ':' + (p.username || '') + ':' + (p.caption || '') + ':' + (p.timestamp || '') + ':' + (p.width || '') + 'x' + (p.height || '') + ':' + (recentPhotos.has(String(p.id)) ? 'R' : '');
+    }).join(',');
+  }
+
   function renderSorted(photos, preserveBatch){
     // Invalidate previous views while allowing this page's own pruning refresh
     // to keep its pending batch navigation alive.
@@ -962,14 +982,15 @@
         if (!isError && hasNextPage) installLoadMoreSentinel(grid);
         return;
       }
-      var _renderSlice = photos.slice(photoBatchStart, photoBatchStart + MAX_DOM_PHOTOS);
+      // 2026-11-27：一次性渲染全部已加载照片，不再按 MAX_DOM_PHOTOS 切片
+      // 分批（用户要求「照片墙全部显示，不要第 N 批 / 下一批」）。服务端分页
+      // 仍由加载哨兵自动续拉，新页走 appendPhotoWallMore 增量追加。
+      var _renderSlice = photos;
       // ★ 第二轮修复（重-1）：切回照片墙时数据没变就别重建网格。旧逻辑每次
       //   innerHTML 全量重写，图片重新走骨架+淡入、流量重新烧。签名覆盖
       //   本页卡片的 id/图址/作者/文案/时间/宽高与最近上传态；浏览数不计入
       //   （它由 updatePhotoViewDisplays 定点更新，不走重建）。
-      var _renderSig = (window.currentUser || '') + '|' + photoBatchStart + '|' + photos.length + '|' + _renderSlice.map(function(p) {
-        return (p && (p.cloudId || p.id)) + ':' + (p.thumbUrl || p.imageUrl || '') + ':' + (p.username || '') + ':' + (p.caption || '') + ':' + (p.timestamp || '') + ':' + (p.width || '') + 'x' + (p.height || '') + ':' + (recentPhotos.has(String(p.id)) ? 'R' : '');
-      }).join(',');
+      var _renderSig = computeRenderSignature(_renderSlice, window.currentUser, photoBatchStart);
       if (grid.__xtjPwSig === _renderSig && grid.querySelector('.photo-wall-item[data-photo-id]')) return;
       grid.__xtjPwSig = _renderSig;
       grid.innerHTML = photoCardHtml(_renderSlice, photoBatchStart) + photoBatchNavHtml(photos);
@@ -1001,7 +1022,8 @@
     }
 
     window.pwCurrentSortedPhotos = group.photos.slice();
-    grid.innerHTML = '<div class="pw-album-toolbar"><button type="button" class="pw-album-back-btn" aria-label="返回相册" onclick="openPhotoAlbumGroup(\'\')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 6-6 6 6 6"/></svg><span>相册</span></button><div class="pw-album-toolbar-meta"><strong>' + esc(group.title) + '</strong><span>' + group.photos.length + ' 张照片</span></div></div>' + photoCardHtml(group.photos.slice(photoBatchStart, photoBatchStart + MAX_DOM_PHOTOS), photoBatchStart) + photoBatchNavHtml(group.photos);
+    // 2026-11-27：相册详情同样全量渲染本组已加载照片，不再按 500 分片。
+    grid.innerHTML = '<div class="pw-album-toolbar"><button type="button" class="pw-album-back-btn" aria-label="返回相册" onclick="openPhotoAlbumGroup(\'\')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 6-6 6 6 6"/></svg><span>相册</span></button><div class="pw-album-toolbar-meta"><strong>' + esc(group.title) + '</strong><span>' + group.photos.length + ' 张照片</span></div></div>' + photoCardHtml(group.photos, photoBatchStart) + photoBatchNavHtml(group.photos);
     revealCards(grid);
     observeImages(grid);
     // H-33: 相册分组详情页同样需要哨兵，滚动到底继续加载更多照片

@@ -616,44 +616,27 @@ test('photo view count is wired when the preview opens', () => {
   assert.doesNotMatch(openPreview, /window\.syncPhotoViewCount/);
 });
 
-test('photo wall renders 500-item batches at 500, 501, and 1001 photo boundaries', async () => {
+test('photo wall renders ALL loaded photos with no batch pager (500/501/1001)', async () => {
+  // 2026-11-27：用户要求照片墙「全部显示、不要第 N 批 / 下一批」。旧版按
+  // MAX_DOM_PHOTOS=500 切片分批；现在一次性渲染全部已加载照片，批次导航 UI
+  // 恒为空，预览索引仍与完整列表一一对应。
   for (const total of [500, 501, 1001]) {
     const runtime = createPhotoWallRenderRuntime(makeRenderablePhotos(total));
     runtime.window.renderPhotoWallWithoutReload();
 
-    assert.equal(runtime.grid.getPhotoCards().length, Math.min(total, 500), `${total} photos: first batch is capped at 500`);
+    const cards = runtime.grid.getPhotoCards();
+    assert.equal(cards.length, total, `${total} photos: all loaded photos rendered, no 500 cap`);
     assert.equal(runtime.window.pwCurrentSortedPhotos.length, total, `${total} photos: preview source retains the full sorted list`);
+    assert.doesNotMatch(runtime.grid.innerHTML, /pw-batch-nav/, 'no batch pager at any size');
+    assert.doesNotMatch(runtime.grid.innerHTML, /下一批|上一批|第 \d+ 批/, 'no batch navigation copy');
+    assert.equal(cards[0].id, 'photo-0');
+    assert.equal(cards[cards.length - 1].id, 'photo-' + (total - 1));
+    assert.equal(cards[cards.length - 1].previewIndex, total - 1, 'last card index stays global');
 
-    if (total <= 500) {
-      assert.doesNotMatch(runtime.grid.innerHTML, /pw-batch-nav/);
-      continue;
-    }
-
-    assert.match(runtime.grid.innerHTML, /下一批/);
-    await runtime.window.showNextPhotoBatch();
-    const secondBatch = runtime.grid.getPhotoCards();
-    assert.equal(secondBatch.length, Math.min(total - 500, 500));
-    assert.equal(secondBatch[0].id, 'photo-500');
-    assert.equal(secondBatch[0].previewIndex, 500, 'batch card onclick indices stay global');
-
-    const previewCard = secondBatch[secondBatch.length - 1];
+    const previewCard = cards[cards.length - 1];
     runtime.window.openPhotoWallPreviewAt(previewCard.previewIndex, previewCard);
     assert.equal(runtime.window.lastPreview.config.photos.length, total);
     assert.equal(runtime.window.lastPreview.config.photos[previewCard.previewIndex].id, previewCard.id);
-
-    if (total === 1001) {
-      await runtime.window.showNextPhotoBatch();
-      assert.equal(runtime.grid.getPhotoCards().length, 1, 'the final partial batch remains visible');
-      assert.equal(runtime.grid.getPhotoCards()[0].id, 'photo-1000');
-      assert.equal(runtime.grid.getPhotoCards()[0].previewIndex, 1000);
-      await runtime.window.showPreviousPhotoBatch();
-      assert.equal(runtime.grid.getPhotoCards().length, 500, 'previous from the tail returns to batch two');
-      assert.equal(runtime.grid.getPhotoCards()[0].id, 'photo-500');
-    }
-
-    await runtime.window.showPreviousPhotoBatch();
-    assert.equal(runtime.grid.getPhotoCards().length, 500, 'previous returns to the first batch');
-    assert.equal(runtime.grid.getPhotoCards()[0].id, 'photo-0');
   }
 });
 
@@ -672,7 +655,8 @@ test('photo wall next-batch request does not navigate to an empty tail after fil
   assert.doesNotMatch(runtime.grid.innerHTML, /下一批/);
 });
 
-test('photo album detail paginates within the selected date and preserves preview indices', async () => {
+test('photo album detail renders all photos in the selected date with global preview indices', async () => {
+  // 2026-11-27：相册详情同样全量渲染本组已加载照片，不再 500 分片、无分批导航。
   const photos = makeRenderablePhotos(501, true);
   const runtime = createPhotoWallRenderRuntime(photos);
   runtime.window.pwAlbumView = true;
@@ -680,14 +664,11 @@ test('photo album detail paginates within the selected date and preserves previe
   runtime.window.pwAlbumGroupKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
   runtime.window.renderPhotoWallWithoutReload();
 
-  assert.equal(runtime.grid.getPhotoCards().length, 500);
+  assert.equal(runtime.grid.getPhotoCards().length, 501, 'all photos in the date group rendered');
   assert.match(runtime.grid.innerHTML, /返回相册/);
-  await runtime.window.showNextPhotoBatch();
-  assert.equal(runtime.grid.getPhotoCards().length, 1);
-  assert.equal(runtime.grid.getPhotoCards()[0].previewIndex, 500);
+  assert.doesNotMatch(runtime.grid.innerHTML, /下一批|上一批|第 \d+ 批/);
+  assert.equal(runtime.grid.getPhotoCards()[500].previewIndex, 500);
   assert.equal(runtime.window.pwCurrentSortedPhotos.length, 501);
-  await runtime.window.showPreviousPhotoBatch();
-  assert.equal(runtime.grid.getPhotoCards().length, 500, 'previous keeps the album detail active and returns to its first batch');
   assert.match(runtime.grid.innerHTML, /返回相册/);
 });
 

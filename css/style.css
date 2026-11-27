@@ -17326,3 +17326,57 @@ html.perf-lite .profile-detail-info-item {
 .photo-wall-item > .pw-skeleton::after {
   background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .10), transparent) !important;
 }
+
+/* ★ 2026-11-27 照片墙恢复「统一方形填充」预览（对齐上个月版本）
+   用户反馈按原比例显示高低不齐、大小不一、很奇怪；上个月每张卡片都是
+   统一方格、图片 object-fit:cover 裁剪铺满。这里覆盖同日晚些时候那条
+   「按 --pw-aspect 原比例」的规则：卡片高度恒为 1:1，图片用绝对定位
+   inset:0 + 100% 宽高铺满方格（iOS Safari 上 absolute 定宽高的 img 不会
+   因父容器 aspect-ratio 推断出百分比高度失效），竖图横图一律填满不留白。 */
+.photo-wall-item {
+  aspect-ratio: 1 / 1 !important;
+}
+.photo-wall-item > img {
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  aspect-ratio: auto !important;
+  object-fit: cover !important;
+}
+
+/* ★ 2026-11-27 全屏预览头像首帧大方块修复
+   .pp-story-avatar 的尺寸约束原本只在异步注入的 photo-preview.min.css，
+   首次打开网站、首次打开照片时该 CSS 尚未到位，story.js 异步插入的头像
+   <img>（无 width/height 属性）按原图固有尺寸渲染成左下角大方块。这里把
+   尺寸钉进同步加载的 style.css，首帧即受约束；终态值与 photo-preview.css
+   一致，异步样式到位后无可见跳变。 */
+#photoPreviewOverlay .pp-story-avatar {
+  width: 36px !important;
+  height: 36px !important;
+  min-width: 36px !important;
+  min-height: 36px !important;
+  border-radius: 50% !important;
+  overflow: hidden !important;
+  display: grid !important;
+  place-items: center !important;
+}
+#photoPreviewOverlay .pp-story-avatar img {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+  display: block !important;
+}
+
+/* ★ 2026-11-27 方形填充终极覆盖（本段位于所有规则最后，确保覆盖上面任何
+   --pw-aspect 相关旧声明）：卡片恒 1:1，img 绝对定位铺满，aspect-ratio 归
+   auto。宽高均 100% 时 aspect-ratio 不参与布局，杜绝按原比例高低不齐。 */
+.photo-wall-item { aspect-ratio: 1 / 1 !important; }
+.photo-wall-item > img {
+  position: absolute !important;
+  top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important;
+  width: 100% !important; height: 100% !important;
+  aspect-ratio: auto !important;
+  object-fit: cover !important;
+}

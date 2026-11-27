@@ -22,15 +22,26 @@ const statsSrc = fs.readFileSync(path.join(root, 'js', 'core-parts', '05-feed-st
 test('重-1: renderSorted 数据没变时跳过全量重建', () => {
   const fnIdx = renderSrc.indexOf('function renderSorted(photos, preserveBatch)');
   assert.ok(fnIdx >= 0, '应有 renderSorted');
+  // 2026-11-27：签名字段抽到 computeRenderSignature 统一算法里（增量追加后
+  // 复用同一签名回写 __xtjPwSig，避免签名失配触发全量重建/图片重载）。
   const fnBody = renderSrc.slice(fnIdx, fnIdx + 6000);
   assert.ok(fnBody.includes('__xtjPwSig'), '应有渲染签名缓存');
   assert.ok(fnBody.includes("if (grid.__xtjPwSig === _renderSig && grid.querySelector('.photo-wall-item[data-photo-id]')) return;"),
     '签名相同且已有卡片时应直接返回，不重写 innerHTML');
-  assert.ok(fnBody.includes("(p.cloudId || p.id)"), '签名应含照片 id');
-  assert.ok(fnBody.includes("(p.thumbUrl || p.imageUrl || '')"), '签名应含图址');
-  assert.ok(fnBody.includes("(p.caption || '')"), '签名应含文案');
-  assert.ok(fnBody.includes("recentPhotos.has(String(p.id))"), '签名应含最近上传态');
-  assert.ok(!fnBody.includes('p.views'), '签名不应含浏览数（定点更新，不走重建）');
+  assert.ok(fnBody.includes('computeRenderSignature('), '签名应由统一算法计算，供增量追加回写复用');
+  const sigIdx = renderSrc.indexOf('function computeRenderSignature(');
+  assert.ok(sigIdx >= 0, '应有统一签名函数');
+  const sigBody = renderSrc.slice(sigIdx, sigIdx + 1400);
+  assert.ok(sigBody.includes("(p.cloudId || p.id)"), '签名应含照片 id');
+  assert.ok(sigBody.includes("(p.thumbUrl || p.imageUrl || '')"), '签名应含图址');
+  assert.ok(sigBody.includes("(p.caption || '')"), '签名应含文案');
+  assert.ok(sigBody.includes("recentPhotos.has(String(p.id))"), '签名应含最近上传态');
+  assert.ok(!sigBody.includes('p.views'), '签名不应含浏览数（定点更新，不走重建）');
+  // 增量追加后必须用同一算法回写签名，否则往上翻会全量重建、图片重载。
+  const appendIdx = renderSrc.indexOf('function appendNewPhotoCards(');
+  const appendBody = renderSrc.slice(appendIdx, appendIdx + 1600);
+  assert.ok(appendBody.includes('grid.__xtjPwSig = computeRenderSignature('),
+    '增量追加后应回写签名，避免下次轻量重渲染重建 DOM 导致图片重载');
 });
 
 test('重-3: 骨架检查只统计视口附近未完成的卡片', () => {

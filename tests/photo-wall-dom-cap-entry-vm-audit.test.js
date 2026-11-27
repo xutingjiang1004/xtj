@@ -134,12 +134,15 @@ function createRuntime() {
   };
 }
 
-test('G-L3: 顶满 500 张 DOM 上限后哨兵直接写明触顶状态并保留点击入口', async () => {
+test('G-L3: 无 500 DOM 上限——加载更多后全部追加，哨兵仍是可用入口', async () => {
+  // 2026-11-27：用户要求照片墙全部显示、不要分批。DOM 上限常量放宽到实际
+  // 不可达，加载更多把新页全部追加进 DOM（490 + 20 = 510），不再顶满 500
+  // 停住，也不再写「已达渲染上限」这类分批文案。
   const rt = createRuntime();
   await rt.window.renderPhotoWall();
-  assert.equal(rt.state.cardCount, 490, '首屏渲染 490 张卡片');
+  assert.equal(rt.state.cardCount, 490, '首屏渲染已加载的全部 490 张卡片');
   await rt.window.__xtjPhotoWallLoadMore();
-  assert.equal(rt.state.cardCount, 500, '追加后顶满 500 张 DOM 上限');
-  assert.equal(rt.sentinelText, '已达当前渲染上限，点击继续加载');
-  assert.equal(typeof rt.sentinel.onclick, 'function', '触顶入口可点击（翻下一批）');
+  assert.equal(rt.state.cardCount, 510, '加载更多后全部追加，无 500 上限截断');
+  assert.ok(!/上限|分批|第 \d+ 批/.test(rt.sentinelText), '哨兵不再提示分批触顶');
+  assert.equal(typeof rt.sentinel.onclick, 'function', '哨兵仍保留可点击入口');
 });
