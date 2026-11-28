@@ -2278,6 +2278,13 @@ function isAdmin() {
                 // 立即进入 AI 页面骨架（300ms 内）
                 var aiChatPanel = document.getElementById('panelAiChat');
                 if (aiChatPanel) {
+                    // iOS 固定 .app-container 会建立独立层叠上下文：骨架阶段就必须把
+                    // #panelAiChat 移入 .app-container，确保底部 Dock（z-index:100/70）
+                    // 始终叠在 #panelAiChat（z-index:60）上方，不会消失或被遮盖。
+                    var appContainer = document.querySelector('.app-container');
+                    if (appContainer && aiChatPanel.parentNode !== appContainer) {
+                        appContainer.appendChild(aiChatPanel);
+                    }
                     // 清理旧状态
                     if (aiChatPanel.classList.contains('is-entering')) aiChatPanel.classList.remove('is-entering');
                     if (aiChatPanel.classList.contains('is-leaving')) aiChatPanel.classList.remove('is-leaving');
@@ -2311,7 +2318,12 @@ function isAdmin() {
                     var proceedToOpen = function() {
                         if (typeof window.__xtjOpenAiChat === 'function' && window.__xtjOpenAiChat !== lazyAiChatLauncher._realOpen) {
                             if (openGeneration !== _aiChatOpenGeneration) return;
-                            window.__xtjOpenAiChat();
+                            var fromDock = (typeof currentDockTab !== 'undefined' && currentDockTab === 'ai-chat');
+                            if (fromDock && typeof window.__xtjOpenAiChatFromDock === 'function') {
+                                window.__xtjOpenAiChatFromDock();
+                            } else {
+                                window.__xtjOpenAiChat();
+                            }
                             if (window.XTJPerf) window.XTJPerf.mark('ai-first-open');
                             return;
                         }
@@ -2350,17 +2362,16 @@ function isAdmin() {
         function getAiChatSkeleton() {
             // The page shape appears at once (title bar, message area, input bar) while the AI module
             // loads in the background; the module replaces this markup when it is ready.
-            // ★ 返回入口必须常驻：模块未加载时 ai-agent 的 closeAiChat 还不存在，
-            //   骨架屏没有退出口会让整页看起来死锁（用户实际只能刷新）。
-            return '<div class="ai-chat-container ai-chat-shell" style="box-sizing:border-box;width:100%;min-height:100%;height:100%;display:flex;flex-direction:column;background:var(--bg-page,#f8fcfa);color:var(--text-main,#14261d);">'
-                + '<div style="display:flex;align-items:center;gap:6px;padding:calc(env(safe-area-inset-top,0px) + 8px) 10px 8px;min-height:52px;box-sizing:border-box;">'
-                + '<button type="button" class="ai-chat-skeleton-back" onclick="window.__xtjAbortAiChatOpen&&window.__xtjAbortAiChatOpen()" aria-label="返回帖子" style="width:44px;height:44px;display:inline-flex;align-items:center;justify-content:center;border:0;background:transparent;color:inherit;font-size:28px;line-height:1;cursor:pointer;">‹</button>'
-                + '<div style="font-size:17px;font-weight:600;">小猫AI</div></div>'
-                + '<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:24px 20px;text-align:center;">'
-                + '<div style="font-size:20px;font-weight:600;opacity:.85;">有什么想聊的？</div>'
-                + '<div class="ai-chat-loading" style="font-size:14px;color:var(--text-secondary,#6b7d73);"></div>'
-                + '<div class="ai-chat-error" style="display:none;max-width:360px;text-align:center;color:var(--text-primary,#333);"></div></div>'
-                + '<div style="padding:10px 16px calc(14px + env(safe-area-inset-bottom,0px));box-sizing:border-box;"><div aria-hidden="true" style="max-width:760px;margin:0 auto;box-sizing:border-box;min-height:52px;padding:14px 16px;border-radius:18px;border:1px solid rgba(120,140,130,.28);background:rgba(255,255,255,.55);color:var(--text-secondary,#6b7d73);font-size:15px;text-align:left;">问点什么…</div></div>'
+            // 颜色完全跟随 #panelAiChat 浅/深色主题（不再写死浅色 background），移动端底部预留 Dock 空间。
+            return '<div class="ai-chat-container ai-chat-shell ai-chat-skeleton">'
+                + '<div class="ai-chat-skeleton-head">'
+                + '<button type="button" class="ai-chat-skeleton-back" onclick="window.__xtjAbortAiChatOpen&&window.__xtjAbortAiChatOpen()" aria-label="返回帖子">‹</button>'
+                + '<div class="ai-chat-skeleton-title">小猫AI</div></div>'
+                + '<div class="ai-chat-skeleton-body">'
+                + '<div class="ai-chat-skeleton-hero">有什么想聊的？</div>'
+                + '<div class="ai-chat-loading"></div>'
+                + '<div class="ai-chat-error" style="display:none;max-width:360px;text-align:center;"></div></div>'
+                + '<div class="ai-chat-skeleton-foot"><div aria-hidden="true" class="ai-chat-skeleton-input">问点什么…</div></div>'
                 + '</div>';
         }
 

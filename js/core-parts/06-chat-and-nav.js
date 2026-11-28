@@ -104,6 +104,9 @@
                 if (routePreviousTab === 'ai' && tab !== 'ai' && typeof window.cleanupPhotoWallTransientState === 'function') {
                     try { window.cleanupPhotoWallTransientState(); } catch (ePwClean) {}
                 }
+                if (routePreviousTab === 'chat' && tab !== 'chat' && window.__xtjChatGroups && typeof window.__xtjChatGroups.closeSheets === 'function') {
+                    try { window.__xtjChatGroups.closeSheets(); } catch (eGrpClean) {}
+                }
                 var shouldAnimateTab = options.animate === true;
                 if (tab !== currentDockTab) {
                     // 「返回时回到帖子页」只属于从帖子直接打开某个会话的路径，由 openChat 在入口处记录。
@@ -4464,18 +4467,31 @@
                     result.items.forEach(function(item) {
                         var row = document.createElement('article'); row.className = 'chat-history-result';
                         var jump = document.createElement('button'); jump.type = 'button'; jump.className = 'chat-history-jump';
-                        var heading = document.createElement('strong'); heading.textContent = (item.peer_name || '') + ' · ' + (item.sender_name || '');
-                        var excerpt = document.createElement('span'); excerpt.textContent = (item.payload && item.payload.transcript && q && !String(item.body || '').includes(q) ? item.payload.transcript : item.body) || (item.payload && item.payload.media && item.payload.media.name) || '[' + ({ image: '图片', video: '视频', audio: '语音', file: '文件' }[item.message_type] || '消息') + ']';
-                        var time = document.createElement('time'); time.textContent = new Date(item.sent_at).toLocaleString();
-                        jump.append(heading, excerpt, time); jump.addEventListener('click', function() { jumpChatHistory(item.peer_name, item.message_id); }); row.appendChild(jump);
+                        var meta = document.createElement('div'); meta.className = 'chr-meta';
+                        var heading = document.createElement('strong'); heading.textContent = (item.peer_name || '') + (item.sender_name && item.sender_name !== item.peer_name ? ' · ' + item.sender_name : '');
+                        var time = document.createElement('time');
+                        var dt = new Date(item.sent_at);
+                        time.textContent = isNaN(dt) ? '' : dt.toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+                        meta.append(heading, time);
+                        var excerpt = document.createElement('span'); excerpt.className = 'chr-excerpt';
+                        excerpt.textContent = (item.payload && item.payload.transcript && q && !String(item.body || '').includes(q) ? item.payload.transcript : item.body) || (item.payload && item.payload.media && item.payload.media.name) || '[' + ({ image: '图片', video: '视频', audio: '语音', file: '文件' }[item.message_type] || '消息') + ']';
+                        jump.append(meta, excerpt);
+                        jump.addEventListener('click', function() { jumpChatHistory(item.peer_name, item.message_id); });
+                        row.appendChild(jump);
                         var media = item.payload && item.payload.media;
                         var safe = media && sanitizeUrl(media.url);
                         if (safe && /^https?:\/\//i.test(safe)) {
-                            if (media.kind === 'image') { var thumb = document.createElement('img'); thumb.src = safe; thumb.alt = '聊天图片'; thumb.loading = 'lazy'; row.appendChild(thumb); }
-                            var link = document.createElement('a'); link.href = safe; link.target = '_blank'; link.rel = 'noopener noreferrer'; link.textContent = media.name || '打开附件'; row.appendChild(link);
+                            var side = document.createElement('div'); side.className = 'chr-side';
+                            if (media.kind === 'image') { var thumb = document.createElement('img'); thumb.src = safe; thumb.alt = '聊天图片'; thumb.loading = 'lazy'; side.appendChild(thumb); }
+                            var link = document.createElement('a'); link.className = 'chr-link'; link.href = safe; link.target = '_blank'; link.rel = 'noopener noreferrer'; link.textContent = media.name || (media.kind === 'image' ? '原图' : '打开附件'); side.appendChild(link);
+                            row.appendChild(side);
                         } else {
                             var urls = String(item.body || '').match(/https?:\/\/[^\s<>"']+/g) || [];
-                            urls.slice(0, 3).forEach(function(url) { var href = sanitizeUrl(url); if (!href) return; var a = document.createElement('a'); a.href = href; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.textContent = url; row.appendChild(a); });
+                            if (urls.length) {
+                                var links = document.createElement('div'); links.className = 'chr-links';
+                                urls.slice(0, 2).forEach(function(url) { var href = sanitizeUrl(url); if (!href) return; var a = document.createElement('a'); a.className = 'chr-link'; a.href = href; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.textContent = url; links.appendChild(a); });
+                                if (links.children.length) row.appendChild(links);
+                            }
                         }
                         list.appendChild(row);
                     });

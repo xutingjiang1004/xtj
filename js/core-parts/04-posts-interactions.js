@@ -6129,28 +6129,37 @@
                 overlay.innerHTML =
                     '<div class="post-vis-dialog" role="dialog" aria-modal="true" aria-labelledby="postVisTitle">' +
                         '<div class="post-vis-head">' +
-                            '<h3 id="postVisTitle">可见范围</h3>' +
-                            '<button type="button" class="post-vis-close" aria-label="关闭权限设置">×</button>' +
+                            '<div class="post-vis-title-group">' +
+                                '<h3 id="postVisTitle">可见范围</h3>' +
+                                '<p class="post-vis-sub">随时可更改，保存后立即生效</p>' +
+                            '</div>' +
+                            '<button type="button" class="post-vis-close" aria-label="关闭权限设置">' +
+                                '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>' +
+                            '</button>' +
                         '</div>' +
                         '<div class="post-vis-modes" role="radiogroup" aria-label="可见范围">' +
                             '<label class="post-vis-option" data-mode="public">' +
                                 '<input type="radio" name="postVisMode" value="public">' +
-                                '<span class="post-vis-opt-body"><strong>公开</strong><small>所有人可见</small></span>' +
+                                '<span class="post-vis-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3.6 9h16.8M3.6 15h16.8M12 3a13.5 13.5 0 0 0 0 18M12 3a13.5 13.5 0 0 1 0 18"/></svg></span>' +
+                                '<span class="post-vis-opt-body"><strong>公开</strong><small>所有访问者都可以看到</small></span>' +
                                 '<span class="post-vis-radio-mark" aria-hidden="true"></span>' +
                             '</label>' +
                             '<label class="post-vis-option" data-mode="private">' +
                                 '<input type="radio" name="postVisMode" value="private">' +
-                                '<span class="post-vis-opt-body"><strong>私密</strong><small>仅自己可见</small></span>' +
+                                '<span class="post-vis-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2.5"/><path d="M8 11V7.5a4 4 0 0 1 8 0V11"/></svg></span>' +
+                                '<span class="post-vis-opt-body"><strong>私密</strong><small>仅自己可见，他人无法查看</small></span>' +
                                 '<span class="post-vis-radio-mark" aria-hidden="true"></span>' +
                             '</label>' +
                             '<label class="post-vis-option" data-mode="allow_list">' +
                                 '<input type="radio" name="postVisMode" value="allow_list">' +
-                                '<span class="post-vis-opt-body"><strong>仅谁可见</strong><small>选中的用户可见</small></span>' +
+                                '<span class="post-vis-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8.5" r="3.2"/><path d="M3 19c.6-3.2 2.8-4.8 6-4.8 2.2 0 4 .8 5 2.2M15.5 12.5l2 2 4-4"/></svg></span>' +
+                                '<span class="post-vis-opt-body"><strong>仅谁可见</strong><small>仅选中的指定用户与自己可见</small></span>' +
                                 '<span class="post-vis-radio-mark" aria-hidden="true"></span>' +
                             '</label>' +
                             '<label class="post-vis-option" data-mode="deny_list">' +
                                 '<input type="radio" name="postVisMode" value="deny_list">' +
-                                '<span class="post-vis-opt-body"><strong>仅谁不可见</strong><small>选中的用户不可见</small></span>' +
+                                '<span class="post-vis-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12s3.5-6.5 9.5-6.5c2 0 3.8.7 5.3 1.7M21.5 12s-3.5 6.5-9.5 6.5c-2.2 0-4.1-.8-5.6-2M3 3l18 18"/></svg></span>' +
+                                '<span class="post-vis-opt-body"><strong>仅谁不可见</strong><small>屏蔽选中用户，其余已登录用户可见</small></span>' +
                                 '<span class="post-vis-radio-mark" aria-hidden="true"></span>' +
                             '</label>' +
                         '</div>' +
@@ -6159,13 +6168,16 @@
                                 '<span class="post-vis-picker-title">选择用户</span>' +
                                 '<span class="post-vis-picker-count">已选 0 人</span>' +
                             '</div>' +
-                            '<input type="search" class="post-vis-search" placeholder="搜索用户名…" autocomplete="off" aria-label="搜索用户">' +
+                            '<div class="post-vis-search-wrap">' +
+                                '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>' +
+                                '<input type="search" class="post-vis-search" placeholder="搜索站内用户名…" autocomplete="off" aria-label="搜索用户">' +
+                            '</div>' +
                             '<div class="post-vis-chips"></div>' +
                             '<div class="post-vis-user-list" role="listbox" aria-multiselectable="true"></div>' +
                         '</div>' +
                         '<div class="post-vis-actions">' +
                             '<button type="button" class="post-vis-cancel">取消</button>' +
-                            '<button type="button" class="post-vis-save">保存</button>' +
+                            '<button type="button" class="post-vis-save">保存设置</button>' +
                         '</div>' +
                     '</div>';
 
@@ -6206,9 +6218,11 @@
                     }
                     userListEl.innerHTML = filtered.map(function(u) {
                         var checked = selectedSet.has(u);
+                        var initial = Array.from(String(u || '?')).slice(0, 1).join('').toUpperCase();
                         return '<button type="button" class="post-vis-user-row' + (checked ? ' is-selected' : '') + '" role="option" aria-selected="' + (checked ? 'true' : 'false') + '" data-pick-user="' + escapeHtml(u) + '">' +
-                            '<span class="post-vis-user-check">' + (checked ? '✓' : '') + '</span>' +
+                            '<span class="post-vis-user-avatar" aria-hidden="true">' + escapeHtml(initial) + '</span>' +
                             '<span class="post-vis-user-name">' + escapeHtml(u) + '</span>' +
+                            '<span class="post-vis-user-check">' + (checked ? '✓' : '') + '</span>' +
                         '</button>';
                     }).join('');
                 }
@@ -6352,7 +6366,7 @@
                         saving = false;
                         if (saveBtn && saveBtn.isConnected) {
                             saveBtn.disabled = false;
-                            saveBtn.textContent = '保存';
+                            saveBtn.textContent = '保存设置';
                         }
                     }
                 });

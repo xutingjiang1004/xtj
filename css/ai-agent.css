@@ -1224,7 +1224,7 @@ html.xtj-reduce-motion .ai-rail-beat.is-open .ai-rail-reason {
 .ai-site-search-result span { margin-top: 5px; color: #5b716a; font-size: 13px; line-height: 1.55; }
 .ai-site-search-result small { margin-top: 9px; color: #82938f; font-size: 11px; }
 
-[data-theme="dark"] .ai-secondary-panel,
+[data-theme="dark"] .ai-secondary-panel { background: #0b0b10; }
 [data-theme="dark"] .ai-site-search-panel { background: linear-gradient(180deg, #10211e, #0d1a18); }
 [data-theme="dark"] .ai-site-search-page { color: #e1efe9; }
 [data-theme="dark"] .ai-site-search-header { border-color: rgba(157, 218, 199, .14); background: rgba(17, 39, 34, .8); }
@@ -3539,14 +3539,11 @@ html[data-xtj-motion="off"] .ai-chat-input-bar {
   --ai-text-muted: rgba(220, 231, 230, 0.72);
   --ai-assistant-start: rgba(28, 35, 39, 0.88);
   --ai-assistant-end: rgba(33, 40, 46, 0.8);
-  background:
-    radial-gradient(circle at top left, rgba(51, 98, 88, 0.42), transparent 32%),
-    radial-gradient(circle at top right, rgba(52, 85, 115, 0.34), transparent 28%),
-    linear-gradient(180deg, rgba(15, 18, 21, 0.98), rgba(18, 22, 25, 0.98) 54%, rgba(20, 24, 30, 1));
+  background: #0b0b10;
 }
 
 [data-theme="dark"] .ai-chat-header {
-  background: #141c20;
+  background: #0b0b10;
   border-bottom-color: rgba(255, 255, 255, 0.08);
   backdrop-filter: none;
   -webkit-backdrop-filter: none;

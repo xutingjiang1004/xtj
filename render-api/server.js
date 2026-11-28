@@ -4965,6 +4965,10 @@ app.use('/api/voice-model', require('./voice-model-assets').createVoiceModelAsse
 
 app.use(require('./security-activity').createSecurityActivity({supabase,getClientIp}));
 
+const { createStaticCompressor, jsonCompressMiddleware } = require('./static-compress');
+app.use(jsonCompressMiddleware);
+app.use(createStaticCompressor(path.join(__dirname, '..')));
+
 app.use(express.static(path.join(__dirname, '..'), {
   maxAge: '1h',
   setHeaders: function(res, filePath) {

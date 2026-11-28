@@ -2284,6 +2284,13 @@ function isAdmin() {
                 // 立即进入 AI 页面骨架（300ms 内）
                 var aiChatPanel = document.getElementById('panelAiChat');
                 if (aiChatPanel) {
+                    // iOS 固定 .app-container 会建立独立层叠上下文：骨架阶段就必须把
+                    // #panelAiChat 移入 .app-container，确保底部 Dock（z-index:100/70）
+                    // 始终叠在 #panelAiChat（z-index:60）上方，不会消失或被遮盖。
+                    var appContainer = document.querySelector('.app-container');
+                    if (appContainer && aiChatPanel.parentNode !== appContainer) {
+                        appContainer.appendChild(aiChatPanel);
+                    }
                     // 清理旧状态
                     if (aiChatPanel.classList.contains('is-entering')) aiChatPanel.classList.remove('is-entering');
                     if (aiChatPanel.classList.contains('is-leaving')) aiChatPanel.classList.remove('is-leaving');
@@ -2317,7 +2324,12 @@ function isAdmin() {
                     var proceedToOpen = function() {
                         if (typeof window.__xtjOpenAiChat === 'function' && window.__xtjOpenAiChat !== lazyAiChatLauncher._realOpen) {
                             if (openGeneration !== _aiChatOpenGeneration) return;
-                            window.__xtjOpenAiChat();
+                            var fromDock = (typeof currentDockTab !== 'undefined' && currentDockTab === 'ai-chat');
+                            if (fromDock && typeof window.__xtjOpenAiChatFromDock === 'function') {
+                                window.__xtjOpenAiChatFromDock();
+                            } else {
+                                window.__xtjOpenAiChat();
+                            }
                             if (window.XTJPerf) window.XTJPerf.mark('ai-first-open');
                             return;
                         }
@@ -2356,17 +2368,16 @@ function isAdmin() {
         function getAiChatSkeleton() {
             // The page shape appears at once (title bar, message area, input bar) while the AI module
             // loads in the background; the module replaces this markup when it is ready.
-            // ★ 返回入口必须常驻：模块未加载时 ai-agent 的 closeAiChat 还不存在，
-            //   骨架屏没有退出口会让整页看起来死锁（用户实际只能刷新）。
-            return '<div class="ai-chat-container ai-chat-shell" style="box-sizing:border-box;width:100%;min-height:100%;height:100%;display:flex;flex-direction:column;background:var(--bg-page,#f8fcfa);color:var(--text-main,#14261d);">'
-                + '<div style="display:flex;align-items:center;gap:6px;padding:calc(env(safe-area-inset-top,0px) + 8px) 10px 8px;min-height:52px;box-sizing:border-box;">'
-                + '<button type="button" class="ai-chat-skeleton-back" onclick="window.__xtjAbortAiChatOpen&&window.__xtjAbortAiChatOpen()" aria-label="返回帖子" style="width:44px;height:44px;display:inline-flex;align-items:center;justify-content:center;border:0;background:transparent;color:inherit;font-size:28px;line-height:1;cursor:pointer;">‹</button>'
-                + '<div style="font-size:17px;font-weight:600;">小猫AI</div></div>'
-                + '<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:24px 20px;text-align:center;">'
-                + '<div style="font-size:20px;font-weight:600;opacity:.85;">有什么想聊的？</div>'
-                + '<div class="ai-chat-loading" style="font-size:14px;color:var(--text-secondary,#6b7d73);"></div>'
-                + '<div class="ai-chat-error" style="display:none;max-width:360px;text-align:center;color:var(--text-primary,#333);"></div></div>'
-                + '<div style="padding:10px 16px calc(14px + env(safe-area-inset-bottom,0px));box-sizing:border-box;"><div aria-hidden="true" style="max-width:760px;margin:0 auto;box-sizing:border-box;min-height:52px;padding:14px 16px;border-radius:18px;border:1px solid rgba(120,140,130,.28);background:rgba(255,255,255,.55);color:var(--text-secondary,#6b7d73);font-size:15px;text-align:left;">问点什么…</div></div>'
+            // 颜色完全跟随 #panelAiChat 浅/深色主题（不再写死浅色 background），移动端底部预留 Dock 空间。
+            return '<div class="ai-chat-container ai-chat-shell ai-chat-skeleton">'
+                + '<div class="ai-chat-skeleton-head">'
+                + '<button type="button" class="ai-chat-skeleton-back" onclick="window.__xtjAbortAiChatOpen&&window.__xtjAbortAiChatOpen()" aria-label="返回帖子">‹</button>'
+                + '<div class="ai-chat-skeleton-title">小猫AI</div></div>'
+                + '<div class="ai-chat-skeleton-body">'
+                + '<div class="ai-chat-skeleton-hero">有什么想聊的？</div>'
+                + '<div class="ai-chat-loading"></div>'
+                + '<div class="ai-chat-error" style="display:none;max-width:360px;text-align:center;"></div></div>'
+                + '<div class="ai-chat-skeleton-foot"><div aria-hidden="true" class="ai-chat-skeleton-input">问点什么…</div></div>'
                 + '</div>';
         }
 
@@ -11913,28 +11924,37 @@ function renderProfileActivityList(kind) {
                 overlay.innerHTML =
                     '<div class="post-vis-dialog" role="dialog" aria-modal="true" aria-labelledby="postVisTitle">' +
                         '<div class="post-vis-head">' +
-                            '<h3 id="postVisTitle">可见范围</h3>' +
-                            '<button type="button" class="post-vis-close" aria-label="关闭权限设置">×</button>' +
+                            '<div class="post-vis-title-group">' +
+                                '<h3 id="postVisTitle">可见范围</h3>' +
+                                '<p class="post-vis-sub">随时可更改，保存后立即生效</p>' +
+                            '</div>' +
+                            '<button type="button" class="post-vis-close" aria-label="关闭权限设置">' +
+                                '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>' +
+                            '</button>' +
                         '</div>' +
                         '<div class="post-vis-modes" role="radiogroup" aria-label="可见范围">' +
                             '<label class="post-vis-option" data-mode="public">' +
                                 '<input type="radio" name="postVisMode" value="public">' +
-                                '<span class="post-vis-opt-body"><strong>公开</strong><small>所有人可见</small></span>' +
+                                '<span class="post-vis-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3.6 9h16.8M3.6 15h16.8M12 3a13.5 13.5 0 0 0 0 18M12 3a13.5 13.5 0 0 1 0 18"/></svg></span>' +
+                                '<span class="post-vis-opt-body"><strong>公开</strong><small>所有访问者都可以看到</small></span>' +
                                 '<span class="post-vis-radio-mark" aria-hidden="true"></span>' +
                             '</label>' +
                             '<label class="post-vis-option" data-mode="private">' +
                                 '<input type="radio" name="postVisMode" value="private">' +
-                                '<span class="post-vis-opt-body"><strong>私密</strong><small>仅自己可见</small></span>' +
+                                '<span class="post-vis-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2.5"/><path d="M8 11V7.5a4 4 0 0 1 8 0V11"/></svg></span>' +
+                                '<span class="post-vis-opt-body"><strong>私密</strong><small>仅自己可见，他人无法查看</small></span>' +
                                 '<span class="post-vis-radio-mark" aria-hidden="true"></span>' +
                             '</label>' +
                             '<label class="post-vis-option" data-mode="allow_list">' +
                                 '<input type="radio" name="postVisMode" value="allow_list">' +
-                                '<span class="post-vis-opt-body"><strong>仅谁可见</strong><small>选中的用户可见</small></span>' +
+                                '<span class="post-vis-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8.5" r="3.2"/><path d="M3 19c.6-3.2 2.8-4.8 6-4.8 2.2 0 4 .8 5 2.2M15.5 12.5l2 2 4-4"/></svg></span>' +
+                                '<span class="post-vis-opt-body"><strong>仅谁可见</strong><small>仅选中的指定用户与自己可见</small></span>' +
                                 '<span class="post-vis-radio-mark" aria-hidden="true"></span>' +
                             '</label>' +
                             '<label class="post-vis-option" data-mode="deny_list">' +
                                 '<input type="radio" name="postVisMode" value="deny_list">' +
-                                '<span class="post-vis-opt-body"><strong>仅谁不可见</strong><small>选中的用户不可见</small></span>' +
+                                '<span class="post-vis-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12s3.5-6.5 9.5-6.5c2 0 3.8.7 5.3 1.7M21.5 12s-3.5 6.5-9.5 6.5c-2.2 0-4.1-.8-5.6-2M3 3l18 18"/></svg></span>' +
+                                '<span class="post-vis-opt-body"><strong>仅谁不可见</strong><small>屏蔽选中用户，其余已登录用户可见</small></span>' +
                                 '<span class="post-vis-radio-mark" aria-hidden="true"></span>' +
                             '</label>' +
                         '</div>' +
@@ -11943,13 +11963,16 @@ function renderProfileActivityList(kind) {
                                 '<span class="post-vis-picker-title">选择用户</span>' +
                                 '<span class="post-vis-picker-count">已选 0 人</span>' +
                             '</div>' +
-                            '<input type="search" class="post-vis-search" placeholder="搜索用户名…" autocomplete="off" aria-label="搜索用户">' +
+                            '<div class="post-vis-search-wrap">' +
+                                '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>' +
+                                '<input type="search" class="post-vis-search" placeholder="搜索站内用户名…" autocomplete="off" aria-label="搜索用户">' +
+                            '</div>' +
                             '<div class="post-vis-chips"></div>' +
                             '<div class="post-vis-user-list" role="listbox" aria-multiselectable="true"></div>' +
                         '</div>' +
                         '<div class="post-vis-actions">' +
                             '<button type="button" class="post-vis-cancel">取消</button>' +
-                            '<button type="button" class="post-vis-save">保存</button>' +
+                            '<button type="button" class="post-vis-save">保存设置</button>' +
                         '</div>' +
                     '</div>';
 
@@ -11990,9 +12013,11 @@ function renderProfileActivityList(kind) {
                     }
                     userListEl.innerHTML = filtered.map(function(u) {
                         var checked = selectedSet.has(u);
+                        var initial = Array.from(String(u || '?')).slice(0, 1).join('').toUpperCase();
                         return '<button type="button" class="post-vis-user-row' + (checked ? ' is-selected' : '') + '" role="option" aria-selected="' + (checked ? 'true' : 'false') + '" data-pick-user="' + escapeHtml(u) + '">' +
-                            '<span class="post-vis-user-check">' + (checked ? '✓' : '') + '</span>' +
+                            '<span class="post-vis-user-avatar" aria-hidden="true">' + escapeHtml(initial) + '</span>' +
                             '<span class="post-vis-user-name">' + escapeHtml(u) + '</span>' +
+                            '<span class="post-vis-user-check">' + (checked ? '✓' : '') + '</span>' +
                         '</button>';
                     }).join('');
                 }
@@ -12136,7 +12161,7 @@ function renderProfileActivityList(kind) {
                         saving = false;
                         if (saveBtn && saveBtn.isConnected) {
                             saveBtn.disabled = false;
-                            saveBtn.textContent = '保存';
+                            saveBtn.textContent = '保存设置';
                         }
                     }
                 });
@@ -15650,6 +15675,9 @@ function renderProfileActivityList(kind) {
                 }
                 if (routePreviousTab === 'ai' && tab !== 'ai' && typeof window.cleanupPhotoWallTransientState === 'function') {
                     try { window.cleanupPhotoWallTransientState(); } catch (ePwClean) {}
+                }
+                if (routePreviousTab === 'chat' && tab !== 'chat' && window.__xtjChatGroups && typeof window.__xtjChatGroups.closeSheets === 'function') {
+                    try { window.__xtjChatGroups.closeSheets(); } catch (eGrpClean) {}
                 }
                 var shouldAnimateTab = options.animate === true;
                 if (tab !== currentDockTab) {
@@ -20011,18 +20039,31 @@ function renderProfileActivityList(kind) {
                     result.items.forEach(function(item) {
                         var row = document.createElement('article'); row.className = 'chat-history-result';
                         var jump = document.createElement('button'); jump.type = 'button'; jump.className = 'chat-history-jump';
-                        var heading = document.createElement('strong'); heading.textContent = (item.peer_name || '') + ' · ' + (item.sender_name || '');
-                        var excerpt = document.createElement('span'); excerpt.textContent = (item.payload && item.payload.transcript && q && !String(item.body || '').includes(q) ? item.payload.transcript : item.body) || (item.payload && item.payload.media && item.payload.media.name) || '[' + ({ image: '图片', video: '视频', audio: '语音', file: '文件' }[item.message_type] || '消息') + ']';
-                        var time = document.createElement('time'); time.textContent = new Date(item.sent_at).toLocaleString();
-                        jump.append(heading, excerpt, time); jump.addEventListener('click', function() { jumpChatHistory(item.peer_name, item.message_id); }); row.appendChild(jump);
+                        var meta = document.createElement('div'); meta.className = 'chr-meta';
+                        var heading = document.createElement('strong'); heading.textContent = (item.peer_name || '') + (item.sender_name && item.sender_name !== item.peer_name ? ' · ' + item.sender_name : '');
+                        var time = document.createElement('time');
+                        var dt = new Date(item.sent_at);
+                        time.textContent = isNaN(dt) ? '' : dt.toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+                        meta.append(heading, time);
+                        var excerpt = document.createElement('span'); excerpt.className = 'chr-excerpt';
+                        excerpt.textContent = (item.payload && item.payload.transcript && q && !String(item.body || '').includes(q) ? item.payload.transcript : item.body) || (item.payload && item.payload.media && item.payload.media.name) || '[' + ({ image: '图片', video: '视频', audio: '语音', file: '文件' }[item.message_type] || '消息') + ']';
+                        jump.append(meta, excerpt);
+                        jump.addEventListener('click', function() { jumpChatHistory(item.peer_name, item.message_id); });
+                        row.appendChild(jump);
                         var media = item.payload && item.payload.media;
                         var safe = media && sanitizeUrl(media.url);
                         if (safe && /^https?:\/\//i.test(safe)) {
-                            if (media.kind === 'image') { var thumb = document.createElement('img'); thumb.src = safe; thumb.alt = '聊天图片'; thumb.loading = 'lazy'; row.appendChild(thumb); }
-                            var link = document.createElement('a'); link.href = safe; link.target = '_blank'; link.rel = 'noopener noreferrer'; link.textContent = media.name || '打开附件'; row.appendChild(link);
+                            var side = document.createElement('div'); side.className = 'chr-side';
+                            if (media.kind === 'image') { var thumb = document.createElement('img'); thumb.src = safe; thumb.alt = '聊天图片'; thumb.loading = 'lazy'; side.appendChild(thumb); }
+                            var link = document.createElement('a'); link.className = 'chr-link'; link.href = safe; link.target = '_blank'; link.rel = 'noopener noreferrer'; link.textContent = media.name || (media.kind === 'image' ? '原图' : '打开附件'); side.appendChild(link);
+                            row.appendChild(side);
                         } else {
                             var urls = String(item.body || '').match(/https?:\/\/[^\s<>"']+/g) || [];
-                            urls.slice(0, 3).forEach(function(url) { var href = sanitizeUrl(url); if (!href) return; var a = document.createElement('a'); a.href = href; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.textContent = url; row.appendChild(a); });
+                            if (urls.length) {
+                                var links = document.createElement('div'); links.className = 'chr-links';
+                                urls.slice(0, 2).forEach(function(url) { var href = sanitizeUrl(url); if (!href) return; var a = document.createElement('a'); a.className = 'chr-link'; a.href = href; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.textContent = url; links.appendChild(a); });
+                                if (links.children.length) row.appendChild(links);
+                            }
                         }
                         list.appendChild(row);
                     });
@@ -25461,7 +25502,7 @@ function renderProfileActivityList(kind) {
                     return !root.hidden && root.style.display !== 'none' && !root.classList.contains('closing');
                 }
                 if (root.classList.contains('grp-sheet')) {
-                    return !root.hidden && root.style.display !== 'none' && root.classList.contains('open') && !root.classList.contains('closing');
+                    return !root.hidden && root.style.display !== 'none' && !root.classList.contains('closing');
                 }
                 return !root.hidden && root.style.display !== 'none' && (root.classList.contains('active') || root.classList.contains('show'));
             }

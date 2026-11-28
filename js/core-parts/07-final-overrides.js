@@ -17,7 +17,7 @@
                     return !root.hidden && root.style.display !== 'none' && !root.classList.contains('closing');
                 }
                 if (root.classList.contains('grp-sheet')) {
-                    return !root.hidden && root.style.display !== 'none' && root.classList.contains('open') && !root.classList.contains('closing');
+                    return !root.hidden && root.style.display !== 'none' && !root.classList.contains('closing');
                 }
                 return !root.hidden && root.style.display !== 'none' && (root.classList.contains('active') || root.classList.contains('show'));
             }

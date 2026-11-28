@@ -302,8 +302,15 @@ html.xtj-photo-preview-ready #photoPreviewOverlay.pp-img-error .pp-slide-track {
   transform: none;
 }
 
-html[data-theme="dark"].xtj-photo-preview-ready #photoPreviewOverlay .pp-preview-toolbar,
+html.xtj-photo-preview-ready #photoPreviewOverlay .pp-info-modal-content,
 html[data-theme="dark"].xtj-photo-preview-ready #photoPreviewOverlay .pp-info-modal-content {
+  background: rgba(14, 19, 27, 0.48) !important;
+  border-color: rgba(255, 255, 255, 0.18) !important;
+  color: rgba(250, 253, 252, 0.96) !important;
+  backdrop-filter: blur(22px) saturate(155%) !important;
+  -webkit-backdrop-filter: blur(22px) saturate(155%) !important;
+}
+html[data-theme="dark"].xtj-photo-preview-ready #photoPreviewOverlay .pp-preview-toolbar {
   border-color: rgba(194, 231, 221, 0.12);
 }
 

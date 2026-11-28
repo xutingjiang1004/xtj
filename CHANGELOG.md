@@ -1,5 +1,16 @@
 # 更新日志
 
+## 2026-11-28 八项交互、深色视觉统一与加载速度优化
+
+- **小猫 AI 保留底部导航栏 & 修复冷启动白底白字骨架屏**：`window.__xtjOpenAiChat` 在冷启动阶段即把 `#panelAiChat` 归位至 `.app-container` 同一堆叠上下文（与 iOS `html.xtj-ios-viewport` 下底部 Dock 保持一致层级），并改由 CSS 类 `.ai-chat-skeleton` 跟随浅/深色主题（深色 `#0b0b10`）且为底部 Dock 预留 92px 底部空间；模块加载完成后若仍停留在 `ai-chat` tab，改走 `__xtjOpenAiChatFromDock()` 保持 Dock 模式；同步收敛深色模式下小猫 AI 顶栏/底栏为中性暗色。
+- **修复聊天「发起群聊」弹窗彻底卡死且点透到底层页面**：根因为 `js/core-parts/07-final-overrides.js` 焦点生命周期守卫对 `.grp-sheet` 错误要求 `.open` 类，导致所有群聊抽屉打开即被置为 `inert = true`；修复守卫判定、在 `js/chat-groups.js` 补充 `open`/`closing` 状态并暴露 `closeSheets`，且切离聊天 tab 时自动关闭残留群聊抽屉。
+- **帖子权限弹窗精修升级**：重构 `#postVisibilityModal` 为磨砂玻璃质感弹窗，配备 4 枚矢量图标圆角徽标、圆形首字母头像、带图标一体式透明搜索框与发光选中高亮，兼顾浅色与深色模式。
+- **深色模式聊天（群聊 / 私聊 / 聊天记录 / 弹窗）色差统一 & 聊天记录重排**：将 `#panelChat`、`#dockChatContainer`、`#groupChatView`、`.chat-header`、`.chat-input-area`、`#chatHistoryPanel` 及深色对话框统一至站点主暗色 `#0b0b10` / `#141720`，彻底消除深绿底与外框色差并修复私聊返回箭头尺寸对比度；重排聊天记录面板为规整 2×2 筛选 + 清晰左文右图卡片（移除重叠的绿色胶囊按钮与杂乱蓝字链接）。
+- **全屏照片预览「照片详情（i）」改为约 50% 半透明磨砂**：在 `css/style.css` 与 `css/photo-preview.css` 同步覆盖原 96% 不透明深色规则，帖子图与照片墙预览均统一为 `rgba(14, 19, 27, 0.48)` + `blur(22px)`。
+- **「我的动态」底部「查看更多」去除胶囊样式**：剥离全局玻璃胶囊样式及伪元素，改为顶部分割线 + 居中静默纯文字链接。
+- **首屏加载速度优化**：新增零依赖 `render-api/static-compress.js`（Brotli/Gzip 静态资源内存缓存 + JSON 响应压缩，自动跳过 SSE/Range/二进制媒体，`core.min.js` 体积降约 74%，`style.min.css` 降约 83%）；将 `index.html` 中 5 个照片墙脚本从高优先级 `preload` 降级为 `prefetch`，避免冷启动时抢占首屏核心资源连接。
+- 新增端到端与服务端回归测试：`tests/ux-qa-2026-11-28-round2.test.js`。
+
 ## 2026-11-28 六项线上复核问题修复（聊天图标 / 群头像 / 锐评 OSS / 权限 UI / 小猫 AI 重叠 / 已读同步）
 
 - **聊天顶栏图标与残留入口清理**：`#chatGroupCreateButton`（发起群聊）SVG 改为双人轮廓 + 加号图标；同步更新 `#dockChatSocialBtn`、联系人搜索 Tab 与建群空态按钮文案，贴合“发消息自动加好友”交互。

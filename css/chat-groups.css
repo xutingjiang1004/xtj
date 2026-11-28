@@ -23,10 +23,15 @@
   --grp-other: #ffffff;
   --grp-danger: #c4473f;
 }
-[data-theme="dark"] .grp-sheet.grp-sheet.grp-sheet, [data-theme="dark"] #dockChatContainer {
-  --grp-surface: #192d25; --grp-card: #20372d; --grp-line: rgba(150, 200, 174, .15);
-  --grp-ink: #daede1; --grp-muted: #97b3a3; --grp-accent: #2fae80; --grp-control: rgba(150, 210, 175, .09);
-  --grp-mine: #214f3f; --grp-other: #20372d; --grp-danger: #ef7d74;
+[data-theme="dark"] #dockChatContainer {
+  --grp-surface: #0b0b10; --grp-card: #161922; --grp-line: rgba(255, 255, 255, .08);
+  --grp-ink: #eef1f7; --grp-muted: #8c95a6; --grp-accent: #27a579; --grp-control: rgba(255, 255, 255, .06);
+  --grp-mine: #1c4738; --grp-other: #171a24; --grp-danger: #ef7d74;
+}
+[data-theme="dark"] .grp-sheet.grp-sheet.grp-sheet {
+  --grp-surface: #141720; --grp-card: #1b1f2b; --grp-line: rgba(255, 255, 255, .08);
+  --grp-ink: #eef1f7; --grp-muted: #8c95a6; --grp-accent: #27a579; --grp-control: rgba(255, 255, 255, .07);
+  --grp-mine: #1c4738; --grp-other: #1b1f2b; --grp-danger: #ef7d74;
 }
 .grp-sheet.grp-sheet.grp-sheet svg, .grp-view.grp-view.grp-view svg, .grp-section.grp-section.grp-section svg { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 
@@ -258,7 +263,8 @@ html.xtj-ios-viewport.xtj-keyboard-open .grp-jump.grp-jump.grp-jump { bottom: 82
 .grp-field.grp-field.grp-field input:focus, .grp-field.grp-field.grp-field textarea:focus, .grp-ann-edit.grp-ann-edit.grp-ann-edit textarea:focus { border-color: rgba(33, 157, 114, .5); }
 .grp-search.grp-search.grp-search { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; padding: 0 12px; min-height: 40px; border-radius: 12px; background: var(--grp-control); }
 .grp-search.grp-search.grp-search svg { width: 17px; height: 17px; color: var(--grp-muted); flex-shrink: 0; }
-.grp-search.grp-search.grp-search input { flex: 1; min-width: 0; border: 0; background: none; color: var(--grp-ink); font: inherit; font-size: 15px; outline: none; }
+.grp-search.grp-search.grp-search input,
+[data-theme="dark"] .grp-search.grp-search.grp-search input { flex: 1; min-width: 0; border: 0 !important; background: transparent !important; box-shadow: none !important; color: var(--grp-ink) !important; font: inherit; font-size: 15px; outline: none; }
 .grp-chips.grp-chips.grp-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 6px; }
 .grp-chips.grp-chips.grp-chips:empty { display: none; }
 .grp-chip.grp-chip.grp-chip { border: 0; border-radius: 999px; padding: 4px 10px; background: rgba(33, 157, 114, .14); color: var(--grp-accent); font-size: 12px; cursor: pointer; animation: grpFadeUp .14s ease both; }

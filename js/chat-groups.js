@@ -148,7 +148,7 @@
   function openSheet(title, bodyHtml, options) {
     options = options || {};
     var overlay = document.createElement('div');
-    overlay.className = 'grp-sheet grp-ui' + (options.wide ? ' is-wide' : '') + (options.className ? ' ' + options.className : '');
+    overlay.className = 'grp-sheet grp-ui open' + (options.wide ? ' is-wide' : '') + (options.className ? ' ' + options.className : '');
     overlay.setAttribute('role', 'dialog'); overlay.setAttribute('aria-modal', 'true');
     overlay.innerHTML = '<div class="grp-sheet-card"><div class="grp-sheet-head">' +
       (options.back ? '<button type="button" class="grp-icon-btn" data-sheet-close aria-label="返回"><svg viewBox="0 0 24 24"><path d="m14 6-6 6 6 6"/></svg></button>' : '') +
@@ -158,6 +158,8 @@
     var layer = { el: overlay, close: close, onClose: options.onClose, previous: document.activeElement };
     function close(immediate) {
       if (layer.closed) return; layer.closed = true;
+      overlay.classList.remove('open');
+      overlay.classList.add('closing');
       state.layers = state.layers.filter(function (l) { return l !== layer; });
       if (layer.onClose) try { layer.onClose(); } catch (_) {}
       var card = overlay.firstElementChild;
@@ -2221,7 +2223,7 @@
   }
 
   window.__xtjChatGroups = {
-    open: openGroup, close: closeGroup, reload: loadGroups, create: openCreateSheet,
+    open: openGroup, close: closeGroup, closeSheets: closeAllSheets, reload: loadGroups, create: openCreateSheet,
     // ★ 第二轮修复（聊-3）：好友关系变动（接受/删除/拉黑）后立即失效
     //   30 秒好友缓存，建群选人不用等缓存过期。
     invalidateFriends: function () { state.friends = null; state.friendsAt = 0; },

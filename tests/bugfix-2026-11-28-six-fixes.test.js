@@ -230,17 +230,19 @@ test('Bug 4 & Bug 5: 帖子权限弹窗采用克制原生样式；移动端在 a
   t.after(() => f.close());
   const p = f.page;
 
-  // 1) 验证 Bug 4: 权限弹窗无薄荷绿底、无渐变按钮，且表单可正常交互
+  // 1) 验证 Bug 4: 权限弹窗精致半透玻璃质感（非薄荷绿、无渐变按钮、带图标徽章）
   const postId = f.posts[0].id;
   await p.evaluate(id => window.openPostVisibilityModal(id), postId);
   await p.locator('#postVisibilityModal .post-vis-dialog').waitFor();
   const modalStyle = await p.evaluate(() => {
     const d = getComputedStyle(document.querySelector('#postVisibilityModal .post-vis-dialog'));
     const save = getComputedStyle(document.querySelector('#postVisibilityModal .post-vis-save'));
-    return { bg: d.backgroundColor, saveBgImage: save.backgroundImage };
+    const icons = document.querySelectorAll('#postVisibilityModal .post-vis-icon svg').length;
+    return { bg: d.backgroundColor, saveBgImage: save.backgroundImage, icons };
   });
-  assert.equal(modalStyle.bg, 'rgb(255, 255, 255)', '浅色权限弹窗应为干净纯白底，而非薄荷绿');
+  assert.match(modalStyle.bg, /^rgba?\(255,\s*255,\s*255/, '浅色权限弹窗应为精致白底玻璃，而非薄荷绿');
   assert.equal(modalStyle.saveBgImage, 'none', '保存按钮不应使用 AI 风格渐变背景');
+  assert.equal(modalStyle.icons, 4, '4 个权限选项应各自配有矢量图标');
   await p.keyboard.press('Escape');
   await p.waitForFunction(() => !document.getElementById('postVisibilityModal'));
 
@@ -264,8 +266,9 @@ test('Bug 4 & Bug 5: 帖子权限弹窗采用克制原生样式；移动端在 a
     const rect = panel.getBoundingClientRect();
     return {
       hasBodyOpenClass: document.body.classList.contains('xtj-ai-page-open'),
+      inAppContainer: !!panel.closest('.app-container'),
       panelPosition: ps.position,
-      panelBgImage: ps.backgroundImage,
+      panelZIndex: Number(ps.zIndex),
       panelBgColor: ps.backgroundColor,
       panelRect: { top: rect.top, left: rect.left, width: rect.width, height: rect.height },
       dockPanelsVisibility: ds.visibility,
@@ -273,9 +276,11 @@ test('Bug 4 & Bug 5: 帖子权限弹窗采用克制原生样式；移动端在 a
     };
   });
   assert.equal(overlapCheck.hasBodyOpenClass, true, '打开骨架屏时 body 应立即加上 xtj-ai-page-open');
+  assert.equal(overlapCheck.inAppContainer, true, '#panelAiChat 必须移入 .app-container 与 Dock 同层叠上下文，防止 iOS 盖住底部导航栏');
   assert.equal(overlapCheck.panelPosition, 'fixed', '未加载 ai-agent.min.css 时 #panelAiChat 也必须 fixed 全屏覆盖');
+  assert.equal(overlapCheck.panelZIndex, 60, '移动端 #panelAiChat 层级必须低于底部 Dock (100/70)');
   assert.ok(overlapCheck.panelRect.width >= 388 && overlapCheck.panelRect.height >= 800, '骨架屏应铺满视口');
-  assert.notEqual(overlapCheck.panelBgImage, 'none', '未加载懒加载样式前也应有不透明背景');
+  assert.notEqual(overlapCheck.panelBgColor, 'rgba(0, 0, 0, 0)', '未加载懒加载样式前也应有不透明背景');
   assert.equal(overlapCheck.dockPanelsVisibility, 'hidden', '移动端打开小猫AI 时底层 #dockPanels 必须 hidden，防止页面重叠');
   assert.equal(overlapCheck.dockPanelsPointerEvents, 'none');
 
