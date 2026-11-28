@@ -128,9 +128,18 @@
       }).catch(function () { avatarUrls[name] = ''; }).finally(function () { delete avatarWaiters[name]; });
     });
   }
+  function safeGroupAvatarUrl(url) {
+    var s = String(url == null ? '' : url).trim();
+    return /^(https?:\/\/|blob:|\/)/i.test(s) ? s : '';
+  }
   function groupAvatarHtml(group, cls) {
-    return '<span class="' + (cls || 'grp-avatar') + '" style="--grp-hue:' + hue(group.id) + '" aria-hidden="true"><span>' +
-      esc(initials(group.name)) + '</span><svg viewBox="0 0 24 24"><circle cx="9" cy="9" r="3.2"/><circle cx="16.5" cy="10" r="2.6"/><path d="M3.5 19c.6-3.4 3-5 5.5-5s4.9 1.6 5.5 5M14.5 14.6c2.6-.4 5 .9 5.8 4"/></svg></span>';
+    var imgUrl = safeGroupAvatarUrl(group && group.avatar_url);
+    var className = (cls || 'grp-avatar') + (imgUrl ? ' has-img' : '');
+    if (imgUrl) {
+      return '<span class="' + className + '" style="--grp-hue:' + hue(group && group.id) + '" aria-hidden="true"><img src="' + esc(imgUrl) + '" alt="" decoding="async"></span>';
+    }
+    return '<span class="' + className + '" style="--grp-hue:' + hue(group && group.id) + '" aria-hidden="true"><span>' +
+      esc(initials(group && group.name)) + '</span><svg viewBox="0 0 24 24"><circle cx="9" cy="9" r="3.2"/><circle cx="16.5" cy="10" r="2.6"/><path d="M3.5 19c.6-3.4 3-5 5.5-5s4.9 1.6 5.5 5M14.5 14.6c2.6-.4 5 .9 5.8 4"/></svg></span>';
   }
 
   // ------------------------------------------------------------- layers
@@ -206,7 +215,7 @@
       var button = document.createElement('button');
       button.type = 'button'; button.id = 'chatGroupCreateButton'; button.className = 'chat-feature-button';
       button.setAttribute('aria-label', '发起群聊'); button.title = '发起群聊';
-      button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M3 19c.7-3.6 3.2-5.4 6-5.4 1.4 0 2.7.4 3.8 1.3M18 13v6M15 16h6"/></svg>';
+      button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="8.5" cy="8.5" r="2.8"/><circle cx="15" cy="9.5" r="2.2"/><path d="M3 18.5c.6-3.1 2.7-4.6 5.5-4.6 2.8 0 4.9 1.5 5.5 4.6M14.6 14.3c1.2-.1 2.3.3 3.1 1.1M19 14v5M16.5 16.5h5"/></svg>';
       button.addEventListener('click', openCreateSheet);
       var anchor = $('dockChatSocialBtn');
       header.insertBefore(button, anchor ? anchor.nextSibling : null);
@@ -318,20 +327,70 @@
     var exclude = options.exclude || {};
     var candidates = friends.filter(function (f) { return !exclude[f.name]; });
     var selected = new Set();
-    var body = (options.withName ? '<label class="grp-field"><span>群聊名称（选填）</span><input id="grpCreateName" maxlength="30" placeholder="不填则使用成员名字"></label>' : '') +
+    var avatarFile = null, avatarPreviewUrl = '';
+    var avatarRow = options.withName
+      ? '<div class="grp-create-avatar-row">' +
+          '<button type="button" class="grp-create-avatar-btn" id="grpCreateAvatarBtn" aria-label="上传群头像">' +
+            '<span class="grp-avatar is-large" id="grpCreateAvatarPreview" style="--grp-hue:150" aria-hidden="true"><span>群</span><svg viewBox="0 0 24 24"><circle cx="9" cy="9" r="3.2"/><circle cx="16.5" cy="10" r="2.6"/><path d="M3.5 19c.6-3.4 3-5 5.5-5s4.9 1.6 5.5 5M14.5 14.6c2.6-.4 5 .9 5.8 4"/></svg></span>' +
+            '<span class="grp-create-avatar-copy"><strong>群头像（选填）</strong><small id="grpCreateAvatarHint">点击上传群聊头像</small></span>' +
+          '</button>' +
+          '<button type="button" class="grp-create-avatar-clear" id="grpCreateAvatarClear" hidden>移除</button>' +
+          '<input type="file" id="grpCreateAvatarInput" accept="image/jpeg,image/png,image/webp,image/gif" hidden>' +
+        '</div>'
+      : '';
+    var body = avatarRow +
+      (options.withName ? '<label class="grp-field"><span>群聊名称（选填）</span><input id="grpCreateName" maxlength="30" placeholder="不填则使用成员名字"></label>' : '') +
       '<div class="grp-search"><svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg><input id="grpPickFilter" type="search" placeholder="搜索好友" aria-label="搜索好友"></div>' +
       '<div class="grp-chips" id="grpPickChips" aria-live="polite"></div>' +
       '<div class="grp-pick-list" id="grpPickList">' + (candidates.length ? candidates.map(function (f) {
         return '<label class="grp-pick-row" data-name="' + esc(f.name.toLowerCase() + ' ' + f.note.toLowerCase()) + '"><input type="checkbox" value="' + esc(f.name) + '">' +
           avatarHtml(f.name) + '<span class="grp-pick-name">' + esc(f.note || f.name) + (f.note ? '<small>' + esc(f.name) + '</small>' : '') + '</span><i class="grp-check" aria-hidden="true"></i></label>';
-      }).join('') : '<p class="grp-empty">' + (friends.length ? '好友都已经在群里了' : '还没有好友，先在「联系人」里添加好友吧') + '</p>' + (!friends.length ? '<button type="button" class="grp-primary grp-pick-empty-action" id="grpGoAddFriend">去添加好友</button>' : '')) + '</div>';
+      }).join('') : '<p class="grp-empty">' + (friends.length ? '好友都已经在群里了' : '还没有互为好友的联系人，发消息互聊后自动成为好友') + '</p>' + (!friends.length ? '<button type="button" class="grp-primary grp-pick-empty-action" id="grpGoAddFriend">去找人聊天</button>' : '')) + '</div>';
     return new Promise(function (resolve) {
       var resolved = false;
+      function revokeAvatarPreview() {
+        if (avatarPreviewUrl) { try { URL.revokeObjectURL(avatarPreviewUrl); } catch (_) {} avatarPreviewUrl = ''; }
+      }
       var layer = openSheet(options.title, body, {
         footer: '<button type="button" class="grp-primary" id="grpPickConfirm" disabled>' + esc(options.okText) + '</button>',
-        onClose: function () { if (!resolved) resolve(null); }
+        onClose: function () { revokeAvatarPreview(); if (!resolved) resolve(null); }
       });
       var root = layer.el, confirmBtn = root.querySelector('#grpPickConfirm'), chips = root.querySelector('#grpPickChips');
+      var avatarInput = root.querySelector('#grpCreateAvatarInput');
+      var avatarBtn = root.querySelector('#grpCreateAvatarBtn');
+      var avatarPreview = root.querySelector('#grpCreateAvatarPreview');
+      var avatarHint = root.querySelector('#grpCreateAvatarHint');
+      var avatarClear = root.querySelector('#grpCreateAvatarClear');
+      function resetCreateAvatar() {
+        revokeAvatarPreview();
+        avatarFile = null;
+        if (avatarInput) avatarInput.value = '';
+        if (avatarPreview) {
+          avatarPreview.classList.remove('has-img');
+          avatarPreview.innerHTML = '<span>群</span><svg viewBox="0 0 24 24"><circle cx="9" cy="9" r="3.2"/><circle cx="16.5" cy="10" r="2.6"/><path d="M3.5 19c.6-3.4 3-5 5.5-5s4.9 1.6 5.5 5M14.5 14.6c2.6-.4 5 .9 5.8 4"/></svg>';
+        }
+        if (avatarHint) avatarHint.textContent = '点击上传群聊头像';
+        if (avatarClear) avatarClear.hidden = true;
+      }
+      if (avatarBtn && avatarInput) {
+        avatarBtn.addEventListener('click', function () { avatarInput.click(); });
+        avatarInput.addEventListener('change', function () {
+          var file = avatarInput.files && avatarInput.files[0];
+          if (!file) return;
+          if (file.size > 10 * 1024 * 1024) { toast('群头像不能超过 10MB'); avatarInput.value = ''; return; }
+          if (file.type && !/^image\/(jpeg|png|webp|gif)$/i.test(file.type)) { toast('只支持 JPG、PNG、WebP、GIF 图片'); avatarInput.value = ''; return; }
+          revokeAvatarPreview();
+          avatarFile = file;
+          avatarPreviewUrl = URL.createObjectURL(file);
+          if (avatarPreview) {
+            avatarPreview.classList.add('has-img');
+            avatarPreview.innerHTML = '<img src="' + esc(avatarPreviewUrl) + '" alt="">';
+          }
+          if (avatarHint) avatarHint.textContent = '已选择，点击可更换';
+          if (avatarClear) avatarClear.hidden = false;
+        });
+      }
+      if (avatarClear) avatarClear.addEventListener('click', resetCreateAvatar);
       ensureAvatars(candidates.map(function (f) { return f.name; }), root);
       function sync() {
         confirmBtn.disabled = selected.size === 0;
@@ -359,10 +418,10 @@
       confirmBtn.addEventListener('click', function () {
         resolved = true;
         var nameInput = root.querySelector('#grpCreateName');
-        resolve({ members: Array.from(selected), name: nameInput ? nameInput.value.trim() : '', layer: layer, button: confirmBtn });
+        resolve({ members: Array.from(selected), name: nameInput ? nameInput.value.trim() : '', avatarFile: avatarFile, layer: layer, button: confirmBtn });
       });
       // ★ 第二轮修复（聊-2）：建群选人空态不再是死胡同。关掉选人表，
-      //   打开「联系人」搜索页去加好友；onClose 会把 pickFriends 以
+      //   打开「联系人」搜索页找人聊天；onClose 会把 pickFriends 以
       //   null 结算，调用方直接返回，不会误建群。
       var goAddFriend = root.querySelector('#grpGoAddFriend');
       if (goAddFriend) goAddFriend.addEventListener('click', function () {
@@ -372,6 +431,20 @@
     });
   }
 
+  async function uploadGroupAvatarFile(groupId, file, owner, ep) {
+    if (!groupId || !file) return null;
+    if (file.size > 10 * 1024 * 1024) throw new Error('群头像不能超过 10MB');
+    if (file.type && !/^image\/(jpeg|png|webp|gif)$/i.test(file.type)) throw new Error('只支持 JPG、PNG、WebP、GIF 图片');
+    var data = await api('/' + groupId + '/avatar', {
+      method: 'POST',
+      raw: file,
+      contentType: file.type || 'application/octet-stream',
+      owner: owner,
+      epoch: ep
+    });
+    return data && data.avatar_url ? data.avatar_url : null;
+  }
+
   async function openCreateSheet() {
     if (!me()) { toast('请先登录'); if (typeof window.openAuthModal === 'function') window.openAuthModal('login'); return; }
     var picked = await pickFriends({ title: '发起群聊', okText: '创建', withName: true });
@@ -379,6 +452,11 @@
     picked.button.disabled = true; picked.button.textContent = '正在创建…';
     try {
       var data = await api('', { method: 'POST', json: { name: picked.name, members: picked.members } });
+      if (picked.avatarFile && data && data.group_id) {
+        picked.button.textContent = '正在上传群头像…';
+        try { await uploadGroupAvatarFile(data.group_id, picked.avatarFile); }
+        catch (avatarErr) { toast('群聊已创建，头像上传失败：' + (avatarErr && avatarErr.message || '请稍后重试')); }
+      }
       picked.layer.close();
       if (data.rejected && data.rejected.length) toast('已创建，' + data.rejected.join('、') + ' 不是好友或无法邀请');
       await loadGroups();
@@ -447,7 +525,8 @@
     }
     var prev = state.active;
     if (prev) {
-      clearTimeout(prev.readTimer);
+      if (prev.pendingMarkRead) flushMarkRead(prev);
+      else clearTimeout(prev.readTimer);
       saveDraft(prev.id, $('groupChatInput') ? $('groupChatInput').value : '');
       if (prev.messages) {
         prev.messages.forEach(function (m) {
@@ -461,6 +540,11 @@
     state.active = newConversation(id);
     var conv = state.active;
     var group = findGroup(id);
+    if (group && group.unread && document.visibilityState === 'visible') {
+      group.unread = 0; group.mentioned = false; renderGroupList();
+      if (typeof window.__xtjSetGroupUnread === 'function') window.__xtjSetGroupUnread(groupUnreadTotal());
+      flushMarkRead(conv);
+    }
     $('groupStream').innerHTML = '';
     $('groupOlder').hidden = true;
     $('groupJumpLatest').hidden = true;
@@ -492,7 +576,8 @@
     var view = $('groupChatView');
     var conv = state.active;
     if (conv) {
-      clearTimeout(conv.readTimer);
+      if (conv.pendingMarkRead) flushMarkRead(conv);
+      else clearTimeout(conv.readTimer);
       saveDraft(conv.id, $('groupChatInput') ? $('groupChatInput').value : '');
       if (conv.messages) {
         conv.messages.forEach(function (m) {
@@ -676,30 +761,47 @@
     } finally { conv.loadingOlder = false; if (!showRetry) $('groupOlder').hidden = true; }
   }
 
+  function flushMarkRead(conv) {
+    if (!conv || !same(conv.owner, conv.epoch)) return;
+    clearTimeout(conv.readTimer);
+    conv.readTimer = 0;
+    conv.pendingMarkRead = false;
+    conv.markReadSent = true;
+    api('/' + conv.id + '/actions', { method: 'POST', json: { action: 'mark_read' }, owner: conv.owner, epoch: conv.epoch }).then(function () {
+      scheduleListRefresh(200);
+    }).catch(function (error) {
+      // F-M4：失败补发一次，再失败刷新列表回正服务端真实未读数；
+      // 离开群聊后仍按账号代次重试，避免 400ms 内退出会话丢失已读回执。
+      console.warn('[group] mark_read failed:', error && error.message);
+      if (!same(conv.owner, conv.epoch)) return;
+      setTimeout(function () {
+        if (!same(conv.owner, conv.epoch)) return;
+        api('/' + conv.id + '/actions', { method: 'POST', json: { action: 'mark_read' }, owner: conv.owner, epoch: conv.epoch }).catch(function () {
+          scheduleListRefresh(0);
+        });
+      }, 5000);
+    });
+  }
+
   function markRead(conv) {
     if (!conv || document.visibilityState !== 'visible' || !isChatVisible()) return;
     var group = findGroup(conv.id);
-    if (group && group.unread) {
+    var hadUnread = !!(group && group.unread);
+    if (hadUnread) {
       group.unread = 0; group.mentioned = false; renderGroupList();
       if (typeof window.__xtjSetGroupUnread === 'function') window.__xtjSetGroupUnread(groupUnreadTotal());
     }
     clearTimeout(conv.readTimer);
+    conv.pendingMarkRead = true;
+    // 有未读或首次进入时立即上报服务端已读，避免快速返回时被延迟定时器取消。
+    if (hadUnread || !conv.markReadSent) {
+      flushMarkRead(conv);
+      return;
+    }
     conv.readTimer = setTimeout(function () {
       if (state.active !== conv) return;
-      api('/' + conv.id + '/actions', { method: 'POST', json: { action: 'mark_read' }, owner: conv.owner, epoch: conv.epoch }).catch(function (error) {
-        // F-M4：之前先清角标、POST 失败空吞 —— 角标清了但服务端仍记未读，
-        // 下次列表刷新角标又会跳回来。失败只补发一次，再失败就刷新列表，
-        // 让角标回到服务端真实值，而不是一直错着。
-        console.warn('[group] mark_read failed:', error && error.message);
-        if (state.active !== conv) return;
-        setTimeout(function () {
-          if (state.active !== conv) return;
-          api('/' + conv.id + '/actions', { method: 'POST', json: { action: 'mark_read' }, owner: conv.owner, epoch: conv.epoch }).catch(function () {
-            scheduleListRefresh(0);
-          });
-        }, 5000);
-      });
-    }, 400);
+      flushMarkRead(conv);
+    }, 250);
   }
 
   // ---- rendering
@@ -1407,6 +1509,7 @@
       panel.innerHTML = html; ensureAvatars(shown.map(function (m) { return m.user_name; }), panel); return;
     }
     html += '<div class="grp-info-card">' +
+      infoRow('avatar', '群头像', groupAvatarHtml(g, 'grp-avatar is-mini'), admin ? '' : 'no-arrow') +
       infoRow('rename', '群聊名称', esc(g.name)) +
       (g.qr_token ? infoRow('qr', '群二维码', '<svg class="grp-qr-mini" viewBox="0 0 24 24"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h2v2h-2zM18 14h2v2h-2zM14 18h2v2h-2zM18 18h2v2h-2z"/></svg>') : '') +
       infoRow('announce', '群公告', g.announcement ? '<span class="grp-info-ann">' + esc(g.announcement.slice(0, 60)) + '</span>' : '<span class="grp-muted">未设置</span>') +
@@ -1469,6 +1572,9 @@
       if (res) toast(res.pending && res.pending.length ? '已发送入群邀请，等待群主或管理员确认' : '已邀请 ' + (res.added || []).length + ' 位好友');
     } else if (what === 'remove' || what === 'members') {
       openMemberList(conv, what === 'remove');
+    } else if (what === 'avatar') {
+      if (d.me.role === 'member') { toast('只有群主或管理员可以修改群头像'); return; }
+      openGroupAvatarSheet(conv);
     } else if (what === 'rename') {
       if (d.me.role === 'member') { toast('只有群主或管理员可以修改群名称'); return; }
       var name = await promptBox('修改群聊名称', '修改后将通知全体成员', g.name, 30);
@@ -1509,6 +1615,70 @@
     } else if (what === 'dissolve') {
       if (!(await confirmBox('解散群聊', '解散后所有成员都不能再发言，此操作不能撤销。', '解散'))) return;
       await groupAction(conv, { action: 'dissolve' }, '群聊已解散');
+    }
+  }
+
+  function openGroupAvatarSheet(conv) {
+    var d = conv && conv.detail; if (!d) return;
+    var g = d.group;
+    var body = '<div class="grp-avatar-sheet">' +
+      '<div class="grp-avatar-sheet-preview" id="grpAvatarSheetPreview">' + groupAvatarHtml(g, 'grp-avatar is-large') + '</div>' +
+      '<p class="grp-hint">支持 JPG、PNG、WebP、GIF 图片，自动裁剪为方形私密群头像</p>' +
+      '<div class="grp-avatar-sheet-actions">' +
+        '<button type="button" class="grp-primary" id="grpAvatarChooseBtn">' + (g.avatar_url ? '更换群头像' : '上传群头像') + '</button>' +
+        (g.avatar_url ? '<button type="button" class="grp-secondary is-danger" id="grpAvatarResetBtn">恢复默认头像</button>' : '') +
+      '</div>' +
+      '<input type="file" id="grpAvatarUploadInput" accept="image/jpeg,image/png,image/webp,image/gif" hidden>' +
+    '</div>';
+    var layer = openSheet('群头像', body, { back: true });
+    var chooseBtn = layer.el.querySelector('#grpAvatarChooseBtn');
+    var resetBtn = layer.el.querySelector('#grpAvatarResetBtn');
+    var fileInput = layer.el.querySelector('#grpAvatarUploadInput');
+    function syncAvatar(url) {
+      if (conv.detail && conv.detail.group) conv.detail.group.avatar_url = url || null;
+      var item = findGroup(conv.id);
+      if (item) item.avatar_url = url || null;
+      renderGroupList();
+      if (state.info && state.info.conv === conv) renderInfo();
+      scheduleListRefresh(200);
+    }
+    if (chooseBtn && fileInput) {
+      chooseBtn.addEventListener('click', function () { fileInput.click(); });
+      fileInput.addEventListener('change', async function () {
+        var file = fileInput.files && fileInput.files[0];
+        if (!file) return;
+        chooseBtn.disabled = true;
+        chooseBtn.textContent = '上传中…';
+        if (resetBtn) resetBtn.disabled = true;
+        try {
+          var nextUrl = await uploadGroupAvatarFile(conv.id, file, conv.owner, conv.epoch);
+          syncAvatar(nextUrl);
+          layer.close();
+          toast('群头像已更新');
+        } catch (err) {
+          if (err && err.code !== 'identity_changed') toast((err && err.message) || '头像上传失败');
+          chooseBtn.disabled = false;
+          chooseBtn.textContent = g.avatar_url ? '更换群头像' : '上传群头像';
+          if (resetBtn) resetBtn.disabled = false;
+          fileInput.value = '';
+        }
+      });
+    }
+    if (resetBtn) {
+      resetBtn.addEventListener('click', async function () {
+        resetBtn.disabled = true;
+        if (chooseBtn) chooseBtn.disabled = true;
+        try {
+          await api('/' + conv.id + '/avatar', { method: 'DELETE', owner: conv.owner, epoch: conv.epoch });
+          syncAvatar(null);
+          layer.close();
+          toast('已恢复默认群头像');
+        } catch (err) {
+          if (err && err.code !== 'identity_changed') toast((err && err.message) || '恢复默认头像失败');
+          resetBtn.disabled = false;
+          if (chooseBtn) chooseBtn.disabled = false;
+        }
+      });
     }
   }
 
@@ -1962,7 +2132,7 @@
           payload.kind === 'unset_admin' || payload.kind === 'ban' || payload.kind === 'unban' || payload.kind === 'set_mute_all' ||
           payload.kind === 'rename' || payload.kind === 'announce' || payload.kind === 'invite' || payload.kind === 'members' ||
           payload.kind === 'leave' || payload.kind === 'set_join_approval' || payload.kind === 'set_invite_policy' || payload.kind === 'approve_request' ||
-          payload.kind === 'set_nickname' || payload.kind === 'request') {
+          payload.kind === 'set_nickname' || payload.kind === 'request' || payload.kind === 'avatar') {
         refreshDetail(conv);
       }
       fetchNewer(conv).then(function () { if (state.active === conv) markRead(conv); });

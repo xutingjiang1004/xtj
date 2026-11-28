@@ -19,9 +19,9 @@ const navSrc = fs.readFileSync(path.join(root, 'js', 'core-parts', '06-chat-and-
 const serverSrc = fs.readFileSync(path.join(root, 'render-api', 'chat-groups.js'), 'utf8');
 const cssSrc = fs.readFileSync(path.join(root, 'css', 'chat-groups.css'), 'utf8');
 
-test('聊-2: 建群选人无好友空态有“去添加好友”按钮', () => {
-  assert.ok(groupsSrc.includes("id=\"grpGoAddFriend\""), '空态应有去添加好友按钮');
-  assert.ok(groupsSrc.includes("去添加好友"), '按钮文案应为“去添加好友”');
+test('聊-2: 建群选人无好友空态有“去找人聊天”按钮', () => {
+  assert.ok(groupsSrc.includes("id=\"grpGoAddFriend\""), '空态应有找人聊天入口按钮');
+  assert.ok(groupsSrc.includes("去找人聊天"), '按钮文案应为“去找人聊天”');
   assert.ok(groupsSrc.includes("typeof window.__xtjOpenChatSocial === 'function'"),
     '点击应先判断 __xtjOpenChatSocial 存在再调用');
   assert.ok(groupsSrc.includes("__xtjOpenChatSocial('search')"), '应打开联系人搜索页');

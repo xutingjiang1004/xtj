@@ -2249,15 +2249,19 @@ function isAdmin() {
                 var silent = !!(opts && opts.silent);
                 var panel = document.getElementById('panelAiChat');
                 var hasPendingSkeleton = !!(panel && panel.getAttribute('aria-busy') === 'true');
-                if (silent && !_aiChatOpenInProgress && !window.__xtjPendingAiChatOpen && !hasPendingSkeleton) return;
+                var hasVisibleFallbackPanel = !!(panel && !window.__xtjAiChatActive && (panel.classList.contains('active') || !panel.classList.contains('hidden')) && !panel.querySelector('#aiChatRoot'));
+                if (silent && !_aiChatOpenInProgress && !window.__xtjPendingAiChatOpen && !hasPendingSkeleton && !hasVisibleFallbackPanel) return;
                 try { window.__xtjCancelPendingAiChatOpen(); } catch (eCancel) {}
-                if (panel && (!silent || hasPendingSkeleton || !window.__xtjAiChatActive)) {
+                if (panel && (!silent || hasPendingSkeleton || hasVisibleFallbackPanel || !window.__xtjAiChatActive)) {
                     panel.classList.remove('active', 'is-entering', 'is-leaving');
                     panel.classList.add('hidden');
                     panel.setAttribute('aria-hidden', 'true');
                     panel.removeAttribute('aria-busy');
                     panel.style.display = '';
-                    if (!silent || hasPendingSkeleton) panel.innerHTML = '';
+                    if (!silent || hasPendingSkeleton || hasVisibleFallbackPanel) panel.innerHTML = '';
+                }
+                if (!window.__xtjAiChatActive) {
+                    try { document.body.classList.remove('xtj-ai-page-open'); } catch (_) {}
                 }
                 try {
                     if (typeof window.syncHeaderModalBodyLock === 'function') window.syncHeaderModalBodyLock();
@@ -2289,6 +2293,7 @@ function isAdmin() {
                     aiChatPanel.classList.add('active');
                     aiChatPanel.setAttribute('aria-hidden', 'false');
                     aiChatPanel.setAttribute('aria-busy', 'true');
+                    try { document.body.classList.add('xtj-ai-page-open'); } catch (_) {}
                 }
 
                 // 显示 loading 在 AI 页面内部
@@ -2353,7 +2358,7 @@ function isAdmin() {
             // loads in the background; the module replaces this markup when it is ready.
             // ★ 返回入口必须常驻：模块未加载时 ai-agent 的 closeAiChat 还不存在，
             //   骨架屏没有退出口会让整页看起来死锁（用户实际只能刷新）。
-            return '<div class="ai-chat-container ai-chat-shell" style="box-sizing:border-box;min-height:100%;height:100%;display:flex;flex-direction:column;color:var(--text-main,#14261d);">'
+            return '<div class="ai-chat-container ai-chat-shell" style="box-sizing:border-box;width:100%;min-height:100%;height:100%;display:flex;flex-direction:column;background:var(--bg-page,#f8fcfa);color:var(--text-main,#14261d);">'
                 + '<div style="display:flex;align-items:center;gap:6px;padding:calc(env(safe-area-inset-top,0px) + 8px) 10px 8px;min-height:52px;box-sizing:border-box;">'
                 + '<button type="button" class="ai-chat-skeleton-back" onclick="window.__xtjAbortAiChatOpen&&window.__xtjAbortAiChatOpen()" aria-label="返回帖子" style="width:44px;height:44px;display:inline-flex;align-items:center;justify-content:center;border:0;background:transparent;color:inherit;font-size:28px;line-height:1;cursor:pointer;">‹</button>'
                 + '<div style="font-size:17px;font-weight:600;">小猫AI</div></div>'
@@ -9620,10 +9625,29 @@ function renderProfileActivityList(kind) {
                         postActionIdentityCurrent(session.identity) && session.output.isConnected !== false;
                 }
                 var receivedContent = false, reachedDone = false, failed = false;
-                function showFailure() {
+                function formatPostAiError(raw) {
+                    var msg = String(raw == null ? '' : raw).trim();
+                    if (!msg) return 'AI 暂时不可用。';
+                    var known = {
+                        post_chat_failed: 'AI 暂时不可用。',
+                        stream_interrupted: 'AI 回复中断，点击锐评重试。',
+                        post_images_unavailable: '帖子图片暂时无法读取，请稍后重试。',
+                        post_not_visible: '这篇帖子无权查看，无法锐评。',
+                        post_not_found: '帖子不存在或已删除。',
+                        post_content_empty: '这篇帖子没有可供锐评的文字或图片。',
+                        invalid_post_chat_request: '锐评请求参数无效，请刷新后重试。',
+                        quota_unavailable: 'AI 额度校验暂时不可用，请稍后重试。',
+                        rate_limited: '请求过于频繁，请稍后再试。',
+                        unauthorized: '请先登录后再使用锐评 AI。'
+                    };
+                    if (known[msg]) return known[msg];
+                    if (/[\u4e00-\u9fff]/.test(msg) && msg.length <= 160) return msg;
+                    return 'AI 暂时不可用。';
+                }
+                function showFailure(reason) {
                     if (!isCurrentRequest() || failed) return;
                     failed = true;
-                    session.output.textContent = receivedContent ? session.output.textContent + '\n（回复中断，点击锐评重试）' : 'AI 暂时不可用。';
+                    session.output.textContent = receivedContent ? session.output.textContent + '\n（回复中断，点击锐评重试）' : formatPostAiError(reason);
                     session.output.classList.add('is-error');
                 }
                 session.output.textContent = 'AI 正在锐评...';
@@ -9632,7 +9656,13 @@ function renderProfileActivityList(kind) {
                 session.controller = new AbortController();
                 window.xtjProtectedFetch('/api/agent/post-chat/stream', { method: 'POST', authOwner: session.identity.owner, authEpoch: session.identity.epoch, body: JSON.stringify(payload), signal: session.controller.signal }).then(function(resp) {
                     if (!isCurrentRequest()) { session.controller.abort(); return null; }
-                    if (!resp.ok || !resp.body) throw new Error('post_chat_failed');
+                    if (!resp.ok) {
+                        return (typeof resp.json === 'function' ? resp.json().catch(function() { return {}; }) : Promise.resolve({})).then(function(errBody) {
+                            var serverMsg = (errBody && (errBody.error || errBody.message || errBody.code)) || (resp.status === 401 ? 'unauthorized' : resp.status === 429 ? 'rate_limited' : 'post_chat_failed');
+                            throw new Error(String(serverMsg));
+                        });
+                    }
+                    if (!resp.body) throw new Error('post_chat_failed');
                     return resp.body.getReader();
                 }).then(function(reader) {
                     if (!reader) return;
@@ -9647,7 +9677,7 @@ function renderProfileActivityList(kind) {
                         if (eventType === 'done') { reachedDone = true; return; }
                         var data; try { data = JSON.parse(dataLines.join('\n')); } catch (_) { return; }
                         if (!data || typeof data !== 'object') return;
-                        if (data.error) { showFailure(); return; }
+                        if (data.error) { showFailure(data.error || data.code); return; }
                         if (typeof data.content === 'string' && data.content) {
                             receivedContent = true;
                             session.conversationId = data.conversation_id || session.conversationId;
@@ -9681,7 +9711,7 @@ function renderProfileActivityList(kind) {
                     return read().finally(function() { try { reader.releaseLock(); } catch (_) {} });
                 }).catch(function(error) {
                     if (isCurrentRequest() && (error.name !== 'AbortError' || !session.controller.signal.aborted)) {
-                        showFailure();
+                        showFailure(error && error.message);
                     }
                 });
             }
@@ -10739,6 +10769,7 @@ function renderProfileActivityList(kind) {
                     .neq("media_type", "__auth_deleted__")
                     .neq("media_type", "__custom_ai_models__")
                     .neq("media_type", "__dm_deleted__")
+                    .neq("media_type", "__group_avatar__")
                     .neq("is_deleted", true);
                 // 回退查询显式加可见性 fortify：公开帖 + 本人私密帖（不单依赖 RLS）
                 try {
@@ -10774,6 +10805,7 @@ function renderProfileActivityList(kind) {
                     "__ai_agent_profile__", "__ai_agent_msg__", "__ai_agent_memory__", "__ai_agent_config__",
                     "**ai_agent_memory_box**", "**ai_agent_conv_summary**", "**ai_agent_memory_log**",
                     "__location_task__",
+                    "__group_avatar__",
                     "__ai_english_learning__"  // 退役模块，保留过滤防止旧数据泄漏
                 ];
                 return SYSTEM_MARKERS.indexOf(mt) >= 0;
@@ -11880,25 +11912,30 @@ function renderProfileActivityList(kind) {
                 overlay.className = 'post-vis-overlay active';
                 overlay.innerHTML =
                     '<div class="post-vis-dialog" role="dialog" aria-modal="true" aria-labelledby="postVisTitle">' +
-                        '<button type="button" class="post-vis-close" aria-label="关闭权限设置">×</button>' +
-                        '<h3 id="postVisTitle">帖子权限</h3>' +
-                        '<p class="post-vis-sub">选择这篇帖子的可见范围，保存后立即对全站生效</p>' +
+                        '<div class="post-vis-head">' +
+                            '<h3 id="postVisTitle">可见范围</h3>' +
+                            '<button type="button" class="post-vis-close" aria-label="关闭权限设置">×</button>' +
+                        '</div>' +
                         '<div class="post-vis-modes" role="radiogroup" aria-label="可见范围">' +
                             '<label class="post-vis-option" data-mode="public">' +
                                 '<input type="radio" name="postVisMode" value="public">' +
                                 '<span class="post-vis-opt-body"><strong>公开</strong><small>所有人可见</small></span>' +
+                                '<span class="post-vis-radio-mark" aria-hidden="true"></span>' +
                             '</label>' +
                             '<label class="post-vis-option" data-mode="private">' +
                                 '<input type="radio" name="postVisMode" value="private">' +
-                                '<span class="post-vis-opt-body"><strong>私密</strong><small>仅自己可见，他人无法查看</small></span>' +
+                                '<span class="post-vis-opt-body"><strong>私密</strong><small>仅自己可见</small></span>' +
+                                '<span class="post-vis-radio-mark" aria-hidden="true"></span>' +
                             '</label>' +
                             '<label class="post-vis-option" data-mode="allow_list">' +
                                 '<input type="radio" name="postVisMode" value="allow_list">' +
-                                '<span class="post-vis-opt-body"><strong>仅谁可见</strong><small>只有选中的用户和自己可见</small></span>' +
+                                '<span class="post-vis-opt-body"><strong>仅谁可见</strong><small>选中的用户可见</small></span>' +
+                                '<span class="post-vis-radio-mark" aria-hidden="true"></span>' +
                             '</label>' +
                             '<label class="post-vis-option" data-mode="deny_list">' +
                                 '<input type="radio" name="postVisMode" value="deny_list">' +
-                                '<span class="post-vis-opt-body"><strong>仅谁不可见</strong><small>除选中用户外，已登录用户可见</small></span>' +
+                                '<span class="post-vis-opt-body"><strong>仅谁不可见</strong><small>选中的用户不可见</small></span>' +
+                                '<span class="post-vis-radio-mark" aria-hidden="true"></span>' +
                             '</label>' +
                         '</div>' +
                         '<div class="post-vis-picker" hidden>' +
@@ -11906,13 +11943,13 @@ function renderProfileActivityList(kind) {
                                 '<span class="post-vis-picker-title">选择用户</span>' +
                                 '<span class="post-vis-picker-count">已选 0 人</span>' +
                             '</div>' +
-                            '<input type="search" class="post-vis-search" placeholder="搜索网站用户…" autocomplete="off" aria-label="搜索用户">' +
+                            '<input type="search" class="post-vis-search" placeholder="搜索用户名…" autocomplete="off" aria-label="搜索用户">' +
                             '<div class="post-vis-chips"></div>' +
                             '<div class="post-vis-user-list" role="listbox" aria-multiselectable="true"></div>' +
                         '</div>' +
                         '<div class="post-vis-actions">' +
                             '<button type="button" class="post-vis-cancel">取消</button>' +
-                            '<button type="button" class="post-vis-save">保存权限</button>' +
+                            '<button type="button" class="post-vis-save">保存</button>' +
                         '</div>' +
                     '</div>';
 
@@ -12099,7 +12136,7 @@ function renderProfileActivityList(kind) {
                         saving = false;
                         if (saveBtn && saveBtn.isConnected) {
                             saveBtn.disabled = false;
-                            saveBtn.textContent = '保存权限';
+                            saveBtn.textContent = '保存';
                         }
                     }
                 });
@@ -14454,8 +14491,11 @@ function renderProfileActivityList(kind) {
                         }, 5000);
                     }
                 }
+                if (typeof window.__xtjInvalidateDmListShared === 'function') window.__xtjInvalidateDmListShared();
+                _dmUnreadFetchedAt = 0;
+                if (typeof window.__xtjClearLocalPeerUnread === 'function') window.__xtjClearLocalPeerUnread(senderName);
                 scheduleDockChatListRefresh(updates.length ? 120 : 40);
-                updateUnreadBadge();
+                updateUnreadBadge(true);
             }
             window.markMessagesRead = markMessagesRead;
 
@@ -15225,7 +15265,7 @@ function renderProfileActivityList(kind) {
             }
             window.fetchDmListShared = fetchDmListShared;
 
-            async function updateUnreadBadge() {
+            async function updateUnreadBadge(force) {
                 if (!window.currentUser) { setUnreadBadgeCount(0); return; }
                 // ★ 2026-09-25 修复（审计 H-2，严重）：旧实现用浏览器端 anon key 直连
                 //   Supabase 查 posts 里 media_type = '__dm__' 的行来数未读。但 posts 的 RLS
@@ -15235,7 +15275,7 @@ function renderProfileActivityList(kind) {
                 //   抹掉 loadDockChatList 算出来的正确数字 —— 用户因此漏消息。
                 //   未读数是安全敏感数据，必须走后端（service_role）。这里改为复用
                 //   /api/dm/list，并用 aggregateDmUnread 保证与会话列表口径完全一致。
-                if (Date.now() - _dmUnreadFetchedAt < 5000) return;
+                if (!force && Date.now() - _dmUnreadFetchedAt < 5000) return;
                 var badgeOwner = window.currentUser, badgeEpoch = (typeof _authStateEpoch === 'number' ? _authStateEpoch : 0);
                 try {
                     // 走共享单飞请求：与会话列表复用同一份结果，不再并发两次
@@ -16360,7 +16400,31 @@ function renderProfileActivityList(kind) {
                 _chatRenderSignature[peer] = undefined;
             }
 
+            var _dockChatUnreadDirtyAt = 0;
+            window.__xtjClearLocalPeerUnread = function(peer) {
+                if (!peer) return;
+                _dockChatUnreadDirtyAt = Date.now();
+                window.dockChatListCacheTime = 0;
+                if (typeof _dockChatConversationStates !== 'undefined' && _dockChatConversationStates && _dockChatConversationStates[peer]) {
+                    _dockChatConversationStates[peer].unread_count = 0;
+                    _dockChatConversationStates[peer].manual_unread_at = null;
+                }
+                var listEl = document.getElementById('dockChatList');
+                if (listEl) {
+                    var rows = listEl.querySelectorAll('.chat-list-item[data-chat-user]');
+                    for (var i = 0; i < rows.length; i++) {
+                        if (rows[i].getAttribute('data-chat-user') === peer) {
+                            var badge = rows[i].querySelector('.cli-badge');
+                            if (badge) badge.remove();
+                            if (typeof _dockChatListRenderSignature !== 'undefined') _dockChatListRenderSignature = '';
+                            break;
+                        }
+                    }
+                }
+            };
+
             function dockChatGoBack() {
+                var leavingPeer = dockChatActiveUser;
                 var routeExit = prepareDockChatExit();
                 saveChatAttachmentDraft(); _chatContextSeq++;
                 cancelChatFlashSend();
@@ -16404,10 +16468,25 @@ function renderProfileActivityList(kind) {
                 //   进的详情），则必须清掉缓存时间戳强制加载，否则返回时列表空白。
                 var listEl = document.getElementById('dockChatList');
                 var listHasContent = !!(listEl && listEl.children.length);
-                if (_dockChatListEverLoaded || listHasContent) {
+                var hadLeavingUnread = false;
+                if (leavingPeer && listEl) {
+                    var leavingRows = listEl.querySelectorAll('.chat-list-item[data-chat-user]');
+                    for (var li = 0; li < leavingRows.length; li++) {
+                        if (leavingRows[li].getAttribute('data-chat-user') === leavingPeer && leavingRows[li].querySelector('.cli-badge')) {
+                            hadLeavingUnread = true;
+                            break;
+                        }
+                    }
+                }
+                if (_dockChatUnreadDirtyAt || hadLeavingUnread) {
+                    _dockChatUnreadDirtyAt = 0;
+                    window.dockChatListCacheTime = 0;
+                    if (typeof window.__xtjInvalidateDmListShared === 'function') window.__xtjInvalidateDmListShared();
+                } else if (_dockChatListEverLoaded || listHasContent) {
                     window.dockChatListCacheTime = Date.now();
                 }
                 loadDockChatList();
+                if (hadLeavingUnread && typeof updateUnreadBadge === 'function') updateUnreadBadge(true);
                 startDMPolling(300000);
                 if (typeof window.__xtjResetIOSChatViewport === 'function') {
                     window.__xtjResetIOSChatViewport();
@@ -17157,9 +17236,10 @@ function renderProfileActivityList(kind) {
                 if (_dockChatListRefreshTimer) clearTimeout(_dockChatListRefreshTimer);
                 _dockChatListRefreshTimer = setTimeout(function() {
                     _dockChatListRefreshTimer = null;
+                    if (typeof window.__xtjInvalidateDmListShared === 'function') window.__xtjInvalidateDmListShared();
                     window.dockChatListCacheTime = 0;
                     loadDockChatList();
-                    updateUnreadBadge();
+                    updateUnreadBadge(true);
                 }, typeof delay === 'number' ? delay : 100);
             }
 
@@ -17993,29 +18073,35 @@ function renderProfileActivityList(kind) {
                     renderDockMessages(userName, mergedMessages, forceScroll);
                     syncDockChatHistoryButton(userName);
                     var isGroupOpen = !!(window.__xtjChatGroups && typeof window.__xtjChatGroups.state === 'function' && window.__xtjChatGroups.state() && window.__xtjChatGroups.state().active);
-                    if (pendingReadUpdates.length && currentDockTab==='chat' && !document.hidden && !isGroupOpen) {
+                    var canMarkActiveDmRead = (currentDockTab === 'chat' && !document.hidden && !isGroupOpen);
+                    var convState = (typeof _dockChatConversationStates !== 'undefined' && _dockChatConversationStates) ? _dockChatConversationStates[userName] : null;
+                    var needConvMarkRead = !!(canMarkActiveDmRead && convState && (convState.manual_unread_at || Number(convState.unread_count) > 0));
+                    if (pendingReadUpdates.length && canMarkActiveDmRead) {
                         window.markMessagesRead(userName, mergedMessages, pendingReadUpdates).catch(function() {
                             scheduleDockChatListRefresh(120);
                         });
-                    } else {
-                        if (currentDockTab==='chat' && !document.hidden && !isGroupOpen) {
-                            var convState = (typeof _dockChatConversationStates !== 'undefined' && _dockChatConversationStates) ? _dockChatConversationStates[userName] : null;
-                            if (convState && (convState.manual_unread_at || Number(convState.unread_count) > 0)) {
-                                convState.manual_unread_at = null;
-                                convState.unread_count = 0;
-                                if (typeof window.xtjProtectedFetch === 'function') {
-                                    window.xtjProtectedFetch('/api/chat/social/conversations/' + encodeURIComponent(userName), {
-                                        method: 'PATCH',
-                                        headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({ action: 'mark_read' }),
-                                        authOwner: loadOwner,
-                                        authEpoch: loadEpoch,
-                                        background: true,
-                                        timeoutMs: 10000
-                                    }).then(function() { scheduleDockChatListRefresh(120); }).catch(function() {});
-                                }
-                            }
+                    }
+                    // 独立清除会话级 manual_unread_at 及 180 条窗口外的未读，不再与 pendingReadUpdates 互斥。
+                    if (needConvMarkRead) {
+                        convState.manual_unread_at = null;
+                        convState.unread_count = 0;
+                        if (typeof window.__xtjClearLocalPeerUnread === 'function') window.__xtjClearLocalPeerUnread(userName);
+                        if (typeof window.xtjProtectedFetch === 'function') {
+                            window.xtjProtectedFetch('/api/chat/social/conversations/' + encodeURIComponent(userName), {
+                                method: 'PATCH',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ action: 'mark_read' }),
+                                authOwner: loadOwner,
+                                authEpoch: loadEpoch,
+                                background: true,
+                                timeoutMs: 10000
+                            }).then(function() {
+                                if (typeof window.__xtjInvalidateDmListShared === 'function') window.__xtjInvalidateDmListShared();
+                                scheduleDockChatListRefresh(120);
+                            }).catch(function() {});
                         }
+                    }
+                    if (!pendingReadUpdates.length && !needConvMarkRead) {
                         updateUnreadBadge();
                     }
                 } catch(e) {

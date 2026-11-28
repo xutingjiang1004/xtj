@@ -3841,10 +3841,29 @@
                         postActionIdentityCurrent(session.identity) && session.output.isConnected !== false;
                 }
                 var receivedContent = false, reachedDone = false, failed = false;
-                function showFailure() {
+                function formatPostAiError(raw) {
+                    var msg = String(raw == null ? '' : raw).trim();
+                    if (!msg) return 'AI 暂时不可用。';
+                    var known = {
+                        post_chat_failed: 'AI 暂时不可用。',
+                        stream_interrupted: 'AI 回复中断，点击锐评重试。',
+                        post_images_unavailable: '帖子图片暂时无法读取，请稍后重试。',
+                        post_not_visible: '这篇帖子无权查看，无法锐评。',
+                        post_not_found: '帖子不存在或已删除。',
+                        post_content_empty: '这篇帖子没有可供锐评的文字或图片。',
+                        invalid_post_chat_request: '锐评请求参数无效，请刷新后重试。',
+                        quota_unavailable: 'AI 额度校验暂时不可用，请稍后重试。',
+                        rate_limited: '请求过于频繁，请稍后再试。',
+                        unauthorized: '请先登录后再使用锐评 AI。'
+                    };
+                    if (known[msg]) return known[msg];
+                    if (/[\u4e00-\u9fff]/.test(msg) && msg.length <= 160) return msg;
+                    return 'AI 暂时不可用。';
+                }
+                function showFailure(reason) {
                     if (!isCurrentRequest() || failed) return;
                     failed = true;
-                    session.output.textContent = receivedContent ? session.output.textContent + '\n（回复中断，点击锐评重试）' : 'AI 暂时不可用。';
+                    session.output.textContent = receivedContent ? session.output.textContent + '\n（回复中断，点击锐评重试）' : formatPostAiError(reason);
                     session.output.classList.add('is-error');
                 }
                 session.output.textContent = 'AI 正在锐评...';
@@ -3853,7 +3872,13 @@
                 session.controller = new AbortController();
                 window.xtjProtectedFetch('/api/agent/post-chat/stream', { method: 'POST', authOwner: session.identity.owner, authEpoch: session.identity.epoch, body: JSON.stringify(payload), signal: session.controller.signal }).then(function(resp) {
                     if (!isCurrentRequest()) { session.controller.abort(); return null; }
-                    if (!resp.ok || !resp.body) throw new Error('post_chat_failed');
+                    if (!resp.ok) {
+                        return (typeof resp.json === 'function' ? resp.json().catch(function() { return {}; }) : Promise.resolve({})).then(function(errBody) {
+                            var serverMsg = (errBody && (errBody.error || errBody.message || errBody.code)) || (resp.status === 401 ? 'unauthorized' : resp.status === 429 ? 'rate_limited' : 'post_chat_failed');
+                            throw new Error(String(serverMsg));
+                        });
+                    }
+                    if (!resp.body) throw new Error('post_chat_failed');
                     return resp.body.getReader();
                 }).then(function(reader) {
                     if (!reader) return;
@@ -3868,7 +3893,7 @@
                         if (eventType === 'done') { reachedDone = true; return; }
                         var data; try { data = JSON.parse(dataLines.join('\n')); } catch (_) { return; }
                         if (!data || typeof data !== 'object') return;
-                        if (data.error) { showFailure(); return; }
+                        if (data.error) { showFailure(data.error || data.code); return; }
                         if (typeof data.content === 'string' && data.content) {
                             receivedContent = true;
                             session.conversationId = data.conversation_id || session.conversationId;
@@ -3902,7 +3927,7 @@
                     return read().finally(function() { try { reader.releaseLock(); } catch (_) {} });
                 }).catch(function(error) {
                     if (isCurrentRequest() && (error.name !== 'AbortError' || !session.controller.signal.aborted)) {
-                        showFailure();
+                        showFailure(error && error.message);
                     }
                 });
             }
@@ -4960,6 +4985,7 @@
                     .neq("media_type", "__auth_deleted__")
                     .neq("media_type", "__custom_ai_models__")
                     .neq("media_type", "__dm_deleted__")
+                    .neq("media_type", "__group_avatar__")
                     .neq("is_deleted", true);
                 // 回退查询显式加可见性 fortify：公开帖 + 本人私密帖（不单依赖 RLS）
                 try {
@@ -4995,6 +5021,7 @@
                     "__ai_agent_profile__", "__ai_agent_msg__", "__ai_agent_memory__", "__ai_agent_config__",
                     "**ai_agent_memory_box**", "**ai_agent_conv_summary**", "**ai_agent_memory_log**",
                     "__location_task__",
+                    "__group_avatar__",
                     "__ai_english_learning__"  // 退役模块，保留过滤防止旧数据泄漏
                 ];
                 return SYSTEM_MARKERS.indexOf(mt) >= 0;
@@ -6101,25 +6128,30 @@
                 overlay.className = 'post-vis-overlay active';
                 overlay.innerHTML =
                     '<div class="post-vis-dialog" role="dialog" aria-modal="true" aria-labelledby="postVisTitle">' +
-                        '<button type="button" class="post-vis-close" aria-label="关闭权限设置">×</button>' +
-                        '<h3 id="postVisTitle">帖子权限</h3>' +
-                        '<p class="post-vis-sub">选择这篇帖子的可见范围，保存后立即对全站生效</p>' +
+                        '<div class="post-vis-head">' +
+                            '<h3 id="postVisTitle">可见范围</h3>' +
+                            '<button type="button" class="post-vis-close" aria-label="关闭权限设置">×</button>' +
+                        '</div>' +
                         '<div class="post-vis-modes" role="radiogroup" aria-label="可见范围">' +
                             '<label class="post-vis-option" data-mode="public">' +
                                 '<input type="radio" name="postVisMode" value="public">' +
                                 '<span class="post-vis-opt-body"><strong>公开</strong><small>所有人可见</small></span>' +
+                                '<span class="post-vis-radio-mark" aria-hidden="true"></span>' +
                             '</label>' +
                             '<label class="post-vis-option" data-mode="private">' +
                                 '<input type="radio" name="postVisMode" value="private">' +
-                                '<span class="post-vis-opt-body"><strong>私密</strong><small>仅自己可见，他人无法查看</small></span>' +
+                                '<span class="post-vis-opt-body"><strong>私密</strong><small>仅自己可见</small></span>' +
+                                '<span class="post-vis-radio-mark" aria-hidden="true"></span>' +
                             '</label>' +
                             '<label class="post-vis-option" data-mode="allow_list">' +
                                 '<input type="radio" name="postVisMode" value="allow_list">' +
-                                '<span class="post-vis-opt-body"><strong>仅谁可见</strong><small>只有选中的用户和自己可见</small></span>' +
+                                '<span class="post-vis-opt-body"><strong>仅谁可见</strong><small>选中的用户可见</small></span>' +
+                                '<span class="post-vis-radio-mark" aria-hidden="true"></span>' +
                             '</label>' +
                             '<label class="post-vis-option" data-mode="deny_list">' +
                                 '<input type="radio" name="postVisMode" value="deny_list">' +
-                                '<span class="post-vis-opt-body"><strong>仅谁不可见</strong><small>除选中用户外，已登录用户可见</small></span>' +
+                                '<span class="post-vis-opt-body"><strong>仅谁不可见</strong><small>选中的用户不可见</small></span>' +
+                                '<span class="post-vis-radio-mark" aria-hidden="true"></span>' +
                             '</label>' +
                         '</div>' +
                         '<div class="post-vis-picker" hidden>' +
@@ -6127,13 +6159,13 @@
                                 '<span class="post-vis-picker-title">选择用户</span>' +
                                 '<span class="post-vis-picker-count">已选 0 人</span>' +
                             '</div>' +
-                            '<input type="search" class="post-vis-search" placeholder="搜索网站用户…" autocomplete="off" aria-label="搜索用户">' +
+                            '<input type="search" class="post-vis-search" placeholder="搜索用户名…" autocomplete="off" aria-label="搜索用户">' +
                             '<div class="post-vis-chips"></div>' +
                             '<div class="post-vis-user-list" role="listbox" aria-multiselectable="true"></div>' +
                         '</div>' +
                         '<div class="post-vis-actions">' +
                             '<button type="button" class="post-vis-cancel">取消</button>' +
-                            '<button type="button" class="post-vis-save">保存权限</button>' +
+                            '<button type="button" class="post-vis-save">保存</button>' +
                         '</div>' +
                     '</div>';
 
@@ -6320,7 +6352,7 @@
                         saving = false;
                         if (saveBtn && saveBtn.isConnected) {
                             saveBtn.disabled = false;
-                            saveBtn.textContent = '保存权限';
+                            saveBtn.textContent = '保存';
                         }
                     }
                 });

@@ -15584,7 +15584,7 @@ app.get('/api/feed', optionalAuth, rateLimit(60000, 60), async (req, res) => {
       '__refresh_token__', '__revoked_token__',
       '__ai_agent_profile__', '__ai_agent_msg__', '__ai_agent_memory__', '__ai_agent_config__',
       '**ai_agent_memory_box**', '**ai_agent_conv_summary**', '**ai_agent_memory_log**',
-      '__ai_english_learning__', '__location_task__'
+      '__ai_english_learning__', '__location_task__', '__group_avatar__'
     ];
 
     var selectFields = 'id, user_name, media_type, media_url, content, actor_key, created_at, updated_at, visibility, is_deleted, views, is_pinned, pinned_at, location_name, location_province, location_city, location_district, location_level, ip_province, ip_city, ip_region_text, ip_region_status, ip_lookup_started_at';
@@ -28518,7 +28518,16 @@ app.post('/api/agent/post-chat/stream', guestAiAuth, aiChatConcurrencyGate, gues
       if (streamed) {
         writeSse(res, { partial: true, error: 'stream_interrupted' }, 'error');
       } else {
-        writeSse(res, { error: String((e && e.message) || 'post_chat_failed').slice(0, 180) }, 'error');
+        var rawErr = String((e && e.message) || 'post_chat_failed').slice(0, 180);
+        var critiqueErrMap = {
+          invalid_post_chat_request: '锐评请求参数无效，请刷新后重试。',
+          post_not_found: '帖子不存在或已删除。',
+          post_not_visible: '这篇帖子无权查看，无法锐评。',
+          post_content_empty: '这篇帖子没有可供锐评的文字或图片。',
+          post_images_unavailable: '帖子图片暂时无法读取，请稍后重试。',
+          post_chat_failed: 'AI 暂时不可用。'
+        };
+        writeSse(res, { error: critiqueErrMap[rawErr] || rawErr, code: rawErr }, 'error');
       }
     }
   }

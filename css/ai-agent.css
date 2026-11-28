@@ -6957,6 +6957,13 @@ html.xtj-reduce-motion .ai-copy-menu .ai-reply-menu-panel { animation: none; }
  * remains data-driven by ai-agent.js; the contextual rail only styles status
  * nodes that the runtime actually inserts.
  */
+/* ★ 修复：小猫AI 作为独立页面时隐藏底层主内容（照片墙/帖子视图），
+   移动端与桌面端均需生效，防止懒加载或透明骨架屏与底层页面重叠 */
+body.xtj-ai-page-open #dockPanels {
+  visibility: hidden;
+  pointer-events: none;
+}
+
 @media (min-width: 768px) {
   #panelAiChat.ai-secondary-panel {
     /* The absolute grid child uses the actual content column, including the
@@ -6969,12 +6976,6 @@ html.xtj-reduce-motion .ai-copy-menu .ai-reply-menu-panel { animation: none; }
     height: 100%;
     max-height: 100%;
     z-index: 40;
-  }
-
-  /* ★ 修复：小猫AI 作为独立页面时隐藏底层主内容（照片墙/帖子视图），
-     与侧栏组成"侧栏 + 页面"的桌面导航形态，而不是浮层覆盖在别的窗口上 */
-  body.xtj-ai-page-open #dockPanels {
-    visibility: hidden;
   }
 
   .ai-secondary-panel,

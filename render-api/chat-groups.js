@@ -6,7 +6,9 @@
 const crypto = require('crypto');
 
 const GROUP_BUCKET = 'dm-private';
+const GROUP_AVATAR_MARKER = '__group_avatar__';
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+const MAX_AVATAR_BYTES = 10 * 1024 * 1024;
 const IMAGE_FORMATS = { jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif' };
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const TOKEN_RE = /^[a-f0-9]{32}$/;
@@ -113,6 +115,48 @@ function createChatGroupsRouter(options) {
     return list;
   }
 
+  async function loadGroupAvatarPaths(groupIds) {
+    const out = new Map();
+    const ids = Array.from(new Set((Array.isArray(groupIds) ? groupIds : []).filter(function (id) { return typeof id === 'string' && UUID_RE.test(id); })));
+    if (!ids.length || !supabase || typeof supabase.from !== 'function') return out;
+    try {
+      const table = supabase.from('posts');
+      if (!table || typeof table.select !== 'function') return out;
+      const result = await table
+        .select('actor_key,media_url,created_at')
+        .eq('media_type', GROUP_AVATAR_MARKER)
+        .in('actor_key', ids)
+        .order('created_at', { ascending: false });
+      if (!result || result.error || !Array.isArray(result.data)) return out;
+      for (const row of result.data) {
+        const gid = row && row.actor_key ? String(row.actor_key) : '';
+        if (!gid || out.has(gid)) continue;
+        out.set(gid, String(row.media_url || '').trim());
+      }
+    } catch (_) {}
+    return out;
+  }
+
+  async function attachGroupAvatars(groups) {
+    const list = (Array.isArray(groups) ? groups : []).filter(function (g) { return g && typeof g === 'object' && g.id; });
+    if (!list.length || typeof signPrivate !== 'function') return list;
+    const pathMap = await loadGroupAvatarPaths(list.map(function (g) { return g.id; }));
+    const targets = list.filter(function (g) {
+      const path = pathMap.get(g.id);
+      return typeof path === 'string' && path.length > 0 && path.indexOf('..') < 0;
+    });
+    for (let offset = 0; offset < targets.length; offset += 8) {
+      await Promise.all(targets.slice(offset, offset + 8).map(async function (g) {
+        const path = pathMap.get(g.id);
+        try {
+          const signed = await signPrivate(path);
+          if (signed) g.avatar_url = signed;
+        } catch (_) {}
+      }));
+    }
+    return list;
+  }
+
   function groupId(req, res) {
     const id = String(req.params.id || '');
     if (!UUID_RE.test(id)) { fail(res, 'not_member'); return null; }
@@ -123,7 +167,9 @@ function createChatGroupsRouter(options) {
     try {
       const data = await rpc('chat_group_list', { p_actor: req.userName });
       if (!data.ok) return fail(res, data.code);
-      return res.json({ ok: true, groups: data.groups || [] });
+      const groups = Array.isArray(data.groups) ? data.groups : [];
+      await attachGroupAvatars(groups);
+      return res.json({ ok: true, groups: groups });
     } catch (error) { return unavailable(res, error, 'list'); }
   });
 
@@ -157,6 +203,7 @@ function createChatGroupsRouter(options) {
       if (!TOKEN_RE.test(token)) return fail(res, 'invalid_token');
       const data = await rpc('chat_group_token_preview', { p_actor: req.userName, p_token: token });
       if (!data.ok) return fail(res, data.code);
+      if (data.group) await attachGroupAvatars([data.group]);
       return res.json({ ok: true, group: data.group });
     } catch (error) { return unavailable(res, error, 'preview'); }
   });
@@ -181,8 +228,103 @@ function createChatGroupsRouter(options) {
     try {
       const data = await rpc('chat_group_detail', { p_actor: req.userName, p_group: id });
       if (!data.ok) return fail(res, data.code);
+      if (data.group) await attachGroupAvatars([data.group]);
       return res.json({ ok: true, group: data.group, me: data.me, members: data.members || [] });
     } catch (error) { return unavailable(res, error, 'detail'); }
+  });
+
+  // Group avatars belong to private chat content: store in dm-private only, never OSS/public.
+  router.post('/:id/avatar', rateLimit(3600000, 30), authenticateUser,
+    express.raw({ type: ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'application/octet-stream'], limit: MAX_AVATAR_BYTES }),
+    async function (req, res) {
+      const id = groupId(req, res); if (!id) return;
+      let storagePath = '';
+      try {
+        const blocked = sendBlocked(req);
+        if (blocked) return res.status(blocked.status || 403).json({ ok: false, code: blocked.code, error: blocked.message });
+        const buffer = req.body;
+        if (!Buffer.isBuffer(buffer) || !buffer.length) return fail(res, 'invalid_media');
+        const detail = await rpc('chat_group_detail', { p_actor: req.userName, p_group: id });
+        if (!detail.ok) return fail(res, detail.code);
+        if (detail.group && detail.group.dissolved) return fail(res, 'dissolved');
+        if (!detail.me || (detail.me.role !== 'owner' && detail.me.role !== 'admin')) return fail(res, 'forbidden');
+        let meta;
+        try { meta = await sharp(buffer, { limitInputPixels: 100000000 }).metadata(); } catch (_) { meta = null; }
+        const format = meta && String(meta.format || '').toLowerCase();
+        if (!format || !IMAGE_FORMATS[format]) {
+          return res.status(400).json({ ok: false, code: 'invalid_image', error: '只支持 JPG、PNG、WebP、GIF 图片' });
+        }
+        let processed;
+        try {
+          processed = await sharp(buffer, { limitInputPixels: 100000000 })
+            .rotate()
+            .resize(256, 256, { fit: 'cover' })
+            .jpeg({ quality: 86, mozjpeg: true })
+            .toBuffer();
+        } catch (_) {
+          return res.status(400).json({ ok: false, code: 'invalid_image', error: '图片处理失败，请换一张图片重试' });
+        }
+        const prevPaths = await loadGroupAvatarPaths([id]);
+        const prevPath = prevPaths.get(id) || '';
+        storagePath = 'chat/grp_avatar_' + id.replace(/-/g, '') + '_' + crypto.randomUUID().replace(/-/g, '') + '.jpg';
+        const upload = await supabase.storage.from(GROUP_BUCKET).upload(storagePath, processed, {
+          contentType: 'image/jpeg', cacheControl: '31536000', upsert: false
+        });
+        if (!upload || upload.error) { storagePath = ''; return unavailable(res, upload && upload.error, 'avatar_upload'); }
+        const inserted = await supabase.from('posts').insert([{
+          user_name: req.userName,
+          content: '',
+          media_type: GROUP_AVATAR_MARKER,
+          media_url: storagePath,
+          actor_key: id,
+          visibility: 'private'
+        }]);
+        if (inserted && inserted.error) {
+          await removePrivate([storagePath]).catch(function () {});
+          storagePath = '';
+          return unavailable(res, inserted.error, 'avatar_save');
+        }
+        let avatarUrl = null;
+        if (typeof signPrivate === 'function') {
+          try { avatarUrl = await signPrivate(storagePath); } catch (_) { avatarUrl = null; }
+        }
+        if (prevPath && prevPath !== storagePath) {
+          removePrivate([prevPath]).catch(function () {});
+        }
+        const memberNames = (detail.members || []).map(function (m) { return m && m.user_name; }).filter(Boolean);
+        notify(memberNames, { kind: 'avatar', group_id: id });
+        return res.json({ ok: true, avatar_url: avatarUrl });
+      } catch (error) {
+        if (storagePath) await removePrivate([storagePath]).catch(function () {});
+        return unavailable(res, error, 'avatar');
+      }
+    });
+
+  router.delete('/:id/avatar', rateLimit(3600000, 30), authenticateUser, async function (req, res) {
+    const id = groupId(req, res); if (!id) return;
+    try {
+      const blocked = sendBlocked(req);
+      if (blocked) return res.status(blocked.status || 403).json({ ok: false, code: blocked.code, error: blocked.message });
+      const detail = await rpc('chat_group_detail', { p_actor: req.userName, p_group: id });
+      if (!detail.ok) return fail(res, detail.code);
+      if (detail.group && detail.group.dissolved) return fail(res, 'dissolved');
+      if (!detail.me || (detail.me.role !== 'owner' && detail.me.role !== 'admin')) return fail(res, 'forbidden');
+      const prevPaths = await loadGroupAvatarPaths([id]);
+      const prevPath = prevPaths.get(id) || '';
+      const inserted = await supabase.from('posts').insert([{
+        user_name: req.userName,
+        content: '',
+        media_type: GROUP_AVATAR_MARKER,
+        media_url: '',
+        actor_key: id,
+        visibility: 'private'
+      }]);
+      if (inserted && inserted.error) return unavailable(res, inserted.error, 'avatar_delete');
+      if (prevPath) removePrivate([prevPath]).catch(function () {});
+      const memberNames = (detail.members || []).map(function (m) { return m && m.user_name; }).filter(Boolean);
+      notify(memberNames, { kind: 'avatar', group_id: id });
+      return res.json({ ok: true, avatar_url: null });
+    } catch (error) { return unavailable(res, error, 'avatar_delete'); }
   });
 
   router.get('/:id/messages', rateLimit(60000, 240), authenticateUser, async function (req, res) {
@@ -363,4 +505,4 @@ function createChatGroupsRouter(options) {
   return router;
 }
 
-module.exports = { createChatGroupsRouter, GROUP_BUCKET, MAX_IMAGE_BYTES };
+module.exports = { createChatGroupsRouter, GROUP_BUCKET, GROUP_AVATAR_MARKER, MAX_IMAGE_BYTES, MAX_AVATAR_BYTES };

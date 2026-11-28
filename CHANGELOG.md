@@ -1,5 +1,15 @@
 # 更新日志
 
+## 2026-11-28 六项线上复核问题修复（聊天图标 / 群头像 / 锐评 OSS / 权限 UI / 小猫 AI 重叠 / 已读同步）
+
+- **聊天顶栏图标与残留入口清理**：`#chatGroupCreateButton`（发起群聊）SVG 改为双人轮廓 + 加号图标；同步更新 `#dockChatSocialBtn`、联系人搜索 Tab 与建群空态按钮文案，贴合“发消息自动加好友”交互。
+- **群聊自定义头像（私密桶直存、免 SQL 迁移）**：新增 `POST /api/groups/:id/avatar`、`DELETE /api/groups/:id/avatar` 并在列表/详情/扫码预览返回短时签名 `avatar_url`，仅存 `dm-private` 私密桶（绝不走 OSS/公开），`sharp` 统一裁剪为 256×256 JPEG；建群弹窗与群设置页支持群主/管理员上传、更换、恢复默认头像并实时广播更新。
+- **帖子「锐评 AI」与评论区 `@小猫` 修复 OSS 图片 + 透传真实报错**：`render-api/post-critique.js` 与 `render-api/cat-post-images.js` 识别直传阿里云 OSS 的帖子图后直接透传已校验公网地址，不再错误调用 Supabase `createSignedUrl`；`/api/agent/post-chat/stream` 与前端 `runPostAiRequest` 透传可读中文报错（保留空流兜底）。
+- **帖子权限弹窗视觉精简**：重构 `#postVisibilityModal` 为原生克制分组表单（白/深灰中性底、细分隔线、右侧勾选指示、扁平保存/取消按钮，移动端底部抽屉），收敛帖子卡片可见徽章视觉强度。
+- **小猫 AI 冷启动与移动端页面重叠修复**：将 `#panelAiChat.ai-secondary-panel` 固定全屏不透明样式与全视口 `body.xtj-ai-page-open #dockPanels { visibility: hidden; pointer-events: none; }` 写入首屏常驻 `css/style.css`，`__xtjOpenAiChat` 显示骨架时立即加 `xtj-ai-page-open` 并在中止时清理。
+- **私聊 / 群聊查看后未读同步修复**：私聊标已读立即失效 `fetchDmListShared` 3 秒共享缓存、支持 `updateUnreadBadge(true)` 绕过 5 秒节流、返回列表时不再跳过刷新；将 `PATCH /api/chat/social/conversations/:peer { action: 'mark_read' }` 从 `else` 互斥分支解耦，确保同时清除 `manual_unread_at` 与 180 条窗口外未读；群聊进入未读会话立即上报已读，且离开群聊时强制 flush 待发已读回执。
+- 新增回归测试：`tests/bugfix-2026-11-28-six-fixes.test.js`，扩展 `tests/post-critique-runtime.test.js`。
+
 ## 2026-11-28 全站四板块审计修复 + 帖子权限管理 + 聊天发消息自动加好友
 
 - **四板块全面审计与修复（帖子 / 小猫 AI / 照片墙与预览 / 聊天与群聊）**：

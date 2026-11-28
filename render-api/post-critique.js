@@ -1,6 +1,6 @@
 'use strict';
 const { loadPostAttachments } = require('./post-attachments');
-const { parsePostMediaUrl } = require('./post-media');
+const { parsePostMediaUrl, parseOssMediaUrl } = require('./post-media');
 const { MAX_POST_IMAGES } = require('../js/post-media');
 const CRITIQUE_SYSTEM = '你是小猫，一个嘴毒、反应快的中文吐槽高手。当前只做帖子锐评。' +
   '\n只写一到两句，通常20至60字，最多90字。开口就吐槽，不铺垫、不分析成小作文、不安慰、不在结尾夸回来。' +
@@ -21,6 +21,11 @@ async function preparePostCritique({ post, content, initial, followup, supabase,
   const parts = await Promise.all(images.map(async item => {
     // Only server-owned, authorized post attachments are passed to the model.
     // Client-supplied URLs and arbitrary external hosts are never fetched.
+    // Direct-to-OSS post images live in the configured public-read OSS bucket
+    // (not Supabase Storage), so pass their validated HTTPS URL directly.
+    if (parseOssMediaUrl(item.media_url)) {
+      return { type: 'image_url', image_url: { url: new URL(item.media_url).href } };
+    }
     const path = parsePostMediaUrl(item.media_url, supabaseUrl);
     if (!path) throw Error('post_images_unavailable');
     const result = await supabase.storage.from('uploads').createSignedUrl(path, 120);

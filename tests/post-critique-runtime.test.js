@@ -57,6 +57,7 @@ test('the actual critique route enforces post visibility and bills image provide
   const supabase = { from() { return { select() { return this; }, eq() { return this; }, in() { return this; }, async maybeSingle() { return { data: { ...post, visibility } }; }, async order() { return { data: [{ post_id: post.id, media_type: 'image', position: 0, media_url: post.media_url }] }; } }; }, storage: { from() { return { async createSignedUrl(path, ttl) { signed.push({ path, ttl }); return { data: { signedUrl: 'https://supabase.test/storage/v1/object/sign/uploads/' + path + '?token=fixture' } }; } }; } } };
   const pass = (req, res, next) => next();
   const scope = vm.createContext({ app, supabase, require: localRequire, ADMIN_USERNAME: 'xxz', SUPABASE_URL: 'https://supabase.test', AbortController, console,
+    canUserViewPost: localRequire('./post-visibility').canUserViewPost,
     DEEPSEEK_MODEL_VISION: 'deepseek-flash', DEEPSEEK_MODEL_FLASH: 'deepseek-flash', endSse:require('../render-api/sse-write').endSse,writeSse: localRequire('./sse-write').writeSse,
     authenticateUser: (req, res, next) => { req.userName = req.headers['x-fixture-user']; if (!req.userName) return res.status(401).json({ error: 'unauthorized' }); next(); },
     guestAiAuth: (req, res, next) => { req.userName = req.userName || req.headers['x-fixture-user']; if (!req.userName) return res.status(401).json({ error: 'unauthorized' }); next(); },
@@ -87,4 +88,47 @@ test('the actual critique route enforces post visibility and bills image provide
   assert.equal(visible.length, 90); assert.doesNotMatch(visible, /锐评：|\*\*/);
   assert.equal(billed.length, 1); assert.equal(billed[0].actualUsage, usage);
   assert.doesNotMatch(JSON.stringify(billed), /token=fixture|signedUrl/);
+});
+
+test('direct-to-OSS post images bypass Supabase createSignedUrl for both critique and @cat replies', async () => {
+  const prevBucket = process.env.OSS_BUCKET, prevEndpoint = process.env.OSS_ENDPOINT;
+  process.env.OSS_BUCKET = 'xtj-test-bucket';
+  process.env.OSS_ENDPOINT = 'oss-cn-hangzhou.aliyuncs.com';
+  try {
+    const ossUrl = 'https://xtj-test-bucket.oss-cn-hangzhou.aliyuncs.com/posts/oss-photo-1.jpg';
+    const f = fixture([{ post_id: 'oss-post', position: 0, media_type: 'image', media_url: ossUrl }]);
+    const prepared = await preparePostCritique({
+      post: { id: 'oss-post', media_type: 'album' },
+      content: 'OSS 图测试',
+      initial: true,
+      supabase: f.supabase,
+      supabaseUrl: 'https://supabase.test'
+    });
+    assert.equal(prepared.imageCount, 1);
+    assert.equal(prepared.message[1].image_url.url, ossUrl);
+    assert.equal(f.signed.length, 0, 'OSS image must not call Supabase Storage createSignedUrl');
+
+    const { catPostImageParts } = require('../render-api/cat-post-images');
+    const catParts = await catPostImageParts({
+      post: { id: 'oss-post', media_type: 'album' },
+      supabase: f.supabase,
+      supabaseUrl: 'https://supabase.test'
+    });
+    assert.equal(catParts.length, 1);
+    assert.equal(catParts[0].image_url.url, ossUrl);
+    assert.equal(f.signed.length, 0);
+
+    // Foreign host with OSS enabled is still rejected.
+    const bad = fixture([{ post_id: 'bad-post', position: 0, media_type: 'image', media_url: 'https://evil-bucket.oss-cn-hangzhou.aliyuncs.com/posts/x.jpg' }]);
+    await assert.rejects(preparePostCritique({
+      post: { id: 'bad-post', media_type: 'album' },
+      content: '',
+      initial: true,
+      supabase: bad.supabase,
+      supabaseUrl: 'https://supabase.test'
+    }), /post_images_unavailable/);
+  } finally {
+    if (prevBucket === undefined) delete process.env.OSS_BUCKET; else process.env.OSS_BUCKET = prevBucket;
+    if (prevEndpoint === undefined) delete process.env.OSS_ENDPOINT; else process.env.OSS_ENDPOINT = prevEndpoint;
+  }
 });

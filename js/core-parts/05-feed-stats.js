@@ -804,8 +804,11 @@
                         }, 5000);
                     }
                 }
+                if (typeof window.__xtjInvalidateDmListShared === 'function') window.__xtjInvalidateDmListShared();
+                _dmUnreadFetchedAt = 0;
+                if (typeof window.__xtjClearLocalPeerUnread === 'function') window.__xtjClearLocalPeerUnread(senderName);
                 scheduleDockChatListRefresh(updates.length ? 120 : 40);
-                updateUnreadBadge();
+                updateUnreadBadge(true);
             }
             window.markMessagesRead = markMessagesRead;
 
@@ -1575,7 +1578,7 @@
             }
             window.fetchDmListShared = fetchDmListShared;
 
-            async function updateUnreadBadge() {
+            async function updateUnreadBadge(force) {
                 if (!window.currentUser) { setUnreadBadgeCount(0); return; }
                 // ★ 2026-09-25 修复（审计 H-2，严重）：旧实现用浏览器端 anon key 直连
                 //   Supabase 查 posts 里 media_type = '__dm__' 的行来数未读。但 posts 的 RLS
@@ -1585,7 +1588,7 @@
                 //   抹掉 loadDockChatList 算出来的正确数字 —— 用户因此漏消息。
                 //   未读数是安全敏感数据，必须走后端（service_role）。这里改为复用
                 //   /api/dm/list，并用 aggregateDmUnread 保证与会话列表口径完全一致。
-                if (Date.now() - _dmUnreadFetchedAt < 5000) return;
+                if (!force && Date.now() - _dmUnreadFetchedAt < 5000) return;
                 var badgeOwner = window.currentUser, badgeEpoch = (typeof _authStateEpoch === 'number' ? _authStateEpoch : 0);
                 try {
                     // 走共享单飞请求：与会话列表复用同一份结果，不再并发两次

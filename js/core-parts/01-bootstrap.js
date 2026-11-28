@@ -2243,15 +2243,19 @@ function isAdmin() {
                 var silent = !!(opts && opts.silent);
                 var panel = document.getElementById('panelAiChat');
                 var hasPendingSkeleton = !!(panel && panel.getAttribute('aria-busy') === 'true');
-                if (silent && !_aiChatOpenInProgress && !window.__xtjPendingAiChatOpen && !hasPendingSkeleton) return;
+                var hasVisibleFallbackPanel = !!(panel && !window.__xtjAiChatActive && (panel.classList.contains('active') || !panel.classList.contains('hidden')) && !panel.querySelector('#aiChatRoot'));
+                if (silent && !_aiChatOpenInProgress && !window.__xtjPendingAiChatOpen && !hasPendingSkeleton && !hasVisibleFallbackPanel) return;
                 try { window.__xtjCancelPendingAiChatOpen(); } catch (eCancel) {}
-                if (panel && (!silent || hasPendingSkeleton || !window.__xtjAiChatActive)) {
+                if (panel && (!silent || hasPendingSkeleton || hasVisibleFallbackPanel || !window.__xtjAiChatActive)) {
                     panel.classList.remove('active', 'is-entering', 'is-leaving');
                     panel.classList.add('hidden');
                     panel.setAttribute('aria-hidden', 'true');
                     panel.removeAttribute('aria-busy');
                     panel.style.display = '';
-                    if (!silent || hasPendingSkeleton) panel.innerHTML = '';
+                    if (!silent || hasPendingSkeleton || hasVisibleFallbackPanel) panel.innerHTML = '';
+                }
+                if (!window.__xtjAiChatActive) {
+                    try { document.body.classList.remove('xtj-ai-page-open'); } catch (_) {}
                 }
                 try {
                     if (typeof window.syncHeaderModalBodyLock === 'function') window.syncHeaderModalBodyLock();
@@ -2283,6 +2287,7 @@ function isAdmin() {
                     aiChatPanel.classList.add('active');
                     aiChatPanel.setAttribute('aria-hidden', 'false');
                     aiChatPanel.setAttribute('aria-busy', 'true');
+                    try { document.body.classList.add('xtj-ai-page-open'); } catch (_) {}
                 }
 
                 // 显示 loading 在 AI 页面内部
@@ -2347,7 +2352,7 @@ function isAdmin() {
             // loads in the background; the module replaces this markup when it is ready.
             // ★ 返回入口必须常驻：模块未加载时 ai-agent 的 closeAiChat 还不存在，
             //   骨架屏没有退出口会让整页看起来死锁（用户实际只能刷新）。
-            return '<div class="ai-chat-container ai-chat-shell" style="box-sizing:border-box;min-height:100%;height:100%;display:flex;flex-direction:column;color:var(--text-main,#14261d);">'
+            return '<div class="ai-chat-container ai-chat-shell" style="box-sizing:border-box;width:100%;min-height:100%;height:100%;display:flex;flex-direction:column;background:var(--bg-page,#f8fcfa);color:var(--text-main,#14261d);">'
                 + '<div style="display:flex;align-items:center;gap:6px;padding:calc(env(safe-area-inset-top,0px) + 8px) 10px 8px;min-height:52px;box-sizing:border-box;">'
                 + '<button type="button" class="ai-chat-skeleton-back" onclick="window.__xtjAbortAiChatOpen&&window.__xtjAbortAiChatOpen()" aria-label="返回帖子" style="width:44px;height:44px;display:inline-flex;align-items:center;justify-content:center;border:0;background:transparent;color:inherit;font-size:28px;line-height:1;cursor:pointer;">‹</button>'
                 + '<div style="font-size:17px;font-weight:600;">小猫AI</div></div>'

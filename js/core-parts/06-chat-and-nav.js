@@ -853,7 +853,31 @@
                 _chatRenderSignature[peer] = undefined;
             }
 
+            var _dockChatUnreadDirtyAt = 0;
+            window.__xtjClearLocalPeerUnread = function(peer) {
+                if (!peer) return;
+                _dockChatUnreadDirtyAt = Date.now();
+                window.dockChatListCacheTime = 0;
+                if (typeof _dockChatConversationStates !== 'undefined' && _dockChatConversationStates && _dockChatConversationStates[peer]) {
+                    _dockChatConversationStates[peer].unread_count = 0;
+                    _dockChatConversationStates[peer].manual_unread_at = null;
+                }
+                var listEl = document.getElementById('dockChatList');
+                if (listEl) {
+                    var rows = listEl.querySelectorAll('.chat-list-item[data-chat-user]');
+                    for (var i = 0; i < rows.length; i++) {
+                        if (rows[i].getAttribute('data-chat-user') === peer) {
+                            var badge = rows[i].querySelector('.cli-badge');
+                            if (badge) badge.remove();
+                            if (typeof _dockChatListRenderSignature !== 'undefined') _dockChatListRenderSignature = '';
+                            break;
+                        }
+                    }
+                }
+            };
+
             function dockChatGoBack() {
+                var leavingPeer = dockChatActiveUser;
                 var routeExit = prepareDockChatExit();
                 saveChatAttachmentDraft(); _chatContextSeq++;
                 cancelChatFlashSend();
@@ -897,10 +921,25 @@
                 //   进的详情），则必须清掉缓存时间戳强制加载，否则返回时列表空白。
                 var listEl = document.getElementById('dockChatList');
                 var listHasContent = !!(listEl && listEl.children.length);
-                if (_dockChatListEverLoaded || listHasContent) {
+                var hadLeavingUnread = false;
+                if (leavingPeer && listEl) {
+                    var leavingRows = listEl.querySelectorAll('.chat-list-item[data-chat-user]');
+                    for (var li = 0; li < leavingRows.length; li++) {
+                        if (leavingRows[li].getAttribute('data-chat-user') === leavingPeer && leavingRows[li].querySelector('.cli-badge')) {
+                            hadLeavingUnread = true;
+                            break;
+                        }
+                    }
+                }
+                if (_dockChatUnreadDirtyAt || hadLeavingUnread) {
+                    _dockChatUnreadDirtyAt = 0;
+                    window.dockChatListCacheTime = 0;
+                    if (typeof window.__xtjInvalidateDmListShared === 'function') window.__xtjInvalidateDmListShared();
+                } else if (_dockChatListEverLoaded || listHasContent) {
                     window.dockChatListCacheTime = Date.now();
                 }
                 loadDockChatList();
+                if (hadLeavingUnread && typeof updateUnreadBadge === 'function') updateUnreadBadge(true);
                 startDMPolling(300000);
                 if (typeof window.__xtjResetIOSChatViewport === 'function') {
                     window.__xtjResetIOSChatViewport();
@@ -1650,9 +1689,10 @@
                 if (_dockChatListRefreshTimer) clearTimeout(_dockChatListRefreshTimer);
                 _dockChatListRefreshTimer = setTimeout(function() {
                     _dockChatListRefreshTimer = null;
+                    if (typeof window.__xtjInvalidateDmListShared === 'function') window.__xtjInvalidateDmListShared();
                     window.dockChatListCacheTime = 0;
                     loadDockChatList();
-                    updateUnreadBadge();
+                    updateUnreadBadge(true);
                 }, typeof delay === 'number' ? delay : 100);
             }
 
@@ -2486,29 +2526,35 @@
                     renderDockMessages(userName, mergedMessages, forceScroll);
                     syncDockChatHistoryButton(userName);
                     var isGroupOpen = !!(window.__xtjChatGroups && typeof window.__xtjChatGroups.state === 'function' && window.__xtjChatGroups.state() && window.__xtjChatGroups.state().active);
-                    if (pendingReadUpdates.length && currentDockTab==='chat' && !document.hidden && !isGroupOpen) {
+                    var canMarkActiveDmRead = (currentDockTab === 'chat' && !document.hidden && !isGroupOpen);
+                    var convState = (typeof _dockChatConversationStates !== 'undefined' && _dockChatConversationStates) ? _dockChatConversationStates[userName] : null;
+                    var needConvMarkRead = !!(canMarkActiveDmRead && convState && (convState.manual_unread_at || Number(convState.unread_count) > 0));
+                    if (pendingReadUpdates.length && canMarkActiveDmRead) {
                         window.markMessagesRead(userName, mergedMessages, pendingReadUpdates).catch(function() {
                             scheduleDockChatListRefresh(120);
                         });
-                    } else {
-                        if (currentDockTab==='chat' && !document.hidden && !isGroupOpen) {
-                            var convState = (typeof _dockChatConversationStates !== 'undefined' && _dockChatConversationStates) ? _dockChatConversationStates[userName] : null;
-                            if (convState && (convState.manual_unread_at || Number(convState.unread_count) > 0)) {
-                                convState.manual_unread_at = null;
-                                convState.unread_count = 0;
-                                if (typeof window.xtjProtectedFetch === 'function') {
-                                    window.xtjProtectedFetch('/api/chat/social/conversations/' + encodeURIComponent(userName), {
-                                        method: 'PATCH',
-                                        headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({ action: 'mark_read' }),
-                                        authOwner: loadOwner,
-                                        authEpoch: loadEpoch,
-                                        background: true,
-                                        timeoutMs: 10000
-                                    }).then(function() { scheduleDockChatListRefresh(120); }).catch(function() {});
-                                }
-                            }
+                    }
+                    // 独立清除会话级 manual_unread_at 及 180 条窗口外的未读，不再与 pendingReadUpdates 互斥。
+                    if (needConvMarkRead) {
+                        convState.manual_unread_at = null;
+                        convState.unread_count = 0;
+                        if (typeof window.__xtjClearLocalPeerUnread === 'function') window.__xtjClearLocalPeerUnread(userName);
+                        if (typeof window.xtjProtectedFetch === 'function') {
+                            window.xtjProtectedFetch('/api/chat/social/conversations/' + encodeURIComponent(userName), {
+                                method: 'PATCH',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ action: 'mark_read' }),
+                                authOwner: loadOwner,
+                                authEpoch: loadEpoch,
+                                background: true,
+                                timeoutMs: 10000
+                            }).then(function() {
+                                if (typeof window.__xtjInvalidateDmListShared === 'function') window.__xtjInvalidateDmListShared();
+                                scheduleDockChatListRefresh(120);
+                            }).catch(function() {});
                         }
+                    }
+                    if (!pendingReadUpdates.length && !needConvMarkRead) {
                         updateUnreadBadge();
                     }
                 } catch(e) {

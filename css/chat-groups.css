@@ -51,7 +51,22 @@
 .grp-avatar.grp-avatar.grp-avatar { position: relative; display: grid; place-items: center; width: 100%; height: 100%; min-width: 40px; min-height: 40px; border-radius: 12px; color: #fff; font-weight: 700; font-size: 15px; letter-spacing: -.02em;
   background: linear-gradient(135deg, hsl(var(--grp-hue, 150) 52% 52%), hsl(calc(var(--grp-hue, 150) + 40) 50% 42%)); overflow: hidden; }
 .grp-avatar.grp-avatar.grp-avatar svg { position: absolute; right: 3px; bottom: 3px; width: 13px; height: 13px; stroke: rgba(255, 255, 255, .85); stroke-width: 2; }
+.grp-avatar.grp-avatar.grp-avatar.has-img { background: var(--grp-control); }
+.grp-avatar.grp-avatar.grp-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.grp-avatar.grp-avatar.grp-avatar.is-mini { width: 34px; height: 34px; min-width: 34px; min-height: 34px; border-radius: 10px; font-size: 13px; }
+.grp-avatar.grp-avatar.grp-avatar.is-mini svg { width: 10px; height: 10px; right: 2px; bottom: 2px; }
 .grp-avatar.grp-avatar.grp-avatar.is-large { width: 56px; height: 56px; min-width: 56px; border-radius: 16px; font-size: 20px; }
+.grp-create-avatar-row.grp-create-avatar-row.grp-create-avatar-row { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; }
+.grp-create-avatar-btn.grp-create-avatar-btn.grp-create-avatar-btn { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; padding: 8px 10px; border: 1px solid var(--grp-line); border-radius: 14px; background: var(--grp-card); color: var(--grp-ink); text-align: left; cursor: pointer; }
+.grp-create-avatar-btn.grp-create-avatar-btn.grp-create-avatar-btn:active { background: var(--grp-control); }
+.grp-create-avatar-copy.grp-create-avatar-copy.grp-create-avatar-copy { display: grid; gap: 2px; min-width: 0; }
+.grp-create-avatar-copy.grp-create-avatar-copy.grp-create-avatar-copy strong { font-size: 14px; font-weight: 600; color: var(--grp-ink); }
+.grp-create-avatar-copy.grp-create-avatar-copy.grp-create-avatar-copy small { font-size: 12px; color: var(--grp-muted); }
+.grp-create-avatar-clear.grp-create-avatar-clear.grp-create-avatar-clear { flex-shrink: 0; min-height: 34px; padding: 0 12px; border-radius: 10px; background: var(--grp-control); color: var(--grp-muted); font-size: 12.5px; cursor: pointer; }
+.grp-create-avatar-clear.grp-create-avatar-clear.grp-create-avatar-clear[hidden] { display: none; }
+.grp-avatar-sheet.grp-avatar-sheet.grp-avatar-sheet { display: grid; justify-items: center; gap: 14px; padding: 10px 0 4px; text-align: center; }
+.grp-avatar-sheet-preview.grp-avatar-sheet-preview.grp-avatar-sheet-preview .grp-avatar { width: 88px; height: 88px; min-width: 88px; min-height: 88px; border-radius: 22px; font-size: 28px; }
+.grp-avatar-sheet-actions.grp-avatar-sheet-actions.grp-avatar-sheet-actions { display: grid; gap: 8px; width: 100%; }
 .grp-user-avatar.grp-user-avatar.grp-user-avatar { display: inline-grid; place-items: center; flex-shrink: 0; width: 38px; height: 38px; border-radius: 50%; overflow: hidden; color: #fff; font-weight: 700; font-size: 15px;
   background: hsl(var(--grp-hue, 150) 42% 52%); }
 .grp-user-avatar.grp-user-avatar.grp-user-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
