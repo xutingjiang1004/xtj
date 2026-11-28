@@ -704,8 +704,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   //   30s 加密到 20s，额度显示最多滞后 20s、更及时，/quota 是轻量 GET；
   //   缓存窗口 15s→20s，与轮询周期对齐，轮询到达时缓存刚过期、恰好拉新。
   var AI_QUOTA_CACHE_MS = 20000;
-  var FREE_TOKEN_DEFAULT = 100000;
-  var PRO_TOKEN_DEFAULT = 1000000;
+  // ★ 2026-11-28 额度调整：占位/加载失败时的兜底值同步为新的双窗口默认
+  //   免费 5h 1M / 周 10M；Pro 5h 10M / 周 100M（真实额度始终以服务端 RPC 为准）
+  var FREE_TOKEN_DEFAULT = 1000000;
+  var PRO_TOKEN_DEFAULT = 10000000;
   var FREE_SEARCH_DEFAULT = 10;
 
   function formatTokenCount(n) {
@@ -935,8 +937,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         if (r && r.ok && payload && payload.quota) {
           applyQuota(payload.quota);
           if (payload.features) {
-            if (payload.features.free_tokens_daily) FREE_TOKEN_DEFAULT = payload.features.free_tokens_daily;
-            if (payload.features.pro_tokens_daily) PRO_TOKEN_DEFAULT = payload.features.pro_tokens_daily;
+            // 双窗口额度优先；legacy 日额度仅作兜底（值更小，不能覆盖 5h 新默认）
+            if (payload.features.free_tokens_5h) FREE_TOKEN_DEFAULT = payload.features.free_tokens_5h;
+            else if (payload.features.free_tokens_daily) FREE_TOKEN_DEFAULT = payload.features.free_tokens_daily;
+            if (payload.features.pro_tokens_5h) PRO_TOKEN_DEFAULT = payload.features.pro_tokens_5h;
+            else if (payload.features.pro_tokens_daily) PRO_TOKEN_DEFAULT = payload.features.pro_tokens_daily;
             if (payload.features.free_search_daily != null) FREE_SEARCH_DEFAULT = payload.features.free_search_daily;
           }
           return S.quota;

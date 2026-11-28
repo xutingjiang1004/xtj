@@ -180,7 +180,11 @@ const {
   getTokenQuotaErrorMessage,
   FREE_TOKEN_LIMIT,
   PRO_TOKEN_LIMIT,
-  FREE_SEARCH_LIMIT
+  FREE_SEARCH_LIMIT,
+  FREE_5H_TOKEN_LIMIT,
+  FREE_WEEK_TOKEN_LIMIT,
+  PRO_5H_TOKEN_LIMIT,
+  PRO_WEEK_TOKEN_LIMIT
 } = require('./ai-quota');
 const sharp = require('sharp');
 var nodemailer = null;
@@ -20951,6 +20955,10 @@ app.get('/api/agent/quota', guestAiAuth, async (req, res) => {
         free_tokens_daily: FREE_TOKEN_LIMIT,
         pro_tokens_daily: PRO_TOKEN_LIMIT,
         free_search_daily: FREE_SEARCH_LIMIT,
+        free_tokens_5h: FREE_5H_TOKEN_LIMIT,
+        free_tokens_week: FREE_WEEK_TOKEN_LIMIT,
+        pro_tokens_5h: PRO_5H_TOKEN_LIMIT,
+        pro_tokens_week: PRO_WEEK_TOKEN_LIMIT,
         pro_search_unlimited: !!(quota && quota.search_unlimited),
         pro_multiplier: 10,
         invite_mode: true
@@ -20988,6 +20996,10 @@ app.post('/api/agent/pro/checkout', authenticateUser, async (req, res) => {
         free_tokens_daily: FREE_TOKEN_LIMIT,
         pro_tokens_daily: PRO_TOKEN_LIMIT,
         free_search_daily: FREE_SEARCH_LIMIT,
+        free_tokens_5h: FREE_5H_TOKEN_LIMIT,
+        free_tokens_week: FREE_WEEK_TOKEN_LIMIT,
+        pro_tokens_5h: PRO_5H_TOKEN_LIMIT,
+        pro_tokens_week: PRO_WEEK_TOKEN_LIMIT,
         pro_search_unlimited: !!(quota && quota.search_unlimited),
         pro_multiplier: 10
       },
@@ -21030,6 +21042,8 @@ app.post('/api/agent/invite/validate', authenticateUser, rateLimit(60000, 20), a
       days: data.days,
       token_limit_daily: data.token_limit_daily,
       search_limit_daily: data.search_limit_daily,
+      token_limit_5h: data.token_limit_5h != null ? data.token_limit_5h : null,
+      token_limit_week: data.token_limit_week != null ? data.token_limit_week : null,
       message: formatInviteCodeInfo(data)
     });
   } catch (e) {
@@ -21112,17 +21126,29 @@ app.post('/api/agent/invite/redeem', authenticateUser, rateLimit(60000, 20), asy
 
 function formatInviteCodeInfo(data) {
   var parts = ['开通 Pro ' + (data.days || 1) + ' 天'];
-  if (data.token_limit_daily === -1) {
+  // 优先展示「每 5 小时 / 每周」双窗口额度；两者都未设置时回退到旧「每日」文案。
+  var l5 = data.token_limit_5h;
+  var lw = data.token_limit_week;
+  if (l5 != null || lw != null) {
+    parts.push('每5小时 ' + formatWindowLimit(l5, PRO_5H_TOKEN_LIMIT));
+    parts.push('每周 ' + formatWindowLimit(lw, PRO_WEEK_TOKEN_LIMIT));
+  } else if (data.token_limit_daily === -1) {
     parts.push('Token 无限');
   } else if (data.token_limit_daily != null && data.token_limit_daily > 0) {
     parts.push('每日 ' + formatBigNumber(data.token_limit_daily) + ' token');
   } else {
-    parts.push('每日 ' + formatBigNumber(PRO_TOKEN_LIMIT) + ' token');
+    parts.push('每5小时 ' + formatBigNumber(PRO_5H_TOKEN_LIMIT) + ' · 每周 ' + formatBigNumber(PRO_WEEK_TOKEN_LIMIT));
   }
   if (data.search_limit_daily === -1) parts.push('无限搜索');
   else if (data.search_limit_daily != null && data.search_limit_daily >= 0) parts.push('每日 ' + data.search_limit_daily + ' 次搜索');
   else parts.push('无限搜索');
   return parts.join(' · ');
+}
+
+function formatWindowLimit(v, fallback) {
+  if (v === -1) return '无限';
+  if (v === 0) return '禁用';
+  return formatBigNumber(v == null ? fallback : v) + ' token';
 }
 
 function formatBigNumber(n) {
@@ -21250,6 +21276,32 @@ app.post('/admin/ai-agent/invite-codes', verifyToken, securityRateLimit(60000, 2
       var s = Number(searchLimitRaw);
       if (Number.isFinite(s)) searchLimit = Math.max(0, Math.floor(s));
     }
+    // ★ 2026-11-28：邀请码支持分别设置「每 5 小时」与「每周」token 上限。
+    //   语义与 token_limit_daily 一致：null/空 = 不覆盖（用档位默认）、-1 = 无限、0 = 禁用、>0 = 上限。
+    //   仅接受 number 或纯十进制整数字符串；非法值显式报错，绝不静默丢弃管理员的设置。
+    function parseWindowLimit(raw, fieldName) {
+      if (raw === undefined || raw === null || raw === '') return null;
+      var n = (typeof raw === 'number') ? raw
+        : (typeof raw === 'string' && /^[+-]?\d+$/.test(raw.trim())) ? Number(raw.trim())
+        : NaN;
+      if (!Number.isFinite(n)) {
+        var e1 = new Error(fieldName + ' 非法：须为整数 ≥ -1'); e1.statusCode = 400; throw e1;
+      }
+      n = Math.floor(n);
+      if (n < -1) {
+        var e2 = new Error(fieldName + ' 非法：须为整数 ≥ -1'); e2.statusCode = 400; throw e2;
+      }
+      if (n > Number.MAX_SAFE_INTEGER) {
+        var e3 = new Error(fieldName + ' 超出可表示范围'); e3.statusCode = 400; throw e3;
+      }
+      return n;
+    }
+    var tokenLimit5h = parseWindowLimit(body.token_limit_5h, 'token_limit_5h');
+    var tokenLimitWeek = parseWindowLimit(body.token_limit_week, 'token_limit_week');
+    // 两个都为正时，每周上限不应小于 5 小时上限（否则窗口语义自相矛盾）
+    if (tokenLimit5h > 0 && tokenLimitWeek > 0 && tokenLimitWeek < tokenLimit5h) {
+      var eWeek = new Error('token_limit_week 不能小于 token_limit_5h'); eWeek.statusCode = 400; throw eWeek;
+    }
     var note = String(body.note || '').slice(0, 200);
     var expiresDays = parseInt(body.expires_days, 10);
     var expiresAt = (expiresDays && expiresDays > 0)
@@ -21292,6 +21344,7 @@ app.post('/admin/ai-agent/invite-codes', verifyToken, securityRateLimit(60000, 2
       return res.status(500).json({ ok: false, error: '生成失败，请重试' });
     }
 
+    var hasWindowLimits = tokenLimit5h !== null || tokenLimitWeek !== null;
     var rows = codes.map(function(c) {
       return {
         // 统一大写存储，RPC 按 upper() 匹配
@@ -21299,6 +21352,8 @@ app.post('/admin/ai-agent/invite-codes', verifyToken, securityRateLimit(60000, 2
         days: days,
         token_limit_daily: tokenLimit,
         search_limit_daily: searchLimit,
+        token_limit_5h: tokenLimit5h,
+        token_limit_week: tokenLimitWeek,
         max_uses: maxUses,
         expires_at: expiresAt,
         note: note,
@@ -21306,6 +21361,25 @@ app.post('/admin/ai-agent/invite-codes', verifyToken, securityRateLimit(60000, 2
       };
     });
     var ins = await supabase.from('ai_invite_codes').insert(rows);
+    // ★ 兼容降级：若线上库尚未执行 20261128000000 迁移，PostgREST 会因未知列报错。
+    //   管理员「填了」窗口额度时必须显式报错（绝不静默丢失设置）；
+    //   未填时去掉两个新列重试，保证旧库下生成邀请码功能不受影响。
+    if (ins.error && /token_limit_(5h|week)|Could not find the .*column|schema cache/i.test(String(ins.error.message || ''))) {
+      if (hasWindowLimits) {
+        return res.status(409).json({
+          ok: false,
+          error: '数据库尚未升级：请先在 Supabase 执行 supabase/migrations/20261128000000_ai_invite_window_limits.sql，再设置每5小时/每周额度',
+          migration_required: true
+        });
+      }
+      var legacyRows = rows.map(function(r) {
+        var copy = Object.assign({}, r);
+        delete copy.token_limit_5h;
+        delete copy.token_limit_week;
+        return copy;
+      });
+      ins = await supabase.from('ai_invite_codes').insert(legacyRows);
+    }
     if (ins.error) {
       console.error('[INVITE-ADMIN] insert error:', ins.error.message);
       return res.status(500).json({ ok: false, error: '保存失败：' + ins.error.message });
@@ -21314,8 +21388,10 @@ app.post('/admin/ai-agent/invite-codes', verifyToken, securityRateLimit(60000, 2
     // ★ 修复 S5（簇 B）：批量生成邀请码是「发放付费权益」的敏感操作，此前只打
     //   console.log，未写审计日志 → 事后无法追责/对账。现补 logAdminAudit。
     await logAdminAudit('ai_agent_invite_generate', req.adminName || 'admin',
-      'count=' + codes.length + ' days=' + days + ' max_uses=' + maxUses + ' codes=' + codes.slice(0, 5).join(',') + (codes.length > 5 ? '...' : ''));
-    return res.json({ ok: true, count: codes.length, codes: codes });
+      'count=' + codes.length + ' days=' + days + ' max_uses=' + maxUses
+      + ' token_daily=' + tokenLimit + ' token_5h=' + tokenLimit5h + ' token_week=' + tokenLimitWeek
+      + ' codes=' + codes.slice(0, 5).join(',') + (codes.length > 5 ? '...' : ''));
+    return res.json({ ok: true, count: codes.length, codes: codes, window_limits_applied: hasWindowLimits });
   } catch (e) {
     console.error('[INVITE-ADMIN] create exception:', e && e.message);
     if (e && e.statusCode === 400) {
@@ -21452,11 +21528,21 @@ app.get('/admin/ai-agent/invite-redemptions', verifyToken, securityRateLimit(600
     var pageSize = Math.max(1, Math.min(200, parseInt(req.query.page_size, 10) || 50));
     var from = (page - 1) * pageSize;
     var to = from + pageSize - 1;
+    var selectCols = '*, ai_invite_codes(days, token_limit_daily, search_limit_daily, token_limit_5h, token_limit_week, note)';
+    var legacySelectCols = '*, ai_invite_codes(days, token_limit_daily, search_limit_daily, note)';
     var result = await supabase
       .from('ai_invite_redemptions')
-      .select('*, ai_invite_codes(days, token_limit_daily, search_limit_daily, note)', { count: 'exact' })
+      .select(selectCols, { count: 'exact' })
       .order('redeemed_at', { ascending: false })
       .range(from, to);
+    // 兼容降级：线上库尚未执行 20261128000000 迁移时，select 新列会报未知列，回退旧列集合
+    if (result.error && /token_limit_(5h|week)|column .*does not exist|schema cache/i.test(String(result.error.message || ''))) {
+      result = await supabase
+        .from('ai_invite_redemptions')
+        .select(legacySelectCols, { count: 'exact' })
+        .order('redeemed_at', { ascending: false })
+        .range(from, to);
+    }
     if (result.error) {
       console.error('[INVITE-ADMIN] redemptions error:', result.error.message);
       return res.status(500).json({ ok: false, error: '查询失败' });

@@ -1,7 +1,11 @@
 /**
  * AI token quota + Pro membership helpers.
- * Free: 100k tokens/day + 10 third-party web searches/day
- * Pro:  1M tokens/day + unlimited third-party searches
+ *
+ * 实际限额采用「5 小时滚动窗口 + 北京时区每周（周一 00:00）重置」双窗口：
+ *   Free: 每 5 小时 1M token / 每周 10M token
+ *   Pro : 在此基础上 ×10 → 每 5 小时 10M token / 每周 100M token
+ * 下方 FREE_TOKEN_LIMIT / PRO_TOKEN_LIMIT 是 legacy「每日」额度，只用于旧 RPC
+ * 兜底与邀请码默认文案，不参与双窗口判定；两者刻意解耦，改动窗口额度不影响旧契约。
  * 搜索额度仅约束第三方搜索（Tavily/Serper 等）；额度用尽后仍可用模型内置 web_search。
  *
  * Stripe is intentionally NOT wired here — only membership storage + stubs.
@@ -12,10 +16,12 @@ var FREE_TOKEN_LIMIT = Math.max(1000, parseInt(process.env.AI_FREE_TOKEN_DAILY |
 var PRO_TOKEN_LIMIT = Math.max(FREE_TOKEN_LIMIT, parseInt(process.env.AI_PRO_TOKEN_DAILY || '1000000', 10) || 1000000);
 var configuredSearchLimit = parseInt(process.env.AI_FREE_SEARCH_DAILY, 10);
 var FREE_SEARCH_LIMIT = Number.isFinite(configuredSearchLimit) ? Math.max(0, configuredSearchLimit) : 10;
-var FREE_5H_TOKEN_LIMIT = FREE_TOKEN_LIMIT;
-var FREE_WEEK_TOKEN_LIMIT = Math.max(FREE_5H_TOKEN_LIMIT, parseInt(process.env.AI_FREE_TOKEN_WEEKLY || '1000000', 10) || 1000000);
-var PRO_5H_TOKEN_LIMIT = PRO_TOKEN_LIMIT;
-var PRO_WEEK_TOKEN_LIMIT = Math.max(PRO_5H_TOKEN_LIMIT, parseInt(process.env.AI_PRO_TOKEN_WEEKLY || '10000000', 10) || 10000000);
+// 双窗口额度（2026-11-28 调整）：与 legacy 日额度解耦，独立可配。
+// 免费 5h 1M / 周 10M；Pro 各 ×10 → 5h 10M / 周 100M。
+var FREE_5H_TOKEN_LIMIT = Math.max(1000, parseInt(process.env.AI_FREE_TOKEN_5H || '1000000', 10) || 1000000);
+var FREE_WEEK_TOKEN_LIMIT = Math.max(FREE_5H_TOKEN_LIMIT, parseInt(process.env.AI_FREE_TOKEN_WEEKLY || '10000000', 10) || 10000000);
+var PRO_5H_TOKEN_LIMIT = Math.max(FREE_5H_TOKEN_LIMIT, parseInt(process.env.AI_PRO_TOKEN_5H || '10000000', 10) || 10000000);
+var PRO_WEEK_TOKEN_LIMIT = Math.max(PRO_5H_TOKEN_LIMIT, parseInt(process.env.AI_PRO_TOKEN_WEEKLY || '100000000', 10) || 100000000);
 var V4_PRO_TOKEN_MULTIPLIER = Math.max(1, Number(process.env.AI_PRO_MODEL_MULTIPLIER) || 3);
   
 function getModelTokenMultiplier(model) {
@@ -76,7 +82,7 @@ function normalizeQuotaPayload(raw) {
       plan: 'free',
       is_pro: false,
       tokens_used: 0,
-      tokens_limit: FREE_TOKEN_LIMIT,
+      tokens_limit: FREE_5H_TOKEN_LIMIT,
       tokens_remaining: 0,
       tokens_unlimited: false,
       tokens_percent: 100,
@@ -85,7 +91,7 @@ function normalizeQuotaPayload(raw) {
       search_remaining: 0,
       search_unlimited: false,
       window_5h_used: 0,
-      window_5h_limit: FREE_TOKEN_LIMIT,
+      window_5h_limit: FREE_5H_TOKEN_LIMIT,
       window_5h_remaining: 0,
       window_week_used: 0,
       window_week_limit: FREE_WEEK_TOKEN_LIMIT,

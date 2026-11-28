@@ -5681,6 +5681,14 @@
         return fmtAdminNum(v) + '/天';
     }
 
+    // ★ 2026-11-28：双窗口自定义额度（每 5 小时 / 每周）
+    function fmtAdminWindowLimit(v) {
+        if (v === -1) return '无限';
+        if (v === 0) return '禁用';
+        if (v == null) return '默认';
+        return fmtAdminNum(v);
+    }
+
     function fmtAdminExpiry(iso) {
         if (!iso) return '永不过期';
         try { return new Date(iso).toLocaleString(); } catch(e) { return iso; }
@@ -5761,7 +5769,9 @@
                 '<div class="ai-invite-form-grid">',
                 '<div class="ai-invite-field"><label>数量</label><input type="number" id="aiInviteCount" value="1" min="1" max="100"></div>',
                 '<div class="ai-invite-field"><label>有效天数</label><input type="number" id="aiInviteDays" value="30" min="1" max="3650"></div>',
-                '<div class="ai-invite-field"><label>每日 Token（空=默认Pro，-1=无限）</label><input type="number" id="aiInviteTokenLimit" placeholder="100000 或 -1" min="-1"></div>',
+                '<div class="ai-invite-field"><label>每日 Token（旧字段，空=默认Pro，-1=无限）</label><input type="number" id="aiInviteTokenLimit" placeholder="留空即可" min="-1"></div>',
+                '<div class="ai-invite-field"><label>每5小时 Token（空=档位默认，-1=无限，0=禁用）</label><input type="number" id="aiInviteToken5h" placeholder="10000000" min="-1"></div>',
+                '<div class="ai-invite-field"><label>每周 Token（空=档位默认，-1=无限，0=禁用）</label><input type="number" id="aiInviteTokenWeek" placeholder="100000000" min="-1"></div>',
                 '<div class="ai-invite-field"><label>每日搜索（空=无限）</label><input type="number" id="aiInviteSearchLimit" placeholder="50 或 -1" min="-1"></div>',
                 '<div class="ai-invite-field"><label>每人可用次数</label><input type="number" id="aiInviteMaxUses" value="1" min="1" max="10000"></div>',
                 '<div class="ai-invite-field"><label>码过期天数（空=不过期）</label><input type="number" id="aiInviteExpiresDays" placeholder="如 90" min="1"></div>',
@@ -5780,7 +5790,7 @@
                 html.push('<div class="ai-invite-empty">暂无邀请码，先在上方生成</div>');
             } else {
                 html.push('<div class="ai-invite-table-wrap"><table><thead><tr>' +
-                    '<th>邀请码</th><th>天数</th><th>每日Token</th><th>每日搜索</th><th>已用/总</th><th>状态</th><th>过期时间</th><th>备注</th><th>创建</th><th>操作</th>' +
+                    '<th>邀请码</th><th>天数</th><th>每日Token</th><th>每5小时</th><th>每周</th><th>每日搜索</th><th>已用/总</th><th>状态</th><th>过期时间</th><th>备注</th><th>创建</th><th>操作</th>' +
                     '</tr></thead><tbody>');
                 codes.forEach(function(c) {
                     var used = (c.used_count || 0) + '/' + c.max_uses;
@@ -5791,6 +5801,8 @@
                         '<button type="button" class="ai-invite-copy-btn" data-code="' + codeSafe + '">复制</button></div></td>' +
                         '<td>' + c.days + '</td>' +
                         '<td>' + fmtAdminTokenLimit(c.token_limit_daily) + '</td>' +
+                        '<td>' + fmtAdminWindowLimit(c.token_limit_5h) + '</td>' +
+                        '<td>' + fmtAdminWindowLimit(c.token_limit_week) + '</td>' +
                         '<td>' + fmtAdminSearchLimit(c.search_limit_daily) + '</td>' +
                         '<td>' + used + '</td>' +
                         '<td>' + fmtAdminCodeStatus(c) + '</td>' +
@@ -5956,6 +5968,10 @@
                 var count = parseInt(document.getElementById('aiInviteCount').value, 10) || 1;
                 var days = parseInt(document.getElementById('aiInviteDays').value, 10) || 30;
                 var tokenLimit = document.getElementById('aiInviteTokenLimit').value;
+                var token5hEl = document.getElementById('aiInviteToken5h');
+                var tokenWeekEl = document.getElementById('aiInviteTokenWeek');
+                var token5h = token5hEl ? token5hEl.value : '';
+                var tokenWeek = tokenWeekEl ? tokenWeekEl.value : '';
                 var searchLimit = document.getElementById('aiInviteSearchLimit').value;
                 var maxUses = parseInt(document.getElementById('aiInviteMaxUses').value, 10) || 1;
                 var expiresDays = document.getElementById('aiInviteExpiresDays').value;
@@ -5965,6 +5981,8 @@
                     count: count,
                     days: days,
                     token_limit_daily: tokenLimit === '' ? null : Number(tokenLimit),
+                    token_limit_5h: token5h === '' ? null : Number(token5h),
+                    token_limit_week: tokenWeek === '' ? null : Number(tokenWeek),
                     search_limit_daily: searchLimit === '' ? null : Number(searchLimit),
                     max_uses: maxUses,
                     expires_days: expiresDays === '' ? null : Number(expiresDays),
