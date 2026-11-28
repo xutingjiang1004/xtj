@@ -356,7 +356,7 @@
       var init = { method: options.method || 'GET', authOwner: owner, authEpoch: epoch, timeoutMs: 15000 };
       if (options.body) { init.headers = { 'Content-Type': 'application/json' }; init.body = JSON.stringify(options.body); }
       return window.xtjProtectedFetch(path, init).then(function (response) {
-        return response.json().then(function (data) { return { ok: response.ok && data && data.ok !== false, data: data || {} }; });
+        return response.json().catch(function () { return {}; }).then(function (data) { return { ok: response.ok && data && data.ok !== false, data: data || {} }; });
       });
     }
     function kindLabel(kind) { return kind === 'preference' ? '偏好' : kind === 'instruction' ? '要求' : '信息'; }
@@ -364,8 +364,10 @@
       var d = new Date(value); if (isNaN(d.getTime())) return '';
       return (d.getMonth() + 1) + '月' + d.getDate() + '日';
     }
+    var toggleBusy = false;
     function render() {
       toggle.setAttribute('aria-checked', String(state.enabled));
+      toggle.disabled = !state.ready || toggleBusy;
       count.textContent = state.ready ? state.items.length + ' / ' + state.limit : '';
       clearAll.hidden = !state.items.length; addBtn.disabled = state.busy || !state.ready; input.disabled = !state.ready;
       body.textContent = '';
@@ -412,14 +414,22 @@
         state.items = result.data.items || []; state.enabled = result.data.enabled !== false; state.limit = result.data.limit || 50; state.ready = true; render();
       }).catch(function () { if (aiMemoryDialog && same()) { state.failed = true; render(); } });
     }
+    function onAuthChanged() {
+      if (!same()) close();
+    }
     function close() {
       if (!aiMemoryDialog) return;
       document.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('xtj:auth-changed', onAuthChanged);
+      window.removeEventListener('xtj-auth-changed', onAuthChanged);
       overlay.remove(); aiMemoryDialog = null; document.body.classList.remove('xtj-memory-open');
-      try { if (opener && opener.focus && opener.isConnected) opener.focus(); } catch (_) {}
+      try { if (same() && opener && opener.focus && opener.isConnected) opener.focus(); } catch (_) {}
     }
     function onKey(event) {
-      if (event.key === 'Escape') { event.stopPropagation(); event.preventDefault(); close(); return; }
+      if (event.key === 'Escape') {
+        if (document.querySelector('#ppConfirmOverlay.active, .xtj-prompt-overlay')) return;
+        event.stopPropagation(); event.preventDefault(); close(); return;
+      }
       if (event.key !== 'Tab') return;
       var focusable = Array.prototype.filter.call(dialog.querySelectorAll('button, input'), function (node) { return !node.disabled && !node.hidden && node.offsetParent !== null; });
       if (!focusable.length) return;
@@ -439,13 +449,15 @@
       }).catch(function () { state.busy = false; render(); toast('网络异常，添加未完成', 'error'); });
     }
     toggle.addEventListener('click', function () {
-      var next = !state.enabled; state.enabled = next; render(); toggle.disabled = true;
+      if (!state.ready || toggleBusy) return;
+      var next = !state.enabled; state.enabled = next; toggleBusy = true; render();
       request('/api/profile/settings', { method: 'PATCH', body: { ai_memory_enabled: next } }).then(function (result) {
-        toggle.disabled = false;
+        toggleBusy = false;
         if (!same() || !aiMemoryDialog) return;
         if (!result.ok) { state.enabled = !next; render(); toast(result.data.error || '设置未保存，请重试', 'error'); return; }
+        render();
         toast(next ? '已开启记忆' : '已关闭记忆，小猫不会再使用或保存记忆', 'success');
-      }).catch(function () { toggle.disabled = false; state.enabled = !next; render(); toast('网络异常，设置未保存', 'error'); });
+      }).catch(function () { toggleBusy = false; state.enabled = !next; render(); toast('网络异常，设置未保存', 'error'); });
     });
     addBtn.addEventListener('click', add);
     input.addEventListener('keydown', function (event) { if (event.key === 'Enter' && !event.isComposing) { event.preventDefault(); add(); } });
@@ -463,6 +475,8 @@
     closeBtn.addEventListener('click', close);
     overlay.addEventListener('mousedown', function (event) { if (event.target === overlay) close(); });
     document.addEventListener('keydown', onKey, true);
+    window.addEventListener('xtj:auth-changed', onAuthChanged);
+    window.addEventListener('xtj-auth-changed', onAuthChanged);
     aiMemoryDialog = overlay; document.body.appendChild(overlay); document.body.classList.add('xtj-memory-open');
     render(); load();
     setTimeout(function () { try { closeBtn.focus(); } catch (_) {} }, 0);

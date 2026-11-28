@@ -194,13 +194,22 @@
         }
 
         buffer += decoder.decode(result.value, { stream: true });
-        buffer = processSSEBuffer(buffer, onEvent, options, sseState) || '';
+        if (buffer.length > 8 * 1024 * 1024) {
+          buffer = '';
+          aborted = true;
+          cleanup();
+          if (onEvent) {
+            try { onEvent({ type: 'error', data: Errors.build(Errors.CODES.STREAM_INTERRUPTED, '响应流缓冲超限，请重试', true, options) }); } catch (e) {}
+          }
+          return;
+        }
+        buffer = processSSEBuffer(buffer, onEvent, options, sseState, function () { return aborted; }) || '';
         return pump();
       }).catch(function (err) {
+        if (aborted) { cleanup(); return; }
         // 断流上报前先 flush 末尾残帧，避免丢失最后一条未以空行结束的事件
         try { flushPendingEvent(); } catch (e) {}
         cleanup();
-        if (aborted) return;
         if (onEvent) {
           try {
             onEvent({
@@ -225,7 +234,7 @@
     catch (e) { return Promise.resolve(); }
   }
 
-  function processSSEBuffer(rawBuffer, onEvent, options, sseState) {
+  function processSSEBuffer(rawBuffer, onEvent, options, sseState, isAborted) {
     sseState = sseState || { currentEvent: null, dataLines: [] };
     // Retain a trailing CR until the next chunk so split CRLF is one delimiter.
     var trailingCR = /\r$/.test(rawBuffer);
@@ -235,6 +244,7 @@
     var completeLines = lines.slice(0, -1);
 
     for (var i = 0; i < completeLines.length; i++) {
+      if (isAborted && isAborted()) return '';
       var line = completeLines[i].replace(/\r$/, ''); // CRLF 兼容：\r\n / \r 均视作行结束
       if (line === '') {
         // Empty line = end of event

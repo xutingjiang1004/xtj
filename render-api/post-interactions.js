@@ -61,10 +61,71 @@ async function readRelationPage(db, postId, kind, options = {}) {
 
 async function readFeedEngagement(db, posts, owner) {
   if (!posts.length) return { posts, comments: [], likes: [] };
-  const result = await db.rpc('xtj_feed_engagement', { p_post_ids: posts.map(p => p.id), p_owner: owner || '' });
-  if (result.error || !result.data || !Array.isArray(result.data.posts) || !Array.isArray(result.data.comments) || !Array.isArray(result.data.likes)) throw new Error('feed_relations_failed');
-  const stats = new Map((result.data.posts || []).map(p => [String(p.id), p]));
-  return { posts: posts.filter(p => stats.has(String(p.id))).map(p => Object.assign({}, p, stats.get(String(p.id)))), comments: result.data.comments, likes: result.data.likes };
+  const actor = owner || '';
+  const standardPosts = [];
+  const audiencePosts = [];
+  for (const post of posts) {
+    if (!post.visibility || post.visibility === 'public' || post.user_name === actor) {
+      standardPosts.push(post);
+    } else {
+      audiencePosts.push(post);
+    }
+  }
+  const stats = new Map();
+  let comments = [];
+  let likes = [];
+
+  if (standardPosts.length) {
+    const result = await db.rpc('xtj_feed_engagement', { p_post_ids: standardPosts.map(p => p.id), p_owner: actor });
+    if (result.error || !result.data || !Array.isArray(result.data.posts) || !Array.isArray(result.data.comments) || !Array.isArray(result.data.likes)) throw new Error('feed_relations_failed');
+    (result.data.posts || []).forEach(p => stats.set(String(p.id), p));
+    comments = comments.concat(result.data.comments || []);
+    likes = likes.concat(result.data.likes || []);
+  }
+
+  // 仅谁可见 / 仅谁不可见 帖子在库中为 visibility='unlisted'，原 xtj_feed_engagement RPC 只收
+  // public 或本人帖；这里对已通过 canUserViewPost 鉴权的非本人受众帖直接读 service_role 互动数据。
+  if (audiencePosts.length) {
+    const extraIds = audiencePosts.map(p => p.id);
+    const [likesRes, commentsRes] = await Promise.all([
+      db.from('likes').select('id::text,post_id,user_name,created_at').in('post_id', extraIds),
+      db.from('comments').select('id::text,post_id,user_name,content,parent_comment_id::text,generated_by_ai,created_at').in('post_id', extraIds).order('created_at', { ascending: true }).order('id', { ascending: true })
+    ]);
+    if (!likesRes || likesRes.error || !commentsRes || commentsRes.error) throw new Error('feed_relations_failed');
+    const likesByPost = new Map();
+    const commentsByPost = new Map();
+    for (const row of (likesRes.data || [])) {
+      const k = String(row.post_id);
+      if (!likesByPost.has(k)) likesByPost.set(k, []);
+      likesByPost.get(k).push(row);
+    }
+    for (const row of (commentsRes.data || [])) {
+      const k = String(row.post_id);
+      if (!commentsByPost.has(k)) commentsByPost.set(k, []);
+      commentsByPost.get(k).push(row);
+    }
+    for (const post of audiencePosts) {
+      const k = String(post.id);
+      const pLikes = likesByPost.get(k) || [];
+      const pComments = commentsByPost.get(k) || [];
+      const myLike = actor ? pLikes.find(r => r.user_name === actor) : null;
+      stats.set(k, {
+        id: post.id,
+        like_count: pLikes.length,
+        comment_count: pComments.length,
+        liked_by_me: !!myLike
+      });
+      if (myLike) likes.push(myLike);
+      // 保留前 5 条预览评论（与 xtj_feed_engagement 口径一致）
+      comments = comments.concat(pComments.slice(0, 5));
+    }
+  }
+
+  return {
+    posts: posts.filter(p => stats.has(String(p.id))).map(p => Object.assign({}, p, stats.get(String(p.id)))),
+    comments,
+    likes
+  };
 }
 
 module.exports = { commentRequestId, createComment, parseRelationCursor, readRelationPage, readFeedEngagement, ROW_ID, TIMESTAMP };

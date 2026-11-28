@@ -19,6 +19,9 @@
         window.__xtjCloseAiChat();
       }
     }
+    if (typeof window.__xtjAbortAiChatOpen === 'function') {
+      try { window.__xtjAbortAiChatOpen({ silent: true }); } catch (eAbort) {}
+    }
     if (typeof window.switchDockTab === 'function') {
       window.switchDockTab(tab, true, { animate: true, source: 'desktop-sidebar' });
       syncActiveTab();
@@ -248,7 +251,11 @@
           if (typeof window.syncChatBadge === 'function') {
             chatPromises.push(callRefreshSafely(function () { return window.syncChatBadge(); }));
           }
-          if (typeof window.dockChatActiveUser !== 'undefined' && window.dockChatActiveUser) {
+          if (window.__xtjChatGroups && typeof window.__xtjChatGroups.reload === 'function') {
+            chatPromises.push(callRefreshSafely(function () { return window.__xtjChatGroups.reload(); }));
+          }
+          var groupActive = !!(window.__xtjChatGroups && typeof window.__xtjChatGroups.state === 'function' && window.__xtjChatGroups.state() && window.__xtjChatGroups.state().active);
+          if (!groupActive && typeof window.dockChatActiveUser !== 'undefined' && window.dockChatActiveUser) {
             if (typeof window.loadDockChatMessages === 'function') {
               chatPromises.push(callRefreshSafely(function () { return window.loadDockChatMessages(window.dockChatActiveUser, false); }));
             }
@@ -282,8 +289,8 @@
           if (typeof window.renderProfileActivity === 'function') {
             try { window.renderProfileActivity(); } catch (e) {}
           }
-          if (typeof window.syncUser === 'function') {
-            profilePromises.push(window.syncUser().catch(function() {}));
+          if (typeof syncUser === 'function') {
+            profilePromises.push(callRefreshSafely(function() { return syncUser(); }));
           }
           if (profilePromises.length) await Promise.allSettled(profilePromises);
           break;

@@ -142,9 +142,10 @@ function createAgentTools(deps) {
     if (page === 'post') {
       if (!UUID.test(target)) return fail('site_navigate', '帖子编号无效，请先用 search_posts 找到帖子');
       if (d.supabase) {
-        const found = await d.supabase.from('posts').select('id,user_name,visibility,media_type').eq('id', target).maybeSingle();
+        const found = await d.supabase.from('posts').select('id,user_name,visibility,media_type,content,is_deleted').eq('id', target).maybeSingle();
         const row = found && found.data;
-        if (!row || (d.isNormalPost && !d.isNormalPost(row)) || (row.visibility === 'private' && row.user_name !== user(ctx))) return fail('site_navigate', '没有找到这个帖子，或你没有权限查看');
+        const { canUserViewPost } = require('./post-visibility');
+        if (!row || (d.isNormalPost && !d.isNormalPost(row)) || !canUserViewPost(row, user(ctx))) return fail('site_navigate', '没有找到这个帖子，或你没有权限查看');
       }
       return { tool_name: 'site_navigate', content: '已给用户一个打开帖子的按钮。', cards: [makeCard('navigate', '站内跳转', { page, target: target.toLowerCase(), label: label || '打开帖子' })] };
     }

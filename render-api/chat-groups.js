@@ -326,7 +326,7 @@ function createChatGroupsRouter(options) {
       const data = await rpc('chat_group_action', { p_actor: req.userName, p_group: id, p_action: action, p_args: args });
       if (!data.ok) return fail(res, data.code, data.rejected ? { rejected: data.rejected } : null);
       if (action === 'withdraw' && data.storage_path) await removePrivate([data.storage_path]).catch(function () {});
-      notify(data.notify, { kind: action, group_id: id, message_id: args.message_id || undefined });
+      notify(data.notify, { kind: action, group_id: id, message_id: args.message_id || undefined, withdrawn_by: action === 'withdraw' ? req.userName : undefined });
       const out = { ok: true };
       ['message', 'added', 'pending', 'rejected', 'requests', 'nickname', 'left'].forEach(function (key) { if (data[key] !== undefined) out[key] = data[key]; });
       if (out.message) await hydrate([out.message]);

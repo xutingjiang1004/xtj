@@ -107,6 +107,7 @@
       var response = await fetch(url, Object.assign({}, options, {signal:controller.signal}));
       assertPhotoIdentity(identity);
       return { ok:response.ok, status:response.status, headers:response.headers,
+        dispose: dispose,
         json:async function(){
           try { var body = await response.json(); assertPhotoIdentity(identity); return body; }
           finally { dispose(); }
@@ -1078,7 +1079,6 @@
     if (!isPhotoWallImage(file)) throw createPhotoUploadError('unsupported_type');
     if (!Number.isFinite(Number(file.size)) || Number(file.size) > MAX_PHOTO_UPLOAD_BYTES) throw createPhotoUploadError('file_too_large');
     var path = 'photos/' + safeFileName(file, inferExt(file), uploadId);
-    job.storagePath = path;
     var uploadFile = file;
     job.phase = 'preparing';
     if (job.onProgress) job.onProgress();
@@ -1088,6 +1088,7 @@
     if (state.cancelRequested || (signal && signal.aborted)) throw createPhotoUploadError('cancelled');
     var publicUrl;
     try {
+      job.storagePath = path;
       job.phase = 'uploading';
       if (job.onProgress) job.onProgress();
       publicUrl = await uploadPhotoToStorage(path, uploadFile, type, signal, function(bytes, sent){
@@ -1224,7 +1225,11 @@
     }
     clearTimeout(timeoutTimer);
     if (!createRes.ok) {
-      if (state.cancelRequested) throw createPhotoUploadError('cancelled');
+      if (state.cancelRequested) {
+        if (typeof createRes.dispose === 'function') createRes.dispose();
+        await cleanupStorage(path, uploadId, cleanupAfterCreateOptions);
+        throw createPhotoUploadError('cancelled');
+      }
       var errBody = {};
       try { errBody = await createRes.json(); } catch (_) { errBody = {}; }
       var recordError = new Error((errBody && errBody.error) || '创建照片记录失败');
@@ -1546,7 +1551,9 @@
             body: JSON.stringify({ path: j.storagePath, upload_id: j.uploadId })
           });
           var cleanupData = await cleanupResp.json().catch(function(){ return {}; });
-          if (!cleanupResp.ok || !cleanupData.ok) throw new Error(cleanupData.error || '旧照片文件清理失败');
+          if (cleanupResp.status !== 404 && !cleanupData.not_found && (!cleanupResp.ok || !cleanupData.ok)) {
+            throw new Error(cleanupData.error || '旧照片文件清理失败');
+          }
         } catch (cleanupError) {
           j.status = 'confirming';
           j.error = cleanupError;
@@ -1643,7 +1650,7 @@
   }
 
   function triggerPhotoUpload(){
-    if (state.uploading) { toast('正在上传，请等待'); return; }
+    if (isBusy()) { toast('正在上传，请等待'); return; }
     var user = getCurrentUser();
     if (!user) { toast('请先登录'); return; }
     attachPhotoUploadUi();
@@ -1719,6 +1726,9 @@
   window.setPhotoUploadResultState = setUploadResultState;
   window.clearPhotoUploadResult = clearUploadResult;
   window.__xtjSavePendingPhotoUpload = savePendingPhotoUpload;
+  window.cleanupPhotoWallTransientState = function () {
+    if (!state.uploading) closeSheet();
+  };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
   else boot();

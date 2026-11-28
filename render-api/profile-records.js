@@ -1,5 +1,6 @@
 'use strict';
 const { NORMAL_POST_MEDIA_TYPES, isNormalPost } = require('./post-query');
+const { canUserViewPost } = require('./post-visibility');
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/;
 const BIGINT = /^(?:0|[1-9][0-9]{0,18})$/;
@@ -59,7 +60,7 @@ function createProfileRecords({ express, supabase, authenticateUser, rateLimit }
         const ids = [...new Set(rows.map(row => kind === 'views' ? row.media_url : row.post_id).filter(value => UUID.test(String(value))))];
         posts = ids.length ? (await result(supabase.from('posts').select(FIELDS).in('id', ids))).data || [] : [];
       }
-      const visible = new Map(posts.filter(post => isNormalPost(post) && (post.visibility !== 'private' || post.user_name === req.userName)).map(post => [String(post.id), post]));
+      const visible = new Map(posts.filter(post => isNormalPost(post) && canUserViewPost(post, req.userName)).map(post => [String(post.id), post]));
       const items = rows.map(row => {
         const postId = String(kind === 'posts' ? row.id : kind === 'views' ? row.media_url : row.post_id);
         const post = visible.get(postId);

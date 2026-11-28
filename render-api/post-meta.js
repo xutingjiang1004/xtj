@@ -5,6 +5,7 @@
 //   · 别人的 OSS 地址可以被写进来，配合删帖清理误删他人媒体（已在 oss-cleanup 里另外堵住）。
 // 这里在发帖/改帖时清洗：只保留本站自己产生的几种地址形态，其余置空。内容没问题时原字符串原样返回。
 const { parseOssMediaUrl } = require('./post-media');
+const { POST_VISIBILITY_MODES, cleanVisibilityUsers } = require('./post-visibility');
 
 const MAX_THUMBS = 9;
 const MAX_URL = 2048;
@@ -49,6 +50,29 @@ function sanitizePostContent(content, context) {
   if (Object.prototype.hasOwnProperty.call(meta, 'poster_url')) {
     const poster = meta.poster_url;
     if (poster !== '' && poster != null && !allowedMetaUrl(poster, context)) { delete meta.poster_url; changed = true; }
+  }
+  if (Object.prototype.hasOwnProperty.call(meta, 'visibility_mode')) {
+    const mode = String(meta.visibility_mode || '').trim().toLowerCase();
+    if (POST_VISIBILITY_MODES.indexOf(mode) < 0) {
+      delete meta.visibility_mode;
+      changed = true;
+    } else if (meta.visibility_mode !== mode) {
+      meta.visibility_mode = mode;
+      changed = true;
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(meta, 'visibility_users')) {
+    if (!Array.isArray(meta.visibility_users)) {
+      delete meta.visibility_users;
+      changed = true;
+    } else {
+      const cleanedUsers = cleanVisibilityUsers(meta.visibility_users, context && context.authorName);
+      if (cleanedUsers.length !== meta.visibility_users.length || cleanedUsers.some((u, i) => u !== meta.visibility_users[i])) {
+        if (cleanedUsers.length) meta.visibility_users = cleanedUsers;
+        else delete meta.visibility_users;
+        changed = true;
+      }
+    }
   }
   return changed ? { content: JSON.stringify(parsed), changed: true } : { content: text, changed: false };
 }

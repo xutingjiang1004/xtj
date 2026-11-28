@@ -19,6 +19,12 @@
   function storedThumb(post, position) {
     try {
       var meta = post && post._contentMeta;
+      if (!meta && post && typeof post.content === 'string' && post.content.trim().charAt(0) === '{') {
+        try {
+          var parsed = JSON.parse(post.content);
+          if (parsed && typeof parsed === 'object') meta = parsed.meta || parsed;
+        } catch (_) {}
+      }
       var list = meta && Array.isArray(meta.thumbs) ? meta.thumbs : null;
       if (!list) return '';
       var value = list[position];

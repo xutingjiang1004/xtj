@@ -106,7 +106,7 @@
     // 同时恢复常见词形（cancelled/canceled/aborted）与中文"已取消/已中止"的覆盖——
     // 后端 REQUEST_CANCELLED 官方文案恰是"请求已取消"，中文无词间空白，
     // 纯 (^|\s) 前缀会把真实取消误分类为 UNKNOWN
-    var cancelledMsg = /(^|\s)(cancel(?:l?ed|l?ing|s)?|abort(?:ed|ing|s)?)(\s|$|[,.;:!?])/i.test(msg)
+    var cancelledMsg = /(^|[\s_])(cancel(?:l?ed|l?ing|s)?|abort(?:ed|ing|s)?|superseded|disposed)(\s|$|[,.;:!?_])/i.test(msg)
       || /(已取消|已中止|用户已取消|用户取消)/.test(msg);
     if (cancelledMsg) {
       return buildError(ERROR_CODES.REQUEST_CANCELLED, USER_MESSAGES[ERROR_CODES.REQUEST_CANCELLED], false, options);

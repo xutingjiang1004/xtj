@@ -33,8 +33,8 @@ test('聊-7: 服务端发消息时确实校验关系（放开才安全）', () =
   assert.ok(serverSrc.includes('assertCanSendDirectMessage(supabase, sender, targetUser, ADMIN_USERNAME)'),
     '服务端发消息前应调 assertCanSendDirectMessage');
   const socialSrc = fs.readFileSync(path.join(root, 'render-api', 'chat-social.js'), 'utf8');
-  assert.ok(socialSrc.includes("code: 'friend_required'"), '非好友发送应被服务端以 friend_required 拒绝');
   assert.ok(socialSrc.includes("code: 'chat_blocked'"), '拉黑发送应被服务端以 chat_blocked 拒绝');
+  assert.ok(socialSrc.includes('recordAutoFriendOnMessage'), '发消息后应自动维护单向/双向好友关系');
 });
 
 test('聊-9: 滑条只在真正拖动后压 400ms 点击，普通点按不被吞', () => {

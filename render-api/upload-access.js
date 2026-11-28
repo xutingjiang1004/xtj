@@ -3,6 +3,7 @@
 // 顶层解构时对方还没执行到 module.exports，拿到的是 undefined，
 // 结果是 /api/uploads/media 下所有旧图一律失败（报 streamOriginal is not a function）。
 const { isNormalPost } = require('./post-query');
+const { canUserViewPost } = require('./post-visibility');
 function mediaStreamer() { return require('./photo-access').streamOriginal; }
 function uploadPath(value, origin) {
   try {
@@ -39,13 +40,13 @@ function installUploadAccess(app, { supabase, supabaseUrl, optionalAuth, rateLim
         // 接口只能回 503 —— 用户看到的就是「图片一直转圈，点重试也没用」。
         // 改成按完整 URL 精确匹配，命中就走，不再全表扫描。
         const full = String(supabaseUrl || '').replace(/\/+$/, '') + '/storage/v1/object/public/uploads/' + path;
-        const readable = row => isNormalPost(row) && (!row.visibility || row.visibility === 'public' || row.user_name === req.userName);
-        const exact = await checked(supabase.from('posts').select('id,user_name,media_type,media_url,visibility,is_deleted').eq('media_url', full).limit(20));
+        const readable = row => isNormalPost(row) && canUserViewPost(row, req.userName);
+        const exact = await checked(supabase.from('posts').select('id,user_name,media_type,media_url,visibility,is_deleted,content').eq('media_url', full).limit(20));
         allowed = (exact || []).some(readable);
         if (!allowed) {
           const linked = await checked(supabase.from('post_attachments').select('post_id').eq('media_url', full).limit(20));
           if (linked && linked.length) {
-            const rows = await checked(supabase.from('posts').select('id,user_name,media_type,visibility,is_deleted').in('id', linked.map(x => x.post_id)));
+            const rows = await checked(supabase.from('posts').select('id,user_name,media_type,visibility,is_deleted,content').in('id', linked.map(x => x.post_id)));
             allowed = (rows || []).some(readable);
           }
         }
@@ -54,7 +55,7 @@ function installUploadAccess(app, { supabase, supabaseUrl, optionalAuth, rateLim
         if (!allowed && /^posts\/[^/]*_poster-[\w.-]+\.(?:jpe?g|png|webp)$/i.test(path)) {
           // PostgREST 的 ilike 通配符是 *（不是 SQL 的 %）：传 % 只会被当成普通字符，
           // 匹配永远为空，封面便一直 404。这里统一用 *，并转义文件名里的 _ 与 *。
-          const posterRows = await checked(supabase.from('posts').select('id,user_name,media_type,visibility,is_deleted')
+          const posterRows = await checked(supabase.from('posts').select('id,user_name,media_type,visibility,is_deleted,content')
             .eq('media_type', 'video').ilike('content', '*' + path.replace(/[\\%_*]/g, '\\$&') + '*').limit(10));
           allowed = (posterRows || []).some(readable);
         }

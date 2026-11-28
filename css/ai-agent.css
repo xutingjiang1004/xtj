@@ -3276,6 +3276,12 @@ html[data-xtj-motion="off"] .ai-chat-input-bar {
   pointer-events: none;
 }
 
+@media (max-width: 767px) {
+  .ai-conv-page-shell {
+    padding-bottom: calc(var(--dock-safe-bottom, 76px) + env(safe-area-inset-bottom, 0px));
+  }
+}
+
 .ai-conv-page-card {
   pointer-events: auto;
   width: min(420px, 92%);
@@ -8799,7 +8805,7 @@ html[data-theme="dark"] .ai-msg.assistant .ai-msg-bubble {
 /* ===================== ★ 2026-11-14（用户要求）：自动化 / 定时任务面板 =====================
    新增独立类名，不复用既有气泡/工具卡片样式，避免影响回复动画与工具调用展示。 */
 .ai-auto-modal {
-  position: fixed; inset: 0; z-index: 2200;
+  position: fixed; inset: 0; z-index: 9500;
   display: flex; align-items: flex-end; justify-content: center;
   background: rgba(12, 22, 20, 0.42);
   padding: 12px;
@@ -8901,11 +8907,14 @@ html[data-theme="dark"] .ai-msg.assistant .ai-msg-bubble {
 [data-theme="dark"] .ai-auto-box { background: #16211f; color: #dceae6; }
 [data-theme="dark"] .ai-auto-close { background: rgba(255, 255, 255, 0.08); }
 [data-theme="dark"] .ai-auto-tip,
+[data-theme="dark"] .ai-auto-empty,
+[data-theme="dark"] .ai-auto-field,
 [data-theme="dark"] .ai-auto-item-meta,
-[data-theme="dark"] .ai-auto-item-last { color: rgba(190, 214, 208, 0.75); }
+[data-theme="dark"] .ai-auto-item-last { color: rgba(198, 222, 216, 0.82); }
 [data-theme="dark"] .ai-auto-item { background: rgba(255, 255, 255, 0.04); border-color: rgba(120, 190, 170, 0.22); }
 [data-theme="dark"] .ai-auto-item-ops button,
 [data-theme="dark"] .ai-auto-week button { background: rgba(255, 255, 255, 0.06); color: #cfe9e2; }
+[data-theme="dark"] .ai-auto-item-ops button.is-danger { border-color: rgba(235, 130, 116, 0.48); color: #f28d7f; }
 [data-theme="dark"] .ai-auto-new { background: rgba(255, 255, 255, 0.05); color: #cfe9e2; }
 [data-theme="dark"] .ai-auto-form { background: rgba(255, 255, 255, 0.05); border-color: rgba(120, 190, 170, 0.2); }
 [data-theme="dark"] .ai-auto-field input,
@@ -8915,7 +8924,7 @@ html[data-theme="dark"] .ai-msg.assistant .ai-msg-bubble {
 
 @media (max-width: 640px) {
   .ai-auto-modal { padding: 0; align-items: flex-end; }
-  .ai-auto-box { width: 100%; max-height: 88vh; border-radius: 18px 18px 0 0; }
+  .ai-auto-box { width: 100%; max-height: 88vh; border-radius: 18px 18px 0 0; padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px)); }
 }
 
 /* ★ 2026-11-14（用户要求：不喜欢那个胶囊按钮）：

@@ -98,6 +98,12 @@
                         try { window.__xtjCloseAiChat(); } catch (eClose) {}
                     }
                 }
+                if (typeof window.__xtjAbortAiChatOpen === 'function') {
+                    try { window.__xtjAbortAiChatOpen({ silent: true }); } catch (eAbortAi) {}
+                }
+                if (routePreviousTab === 'ai' && tab !== 'ai' && typeof window.cleanupPhotoWallTransientState === 'function') {
+                    try { window.cleanupPhotoWallTransientState(); } catch (ePwClean) {}
+                }
                 var shouldAnimateTab = options.animate === true;
                 if (tab !== currentDockTab) {
                     // 「返回时回到帖子页」只属于从帖子直接打开某个会话的路径，由 openChat 在入口处记录。
@@ -153,9 +159,10 @@
                             window.showToast('正在刷新...');
                             ensurePhotoWallLoaded().then(function() {
                                 if (typeof window.loadPhotoWallData === 'function') {
-                                    return window.loadPhotoWallData(true).then(function() {
+                                    return window.loadPhotoWallData(true).then(function(res) {
+                                        if (res && res.ok === false) throw new Error('refresh_failed');
                                         if (typeof window.renderPhotoWall === 'function') {
-                                            window.renderPhotoWall();
+                                            return window.renderPhotoWall({ force: true });
                                         }
                                     });
                                 }
@@ -197,8 +204,11 @@
                             //   改为 await 真正完成后才给结果提示，并在 finally 里释放锁。
                             window.showToast('正在刷新...');
                             window.dockChatListCacheTime = 0;
-                            Promise.resolve()
-                                .then(function() { return loadDockChatList(); })
+                            var chatRefreshJobs = [Promise.resolve().then(function() { return loadDockChatList(); })];
+                            if (window.__xtjChatGroups && typeof window.__xtjChatGroups.reload === 'function') {
+                                chatRefreshJobs.push(Promise.resolve().then(function() { return window.__xtjChatGroups.reload(); }).catch(function() {}));
+                            }
+                            Promise.all(chatRefreshJobs)
                                 .then(function() {
                                     window.showToast('刷新完成');
                                 })
@@ -227,14 +237,18 @@
                             const panel = document.getElementById('panelPosts');
                             if (panel) panel.scrollTo({ top: 0, behavior: 'smooth' });
                         } else if (tab === 'chat') {
-                            // 聊天页：如果在对话中则返回列表，否则回到顶部
-                            if (dockChatActiveUser) {
+                            // 聊天页：如果在对话中（含群聊）则返回列表，否则回到顶部
+                            if (window.__xtjChatGroups && typeof window.__xtjChatGroups.state === 'function' && window.__xtjChatGroups.state() && window.__xtjChatGroups.state().active) {
+                                window.__xtjChatGroups.close();
+                            } else if (dockChatActiveUser) {
                                 dockChatGoBack();
                             } else {
                                 const panel = document.getElementById('panelChat');
                                 if (panel) panel.scrollTo({ top: 0, behavior: 'smooth' });
                             }
                         } else if (tab === 'ai') {
+                            const panelAi = document.getElementById('panelAi');
+                            if (panelAi) panelAi.scrollTo({ top: 0, behavior: 'smooth' });
                             const photoWallPage = document.getElementById('photoWallContainer');
                             if (photoWallPage) photoWallPage.scrollTo({ top: 0, behavior: 'smooth' });
                             if (window.currentUser) {
@@ -484,6 +498,13 @@
             //   仍显示上一个账号的私聊内容。由 doLogout 显式调用。
             window.__xtjResetChatPanels = function() {
                 try { if (typeof window.__xtjResetChatGroups === 'function') window.__xtjResetChatGroups(); } catch (_) {}
+                try { if (typeof window.__xtjResetDmUidHash === 'function') window.__xtjResetDmUidHash(); } catch (_) {}
+                dockChatActiveUser = null;
+                restorePostsScroll = null;
+                window.dockChatListCacheTime = 0;
+                _dockChatSocialTab = 'friends';
+                _dockChatSocialQuery = '';
+                _dockChatSocialRequestDirection = 'incoming';
                 if (_dockChatDraftTimer) clearTimeout(_dockChatDraftTimer);
                 _dockChatDraftTimer=null;_dockChatDraftLoadSeq++;
                 _dockChatLocalDrafts={};_dockChatDraftWrites={};_dockChatDraftConflicts={};
@@ -840,6 +861,7 @@
                 closeChatHistory(); cancelChatVoice(); clearChatMessageDraft(); clearDockChatFilePreview(false); _chatHistoryFocus = '';
                 closeDockChatConversationMenu(true);
                 cancelDockChatSendFlights();
+                if (_chatSendFlight) { try { _chatSendFlight.controller.abort(); } catch (_) {} _chatSendFlight = null; }
                 resetDockChatTyping();
                 showDockChatPresence('',false);
                 if (_dockChatDraftTimer && dockChatActiveUser) {
@@ -895,6 +917,47 @@
             }
             window.dockChatGoBack = dockChatGoBack;
 
+            // 切入群聊时统一收起私聊浮层并取消当前私聊会话，避免后台轮询误标已读与桌面分屏双高亮。
+            window.__xtjDeactivateDmForGroup = function() {
+                var socialSheet = document.getElementById('dockChatSocialSheet');
+                if (socialSheet && !socialSheet.classList.contains('hidden')) {
+                    socialSheet.classList.add('hidden');
+                    socialSheet.setAttribute('aria-hidden', 'true');
+                }
+                try { closeChatHistory(); } catch (_) {}
+                try { closeDockChatConversationMenu(true); } catch (_) {}
+                try { closeAuthorSupport(); } catch (_) {}
+                try { cancelChatFlashSend(); } catch (_) {}
+                try { cancelChatVoice(); } catch (_) {}
+                if (dockChatActiveUser) {
+                    if (_dockChatDraftTimer) {
+                        clearTimeout(_dockChatDraftTimer);
+                        _dockChatDraftTimer = null;
+                    }
+                    var currentDraftInput = document.getElementById('dockChatInput');
+                    try { persistDockChatDraft(dockChatActiveUser, currentDraftInput ? currentDraftInput.value : ''); } catch (_) {}
+                    try { saveChatAttachmentDraft(); } catch (_) {}
+                    _chatContextSeq++;
+                    try { clearChatMessageDraft(); } catch (_) {}
+                    try { clearDockChatFilePreview(false); } catch (_) {}
+                    _chatHistoryFocus = '';
+                    try { cancelDockChatSendFlights(); } catch (_) {}
+                    if (_chatSendFlight) { try { _chatSendFlight.controller.abort(); } catch (_) {} _chatSendFlight = null; }
+                    try { resetDockChatTyping(); } catch (_) {}
+                    try { showDockChatPresence('', false); } catch (_) {}
+                    dockChatActiveUser = null;
+                    dockChatSending = false;
+                    _dockChatSendQueue = [];
+                    _dockChatLoadSeq += 1;
+                    restorePostsScroll = null;
+                    var conversationButton = document.getElementById('dockChatConversationBtn');
+                    if (conversationButton) conversationButton.hidden = true;
+                    document.querySelectorAll('#dockChatList .chat-list-item.active').forEach(function(n) { n.classList.remove('active'); });
+                    syncDockChatLayoutState();
+                    startDMPolling(300000);
+                }
+            };
+
             window.openChatList = function() { switchDockTab('chat', true); };
             window.closeChat = function() {
                 _dockChatLoadSeq += 1;
@@ -912,6 +975,7 @@
                 cancelChatFlashSend();
                 if(_flashViewer)_flashViewer.close();
                 cancelDockChatSendFlights();
+                if (_chatSendFlight) { try { _chatSendFlight.controller.abort(); } catch (_) {} _chatSendFlight = null; dockChatSending = false; }
                 resetDockChatTyping();
                 closeChatHistory(); cancelChatVoice(); clearChatMessageDraft(); clearDockChatFilePreview(false); _chatHistoryFocus = '';
                 if (!window.currentUser) { showToast('请先登录'); return; }
@@ -1565,6 +1629,21 @@
                 });
                 convs.sort(function(a,b) { return Number(b.pinned)-Number(a.pinned) || String(b.last_time).localeCompare(String(a.last_time)); });
                 renderDockChatConversationList(el, convs);
+                if (window.currentUser && window.currentUser !== 'xxz') {
+                    var xxzRow = el.querySelector('.chat-list-item[data-chat-user="xxz"]');
+                    if (xxzRow) {
+                        xxzRow.classList.add('admin-chat-entry');
+                        var xxzNameWrap = xxzRow.querySelector('.cli-name');
+                        if (xxzNameWrap && !xxzNameWrap.querySelector('.admin-tag-mini')) {
+                            var badgeSpan = document.createElement('span');
+                            badgeSpan.className = 'admin-tag-mini';
+                            badgeSpan.textContent = '管理员';
+                            var nameText = xxzNameWrap.querySelector('.cli-name-text');
+                            if (nameText && nameText.nextSibling) xxzNameWrap.insertBefore(badgeSpan, nameText.nextSibling);
+                            else xxzNameWrap.appendChild(badgeSpan);
+                        }
+                    }
+                }
             }
 
             function scheduleDockChatListRefresh(delay) {
@@ -2406,11 +2485,30 @@
                     var oldRetry = el.querySelector('.chat-load-retry'); if (oldRetry) oldRetry.remove();
                     renderDockMessages(userName, mergedMessages, forceScroll);
                     syncDockChatHistoryButton(userName);
-                    if (pendingReadUpdates.length && currentDockTab==='chat' && !document.hidden) {
+                    var isGroupOpen = !!(window.__xtjChatGroups && typeof window.__xtjChatGroups.state === 'function' && window.__xtjChatGroups.state() && window.__xtjChatGroups.state().active);
+                    if (pendingReadUpdates.length && currentDockTab==='chat' && !document.hidden && !isGroupOpen) {
                         window.markMessagesRead(userName, mergedMessages, pendingReadUpdates).catch(function() {
                             scheduleDockChatListRefresh(120);
                         });
                     } else {
+                        if (currentDockTab==='chat' && !document.hidden && !isGroupOpen) {
+                            var convState = (typeof _dockChatConversationStates !== 'undefined' && _dockChatConversationStates) ? _dockChatConversationStates[userName] : null;
+                            if (convState && (convState.manual_unread_at || Number(convState.unread_count) > 0)) {
+                                convState.manual_unread_at = null;
+                                convState.unread_count = 0;
+                                if (typeof window.xtjProtectedFetch === 'function') {
+                                    window.xtjProtectedFetch('/api/chat/social/conversations/' + encodeURIComponent(userName), {
+                                        method: 'PATCH',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ action: 'mark_read' }),
+                                        authOwner: loadOwner,
+                                        authEpoch: loadEpoch,
+                                        background: true,
+                                        timeoutMs: 10000
+                                    }).then(function() { scheduleDockChatListRefresh(120); }).catch(function() {});
+                                }
+                            }
+                        }
                         updateUnreadBadge();
                     }
                 } catch(e) {
@@ -3101,7 +3199,7 @@
                         renderDockMessages(queuedTarget, upsertDockChatCacheMessage(queuedTarget, queuedMessage), true);
                         animateDockChatSend(queuedTempId, queuedTarget, queuedOrigin);
                         applyDockChatConversationPreview(queuedTarget, queuedMessage, 0);
-                        return;
+                        return { queued: true, tempId: queuedTempId };
                     }
                     // ★ 2026-09-25 修复（审计 M-4）：旧实现把 dockChatSending 与"无内容"
                     //   合并在同一个 return 里，发送中再次回车会被静默吞掉（无提示、不排队）。
@@ -3353,6 +3451,15 @@
                     //   已经把本条会话的预览/时间就地更新好了，发送**不会**改变其它会话。
                     //   现在把它真正作为主更新路径；全量校准交给轮询/可见性变化/手动刷新。
                     applyDockChatConversationPreview(targetUser, insertedMessage, 0);
+                    if (sendResult.auto_friend && (sendResult.auto_friend.status === 'request_sent' || sendResult.auto_friend.status === 'accepted')) {
+                        try { _chatSocialPanels.clear(); } catch (_) {}
+                        try { invalidateChatGroupsFriendsCache(); } catch (_) {}
+                        try { refreshChatFriendNotes(true); } catch (_) {}
+                        try { refreshChatSocialBadge(true); } catch (_) {}
+                        if (sendResult.auto_friend.status === 'accepted' && !forwarding) {
+                            showToast('已与 ' + targetUser + ' 互为好友');
+                        }
+                    }
                     if (forwarding) showToast('已转发给 ' + targetUser);
                     if (typeof window.__xtjRefreshIOSChatViewport === 'function') {
                         window.__xtjRefreshIOSChatViewport({ preserveFocus: true, forceScroll: true });
@@ -3940,18 +4047,30 @@
                 cancelDmAiAsk();
                 window.__xtjOpenAiChat();
                 var task = { owner: currentUser, epoch: _authStateEpoch, controller: new AbortController(),
-                    root: document.getElementById('aiChatRoot'), timer: null };
+                    root: null, input: null, originalDraft: null, imageBlob: null, timer: null };
                 _dmAiAskTask = task;
-                function current() {
+                function alive() {
                     return _dmAiAskTask === task && task.owner === currentUser && task.epoch === _authStateEpoch &&
-                        !task.controller.signal.aborted && task.root && task.root.isConnected && document.getElementById('aiChatRoot') === task.root;
+                        !task.controller.signal.aborted;
                 }
-                var input = task.root && task.root.querySelector('#aiChatMsgInput'), originalDraft = input && input.value;
+                function current() {
+                    if (!alive()) return false;
+                    var liveRoot = document.getElementById('aiChatRoot');
+                    if (!task.root) {
+                        if (!liveRoot || !liveRoot.isConnected) return false;
+                        var liveInput = liveRoot.querySelector('#aiChatMsgInput');
+                        if (!liveInput) return false;
+                        task.root = liveRoot;
+                        task.input = liveInput;
+                        task.originalDraft = liveInput.value;
+                    }
+                    return task.root.isConnected && liveRoot === task.root;
+                }
                 var prompt = isImage ? '请帮我看看这张图片：' : '请帮我看看这条消息：';
                 if (text) prompt += '\n' + text.slice(0, 800);
                 if (mediaUrl && !isImage) prompt += '\n（媒体链接：' + mediaUrl + '）';
                 var ready = !isImage, attached = false, started = Date.now();
-                if (isImage && current()) {
+                if (isImage && alive()) {
                     // Bearer tokens only go to our own API. Signed Storage and local
                     // blob URLs need no credentials and retain their original bytes.
                     var parsed = new URL(mediaUrl, location.href), api = new URL(window.API_BASE || location.origin, location.href);
@@ -3960,22 +4079,41 @@
                         signal: task.controller.signal, timeoutMs: 15000 }) : fetch(mediaUrl, { credentials: 'omit', signal: task.controller.signal });
                     Promise.resolve(request).then(function(response) { if (!response.ok) throw Error('图片暂不可用'); return response.blob(); })
                         .then(function(blob) {
-                            if (!current()) return;
-                            var fileInput = task.root.querySelector('input[type="file"]');
-                            if (!fileInput || input.value !== originalDraft) throw Error('输入内容已改变，请重新选择问小猫');
-                            var dt = new DataTransfer(); dt.items.add(new File([blob], 'dm-image', { type: blob.type || 'image/png' }));
-                            fileInput.files = dt.files; fileInput.dispatchEvent(new Event('change', { bubbles: true })); attached = true; ready = true;
-                        }).catch(function(error) { if (current()) { showToast(error.message || '图片暂不可用，请重试'); cancelDmAiAsk(); } });
+                            if (!alive()) return;
+                            task.imageBlob = blob;
+                        }).catch(function(error) { if (alive()) { showToast(error.message || '图片暂不可用，请重试'); cancelDmAiAsk(); } });
                 }
                 task.timer = setInterval(function() {
-                    if (!current()) { clearInterval(task.timer); task.controller.abort(); return; }
+                    if (!alive()) { clearInterval(task.timer); task.controller.abort(); return; }
                     if (Date.now() - started > 15000) { showToast('小猫AI 尚未准备好，请重试'); cancelDmAiAsk(); return; }
+                    if (!current()) return;
+                    if (isImage && !attached && task.imageBlob) {
+                        var fileInput = task.root.querySelector('input[type="file"]');
+                        if (!fileInput || task.input.value !== task.originalDraft) {
+                            showToast('输入内容已改变，请重新选择问小猫');
+                            cancelDmAiAsk();
+                            return;
+                        }
+                        try {
+                            var dt = new DataTransfer();
+                            dt.items.add(new File([task.imageBlob], 'dm-image', { type: task.imageBlob.type || 'image/png' }));
+                            fileInput.files = dt.files;
+                            fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+                            attached = true;
+                            ready = true;
+                        } catch (eAttach) {
+                            showToast('图片附件添加失败，请重试');
+                            cancelDmAiAsk();
+                            return;
+                        }
+                    }
                     if (!ready || (attached && !task.root.querySelector('.ai-file-thumb'))) return;
                     var cfg = window.__xtjAiAgent && window.__xtjAiAgent.getConfig(), button = task.root.querySelector('#aiChatSendBtn');
                     if (!cfg || !button || button.disabled) return;
-                    if (input.value !== originalDraft) { showToast('输入内容已改变，请重新选择问小猫'); cancelDmAiAsk(); return; }
-                    input.value = originalDraft.trim() ? originalDraft.replace(/\s+$/, '') + '\n' + prompt : prompt;
-                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                    if (task.input.value !== task.originalDraft) { showToast('输入内容已改变，请重新选择问小猫'); cancelDmAiAsk(); return; }
+                    var baseDraft = String(task.originalDraft || '');
+                    task.input.value = baseDraft.trim() ? baseDraft.replace(/\s+$/, '') + '\n' + prompt : prompt;
+                    task.input.dispatchEvent(new Event('input', { bubbles: true }));
                     cancelDmAiAsk(); button.click();
                 }, 150);
             }
@@ -4309,7 +4447,9 @@
                     var result = await chatFeatureApi('history/context?peer=' + encodeURIComponent(peer) + '&message_id=' + encodeURIComponent(id));
                     if (seq !== _chatContextSeq || epoch !== _authStateEpoch || owner !== window.currentUser || dockChatActiveUser !== peer) return;
                     _dockChatLoadSeq++; _chatHistoryRefreshSeq++; _chatHistoryFocus = peer; _chatHistoryAnchor = result.focus_id;
-                    var historyRows = Array.isArray(result.data) ? result.data.slice() : [];
+                    var historyRows = (Array.isArray(result.data) ? result.data.slice() : []).filter(function(m) {
+                        return !isDmMessageLocallyDeleted(m);
+                    });
                     var oldest = historyRows[0];
                     var historyKey = getDockChatCacheKey(peer);
                     _chatPagination[historyKey] = {
@@ -4325,7 +4465,7 @@
                         if (seq !== _chatContextSeq || epoch !== _authStateEpoch || owner !== window.currentUser || dockChatActiveUser !== peer) return;
                         var row = document.querySelector('#dockChatMessages [data-message-id="' + result.focus_id + '"]');
                         if (row) { row.scrollIntoView({ block: 'center', behavior: 'auto' }); row.classList.add('chat-search-focus'); setTimeout(function() { row.classList.remove('chat-search-focus'); }, 1800); }
-                        setDockChatJumpLatestVisible(true);
+                        setDockChatJumpLatestVisible(!!result.has_newer);
                     });
                 } catch (error) { if (seq === _chatContextSeq && epoch === _authStateEpoch && owner === window.currentUser) showToast(error.message); }
             }
@@ -4412,7 +4552,7 @@
                     }
                     showToast('已编辑');
                 } catch (error) { if (currentEdit()) showToast(error.message); }
-                finally { if (currentEdit()) { _chatSendFlight = null; dockChatSending = false; } }
+                finally { if (currentEdit()) { _chatSendFlight = null; dockChatSending = false; drainDockChatSendQueue(); } }
             }
             async function setChatReaction(peer, id, emoji) {
                 var owner = window.currentUser;
@@ -4949,7 +5089,7 @@
 
             var _chatPushSyncing=false, _chatPushPending=false, _chatPushOwner='', _chatPushEnabled=false;
             function chatPushSupported(){return window.isSecureContext && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;}
-            async function chatPushApi(path,body,owner,epoch){var response=await window.xtjProtectedFetch('/api/chat/push/'+path,Object.assign(body?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),timeoutMs:15000}:{timeoutMs:15000},{authOwner:owner,authEpoch:epoch}));var result=await response.json();if(!response.ok || !result.ok)throw new Error(result.error||'通知设置暂不可用');return result;}
+            async function chatPushApi(path,body,owner,epoch){var response=await window.xtjProtectedFetch('/api/chat/push/'+path,Object.assign(body?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),timeoutMs:15000}:{timeoutMs:15000},{authOwner:owner,authEpoch:epoch}));var result=await response.json().catch(function(){return {};});if(!response.ok || !result.ok){var err=new Error(result.error||'通知设置暂不可用');err.status=response.status;throw err;}return result;}
             async function syncChatPushState(){
                 if(!chatPushSupported())return;
                 var owner=window.currentUser || '',epoch=_authStateEpoch,enabled=!!owner && localStorage.getItem('xtj_chat_push_'+owner)==='on';
@@ -4970,7 +5110,21 @@
                     if(subscription){var key=subscription.options && subscription.options.applicationServerKey;if(key && btoa(String.fromCharCode.apply(null,new Uint8Array(key))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'')!==config.public_key){await subscription.unsubscribe();subscription=null;if(!allowed())return;}}
                     if(!subscription){var raw=atob(config.public_key.replace(/-/g,'+').replace(/_/g,'/'));subscription=await registration.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:Uint8Array.from(raw,function(c){return c.charCodeAt(0);})});}
                     if(!allowed())return;
-                    await chatPushApi('subscribe',{subscription:subscription.toJSON()},owner,epoch);
+                    try {
+                        await chatPushApi('subscribe',{subscription:subscription.toJSON()},owner,epoch);
+                    } catch (subErr) {
+                        // 上一账号若离线登出未释放旧推送端点，会返回 409；本地换发新端点后再试一次。
+                        if (subErr && subErr.status === 409 && allowed()) {
+                            try { await subscription.unsubscribe(); } catch (_) {}
+                            if (!allowed()) return;
+                            var rawRetry = atob(config.public_key.replace(/-/g,'+').replace(/_/g,'/'));
+                            subscription = await registration.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:Uint8Array.from(rawRetry,function(c){return c.charCodeAt(0);})});
+                            if (!allowed()) return;
+                            await chatPushApi('subscribe',{subscription:subscription.toJSON()},owner,epoch);
+                        } else {
+                            throw subErr;
+                        }
+                    }
                     if(!allowed())return;
                     _chatPushOwner=owner;_chatPushEnabled=true;
                     (registration.active || registration.waiting).postMessage({type:'XTJ_CHAT_PUSH_STATE',owner,peer:currentDockTab==='chat'?dockChatActiveUser || '':''});
@@ -5153,14 +5307,16 @@
                 try{
                     var prepared=await prepareDmImageForUpload(file,{original:original});if(!active())return;var uploadFile=prepared.file;
                     var form=new FormData();form.append('image',uploadFile,uploadFile.name||'flash.jpg');form.append('target_user',peer);form.append('client_id',client);
-                    var response=await window.xtjProtectedFetch('/api/chat/flash/send',{method:'POST',body:form,signal:flight.controller.signal,timeoutMs:60000});var body=await response.json();if(!active())return;if(body.quota){_flashQuota={owner:owner,data:body.quota,at:Date.now()};paintChatFlashQuota();}else void refreshChatFlashQuota(true);
+                    var response=await window.xtjProtectedFetch('/api/chat/flash/send',{method:'POST',body:form,signal:flight.controller.signal,timeoutMs:60000});var body=await response.json().catch(function(){return {};});if(!active())return;if(body.quota){_flashQuota={owner:owner,data:body.quota,at:Date.now()};paintChatFlashQuota();}else void refreshChatFlashQuota(true);
                     if(!response.ok||!body.ok||!body.message)throw Error(body.error||'闪图发送未确认，请重试');
                     var list=upsertDockChatCacheMessage(peer,Object.assign({},body.message,{__committedRevision:++_chatCommittedRevision}));_chatRenderSignature[peer]=undefined;renderDockMessages(peer,list,true);
+                    applyDockChatConversationPreview(peer,body.message,0);
+                    if(body.auto_friend&&(body.auto_friend.status==='request_sent'||body.auto_friend.status==='accepted')){try{_chatSocialPanels.clear();}catch(_){}try{invalidateChatGroupsFriendsCache();}catch(_){}try{refreshChatFriendNotes(true);}catch(_){}try{refreshChatSocialBadge(true);}catch(_){}}
                     if(_chatAttachmentQueue[0]===file){_chatAttachmentQueue.shift();var url=_chatAttachmentUrls.get(file);if(url)URL.revokeObjectURL(url);_chatAttachmentUrls.delete(file);}
                     if(_chatAttachmentQueue.length){showDockChatFilePreview(_chatAttachmentQueue[0]);renderChatAttachmentQueue();}else clearDockChatFilePreview(false);
                     showToast('闪图已发送，对方可查看一次，清晰显示 3 秒');
                 }catch(error){if(active())showToast(error.message||'闪图发送失败，请重试');}
-                finally{if(_flashSendFlight===flight){_flashSendFlight=null;_flashSending=false;dockChatSending=false;restoreDockChatSendAvailability();if(button){button.textContent='闪图';button.disabled=false;}}}
+                finally{if(_flashSendFlight===flight){_flashSendFlight=null;_flashSending=false;dockChatSending=false;restoreDockChatSendAvailability();if(button){button.textContent='闪图';button.disabled=false;}drainDockChatSendQueue();}}
             };
             window.openChatFlash=async function(id){
                 if(_flashViewer||!currentUser||!/^[a-f0-9-]{36}$/i.test(String(id)))return;
@@ -5177,7 +5333,7 @@
                 watch=setInterval(function(){if(!active())close();},50);
                 try{
                     var response=await window.xtjProtectedFetch('/api/chat/flash/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message_id:id,view_id:view}),signal:controller.signal,timeoutMs:30000,authOwner:owner,authEpoch:epoch});
-                    if(!response.ok){var error=await response.json();if(response.status===410)rememberFlashConsumed(key);throw Error(error.error||'闪图不可查看');}
+                    if(!response.ok){var error=await response.json().catch(function(){return {};});if(response.status===410)rememberFlashConsumed(key);throw Error(error.error||'闪图不可查看');}
                     var cached=(_chatCache[getDockChatCacheKey(peer)]||[]).find(function(m){return String(m.id)===String(id);});role=response.headers.get('X-Flash-Role')||(cached&&cached.user_name===owner?'sender':'recipient');if(role!=='sender' && flashLocallyViewed(owner,id)){close();showToast('闪图已查看');return;}var blob=await response.blob();if(!active())return;
                     if(!blob.size||!/^image\//.test(blob.type))throw Error('闪图图片未加载，请重试');
                     url=URL.createObjectURL(blob);
@@ -6016,7 +6172,7 @@
                 if (_dockChatSocialTab === 'search') {
                     content.innerHTML = '<form id="dockChatSocialSearchForm" class="chat-social-search-form" autocomplete="off">' +
                         '<input name="q" type="search" minlength="2" maxlength="64" placeholder="输入用户名，至少 2 个字符" value="' + escapeHtml(_dockChatSocialQuery) + '" aria-label="搜索用户名">' +
-                        '<button type="submit">搜索</button></form><div id="dockChatSocialResults" class="chat-social-results"><div class="chat-social-empty">搜索公开用户名，查看好友关系并发送申请。</div></div>';
+                        '<button type="submit">搜索</button></form><div id="dockChatSocialResults" class="chat-social-results"><div class="chat-social-empty">搜索用户名即可直接发消息（发消息自动加为单向好友，对方回复后互为好友）。</div></div>';
                     content.dataset.renderMarkup='';
                     content.setAttribute('aria-busy','false');
                     if (_dockChatSocialQuery) loadDockChatSocialSearch(_dockChatSocialQuery, seq);
@@ -6035,21 +6191,30 @@
                         _dockChatFriendNotesAt = Date.now();
                         applyDockChatFriendLabels();
                         if (!friends.length) {
-                            updateChatSocialPanel(content,'<div class="chat-social-empty">还没有好友。搜索用户名后发送好友申请即可开始聊天。</div>');
+                            updateChatSocialPanel(content,'<div class="chat-social-empty">还没有好友。直接给任何用户发消息就会自动加入好友列表，对方回复后自动互为好友。</div>');
                             return;
                         }
                         var friendMarkup = friends.map(function(friend) {
                             var name = String(friend.peer_name || '');
                             var note = String(friend.note || '');
-                            var actions = [
+                            var isMutual = friend.mutual !== false && friend.relation_status !== 'one_way';
+                            var actions = isMutual ? [
                                 chatSocialActionButton('聊天', 'friend-chat', name, '', 'primary'),
                                 chatSocialActionButton('资料', 'friend-profile', name),
                                 chatSocialActionButton('共同好友', 'friend-mutual', name),
                                 chatSocialActionButton('备注', 'friend-note', name, '', '', note),
                                 chatSocialActionButton('删除', 'friend-remove', name, '', 'danger'),
                                 chatSocialActionButton('拉黑', 'friend-block', name, '', 'danger')
+                            ] : [
+                                chatSocialActionButton('聊天', 'friend-chat', name, '', 'primary'),
+                                chatSocialActionButton('资料', 'friend-profile', name),
+                                chatSocialActionButton('删除', 'friend-remove', name, '', 'danger'),
+                                chatSocialActionButton('拉黑', 'friend-block', name, '', 'danger')
                             ];
-                            return chatSocialUserRow(name, note ? '账号：' + name : '已添加为好友', actions, note || name);
+                            var metaText = isMutual
+                                ? (note ? '账号：' + name : '互为好友')
+                                : '单向好友 · 对方回复后自动互为好友';
+                            return chatSocialUserRow(name, metaText, actions, note || name);
                         }).join('');
                         updateChatSocialPanel(content,friendMarkup);
                         hydrateDockChatSocialAvatars(friends.map(function(friend) { return friend.peer_name; }));
@@ -6125,16 +6290,16 @@
                         var meta;
                         if (relation === 'friends') {
                             actions = [chatSocialActionButton('聊天', 'friend-chat', name, '', 'primary'), chatSocialActionButton('资料', 'friend-profile', name)];
-                            meta = '已是好友';
+                            meta = '互为好友';
                         } else if (relation === 'request_sent') {
-                            actions = [chatSocialActionButton('已发送', 'noop', name, '', '', '')];
-                            meta = '等待对方处理';
+                            actions = [chatSocialActionButton('聊天', 'friend-chat', name, '', 'primary'), chatSocialActionButton('资料', 'friend-profile', name)];
+                            meta = '单向好友 · 对方回复后互为好友';
                         } else if (relation === 'request_received') {
-                            actions = [chatSocialActionButton('处理申请', 'requests-open', name, '', 'primary')];
-                            meta = '对方已向你发送好友申请';
+                            actions = [chatSocialActionButton('聊天', 'friend-chat', name, '', 'primary'), chatSocialActionButton('资料', 'friend-profile', name)];
+                            meta = '对方已联系你 · 回复后互为好友';
                         } else {
-                            actions = [chatSocialActionButton('添加好友', 'friend-request', name, '', 'primary'), chatSocialActionButton('资料', 'friend-profile', name)];
-                            meta = '注册用户';
+                            actions = [chatSocialActionButton('聊天', 'friend-chat', name, '', 'primary'), chatSocialActionButton('资料', 'friend-profile', name)];
+                            meta = '注册用户 · 发消息自动加为好友';
                         }
                         return chatSocialUserRow(name, meta, actions, name);
                     }).join('');
@@ -6213,13 +6378,13 @@
                     return;
                 }
                 if (action === 'friend-remove') {
-                    if (!(await window.xtjConfirm('删除好友', '删除好友后会保留历史聊天，但需要重新成为好友才能发送新消息。确定删除？', '删除'))) return;
+                    if (!(await window.xtjConfirm('删除好友', '确定将该用户移出好友列表？历史聊天仍会保留。', '删除'))) return;
                     try {
                         await requestDockChatSocial('/friends/' + encodeURIComponent(peer), { method: 'DELETE' });
                         await refreshChatFriendNotes(true);
                         invalidateChatGroupsFriendsCache();
                         if (dockChatActiveUser === peer) updateDockChatComposerPermission(peer);
-                        showToast('已删除好友，历史聊天保留');
+                        showToast('已移出好友列表，历史聊天保留');
                         renderDockChatSocialTab('friends');
                     } catch (e) { showToast(e && e.message || '删除好友失败'); }
                     return;
@@ -6298,41 +6463,40 @@
                     return;
                 }
                 var seq = ++_dockChatRelationshipSeq;
-                if (input) input.disabled = true;
-                if (send) send.disabled = true;
-                if (attach) attach.disabled = true;
-                if (notice) notice.hidden = false;
-                if (message) message.textContent = '正在确认好友关系…';
+                // 任意未拉黑用户可直接发消息（发消息自动单向加好友，对方回复后互为好友），
+                // 打开对话时不再先锁死输入框；仅在服务端明确返回拉黑/账号不可用时才禁用输入。
+                if (input) input.disabled = false;
+                if (send) send.disabled = false;
+                if (attach) attach.disabled = false;
+                if (notice) notice.hidden = true;
                 if (actionButton) { actionButton.hidden = true; actionButton.onclick = null; }
                 var owner = window.currentUser;
                 try {
                     var result = await requestDockChatSocial('/relationship?target=' + encodeURIComponent(userName));
                     if (seq !== _dockChatRelationshipSeq || window.currentUser !== owner || dockChatActiveUser !== userName) return;
                     var relationship = result.relationship || {};
-                    if (relationship.can_message === true) {
+                    if (relationship.can_message === true || ['none', 'request_sent', 'request_received', 'friends'].indexOf(relationship.status) >= 0) {
                         if (input) input.disabled = false;
                         if (send) send.disabled = false;
                         if (attach) attach.disabled = false;
                         if (notice) notice.hidden = true;
                         return;
                     }
+                    if (input) input.disabled = true;
+                    if (send) send.disabled = true;
+                    if (attach) attach.disabled = true;
+                    if (notice) notice.hidden = false;
                     var action = '';
                     var label = '';
                     var note = '';
                     if (relationship.status === 'blocked_by_me') {
-                        note = '你已拉黑该用户。解除拉黑后，双方才能重新申请或发送新消息。'; action = 'blocks'; label = '管理黑名单';
+                        note = '你已拉黑该用户。解除拉黑后，双方才能重新发送新消息。'; action = 'blocks'; label = '管理黑名单';
                     } else if (relationship.status === 'blocked_by_peer') {
-                        note = '对方已限制与你的好友申请和新消息。历史聊天仍可查看。';
-                    } else if (relationship.status === 'request_sent') {
-                        note = '好友申请已发送，等待对方处理。'; action = 'cancel'; label = '取消申请';
-                    } else if (relationship.status === 'request_received') {
-                        note = '对方已向你发送好友申请。'; action = 'requests'; label = '处理申请';
-                    } else if (relationship.status === 'none') {
-                        note = '成为好友后才能发送新消息。历史聊天仍可查看。'; action = 'add'; label = '添加好友';
+                        note = '对方已限制与你的新消息。历史聊天仍可查看。';
                     } else if (relationship.status === 'user_not_found') {
                         note = '该用户当前不可用。';
                     } else {
-                        note = '好友状态不可用，暂时无法发送新消息。'; action = 'retry'; label = '重试';
+                        note = '当前无法向该用户发送新消息。'; action = 'retry'; label = '重试';
                     }
                     if (message) message.textContent = note;
                     if (actionButton && action) {
@@ -6631,7 +6795,8 @@
                             clearInterval(timer);
                             return;
                         }
-                        if ((tries >= 10 && hasSkeleton) || (tries >= 8 && isEmpty)) {
+                        var feedFetching = (typeof feedPageFetchPending !== 'undefined' && feedPageFetchPending);
+                        if ((tries >= 48 && hasSkeleton && (!feedFetching || tries >= 55)) || (tries >= 16 && isEmpty && !feedFetching)) {
                             clearInterval(timer);
                             console.warn('[XTJ] feed boot watchdog: recovery after ' + tries + 's');
                             feedEl.innerHTML = '<div class="loading" id="feedWatchdogError" role="button" tabindex="0" style="color:#ff3b60;cursor:pointer;padding:24px;text-align:center;">帖子加载超时，点击重试<br><small style="opacity:.7">若底部一直显示「正在等待…」，多半是 Render 冷启动或网络慢，请稍候再点</small></div>';
@@ -6652,12 +6817,6 @@
                             } catch (e3) {}
                         }
                     }, 1000);
-                    // ★ 2026-09-13 修复（S-1）：bfcache 往返时清理看门狗。
-                    // 进入 bfcache 不触发 beforeunload，该 1s 间隔的看门狗会跨页存活；
-                    // 返回后若 feed 已被浏览器恢复为真实内容，看门狗仍可能在检查窗口内
-                    // 判定为 skeleton/空值并写入 innerHTML，覆盖掉恢复后的真实 feed
-                    //（表现为「返回后 feed 闪回错误页」）。pagehide 在进入 bfcache 时
-                    // 同样触发，是可靠时机。
                     window.addEventListener('pagehide', function() { clearInterval(timer); });
                 })();
                 // 记录访问（用户+IP）
@@ -7137,8 +7296,9 @@
                     overlay.classList.remove('active');
                     overlay.style.opacity = '';
                     overlay.style.transition = '';
-                    document.body.style.overflow = '';
-                    if (typeof syncReportModalBodyLock === 'function') syncReportModalBodyLock();
+                    if (typeof window.syncHeaderModalBodyLock === 'function') window.syncHeaderModalBodyLock();
+                    else if (typeof syncReportModalBodyLock === 'function') syncReportModalBodyLock();
+                    else document.body.style.overflow = '';
                     currentAnnouncement = null;
                 }, 200);
             };
@@ -8807,13 +8967,16 @@
             if (!overlay) return;
             overlay.classList.remove('active');
             window.closeReportHistoryModal();
-            syncReportModalBodyLock();
+            if (typeof window.__xtjResetReportAiScan === 'function') window.__xtjResetReportAiScan();
+            if (typeof window.syncHeaderModalBodyLock === 'function') window.syncHeaderModalBodyLock();
+            else syncReportModalBodyLock();
         };
 
         window.switchReportType = function(type) {
             _reportType = type;
             _reportSelectedId = null;
             _reportTargetUser = null;
+            if (typeof window.__xtjResetReportAiScan === 'function') window.__xtjResetReportAiScan();
             document.querySelectorAll('.report-type-tab').forEach(function(t) {
                 t.classList.toggle('active', t.dataset.type === type);
             });
@@ -9058,8 +9221,8 @@
                         if (reportToken) reportHeaders['Authorization'] = 'Bearer ' + reportToken;
                         res = await fetch(API_BASE + '/api/report', { method: 'POST', credentials: 'include', headers: reportHeaders, body: reportBody });
                     }
-                    var data = await res.json();
-                    if (!res.ok) throw new Error(data.error || '提交失败');
+                    var data = await res.json().catch(function() { return {}; });
+                    if (!res.ok) throw new Error(data.error || ('提交失败（' + res.status + '）'));
                 } else {
                     if (!window.sb) throw new Error('数据库连接未初始化，请刷新页面重试');
                     if (!currentUser) throw new Error('请先登录');

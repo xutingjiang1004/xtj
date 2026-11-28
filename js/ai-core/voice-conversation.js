@@ -27,14 +27,14 @@
     var enabled = false, disposed = false, seq = 0, speechSeq = 0, recognition = null, recorder = null, media = null;
     var decodeAbort = null, recordTimer = null, listening = false, speaking = false, utterance = null;
     // ★ 2026-11-14（DeepSeek 语音）：服务端朗读用的音频对象与中断句柄；
-    //   ttsUnavailable 一旦为真，本次页面生命周期内不再尝试，直接走浏览器语音合成。
-    var ttsAudio = null, ttsAbort = null, ttsUnavailable = false, ttsUrl = '';
+    //   永久不可用（未配置）走 ttsUnavailable，临时错误（5xx/429/网络）走短冷却。
+    var ttsAudio = null, ttsAbort = null, ttsUnavailable = false, ttsUnavailableUntil = 0, ttsUrl = '';
     var owner = options.owner(), lastTranscript = '', finalTranscript = '', baseText = '';
     var systemDictationFailed = false;
     // 提前问一次服务端识别是否可用，点麦克风时直接用结果。
     try { if (global.XTJVoiceTranscription && global.XTJVoiceTranscription.serverAvailable && global.currentUser) global.XTJVoiceTranscription.serverAvailable().catch(function () {}); } catch (_) {}
     function current(token) { return !disposed && seq === token && options.current(owner); }
-    function state(label,stage,progress) { options.onState({enabled:enabled,listening:listening,speaking:speaking,stage:stage||(speaking?'speaking':utterance?'speech_wait':listening?'listening':'idle'),progress:progress===undefined?null:progress,label:label || (speaking?'正在朗读，点击麦克风可打断并提问':utterance?'正在准备朗读，点击麦克风可打断':'')}); }
+    function state(label,stage,progress) { options.onState({enabled:enabled,listening:listening,speaking:speaking,stage:stage||(speaking?'speaking':(utterance||ttsAbort)?'speech_wait':listening?'listening':'idle'),progress:progress===undefined?null:progress,label:label || (speaking?'正在朗读，点击麦克风可打断并提问':(utterance||ttsAbort)?'正在准备朗读，点击麦克风可打断':'')}); }
     function releaseMedia() {
       clearTimeout(recordTimer); recordTimer = null;
       if (media) media.getTracks().forEach(function(track) { track.stop(); }); media = null;
@@ -106,6 +106,10 @@
           rec.onerror = function(event) {
             if (!current(token) || recognition !== rec) return;
             cancelInput();
+            if (event.error === 'no-speech') {
+              options.notify('没有识别到语音，点击麦克风可重试');
+              return;
+            }
             if (event.error !== 'not-allowed' && event.error !== 'aborted' && canRecord) {
               // 系统听写不可用（常见于 iPad / 添加到主屏幕）：之后改用录音识别。
               systemDictationFailed = true;
@@ -121,6 +125,9 @@
       }
       if (!global.navigator.mediaDevices || !global.navigator.mediaDevices.getUserMedia || !global.MediaRecorder || !global.XTJVoiceTranscription?.transcribeBlob) {
         options.notify('当前浏览器无法录音转写，请使用文字输入'); return;
+      }
+      if (!owner || !owner.user) {
+        options.notify('录音转文字请先登录，或直接使用文字输入'); return;
       }
       listening = true; state('正在申请麦克风权限…','permission');
       try {
@@ -203,7 +210,7 @@
     // 服务端朗读：按 600 字切段串行播放。首段就失败 → 回落到浏览器合成；
     // 中途失败 → 停止并提示重试（避免半截朗读突然换音色）。
     function serverSpeak(text, speechToken, speechCurrent, autoContinue) {
-      if (ttsUnavailable) return false;
+      if (ttsUnavailable || (ttsUnavailableUntil && Date.now() < ttsUnavailableUntil)) return false;
       if (!global.fetch || !global.Audio || !global.URL) return false;
       var parts = text.match(/[\s\S]{1,600}(?:[。！？\n]|$)|[\s\S]{1,600}/g) || [text];
       var index = 0, started = false;
@@ -214,6 +221,8 @@
         var chunk = parts[index++];
         var ctrl = new global.AbortController();
         ttsAbort = ctrl;
+        var reqTimer = setTimeout(function() { try { ctrl.abort('timeout'); } catch (_) {} }, 60000);
+        function clearReqTimer() { if (reqTimer) { clearTimeout(reqTimer); reqTimer = null; } }
         speaking = false; state('正在准备朗读，点击麦克风可打断','speech_wait');
         // 登录用户带令牌（过期会话会被续期）；访客直接用普通 fetch，走 15 天公开窗口。
         var reqInit = {
@@ -224,44 +233,63 @@
           ? global.xtjProtectedFetch('/api/agent/tts', reqInit)
           : global.fetch('/api/agent/tts', reqInit);
         ttsRequest.then(function(response) {
-          if (!response.ok) throw new Error('tts unavailable');
+          if (!response.ok) {
+            var err = new Error('tts unavailable');
+            err.httpStatus = response.status;
+            throw err;
+          }
           return response.blob();
         }).then(function(blob) {
+          clearReqTimer();
           if (!speechCurrent()) return;
           ttsAbort = null;
           var url = global.URL.createObjectURL(blob);
           ttsUrl = url;
           var audio = new global.Audio(url);
           ttsAudio = audio;
+          var settled = false;
           function cleanupAudio() {
+            try { audio.onplaying = audio.onended = audio.onerror = null; } catch (_) {}
             try { global.URL.revokeObjectURL(url); } catch (_) {}
             if (ttsUrl === url) ttsUrl = '';
             if (ttsAudio === audio) ttsAudio = null;
           }
+          function handlePlayError(fromPlayCatch) {
+            if (settled) return;
+            settled = true;
+            cleanupAudio();
+            if (!speechCurrent()) return;
+            if (!started) {
+              if (fromPlayCatch) ttsUnavailableUntil = Date.now() + 60000;
+              browseSpeak(text, speechToken, speechCurrent, autoContinue);
+            } else {
+              speaking = false;
+              state();
+              options.notify(fromPlayCatch ? '朗读被浏览器暂停，点击回复下的“朗读”可重试' : '朗读播放失败，点击回复下的“朗读”可重试');
+            }
+          }
           audio.onplaying = function() { if (!speechCurrent()) return; started = true; speaking = true; state('正在朗读，点击麦克风可打断并提问','speaking'); };
           audio.onended = function() {
+            if (settled) return;
+            settled = true;
             cleanupAudio();
             playNext();
           };
-          audio.onerror = function() {
-            cleanupAudio();
-            if (!speechCurrent()) return;
-            speaking = false;
-            state();
-            options.notify('朗读播放失败，点击回复下的“朗读”可重试');
-          };
+          audio.onerror = function() { handlePlayError(false); };
           var played = audio.play();
-          if (played && typeof played.catch === 'function') played.catch(function() {
-            if (!started) cleanupAudio();
-            if (!speechCurrent()) return;
-            if (!started) { ttsUnavailable = true; browseSpeak(text, speechToken, speechCurrent, autoContinue); }
-            else { speaking = false; state(); options.notify('朗读被浏览器暂停，点击回复下的“朗读”可重试'); }
-          });
-        }).catch(function() {
+          if (played && typeof played.catch === 'function') played.catch(function() { handlePlayError(true); });
+        }).catch(function(err) {
+          clearReqTimer();
           if (!speechCurrent()) return;
           ttsAbort = null;
           if (started) { speaking = false; state(); options.notify('朗读中断，点击回复下的“朗读”可重试'); return; }
-          ttsUnavailable = true;
+          var status = err && Number(err.httpStatus) || 0;
+          if (status === 404 || status === 501 || status === 503) {
+            ttsUnavailable = true;
+            browseSpeak(text, speechToken, speechCurrent, autoContinue);
+            return;
+          }
+          ttsUnavailableUntil = Date.now() + 60000;
           browseSpeak(text, speechToken, speechCurrent, autoContinue);
         });
       }
@@ -277,6 +305,7 @@
     function visibility() {
       if (global.document.hidden) {
         if (enabled) { suspendedByVisibility = true; cancelInput(); stopSpeech(); }
+        else if (listening || decodeAbort || speaking || utterance || ttsAbort || ttsAudio) { cancelInput(); stopSpeech(); }
         return;
       }
       if (suspendedByVisibility) {
@@ -290,7 +319,7 @@
     global.addEventListener('xtj:auth-changed',identityChanged);
     return {listen:toggleListening,cancelInput:cancelInput,speak:speak,stopSpeech:stopSpeech,setEnabled:setEnabled,
       reply:function(text) { if (enabled) speak(text,true); },
-      isEnabled:function() { return enabled; }, isSpeaking:function() { return speaking || !!utterance; },
+      isEnabled:function() { return enabled; }, isSpeaking:function() { return speaking || !!utterance || !!ttsAbort || !!ttsAudio; },
       dispose:function() { suspend(); disposed = true; global.document.removeEventListener('visibilitychange',visibility); global.removeEventListener('pagehide',suspend); global.removeEventListener('xtj:auth-changed',identityChanged); }};
   }
   core.VoiceConversation = {create:create,speechText:speechText};

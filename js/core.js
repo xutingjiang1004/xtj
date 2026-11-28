@@ -540,7 +540,15 @@ const ADMIN_NAME = "xxz";
                 try { avatarCache = {}; } catch(e) {}
                 try { currentUser = ''; window.currentUser = ''; window._lastKnownUser = ''; window._xtjCanonicalUser = ''; window._xtjAuthState = 'unauthenticated'; } catch(e) {}
                 try { if (window.__xtjResetPhotoWallAccess) window.__xtjResetPhotoWallAccess(); } catch(e) {}
-                try { window.safeStorage.remove('xtj_photos'); window.safeStorage.remove('xtj_photos_owner'); } catch(e) {}
+                try { if (typeof window.__xtjResetDmUidHash === 'function') window.__xtjResetDmUidHash(); } catch(e) {}
+                if (!preserveShared) {
+                    try {
+                        window.safeStorage.remove('xtj_photos');
+                        window.safeStorage.remove('xtj_photos_owner');
+                        window.safeStorage.remove('xtj_photos_deleted');
+                        window.safeStorage.remove('xtj_photos_sort');
+                    } catch(e) {}
+                }
                 try { if (window.__xtjResetPostState) window.__xtjResetPostState(); } catch(e) {}
                 try { if (window.__xtjResetDmNotifications) window.__xtjResetDmNotifications(); } catch(e) {}
                 try { if (window.XTJVoiceTranscription) window.XTJVoiceTranscription.reset(); } catch(e) {}
@@ -2229,6 +2237,7 @@ function isAdmin() {
                 _aiChatOpenGeneration += 1;
                 _aiChatOpenInProgress = false;
                 _aiChatOpenPromise = null;
+                try { window.__xtjPendingAiChatOpen = false; } catch (_) {}
             };
 
             // ★ 修复（P1「小猫 AI 卡住打不开，然后哪里都点不了」）：
@@ -2236,22 +2245,30 @@ function isAdmin() {
             //   （实测 45 秒都发不出去），整页被 #panelAiChat 盖住且无法返回，
             //   只能刷新。这里提供最小收尾：作废本次打开、收起面板、归还滚动、
             //   回到帖子页；无需 ai-agent 已加载。
-            window.__xtjAbortAiChatOpen = function() {
-                try { window.__xtjCancelPendingAiChatOpen(); } catch (eCancel) {}
+            window.__xtjAbortAiChatOpen = function(opts) {
+                var silent = !!(opts && opts.silent);
                 var panel = document.getElementById('panelAiChat');
-                if (panel) {
+                var hasPendingSkeleton = !!(panel && panel.getAttribute('aria-busy') === 'true');
+                if (silent && !_aiChatOpenInProgress && !window.__xtjPendingAiChatOpen && !hasPendingSkeleton) return;
+                try { window.__xtjCancelPendingAiChatOpen(); } catch (eCancel) {}
+                if (panel && (!silent || hasPendingSkeleton || !window.__xtjAiChatActive)) {
                     panel.classList.remove('active', 'is-entering', 'is-leaving');
                     panel.classList.add('hidden');
                     panel.setAttribute('aria-hidden', 'true');
                     panel.removeAttribute('aria-busy');
                     panel.style.display = '';
-                    panel.innerHTML = '';
+                    if (!silent || hasPendingSkeleton) panel.innerHTML = '';
                 }
-                try { document.body.style.overflow = ''; } catch (eOverflow) {}
                 try {
-                    var postsTab = document.querySelector('[data-desktop-tab="posts"]');
-                    if (postsTab) postsTab.click();
-                } catch (eTab) {}
+                    if (typeof window.syncHeaderModalBodyLock === 'function') window.syncHeaderModalBodyLock();
+                    else document.body.style.overflow = '';
+                } catch (eOverflow) {}
+                if (!silent) {
+                    try {
+                        var postsTab = document.querySelector('[data-desktop-tab="posts"]');
+                        if (postsTab) postsTab.click();
+                    } catch (eTab) {}
+                }
             };
 
             window.__xtjOpenAiChat = function() {
@@ -2510,6 +2527,16 @@ function isAdmin() {
             var parsed = parsePostContent(post || {});
             var meta = Object.assign({}, POST_META_DEFAULTS, parsed.meta || {});
             var realVisibility = post && typeof post.visibility === "string" && post.visibility ? post.visibility : "";
+            var effectiveVisibility = realVisibility || meta.visibility || "public";
+            var rawMode = typeof meta.visibility_mode === "string" ? meta.visibility_mode.trim().toLowerCase() : "";
+            var visibilityMode = effectiveVisibility === "private"
+                ? "private"
+                : (effectiveVisibility === "unlisted"
+                    ? ((rawMode === "allow_list" || rawMode === "deny_list" || rawMode === "restricted") ? rawMode : "private")
+                    : "public");
+            var visibilityUsers = Array.isArray(meta.visibility_users)
+                ? meta.visibility_users.map(function(u) { return String(u || "").trim(); }).filter(Boolean)
+                : [];
             var hasRealPinned = !!(post && (post.is_pinned === true || post.is_pinned === false));
             var hasRealPinnedAt = !!(post && post.pinned_at);
             var hasRealUpdatedAt = !!(post && post.updated_at);
@@ -2520,7 +2547,9 @@ function isAdmin() {
             var metaLocationLevel = meta.location_level || "";
             return Object.assign({}, post, {
                 content: parsed.text || "",
-                visibility: realVisibility || meta.visibility || "public",
+                visibility: effectiveVisibility,
+                visibility_mode: visibilityMode,
+                visibility_users: visibilityUsers,
                 is_pinned: hasRealPinned ? !!post.is_pinned : !!meta.is_pinned,
                 pinned_at: hasRealPinnedAt ? post.pinned_at : (meta.pinned_at || null),
                 updated_at: hasRealUpdatedAt ? post.updated_at : (meta.updated_at || null),
@@ -2545,8 +2574,17 @@ function isAdmin() {
 
         function canViewPost(post) {
             var p = normalizePost(post);
+            var viewer = String(window.currentUser || "").trim();
             if (p.visibility === "private") {
-                return !!window.currentUser && p.user_name === window.currentUser;
+                return !!viewer && p.user_name === viewer;
+            }
+            if (p.visibility === "unlisted") {
+                if (!viewer) return false;
+                if (p.user_name === viewer) return true;
+                if (p.visibility_mode === "allow_list") return p.visibility_users.indexOf(viewer) >= 0;
+                if (p.visibility_mode === "deny_list") return p.visibility_users.indexOf(viewer) < 0;
+                if (p.visibility_mode === "restricted") return true;
+                return false;
             }
             return true;
         }
@@ -2743,6 +2781,11 @@ function isAdmin() {
             if (overlay._closeTimer) {
                 clearTimeout(overlay._closeTimer);
                 overlay._closeTimer = null;
+                var pendingCb = overlay._pendingConfirmCb;
+                overlay._pendingConfirmCb = null;
+                if (typeof pendingCb === 'function') {
+                    try { pendingCb(); } catch (_) {}
+                }
             }
             
             // FLIP Animation: Step 1 - First (记录按钮位置)
@@ -2908,6 +2951,7 @@ function isAdmin() {
                     dialog.style.transform = 'translate(' + targetDx + 'px, ' + targetDy + 'px) scale(' + targetScale + ')';
                     dialog.style.opacity = '0';
                     
+                    overlay._pendingConfirmCb = cb;
                     overlay._closeTimer = setTimeout(function() {
                         dialog.style.transform = '';
                         dialog.style.opacity = '';
@@ -2918,8 +2962,10 @@ function isAdmin() {
                         overlay.classList.remove('closing');
                         overlay.classList.remove('active');
                         window._confirmCallback = null;
-                        if (typeof cb === 'function') {
-                            cb();
+                        var runCb = overlay._pendingConfirmCb;
+                        overlay._pendingConfirmCb = null;
+                        if (typeof runCb === 'function') {
+                            runCb();
                         }
                     }, 320);
                     return;
@@ -2930,13 +2976,16 @@ function isAdmin() {
             overlay.classList.add('closing');
             var okBtn = document.getElementById('ppConfirmOkBtn');
             if (okBtn) okBtn.disabled = true;
+            overlay._pendingConfirmCb = cb;
             overlay._closeTimer = setTimeout(function() {
                 overlay.classList.remove('closing');
                 overlay.classList.remove('active');
                 window._confirmCallback = null;
                 overlay._closeTimer = null;
-                if (typeof cb === 'function') {
-                    cb();
+                var runCb = overlay._pendingConfirmCb;
+                overlay._pendingConfirmCb = null;
+                if (typeof runCb === 'function') {
+                    runCb();
                 }
             }, 280);
         };
@@ -3553,6 +3602,12 @@ function isAdmin() {
             let upcRequestSeq = 0;
 
             window.openUserProfile = async function(userName) {
+                // P-03 修复：若浏览/点赞统计弹窗(#postStatsModal, z-index:2200)正开着，先关闭它，
+                // 避免它被置 inert=true 后仍死盖在 z-index:105 的 #userProfileModal 上方锁死移动端。
+                try {
+                    if (typeof window.closePostStatsModal === 'function') window.closePostStatsModal();
+                    else { var _ps = document.getElementById('postStatsModal'); if (_ps) _ps.classList.remove('active'); }
+                } catch (_) {}
                 upcTargetUser = userName;
                 var _seq = ++upcRequestSeq;
                 // ★ 审计修复：upcName/upcLogin/upcMsgBtn 此前直接取用无守卫（与下方
@@ -3574,6 +3629,8 @@ function isAdmin() {
                     if (!small || !avatarEl.querySelector('img') || typeof window.openPostImagePreview !== 'function') return;
                     var large = /\/api\/avatar\/image\//.test(small) ? small + (small.indexOf('?') >= 0 ? '&' : '?') + 'size=large' : small;
                     avatarEl.setAttribute('data-thumb-src', small);
+                    avatarEl.setAttribute('data-preview-source', 'profile');
+                    avatarEl.setAttribute('data-preview-user', String(upcTargetUser || ''));
                     window.openPostImagePreview(large, avatarEl);
                 };
                 avatarEl.onkeydown = function(event) { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); avatarEl.onclick(); } };
@@ -3622,7 +3679,7 @@ function isAdmin() {
                             var cv = readAvatarCacheFromStorage();
                             if (cv[currentUser]) {
                                 avatarCache[currentUser] = cv[currentUser];
-                                if (document.getElementById('userProfileModal').classList.contains('active')) {
+                                if (cv[currentUser].url && document.getElementById('userProfileModal').classList.contains('active')) {
                                     avatarEl.innerHTML = '<img decoding="async" src="' + escapeHtml(sanitizeUrl(cv[currentUser].url)) + '" alt="头像">';
                                 }
                             }
@@ -3642,7 +3699,8 @@ function isAdmin() {
                         }
                         if (document.getElementById('userProfileModal').classList.contains('active')) {
                             var url = (userName === currentUser && getAvatarUrl(currentUser)) ? getAvatarUrl(currentUser) : avatarUrl;
-                            var imgHtml = '<img decoding="async" src="' + escapeHtml(sanitizeUrl(url)) + '" alt="头像" onerror="this.style.display=\'none\';var s=document.createElement(\'span\');s.textContent=this.alt[0]?this.alt[0].toUpperCase():\'?\';s.className=\'avatar-fallback\';this.parentNode.appendChild(s);">';
+                            var fallbackInitial = (Array.from(String(userName || '?'))[0] || '?').toUpperCase();
+                            var imgHtml = '<img decoding="async" src="' + escapeHtml(sanitizeUrl(url)) + '" alt="头像" data-initial="' + escapeHtml(fallbackInitial) + '" onerror="this.style.display=\'none\';var s=document.createElement(\'span\');s.textContent=this.getAttribute(\'data-initial\')||\'?\';s.className=\'avatar-fallback\';this.parentNode.appendChild(s);">';
                             // The same picture is already on screen: leave it alone instead of tearing it down and reloading it.
                             var shownImg = avatarEl.querySelector('img');
                             if (!(shownImg && shownImg.getAttribute('src') === sanitizeUrl(url))) avatarEl.innerHTML = imgHtml;
@@ -4057,7 +4115,25 @@ function isAdmin() {
                 var logoutTimeoutTimer = logoutAbortCtl ? setTimeout(function(){ logoutAbortCtl.abort(); }, 8000) : null;
                 var logoutHeaders = { 'Content-Type': 'application/json' };
                 if (savedToken) logoutHeaders.Authorization = 'Bearer ' + savedToken;
+                // CH-A2 修复：登出前尽力解绑当前浏览器的 Web Push 订阅（服务端 + 本地），
+                // 避免换号后新账号订阅同一浏览器 endpoint 被后端返回 409 永久锁死。
+                var pushUnsubscribeRequest = Promise.resolve().then(async function () {
+                    if (!savedUser || !navigator.serviceWorker || !navigator.serviceWorker.getRegistration) return;
+                    var reg = await navigator.serviceWorker.getRegistration().catch(function () { return null; });
+                    if (!reg || !reg.pushManager || !reg.pushManager.getSubscription) return;
+                    var sub = await reg.pushManager.getSubscription().catch(function () { return null; });
+                    if (!sub) return;
+                    if (sub.endpoint) {
+                        await fetch(API_BASE + '/api/chat/push/unsubscribe', {
+                            method: 'POST', credentials: 'include', headers: logoutHeaders,
+                            body: JSON.stringify({ endpoint: sub.endpoint })
+                        }).catch(function () {});
+                    }
+                    await sub.unsubscribe().catch(function () {});
+                }).catch(function () {});
                 var logoutRequest = Promise.resolve().then(function(){
+                    return pushUnsubscribeRequest;
+                }).then(function(){
                     return fetch(API_BASE + '/api/user/logout', {
                         method: 'POST', credentials: 'include', headers: logoutHeaders,
                         signal: logoutAbortCtl ? logoutAbortCtl.signal : undefined
@@ -4068,10 +4144,17 @@ function isAdmin() {
                 window.__xtjLogoutPending = logoutRequest;
                 closeModal('profileDetailModal');
                 closeModal('profileActivityModal');
-                // FIX PROF-02: 登出时还要关掉从帖子页点开的资料卡/举报记录/删除确认等弹窗，
+                // FIX PROF-02 + P-35: 登出时关闭全部已开弹窗（含浏览/点赞统计与公告），清举报角标，
                 // 否则旧账号界面盖在页面上，并让 07 的焦点表面把背景判为 inert。
-                ['userProfileModal', 'reportHistoryModal', 'reportModal', 'postDetailModal', 'delModal', 'statModal'].forEach(function (modalId) {
-                    try { if (typeof closeModal === 'function') closeModal(modalId); } catch (eModal) {}
+                ['userProfileModal', 'reportHistoryModal', 'reportModal', 'postDetailModal', 'delModal', 'statModal', 'postStatsModal', 'announcementModal'].forEach(function (modalId) {
+                    try {
+                        if (modalId === 'postStatsModal' && typeof window.closePostStatsModal === 'function') window.closePostStatsModal();
+                        else if (modalId === 'announcementModal' && typeof window.closeAnnouncementModal === 'function') window.closeAnnouncementModal();
+                        else if (typeof closeModal === 'function') closeModal(modalId);
+                    } catch (eModal) {}
+                });
+                ['reportBtnBadge', 'navReportBadge'].forEach(function (badgeId) {
+                    try { var b = document.getElementById(badgeId); if (b) { b.textContent = ''; b.style.display = 'none'; b.classList.remove('show'); } } catch (_) {}
                 });
 
                 try {
@@ -4108,6 +4191,8 @@ function isAdmin() {
 
                 currentUser = '';
                 window.currentUser = '';
+                try { if (typeof window.xtjClearOriginalMediaCache === 'function') window.xtjClearOriginalMediaCache(); } catch(e) {}
+                try { if (typeof window.__xtjResetDmUidHash === 'function') window.__xtjResetDmUidHash(); } catch(e) {}
                 try { if (window.__xtjResetPhotoWallAccess) window.__xtjResetPhotoWallAccess(); } catch(e) {}
                 try { if (window.__xtjResetPostState) window.__xtjResetPostState(); } catch(e) {}
                 try { if (window.__xtjResetDmNotifications) window.__xtjResetDmNotifications(); } catch(e) {}
@@ -4170,8 +4255,8 @@ function isAdmin() {
                     if (regNick) regNick.value = '';
                     if (regPw) regPw.value = '';
                 } catch (e) {}
-                // FIX PROF-02: 滚动锁按当前弹窗状态重算，不再无条件写死，避免与 07 打架。
-                try { if (typeof syncHeaderModalBodyLock === 'function') syncHeaderModalBodyLock(); else document.body.style.overflow = ''; }
+                // FIX PROF-02 + P-08: 滚动锁按当前弹窗状态重算，不再无条件写死，避免与 07 打架。
+                try { if (typeof window.syncHeaderModalBodyLock === 'function') window.syncHeaderModalBodyLock(); else document.body.style.overflow = ''; }
                 catch (eBodyLock) { document.body.style.overflow = ''; }
 
                 try { if (typeof window.__xtjBroadcastLogout === 'function') window.__xtjBroadcastLogout('manual'); } catch(e) {}
@@ -4570,7 +4655,7 @@ function renderProfileActivityList(kind) {
                         triggerBtn.setAttribute('aria-label', '打开举报记录');
                     }
                     list.innerHTML = records.map(function(r) {
-                        var targetTypeLabel = r.target_type === 'photo' ? '照片墙' : '帖子';
+                        var targetTypeLabel = r.target_type === 'photo' ? '照片墙' : (r.target_type === 'group' ? '群聊' : '帖子');
                         var statusText = r.status === 'pending' ? '待处理' : (r.status === 'actioned' ? '已处理' : (r.status === 'reviewed' ? '已审阅' : String(r.status || '处理中')));
                         var statusClass = r.status === 'actioned' ? ' report-record-status--actioned' : (r.status === 'reviewed' ? ' report-record-status--reviewed' : '');
                         var reasonText = escapeHtml(String(r.report_reason || '未填写举报原因'));
@@ -4862,27 +4947,44 @@ function renderProfileActivityList(kind) {
             };
 
             window.unlikeFromProfile = async function(likeId, postId, btn) {
-                if (!currentUser) return;
+                if (!currentUser || !postId) return;
+                var owner = currentUser, epoch = _authStateEpoch;
+                function sameAccount() { return owner === currentUser && epoch === _authStateEpoch; }
                 var originalText = btn ? btn.textContent : '';
                 try {
                     if (btn) {
                         btn.disabled = true;
                         btn.textContent = '取消中..';
                     }
-                    var resp = await window.xtjProtectedFetch('/api/likes/user/' + encodeURIComponent(currentUser) + '/post/' + postId, { method: 'DELETE' });
-                    var result = await resp.json();
+                    var resp = await window.xtjProtectedFetch('/api/likes/user/' + encodeURIComponent(owner) + '/post/' + encodeURIComponent(String(postId)), { method: 'DELETE', authOwner: owner, authEpoch: epoch });
+                    var result = await resp.json().catch(function() { return {}; });
+                    if (!sameAccount()) return;
                     if (!resp.ok || !result.ok) throw new Error(result.error || '删除失败');
 
                     profileActivityState.likes = (profileActivityState.likes || []).filter(function(item) {
-                        if (postId) return !(String(item.post_id) === String(postId) && String(item.user_name) === String(currentUser));
+                        if (postId) return !(String(item.post_id) === String(postId) && String(item.user_name) === String(owner));
                         if (likeId) return String(item.id) !== String(likeId);
                         return true;
                     });
                     feedAllLikes = (feedAllLikes || []).filter(function(item) {
-                        if (postId) return !(String(item.post_id) === String(postId) && String(item.user_name) === String(currentUser));
+                        if (postId) return !(String(item.post_id) === String(postId) && String(item.user_name) === String(owner));
                         if (likeId && item && item.id != null) return String(item.id) !== String(likeId);
                         return true;
                     });
+                    (feedAllPosts || []).forEach(function(p) {
+                        if (p && String(p.id) === String(postId)) {
+                            if (p.liked_by_me && Number.isFinite(Number(p.like_count))) p.like_count = Math.max(0, Number(p.like_count) - 1);
+                            p.liked_by_me = false;
+                        }
+                    });
+                    if (window.__xtjPostDetailSnapshot && String(window.__xtjPostDetailSnapshot.id) === String(postId)) {
+                        if (window.__xtjPostDetailSnapshot.liked_by_me && Number.isFinite(Number(window.__xtjPostDetailSnapshot.like_count))) {
+                            window.__xtjPostDetailSnapshot.like_count = Math.max(0, Number(window.__xtjPostDetailSnapshot.like_count) - 1);
+                        }
+                        window.__xtjPostDetailSnapshot.liked_by_me = false;
+                    }
+                    if (typeof updatePostLikeUi === 'function') updatePostLikeUi(postId, false);
+                    if (typeof markFeedInteractionChanged === 'function') markFeedInteractionChanged();
                     if (profileActivityState.totals && profileActivityState.totals.likes > 0) {
                         profileActivityState.totals.likes -= 1;
                     }
@@ -4893,14 +4995,15 @@ function renderProfileActivityList(kind) {
                         rebuildFeedFromCurrentState().catch(function() {});
                     }
                     renderProfileActivity();
-                    loadPersonalRecordSummary(currentUser, true);
+                    loadPersonalRecordSummary(owner, true);
                     showToast('已取消点赞');
                 } catch (e) {
+                    if (!sameAccount()) return;
                     console.error('unlikeFromProfile error:', e);
                     showToast('取消点赞失败');
                     if (btn) btn.textContent = originalText || '取消点赞';
                 } finally {
-                    if (btn) {
+                    if (sameAccount() && btn) {
                         btn.disabled = false;
                         if (btn.textContent === '取消中..') btn.textContent = originalText || '取消点赞';
                     }
@@ -4978,10 +5081,11 @@ function renderProfileActivityList(kind) {
                     var response = await window.xtjProtectedFetch('/api/post/comment/' + encodeURIComponent(commentId), {
                         method: 'DELETE', authOwner: owner, authEpoch: epoch
                     });
-                    var result = await response.json();
+                    var result = await response.json().catch(function() { return {}; });
                     if (!sameAccount()) return;
                     if (!response.ok || !result.ok) throw new Error(result.error || '删除评论失败');
 
+                    if (typeof cancelCatAiTask === 'function') cancelCatAiTask(commentId, 'deleted');
                     window.__xtjApplyCommentDeletion(commentId, result, targetPostId);
                     if (typeof writeFeedCacheSnapshot === 'function') writeFeedCacheSnapshot();
                     if (typeof updateFeedStats === 'function') updateFeedStats();
@@ -4990,6 +5094,7 @@ function renderProfileActivityList(kind) {
                         window.__xtjSchedulePostCardPatch(targetPostId);
                     }
                     renderProfileActivity();
+                    loadPersonalRecordSummary(owner, true);
                     showToast('已删除评论');
                 } catch (e) {
                     if (!sameAccount()) return;
@@ -5308,6 +5413,7 @@ function renderProfileActivityList(kind) {
                     if (!resp.ok) {
                         var errMsg = payload.message || payload.error || '重试失败';
                         showCatAiStatus(commentIdStr, errMsg, true);
+                        retryBtnSetup(commentIdStr, postId);
                         return;
                     }
                     if (payload.status === 'completed') {
@@ -5320,6 +5426,7 @@ function renderProfileActivityList(kind) {
                     }
                     if (payload.status === 'rate_limited') {
                         showCatAiStatus(commentIdStr, payload.message || '调用过于频繁，请稍后再试', true);
+                        retryBtnSetup(commentIdStr, postId);
                         return;
                     }
                     // pending/processing - 开始轮询
@@ -5328,6 +5435,7 @@ function renderProfileActivityList(kind) {
                 } catch (e) {
                     console.error('[CatAI] retry failed:', e);
                     showCatAiStatus(commentIdStr, '重试失败，请检查网络后重试', true);
+                    retryBtnSetup(commentIdStr, postId);
                 }
             };
 
@@ -5347,7 +5455,8 @@ function renderProfileActivityList(kind) {
                     return item && item.id != null && String(item.id) === aiIdStr;
                 });
                 var insertedNewComment = !existingInFeed;
-                var existingInDom = document.querySelector('.comment-item[data-comment-id="' + catAiCssValue(aiIdStr) + '"]');
+                var feedRoot = document.getElementById('feed');
+                var existingInDom = feedRoot ? feedRoot.querySelector('.comment-item[data-comment-id="' + catAiCssValue(aiIdStr) + '"]') : document.querySelector('.comment-item[data-comment-id="' + catAiCssValue(aiIdStr) + '"]');
                 if (existingInFeed && existingInDom) return; // 已存在，跳过
                 // 加入 feedAllComments
                 feedAllComments = (feedAllComments || []).filter(function(item) {
@@ -5367,33 +5476,15 @@ function renderProfileActivityList(kind) {
                 // 插入 DOM，返回结果
                 var result = insertCatAiCommentIntoDOM(aiComment, srcIdStr, postId);
                 if (!result.inserted) {
-                    // ★ 插入失败：定向重渲染对应帖子
-                    if (result.reason === 'source_comment_missing') {
+                    // P-10 修复：走定向局部补丁重绘，避免传反参数或拿 { id: postId } 空壳替换掉真实帖子卡片。
+                    if (result.reason === 'source_comment_missing' && postId != null) {
                         try {
-                            // 尝试对对应 postId 执行一次定向帖子重渲染
-                            var postEl = document.querySelector('.post[data-post-id="' + String(postId) + '"]');
-                            if (postEl && typeof renderPostCardSafely === 'function') {
-                                // 查找该帖子的评论数据
-                                var postComms = (feedAllComments || []).filter(function(c) {
-                                    return String(c.post_id) === String(postId);
-                                });
-                                var maps = buildPostMaps([], postComms);
-                                var template = document.createElement('template');
-                                template.innerHTML = renderPostCardSafely({ id: postId }, maps.commentMap, maps.likeMap, maps.likeUserMap);
-                                var newPost = template.content.firstElementChild;
-                                if (newPost && postEl.parentNode) {
-                                    postEl.parentNode.replaceChild(newPost, postEl);
-                                }
-                            }
-                            // 重渲染后再次确认
-                            var confirmExisting = document.querySelector('.comment-item[data-comment-id="' + catAiCssValue(aiIdStr) + '"]');
-                            if (!confirmExisting) {
-                                console.warn('[CatAI] upsert retry failed for comment:', aiIdStr);
+                            if (typeof window.__xtjSchedulePostCardPatch === 'function') {
+                                window.__xtjSchedulePostCardPatch(postId);
                             }
                         } catch (e) {
-                            console.warn('[CatAI] upsert re-render failed:', e);
+                            console.warn('[CatAI] upsert patch failed:', e);
                         }
-                        // Phase 3-P0-3: source_comment_missing 时不写入缓存，避免孤儿缓存
                     }
                 } else {
                     // Phase 3-P0-3: DOM 插入成功后再写缓存，保证缓存与 DOM 一致
@@ -6900,8 +6991,9 @@ function renderProfileActivityList(kind) {
                 invalidateFeedCaches();
 
                 // 删除只过渡合成属性，完成后一次移除节点，避免连续重算整张卡片的布局。
-                if (session.postEl && session.postEl.parentNode) {
-                    var el = session.postEl;
+                // P-06 修复：若删除在途关闭过 #delModal，session.postEl 已被清空，按 postId 回查卡片 DOM。
+                var el = (session && session.postEl && session.postEl.parentNode) ? session.postEl : findPostCardElement(postId);
+                if (el && el.parentNode) {
                     var reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
                     if (reducedMotion) {
                         finishDeletedPostElement(el);
@@ -6923,7 +7015,9 @@ function renderProfileActivityList(kind) {
                 }
 
                 if (typeof updateFeedStats === 'function') { try { updateFeedStats(); } catch (e) {} }
-                cleanupDeleteSession({ restoreVisual: false, hideModal: true, resetTarget: true });
+                if (!session || !session.postId || String(session.postId) === String(postId)) {
+                    cleanupDeleteSession({ restoreVisual: false, hideModal: true, resetTarget: true });
+                }
                 showToast("帖子已删除");
                 if (window.XTJHaptics) window.XTJHaptics.play('success');
                 // 不再调用 loadFeed(true)，避免整页重建和闪白
@@ -7133,7 +7227,7 @@ function renderProfileActivityList(kind) {
                     // ★ 修复：关闭即复位 aria-hidden（打开时 02 置 false，关闭从不复位）
                     try { if (el.getAttribute('aria-hidden') !== null) el.setAttribute('aria-hidden', 'true'); } catch (_) {}
                     // ★ 修复：弹窗状态变化后重算 body 滚动锁（statModal 此前所有关闭路径都不解锁）
-                    try { if (typeof syncHeaderModalBodyLock === 'function') syncHeaderModalBodyLock(); } catch (_) {}
+                    try { if (typeof window.syncHeaderModalBodyLock === 'function') window.syncHeaderModalBodyLock(); } catch (_) {}
                 }
                 // 删除弹窗取消时立即清理，不播放动画
                 if (id === 'delModal') {
@@ -7492,7 +7586,10 @@ function renderProfileActivityList(kind) {
                     move.onfinish = onEnd;
                     endTimer = setTimeout(onEnd, D + 260);
                     handle.abort = function() {
+                        var opts = arguments[0];
                         clearTimeout(endTimer); handle.ended = true; closeDone = true;
+                        // P-05 修复：openModal 重开同一弹窗时传 suppressHide=true，避免刚初始化的新内容被旧关闭的 baseClose 清空。
+                        if (opts && opts.suppressHide) { cleanup(0); motionEnded(handle); return; }
                         // ★ 第二轮修复（点-5）：abort 之前跳过 o.hide()。被 abort 的
                         //   若是关闭动画（kind 'close'/'close-reversing'），目标
                         //   面板既不再走 finishClose，又保持可见 + inert——用户
@@ -7521,7 +7618,7 @@ function renderProfileActivityList(kind) {
                     rectOfSpec: rectOfSpec, rectOfElement: rectOfElement,
                     open: function(box, o) { return run('open', box, o); },
                     close: function(box, o) { return run('close', box, o); },
-                    abort: function(box) { var h = runs && runs.get(box); if (h) h.abort(); },
+                    abort: function(box, opts) { var h = runs && runs.get(box); if (h) h.abort(opts); },
                     defer: function(cb) {
                         if (!playing) return false;
                         deferred.push(cb);
@@ -7563,8 +7660,9 @@ function renderProfileActivityList(kind) {
                     var el = document.getElementById(id), box = el && el.querySelector('.modal-box');
                     var spec = ANIMATED[id] && motionOk() ? window.xtjMorph.last() : null;
                     var from = spec ? rectOfSpec(spec) : null;
-                    var wasActive = !!(el && el.classList.contains('active'));
-                    if (box) window.xtjMorph.abort(box);
+                    var wasClosing = !!(el && el.__xtjClosing);
+                    var wasActive = !!(el && el.classList.contains('active')) && !wasClosing;
+                    if (box) window.xtjMorph.abort(box, { suppressHide: true });
                     if (el) el.__xtjClosing = false;
                     var keepTransition = el ? el.style.transition : '';
                     // The page's own fade on the window would stack on the morph; the scrim and the morph own the motion.
@@ -7682,20 +7780,16 @@ function renderProfileActivityList(kind) {
                 var safeImageUrl = sanitizeUrl(rawSrc);
                 if (!safeImageUrl) return null;
                 var postId = String((el && el.getAttribute('data-post-id')) || '').trim();
-                var userName = String((el && el.getAttribute('data-post-user')) || '').trim();
+                var previewSource = String((el && el.getAttribute('data-preview-source')) || '').trim();
+                var userName = String((el && (el.getAttribute('data-post-user') || el.getAttribute('data-preview-user'))) || '').trim();
                 var createdAt = String((el && el.getAttribute('data-post-created-at')) || '').trim();
                 var views = Number((el && el.getAttribute('data-post-views')) || 0) || 0;
                 var fileSize = Number((el && el.getAttribute('data-file-size')) || 0) || null;
                 var originalSize = Number((el && el.getAttribute('data-original-size')) || 0) || null;
-                // ★ 修复（聊天图片无关闭按钮/按钮错位/缩放异常的根因）：
-                //   聊天图片气泡 <img class="msg-img"> 只有 data-full-src，没有 data-post-id。
-                //   旧代码在 postId 为空时 return null → openPostImagePreview 返回 false →
-                //   openImageViewer 退回旧 #imgViewer（其关闭按钮被全局按钮重置规则压成
-                //   position:relative，实测 rect.x = -24 跑到屏幕外，缩放也在两套状态机间打架）。
-                //   现在：无 postId 时按「聊天/通用图片」构造单图预览项，统一走新 photo-preview。
                 var isPostPhoto = !!postId;
+                var sourceKind = isPostPhoto ? 'post' : (previewSource === 'profile' ? 'profile' : 'chat');
                 return {
-                    id: isPostPhoto ? ('post_' + postId) : ('chat_' + (el && el.id ? el.id : 'img') + '_' + rawSrc.length),
+                    id: isPostPhoto ? ('post_' + postId) : (sourceKind + '_' + (el && el.id ? el.id : 'img') + '_' + rawSrc.length),
                     imageUrl: safeImageUrl,
                     // 缩略图与原图同源：聊天图没有独立缩略图，传相同的 URL 会让 preview.js
                     // 走 hasThumb=false 分支（避免多一次无意义预加载）。
@@ -7705,7 +7799,7 @@ function renderProfileActivityList(kind) {
                     views: views,
                     fileSize: fileSize,
                     originalSize: originalSize,
-                    __xtjSource: isPostPhoto ? 'post' : 'chat',
+                    __xtjSource: sourceKind,
                     __xtjPostId: postId,
                     __xtjActorKey: String((el && el.getAttribute('data-actor-key')) || ''),
                     __xtjCanDelete: String((el && el.getAttribute('data-can-delete')) || '') === '1'
@@ -7716,11 +7810,10 @@ function renderProfileActivityList(kind) {
                 var overlay = document.getElementById('photoPreviewOverlay');
                 if (!overlay || !overlay.classList.contains('active')) return;
                 var isPostPhoto = !!(photo && photo.__xtjSource === 'post');
-                var isChatPhoto = !!(photo && photo.__xtjSource === 'chat');
+                var isNonWallSingle = !!(photo && (photo.__xtjSource === 'chat' || photo.__xtjSource === 'profile'));
                 overlay.classList.toggle('pp-post-mode', isPostPhoto);
-                // ★ 修复：单图预览（帖子图 / 聊天图）都隐藏左右翻页箭头——只有一张图时
-                //   箭头点了没反应，反而和关闭按钮一起造成「按钮很多但没用」的观感。
-                var singleItem = isChatPhoto ||
+                // ★ 修复：单图预览（帖子图 / 聊天图 / 资料头像封面）都隐藏左右翻页箭头
+                var singleItem = isNonWallSingle ||
                     (Array.isArray(window.__xtjPreviewExplicitPhotos) && window.__xtjPreviewExplicitPhotos.length <= 1);
                 var prevBtn = document.getElementById('ppPrevBtn');
                 var nextBtn = document.getElementById('ppNextBtn');
@@ -7730,22 +7823,19 @@ function renderProfileActivityList(kind) {
                 if (deleteBtn) {
                     if (isPostPhoto) {
                         setCtBtnDisplay(deleteBtn, photo.__xtjCanDelete ? 'flex' : 'none');
+                        deleteBtn.hidden = !photo.__xtjCanDelete;
                         deleteBtn.title = '删除帖子'; deleteBtn.setAttribute('aria-label', '删除帖子');
                         deleteBtn.__xtjPostDeleteBound = true;
                         deleteBtn.onclick = function() { window.deletePostPhotoFromPreview(); };
                     } else {
-                        // 聊天图 / 通用图不属于当前用户可删除的内容，强制隐藏。
-                        // 必须用 setProperty(...,'important')：style.css 里
-                        // #photoPreviewOverlay .pp-delete-btn { display:flex !important }
-                        // 会压过普通内联值（实测改完后按钮仍在工具栏里显示）。
                         setCtBtnDisplay(deleteBtn, 'none');
+                        deleteBtn.hidden = true;
                         deleteBtn.onclick = function() { window.deletePhotoFromPreview(); };
                     }
                 }
-                // 聊天图片不提供「分享」（复制图片直链给他人并无意义，且聊天图多为
-                // 私有会话内容），也不提供「删除」。工具栏只留 信息 / 旋转。
+                // 聊天/资料头像封面不提供「分享」与「删除」
                 var shareBtn = document.getElementById('ppShareBtn');
-                if (shareBtn) setCtBtnDisplay(shareBtn, isChatPhoto ? 'none' : '');
+                if (shareBtn) setCtBtnDisplay(shareBtn, isNonWallSingle ? 'none' : '');
             }
 
             // 统一用 !important 设置按钮显隐：预览器工具栏按钮在 style.css 里
@@ -8273,6 +8363,8 @@ function renderProfileActivityList(kind) {
                 feedAllPosts = [];
                 feedAllComments = [];
                 feedAllLikes = [];
+                if (typeof _resetCommentExpandState === 'function') _resetCommentExpandState();
+                if (typeof closePostVisibilityModal === 'function') closePostVisibilityModal();
                 deletedPostCommentIds.clear();
                 engagementRefreshTimers.forEach(function(timer) { clearTimeout(timer); }); engagementRefreshTimers.clear();
                 likeOperations = Object.create(null);
@@ -8743,19 +8835,27 @@ function renderProfileActivityList(kind) {
                 // E-M5: 音乐解析加全局并发上限（同时最多 3 个），不同链接排队等候；
                 // 同一链接仍按 pending map 去重，缓存仍只留 60 条。
                 var MUSIC_RESOLVE_MAX = 3;
-                var resolveActive = 0, resolveQueue = [];
+                var resolveActive = 0, resolveQueue = [], negCache = Object.create(null);
                 function pumpResolveQueue() {
                     while (resolveActive < MUSIC_RESOLVE_MAX && resolveQueue.length) resolveQueue.shift()();
                 }
                 function resolve(url) {
+                    if (!url) return Promise.resolve(null);
                     if (url in memory) return Promise.resolve(memory[url]);
+                    if (negCache[url] && negCache[url] > Date.now()) return Promise.resolve(null);
                     if (pending[url]) return pending[url];
                     var task = new Promise(function(done) {
                         function start() {
                             resolveActive++;
                             fetch(API_BASE + '/api/music/resolve?url=' + encodeURIComponent(url)).then(function(res) { return res.ok ? res.json() : null; })
-                                .then(function(data) { var card = data && data.ok && data.card ? data.card : null; if (card) { memory[url] = card; persist(); } return card; })
-                                .catch(function() { return null; }).then(function(card) { delete pending[url]; resolveActive--; pumpResolveQueue(); done(card); });
+                                .then(function(data) {
+                                    var card = data && data.ok && data.card ? data.card : null;
+                                    if (card) { delete negCache[url]; memory[url] = card; persist(); }
+                                    else { negCache[url] = Date.now() + 300000; }
+                                    return card;
+                                })
+                                .catch(function() { negCache[url] = Date.now() + 60000; return null; })
+                                .then(function(card) { delete pending[url]; resolveActive--; pumpResolveQueue(); done(card); });
                         }
                         if (resolveActive < MUSIC_RESOLVE_MAX) start();
                         else resolveQueue.push(start);
@@ -8763,8 +8863,13 @@ function renderProfileActivityList(kind) {
                     return pending[url] = task;
                 }
                 function fill(el, card) {
-                    if (!card || !el.isConnected) return;
-                    el.classList.remove('is-pending'); el.classList.add('has-card', 'platform-' + card.platform);
+                    if (!el || !el.isConnected) return;
+                    if (!card) {
+                        el.classList.remove('is-pending');
+                        el.classList.add('is-unresolved');
+                        return;
+                    }
+                    el.classList.remove('is-pending', 'is-unresolved'); el.classList.add('has-card', 'platform-' + card.platform);
                     if (/^https:\/\//.test(card.url || '')) el.setAttribute('href', card.url);
                     var cover = el.querySelector('.xtj-music-cover');
                     if (cover && /^https:\/\//.test(card.cover || '')) cover.innerHTML = '<img src="' + escapeHtml(card.cover) + '" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">';
@@ -8777,10 +8882,12 @@ function renderProfileActivityList(kind) {
                             event.preventDefault(); event.stopPropagation();
                             if (playing === play) { audio.pause(); return; }
                             if (!audio) audio = new Audio();
+                            audio.onended = audio.onpause = null;
                             if (playing) { playing.textContent = '▶'; playing.classList.remove('on'); }
                             audio.src = card.previewUrl; playing = play; play.textContent = '❚❚'; play.classList.add('on');
-                            audio.onended = audio.onpause = function() { if (playing) { playing.textContent = '▶'; playing.classList.remove('on'); } playing = null; };
-                            audio.play().catch(function() { play.textContent = '▶'; play.classList.remove('on'); playing = null; });
+                            var currentPlay = play;
+                            audio.onended = audio.onpause = function() { if (playing === currentPlay) { currentPlay.textContent = '▶'; currentPlay.classList.remove('on'); playing = null; } };
+                            audio.play().catch(function() { if (playing === currentPlay) { currentPlay.textContent = '▶'; currentPlay.classList.remove('on'); playing = null; } });
                         });
                         el.appendChild(play);
                     }
@@ -8863,7 +8970,9 @@ function renderProfileActivityList(kind) {
                     if (cached) {
                         try {
                             const parsed = JSON.parse(cached);
-                            if (parsed?.data && Date.now()-parsed.timestamp < CACHE_DURATION) { await renderFeed(parsed.data); loadFeed(true); queueDeferredStartupTasks(); return; }
+                            const age = Date.now() - Number(parsed && parsed.timestamp || 0);
+                            const ownerOk = !!(parsed && Object.prototype.hasOwnProperty.call(parsed, 'owner') && String(parsed.owner) === String(window.currentUser || ''));
+                            if (parsed?.data && ownerOk && age >= 0 && age < CACHE_DURATION) { await renderFeed(parsed.data); loadFeed(true); queueDeferredStartupTasks(); return; }
                         } catch(e){}
                     }
                 }
@@ -9221,7 +9330,7 @@ function renderProfileActivityList(kind) {
                     if (!verifyRes.data) return { ok: false, error: new Error('更新失败：数据库没有实际修改任何行') };
                     verified = normalizePost(verifyRes.data);
                 }
-                var verifiedMeta = parsePostContent(verified._rawContent || verified.content || '').meta || {};
+                var verifiedMeta = (verified && verified._contentMeta) || (parsePostContent(result.data || verified).meta) || {};
                 if (String(verified.visibility || "public") !== String(nextVisibility)) {
                     return { ok: false, error: new Error("更新失败：visibility 未实际生效") };
                 }
@@ -9294,7 +9403,16 @@ function renderProfileActivityList(kind) {
             function buildPostBadges(post) {
                 var normalized = normalizePostForRender(post);
                 var bits = [];
-                bits.push('<span class="post-visibility-badge ' + (normalized.visibility === "private" ? 'private' : 'public') + '">' + (normalized.visibility === "private" ? '私密' : '公开') + '</span>');
+                var visMode = normalized.visibility_mode || (normalized.visibility === "private" ? "private" : "public");
+                var badgeClass = visMode === "public" ? "public" : "private";
+                var badgeLabel = visMode === "private"
+                    ? "私密"
+                    : (visMode === "allow_list"
+                        ? "部分可见"
+                        : (visMode === "deny_list"
+                            ? "部分不可见"
+                            : (visMode === "restricted" ? "部分可见" : "公开")));
+                bits.push('<span class="post-visibility-badge ' + badgeClass + '">' + badgeLabel + '</span>');
                 if (normalized.is_pinned) bits.push('<span class="post-pin-badge">置顶</span>');
                 return bits.join("");
             }
@@ -9420,16 +9538,20 @@ function renderProfileActivityList(kind) {
                 var svgAi = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3l1.9 5.8 1.9-5.8a2 2 0 0 1 1.3-1.3l5.8-1.9-5.8-1.9a2 2 0 0 1-1.3-1.3z"/></svg>';
                 var svgReport = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" x2="4" y1="22" y2="15"/></svg>';
                 var svgShare = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" x2="15.42" y1="13.51" y2="17.49"/><line x1="15.41" x2="8.59" y1="6.51" y2="10.49"/></svg>';
+                var svgLock = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>';
                 var post = feedAllPosts.find(function(p) { return String(p.id) === String(postId); });
+                if (!post && window.__xtjPostDetailSnapshot && String(window.__xtjPostDetailSnapshot.id) === String(postId)) post = window.__xtjPostDetailSnapshot;
                 if (!post && window.currentPost && String(window.currentPost.id) === String(postId)) post = window.currentPost;
+                var isAuthor = !!(post && window.currentUser && String(post.user_name || '') === String(window.currentUser));
                 var postText = post ? String(post.content || '') : '';
                 try { var toolPayload = JSON.parse(postText); if (toolPayload && toolPayload.__type === '__xtj_post_v2__') postText = String(toolPayload.text || ''); } catch (_) {}
                 var hasText = postText.trim().length > 0;
                 var hasImages = post && window.XtjPostMedia && window.XtjPostMedia.getPostMediaItems(post).some(function (item) { return /^(image|photo)$/.test(item.media_type); });
+                var btnVisibility = isAuthor ? '<button type="button" role="menuitem" data-post-tool="visibility" data-post-id="' + escapeHtml(postId) + '">' + svgLock + '<span>权限</span></button>' : '';
                 var btnTranslate = hasText ? '<button type="button" role="menuitem" data-post-tool="translate" data-post-id="' + escapeHtml(postId) + '">' + svgTranslate + '<span>翻译帖子</span></button>' : '';
                 var btnAi = hasText || hasImages ? '<button type="button" role="menuitem" data-post-tool="ask-ai" data-post-id="' + escapeHtml(postId) + '">' + svgAi + '<span>锐评 AI</span></button>' : '';
                 var btnShare = '<button type="button" role="menuitem" data-post-tool="share" data-post-id="' + escapeHtml(postId) + '">' + svgShare + '<span>分享帖子</span></button>';
-                menu.innerHTML = btnShare + btnTranslate + btnAi +
+                menu.innerHTML = btnVisibility + btnShare + btnTranslate + btnAi +
                                  '<button type="button" role="menuitem" data-post-tool="report" data-post-id="' + escapeHtml(postId) + '">' + svgReport + '<span>举报帖子</span></button>';
                 document.body.appendChild(menu);
                 activatePostToolsMenu({ menu: menu, trigger: trigger, animation: null }, true);
@@ -9885,7 +10007,14 @@ function renderProfileActivityList(kind) {
                 // E-M3: 兜底追加时把父评论传进去并强制点名，避免超深回复看起来像顶层评论。
                 pComms.forEach(function(c) { if (!_seen[String(c.id)] && _count < limit) html += _renderCommentNode(c, 0, _byId[String(c.parent_comment_id)] || null, true); });
                 var totalComments = Number.isFinite(post.comment_count) ? post.comment_count : pComms.length;
-                if (!(options && options.detail) && totalComments > _count) html += '<button type="button" class="post-all-comments" data-post-id="' + escapeHtml(String(post.id)) + '" onclick="__xtjExpandPostComments(\'' + safeJsStr(String(post.id)) + '\', this)">展开其余 ' + (totalComments - _count) + ' 条评论</button>';
+                if (!(options && options.detail) && totalComments > _count) {
+                    var expandCapHit = _count >= limit && pComms.length >= limit;
+                    if (expandCapHit || _commentExpandDone[String(post.id)]) {
+                        html += '<button type="button" class="post-all-comments" data-post-id="' + escapeHtml(String(post.id)) + '" onclick="openPostDetail(\'' + safeJsStr(String(post.id)) + '\')">查看全部 ' + totalComments + ' 条评论</button>';
+                    } else {
+                        html += '<button type="button" class="post-all-comments" data-post-id="' + escapeHtml(String(post.id)) + '" onclick="__xtjExpandPostComments(\'' + safeJsStr(String(post.id)) + '\', this)">展开其余 ' + (totalComments - _count) + ' 条评论</button>';
+                    }
+                }
                 return '<div class="comments">' + html + '</div>';
             }
             window.buildPostCommentsHtml = buildPostCommentsHtml;
@@ -9899,33 +10028,57 @@ function renderProfileActivityList(kind) {
             // 没有新增、按钮反复出现。游标按帖子持久化，下次点击从上次结束处续拉。
             var _commentExpandCursors = Object.create(null);
             var _commentExpandDone = Object.create(null);
+            function _resetCommentExpandState() {
+                _commentExpandInflight = Object.create(null);
+                _commentExpandAttempted = Object.create(null);
+                _commentExpandCursors = Object.create(null);
+                _commentExpandDone = Object.create(null);
+            }
             window.__xtjExpandPostComments = function(postId, btn) {
                 var key = String(postId || '');
                 if (!key) return Promise.resolve(false);
                 if (_commentExpandInflight[key]) return _commentExpandInflight[key];
-                if (_commentExpandDone[key] || (_commentExpandAttempted[key] && !btn)) return Promise.resolve(false);
+                if (_commentExpandDone[key]) {
+                    if (btn && typeof window.openPostDetail === 'function') window.openPostDetail(key);
+                    return Promise.resolve(false);
+                }
+                if (_commentExpandAttempted[key] && !btn) return Promise.resolve(false);
                 _commentExpandAttempted[key] = true;
+                var expandOwner = String(window.currentUser || ''), expandEpoch = (typeof _authStateEpoch === 'number' ? _authStateEpoch : 0);
                 if (btn) { btn.disabled = true; btn.textContent = '正在加载评论…'; }
                 var task = (async function() {
-                    var rows = [], cursor = _commentExpandCursors[key] || null, guard = 0;
+                    var rows = [], cursor = _commentExpandCursors[key] || null, guard = 0, fetchedOk = false;
                     try {
                         do {
                             var path = '/api/post/detail/' + encodeURIComponent(key) + '/relations/comments?limit=50' + (cursor ? '&cursor=' + encodeURIComponent(cursor) : '');
                             var res = typeof window.xtjOptionalAuthFetch === 'function'
                                 ? await window.xtjOptionalAuthFetch(path, { timeoutMs: 15000 })
                                 : await fetch((window.API_BASE || '') + path, { credentials: 'include', headers: { Accept: 'application/json' } });
-                            var body = await res.json();
-                            if (!body || !body.ok) break;
+                            var body = await res.json().catch(function() { return null; });
+                            if (!res || !res.ok || !body || !body.ok) { fetchedOk = false; break; }
+                            fetchedOk = true;
                             rows = rows.concat(Array.isArray(body.data) ? body.data : []);
                             cursor = body.has_more && body.next_cursor ? body.next_cursor : null;
                         } while (cursor && ++guard < 6);
                     } catch (eExpand) {
+                        fetchedOk = false;
                         console.warn('[comments] expand failed', eExpand);
                     }
-                    _commentExpandCursors[key] = cursor || null;
-                    if (!cursor) _commentExpandDone[key] = true;
+                    if (expandOwner !== String(window.currentUser || '') || expandEpoch !== (typeof _authStateEpoch === 'number' ? _authStateEpoch : 0)) {
+                        return false;
+                    }
+                    if (fetchedOk) {
+                        _commentExpandCursors[key] = cursor || null;
+                        if (!cursor) _commentExpandDone[key] = true;
+                    }
                     if (!rows.length) {
-                        if (btn) { btn.disabled = false; btn.textContent = '展开评论失败，点开帖子详情'; }
+                        if (btn) {
+                            btn.disabled = false;
+                            btn.textContent = fetchedOk ? '查看帖子详情' : '展开评论失败，点击重试或看详情';
+                            if (fetchedOk && typeof window.openPostDetail === 'function') {
+                                btn.onclick = function() { window.openPostDetail(key); };
+                            }
+                        }
                         return false;
                     }
                     feedAllComments = mergeFeedRecords(feedAllComments || [], rows, function(c) { return String(c.id); }, false);
@@ -10228,6 +10381,7 @@ function renderProfileActivityList(kind) {
                 }
                 if (previousKeyword || getPostSearchState().keyword) {
                     feedAllPosts=[];feedAllComments=[];feedAllLikes=[];feedLoadedPages=[];feedNextOffset=0;feedNextCursor=null;feedEndReached=false;
+                    _resetCommentExpandState();
                     markFeedStateChanged();clearFeedCache();return loadFeed(true);
                 }
                 renderFeed({ posts: feedAllPosts, comments: feedAllComments, likes: feedAllLikes });
@@ -10262,8 +10416,14 @@ function renderProfileActivityList(kind) {
                 } catch (_eClr) {}
                 syncPostFilterUi();
                 closePostFilterPanel(true);
-                if(hadKeyword){clearFeedCache();return loadFeed(true);}
                 renderPostFilterUsers();
+                if (hadKeyword) {
+                    feedAllPosts = []; feedAllComments = []; feedAllLikes = []; feedLoadedPages = [];
+                    feedNextOffset = 0; feedNextCursor = null; feedEndReached = false;
+                    _resetCommentExpandState();
+                    markFeedStateChanged(); clearFeedCache();
+                    return loadFeed(true);
+                }
                 renderFeed({ posts: feedAllPosts, comments: feedAllComments, likes: feedAllLikes });
             };
 
@@ -10575,7 +10735,11 @@ function renderProfileActivityList(kind) {
                     .neq("media_type", "__refresh_token__")
                     .neq("media_type", "__revoked_token__")
                     .neq("media_type", "__ai_english_learning__")  // 退役模块，保留过滤防止旧数据泄漏
-                    .neq("media_type", "__location_task__");
+                    .neq("media_type", "__location_task__")
+                    .neq("media_type", "__auth_deleted__")
+                    .neq("media_type", "__custom_ai_models__")
+                    .neq("media_type", "__dm_deleted__")
+                    .neq("is_deleted", true);
                 // 回退查询显式加可见性 fortify：公开帖 + 本人私密帖（不单依赖 RLS）
                 try {
                     var me = String(window.currentUser || '').trim();
@@ -10594,7 +10758,7 @@ function renderProfileActivityList(kind) {
 
             // 客户端过滤：单一帖子是否对当前用户可见
             function isSystemPost(post) {
-                if (!post) return true;
+                if (!post || post.is_deleted === true) return true;
                 var mt = post.media_type;
                 if (!mt) return false;
                 var SYSTEM_MARKERS = [
@@ -10606,6 +10770,7 @@ function renderProfileActivityList(kind) {
                     "__login_event__", "__user_behavior__", "__security_alert__", "__admin_audit__", "__client_error__",
                     "__email_sent__", "__email_recipient_history__",
                     "__refresh_token__", "__revoked_token__",
+                    "__auth_deleted__", "__custom_ai_models__", "__dm_deleted__",
                     "__ai_agent_profile__", "__ai_agent_msg__", "__ai_agent_memory__", "__ai_agent_config__",
                     "**ai_agent_memory_box**", "**ai_agent_conv_summary**", "**ai_agent_memory_log**",
                     "__location_task__",
@@ -10627,7 +10792,7 @@ function renderProfileActivityList(kind) {
                 }
                 return applyVisiblePostQueryFilters(
                     sb.from("posts").select(FEED_FALLBACK_SELECT)
-                ).order("created_at", { ascending: false });
+                ).order("created_at", { ascending: false }).order("id", { ascending: false });
             }
 
             async function readDirectFeedEngagement(posts) {
@@ -10692,7 +10857,7 @@ function renderProfileActivityList(kind) {
                     var earlyIsGuestPage = function(data) { return !!(knownUser && data && data.guest_limited); };
                     var mayReuseEarlyFeed = !searchKeyword && sameEarlyViewer;
 
-                    if (page === 0 && mayReuseEarlyFeed && start === 0 && !usedApi && window.__xtjEarlyFeed && window.__xtjEarlyFeed.status === 'ok' && window.__xtjEarlyFeed.data && !earlyIsGuestPage(window.__xtjEarlyFeed.data)) {
+                    if (page === 0 && mayReuseEarlyFeed && start === 0 && !usedApi && window.__xtjEarlyFeed && window.__xtjEarlyFeed.status === 'ok' && !window.__xtjEarlyFeed.stale && window.__xtjEarlyFeed.data && !earlyIsGuestPage(window.__xtjEarlyFeed.data)) {
                         var early = window.__xtjEarlyFeed.data;
                         posts = normalizePosts(early.posts || []);
                         comments = early.comments || [];
@@ -10804,6 +10969,9 @@ function renderProfileActivityList(kind) {
                         fallbackQuery = fallbackQuery.range(0, FEED_PAGE_SIZE - 1);
                     } else {
                         fallbackQuery = fallbackQuery.range(start, end);
+                    }
+                    if (fallbackIsGuest && !fallbackCursor && start > 0) {
+                        fallbackQuery = fallbackQuery.limit(fallbackGuestLimit);
                     }
                     // 访客已到 10 条上限：不再发查询，直接空页并结束，末尾显示登录入口。
                     var postRes = (fallbackIsGuest && start >= fallbackGuestLimit)
@@ -11404,6 +11572,10 @@ function renderProfileActivityList(kind) {
                         markFeedInteractionChanged();
                     }
                     writeFeedCacheSnapshot();
+                    if (typeof clearEarlyFeedCacheV1 === 'function') clearEarlyFeedCacheV1();
+                    if (typeof window.__xtjUpdateAuthorPost === 'function' && result && result.data) {
+                        window.__xtjUpdateAuthorPost(normalizePost(result.data));
+                    }
                     await rebuildFeedFromCurrentState();
                     assertPostActionIdentity(identity);
                     await refreshPostDetailIfActive(normalizedPostId);
@@ -11573,7 +11745,10 @@ function renderProfileActivityList(kind) {
                 var id = String(postId || '');
                 if (!id) return;
                 var post = getPostShareSource(id);
-                if (post && post.visibility === 'private') { showToast('私密帖子仅自己可见，不能分享'); return; }
+                if (post && post.visibility && post.visibility !== 'public') {
+                    showToast(post.visibility === 'private' ? '私密帖子仅自己可见，不能分享' : '仅部分用户可见的帖子不能生成公开分享链接');
+                    return;
+                }
                 closePostShare();
                 postShareReturnFocus = document.activeElement;
                 var shareTarget = new URL('/share/posts/' + encodeURIComponent(id), window.location.origin);
@@ -11630,7 +11805,8 @@ function renderProfileActivityList(kind) {
                         var thumb = overlay.querySelector('.post-share-thumb');
                         // 用列表缩略图即可：OSS 帖的 preview_url 是 480px 缩略图，
                         // 旧帖的 preview_url 本来就是 ?preview=1 的服务端预览档。
-                        thumb.src = items[i].preview_url || ('/api/post/' + encodeURIComponent(id) + '/media/' + i + '?preview=1');
+                        var safeShareThumb = items[i].preview_url ? sanitizeUrl(items[i].preview_url) : '';
+                        thumb.src = safeShareThumb || ('/api/post/' + encodeURIComponent(id) + '/media/' + i + '?preview=1');
                         thumb.hidden = false;
                         thumb.addEventListener('error', function() { this.hidden = true; });
                         break;
@@ -11654,6 +11830,292 @@ function renderProfileActivityList(kind) {
                 var copyButton = overlay.querySelector('.post-share-copy');
                 if (copyButton && typeof copyButton.focus === 'function') { try { copyButton.focus(); } catch (_) {} }
             };
+            // ============== 帖子权限设置弹窗（公开 / 私密 / 仅谁可见 / 仅谁不可见） ==============
+            var postVisibilityModalEl = null;
+            var postVisibilityReturnFocus = null;
+            var postVisibilityDirectoryCache = { owner: '', users: [], at: 0 };
+
+            function closePostVisibilityModal() {
+                if (!postVisibilityModalEl) return;
+                document.removeEventListener('keydown', onPostVisibilityKeydown, true);
+                postVisibilityModalEl.remove();
+                postVisibilityModalEl = null;
+                if (typeof window.syncHeaderModalBodyLock === 'function') window.syncHeaderModalBodyLock();
+                var back = postVisibilityReturnFocus;
+                postVisibilityReturnFocus = null;
+                if (back && back.isConnected && typeof back.focus === 'function') {
+                    try { back.focus(); } catch (_) {}
+                }
+            }
+            function onPostVisibilityKeydown(e) {
+                if (e.key === 'Escape') { e.preventDefault(); closePostVisibilityModal(); }
+            }
+            window.closePostVisibilityModal = closePostVisibilityModal;
+
+            window.openPostVisibilityModal = function(postId) {
+                var id = String(postId || '');
+                if (!id) return;
+                if (!window.currentUser) { showToast('请先登录'); return; }
+                var post = getPostShareSource(id);
+                if (!post) { showToast('找不到该帖子'); return; }
+                var normalized = normalizePost(post);
+                if (String(normalized.user_name || '') !== String(window.currentUser)) {
+                    showToast('只有帖子作者可以修改权限');
+                    return;
+                }
+                closePostVisibilityModal();
+                postVisibilityReturnFocus = document.activeElement;
+
+                var identity = capturePostActionIdentity();
+                var currentMode = normalized.visibility_mode || (normalized.visibility === 'private' ? 'private' : 'public');
+                if (['public', 'private', 'allow_list', 'deny_list'].indexOf(currentMode) < 0) currentMode = 'public';
+                var selectedSet = new Set(Array.isArray(normalized.visibility_users) ? normalized.visibility_users.filter(function(u) { return u && u !== normalized.user_name; }) : []);
+                var allUsers = [];
+                var directoryLoaded = false;
+                var directoryLoading = false;
+                var saving = false;
+
+                var overlay = document.createElement('div');
+                overlay.id = 'postVisibilityModal';
+                overlay.className = 'post-vis-overlay active';
+                overlay.innerHTML =
+                    '<div class="post-vis-dialog" role="dialog" aria-modal="true" aria-labelledby="postVisTitle">' +
+                        '<button type="button" class="post-vis-close" aria-label="关闭权限设置">×</button>' +
+                        '<h3 id="postVisTitle">帖子权限</h3>' +
+                        '<p class="post-vis-sub">选择这篇帖子的可见范围，保存后立即对全站生效</p>' +
+                        '<div class="post-vis-modes" role="radiogroup" aria-label="可见范围">' +
+                            '<label class="post-vis-option" data-mode="public">' +
+                                '<input type="radio" name="postVisMode" value="public">' +
+                                '<span class="post-vis-opt-body"><strong>公开</strong><small>所有人可见</small></span>' +
+                            '</label>' +
+                            '<label class="post-vis-option" data-mode="private">' +
+                                '<input type="radio" name="postVisMode" value="private">' +
+                                '<span class="post-vis-opt-body"><strong>私密</strong><small>仅自己可见，他人无法查看</small></span>' +
+                            '</label>' +
+                            '<label class="post-vis-option" data-mode="allow_list">' +
+                                '<input type="radio" name="postVisMode" value="allow_list">' +
+                                '<span class="post-vis-opt-body"><strong>仅谁可见</strong><small>只有选中的用户和自己可见</small></span>' +
+                            '</label>' +
+                            '<label class="post-vis-option" data-mode="deny_list">' +
+                                '<input type="radio" name="postVisMode" value="deny_list">' +
+                                '<span class="post-vis-opt-body"><strong>仅谁不可见</strong><small>除选中用户外，已登录用户可见</small></span>' +
+                            '</label>' +
+                        '</div>' +
+                        '<div class="post-vis-picker" hidden>' +
+                            '<div class="post-vis-picker-head">' +
+                                '<span class="post-vis-picker-title">选择用户</span>' +
+                                '<span class="post-vis-picker-count">已选 0 人</span>' +
+                            '</div>' +
+                            '<input type="search" class="post-vis-search" placeholder="搜索网站用户…" autocomplete="off" aria-label="搜索用户">' +
+                            '<div class="post-vis-chips"></div>' +
+                            '<div class="post-vis-user-list" role="listbox" aria-multiselectable="true"></div>' +
+                        '</div>' +
+                        '<div class="post-vis-actions">' +
+                            '<button type="button" class="post-vis-cancel">取消</button>' +
+                            '<button type="button" class="post-vis-save">保存权限</button>' +
+                        '</div>' +
+                    '</div>';
+
+                var pickerEl = overlay.querySelector('.post-vis-picker');
+                var pickerTitleEl = overlay.querySelector('.post-vis-picker-title');
+                var pickerCountEl = overlay.querySelector('.post-vis-picker-count');
+                var searchInput = overlay.querySelector('.post-vis-search');
+                var chipsEl = overlay.querySelector('.post-vis-chips');
+                var userListEl = overlay.querySelector('.post-vis-user-list');
+                var saveBtn = overlay.querySelector('.post-vis-save');
+
+                function renderChips() {
+                    var list = Array.from(selectedSet);
+                    pickerCountEl.textContent = '已选 ' + list.length + ' 人';
+                    if (!list.length) {
+                        chipsEl.innerHTML = '';
+                        chipsEl.hidden = true;
+                        return;
+                    }
+                    chipsEl.hidden = false;
+                    chipsEl.innerHTML = list.map(function(u) {
+                        return '<span class="post-vis-chip"><span>' + escapeHtml(u) + '</span><button type="button" class="post-vis-chip-rm" data-remove-user="' + escapeHtml(u) + '" aria-label="移除 ' + escapeHtml(u) + '">×</button></span>';
+                    }).join('');
+                }
+
+                function renderUserList() {
+                    if (directoryLoading) {
+                        userListEl.innerHTML = '<div class="post-vis-empty">正在加载用户列表…</div>';
+                        return;
+                    }
+                    var q = String(searchInput.value || '').trim().toLowerCase();
+                    var merged = allUsers.slice();
+                    selectedSet.forEach(function(u) { if (merged.indexOf(u) < 0) merged.unshift(u); });
+                    var filtered = q ? merged.filter(function(u) { return u.toLowerCase().indexOf(q) >= 0; }) : merged;
+                    if (!filtered.length) {
+                        userListEl.innerHTML = '<div class="post-vis-empty">' + (q ? '没有找到匹配的用户' : '暂无可选用户') + '</div>';
+                        return;
+                    }
+                    userListEl.innerHTML = filtered.map(function(u) {
+                        var checked = selectedSet.has(u);
+                        return '<button type="button" class="post-vis-user-row' + (checked ? ' is-selected' : '') + '" role="option" aria-selected="' + (checked ? 'true' : 'false') + '" data-pick-user="' + escapeHtml(u) + '">' +
+                            '<span class="post-vis-user-check">' + (checked ? '✓' : '') + '</span>' +
+                            '<span class="post-vis-user-name">' + escapeHtml(u) + '</span>' +
+                        '</button>';
+                    }).join('');
+                }
+
+                async function ensureDirectoryLoaded(force) {
+                    if (directoryLoading) return;
+                    var now = Date.now();
+                    if (!force && postVisibilityDirectoryCache.owner === identity.owner && postVisibilityDirectoryCache.users.length && (now - postVisibilityDirectoryCache.at < 60000)) {
+                        allUsers = postVisibilityDirectoryCache.users.slice();
+                        directoryLoaded = true;
+                        renderUserList();
+                        return;
+                    }
+                    directoryLoading = true;
+                    renderUserList();
+                    try {
+                        var resp = await window.xtjProtectedFetch('/api/users/directory?limit=100', {
+                            method: 'GET', authOwner: identity.owner, authEpoch: identity.epoch, timeoutMs: 12000
+                        });
+                        var body = await resp.json().catch(function() { return {}; });
+                        if (postVisibilityModalEl !== overlay) return;
+                        assertPostActionIdentity(identity);
+                        if (!resp.ok || !body.ok || !Array.isArray(body.users)) {
+                            throw new Error((body && body.error) || '加载用户列表失败');
+                        }
+                        allUsers = body.users.map(function(row) { return String(row && row.user_name || '').trim(); }).filter(function(name) { return name && name !== identity.owner; });
+                        postVisibilityDirectoryCache = { owner: identity.owner, users: allUsers.slice(), at: Date.now() };
+                        directoryLoaded = true;
+                        directoryLoading = false;
+                        renderUserList();
+                    } catch (err) {
+                        if (postVisibilityModalEl !== overlay) return;
+                        directoryLoading = false;
+                        userListEl.innerHTML = '<div class="post-vis-empty"><span>' + escapeHtml((err && err.message) || '用户列表加载失败') + '</span> <button type="button" class="post-vis-retry">重试</button></div>';
+                        var retryBtn = userListEl.querySelector('.post-vis-retry');
+                        if (retryBtn) retryBtn.addEventListener('click', function() { ensureDirectoryLoaded(true); });
+                    }
+                }
+
+                function syncModeUi(nextMode) {
+                    currentMode = nextMode;
+                    overlay.querySelectorAll('.post-vis-option').forEach(function(opt) {
+                        var isSelected = opt.getAttribute('data-mode') === currentMode;
+                        opt.classList.toggle('is-selected', isSelected);
+                        var radio = opt.querySelector('input[type="radio"]');
+                        if (radio) radio.checked = isSelected;
+                    });
+                    var needPicker = currentMode === 'allow_list' || currentMode === 'deny_list';
+                    pickerEl.hidden = !needPicker;
+                    if (needPicker) {
+                        pickerTitleEl.textContent = currentMode === 'allow_list' ? '选择可见的用户' : '选择不可见的用户';
+                        renderChips();
+                        if (!directoryLoaded) ensureDirectoryLoaded(false);
+                        else renderUserList();
+                    }
+                }
+
+                overlay.querySelectorAll('input[name="postVisMode"]').forEach(function(radio) {
+                    radio.addEventListener('change', function() {
+                        if (radio.checked) syncModeUi(radio.value);
+                    });
+                });
+                searchInput.addEventListener('input', function() { renderUserList(); });
+                chipsEl.addEventListener('click', function(ev) {
+                    var rm = ev.target && ev.target.closest && ev.target.closest('[data-remove-user]');
+                    if (!rm) return;
+                    selectedSet.delete(rm.getAttribute('data-remove-user'));
+                    renderChips();
+                    renderUserList();
+                });
+                userListEl.addEventListener('click', function(ev) {
+                    var row = ev.target && ev.target.closest && ev.target.closest('[data-pick-user]');
+                    if (!row) return;
+                    var name = row.getAttribute('data-pick-user');
+                    if (!name) return;
+                    if (selectedSet.has(name)) selectedSet.delete(name);
+                    else selectedSet.add(name);
+                    renderChips();
+                    renderUserList();
+                });
+
+                saveBtn.addEventListener('click', async function() {
+                    if (saving) return;
+                    var pickedUsers = (currentMode === 'allow_list' || currentMode === 'deny_list') ? Array.from(selectedSet) : [];
+                    if ((currentMode === 'allow_list' || currentMode === 'deny_list') && !pickedUsers.length) {
+                        showToast(currentMode === 'allow_list' ? '请至少选择一位可见的用户' : '请至少选择一位不可见的用户');
+                        return;
+                    }
+                    saving = true;
+                    saveBtn.disabled = true;
+                    saveBtn.textContent = '保存中…';
+                    try {
+                        var resp = await window.xtjProtectedFetch('/api/post/visibility', {
+                            method: 'POST',
+                            authOwner: identity.owner,
+                            authEpoch: identity.epoch,
+                            body: JSON.stringify({ post_id: id, mode: currentMode, users: pickedUsers })
+                        });
+                        var body = await resp.json().catch(function() { return {}; });
+                        assertPostActionIdentity(identity);
+                        if (!resp.ok || !body.ok || !body.data) {
+                            throw new Error((body && body.error) || '权限保存失败，请重试');
+                        }
+                        var updatedNormalized = normalizePost(body.data);
+                        if (Array.isArray(feedAllPosts)) {
+                            feedAllPosts = feedAllPosts.map(function(p) {
+                                if (!p || String(p.id) !== id) return p;
+                                return Object.assign({}, p, updatedNormalized, {
+                                    media_items: Array.isArray(p.media_items) ? p.media_items : updatedNormalized.media_items,
+                                    like_count: p.like_count,
+                                    comment_count: p.comment_count,
+                                    liked_by_me: p.liked_by_me
+                                });
+                            });
+                        }
+                        if (window.__xtjPostDetailSnapshot && String(window.__xtjPostDetailSnapshot.id) === id) {
+                            window.__xtjPostDetailSnapshot = Object.assign({}, window.__xtjPostDetailSnapshot, updatedNormalized, {
+                                media_items: Array.isArray(window.__xtjPostDetailSnapshot.media_items) ? window.__xtjPostDetailSnapshot.media_items : updatedNormalized.media_items
+                            });
+                        }
+                        if (typeof window.__xtjUpdateAuthorPost === 'function') window.__xtjUpdateAuthorPost(updatedNormalized);
+                        markFeedStateChanged();
+                        writeFeedCacheSnapshot();
+                        if (typeof clearEarlyFeedCacheV1 === 'function') clearEarlyFeedCacheV1();
+                        if (typeof patchSinglePostCard === 'function') patchSinglePostCard(id);
+                        if (typeof refreshPostDetailIfActive === 'function') refreshPostDetailIfActive(id);
+                        closePostVisibilityModal();
+                        var msg = currentMode === 'public'
+                            ? '已设为公开（所有人可见）'
+                            : (currentMode === 'private'
+                                ? '已设为私密（仅自己可见）'
+                                : (currentMode === 'allow_list'
+                                    ? ('已设为仅 ' + pickedUsers.length + ' 人可见')
+                                    : ('已设为 ' + pickedUsers.length + ' 人不可见')));
+                        showToast(msg);
+                        if (window.XTJHaptics) window.XTJHaptics.play('success');
+                    } catch (err) {
+                        if (err && err.code === 'identity_changed') return;
+                        showToast((err && err.message) || '权限保存失败，请重试');
+                    } finally {
+                        saving = false;
+                        if (saveBtn && saveBtn.isConnected) {
+                            saveBtn.disabled = false;
+                            saveBtn.textContent = '保存权限';
+                        }
+                    }
+                });
+
+                overlay.querySelector('.post-vis-close').addEventListener('click', closePostVisibilityModal);
+                overlay.querySelector('.post-vis-cancel').addEventListener('click', closePostVisibilityModal);
+                overlay.addEventListener('click', function(ev) { if (ev.target === overlay) closePostVisibilityModal(); });
+                document.addEventListener('keydown', onPostVisibilityKeydown, true);
+                document.body.appendChild(overlay);
+                postVisibilityModalEl = overlay;
+                if (typeof window.syncHeaderModalBodyLock === 'function') window.syncHeaderModalBodyLock();
+                syncModeUi(currentMode);
+                var activeRadio = overlay.querySelector('input[name="postVisMode"]:checked');
+                if (activeRadio && typeof activeRadio.focus === 'function') { try { activeRadio.focus(); } catch (_) {} }
+            };
+
             // ============== Global click delegation ==============
             function handlePostActionClick(e) {
                 var postToolTrigger = e.target.closest('.post-tools-trigger');
@@ -11675,7 +12137,9 @@ function renderProfileActivityList(kind) {
                     }
                     if (!window.currentUser) { showToast('请先登录'); return; }
                     closePostToolsMenu();
-                    if (postTool === 'translate' && typeof window.requestPostTranslation === 'function') {
+                    if (postTool === 'visibility' && typeof window.openPostVisibilityModal === 'function') {
+                        window.openPostVisibilityModal(postToolPostId);
+                    } else if (postTool === 'translate' && typeof window.requestPostTranslation === 'function') {
                         window.requestPostTranslation(postToolPostId);
                     } else if (postTool === 'ask-ai' && typeof window.openPostAiChat === 'function') {
                         window.openPostAiChat(postToolPostId);
@@ -11976,9 +12440,11 @@ function renderProfileActivityList(kind) {
                 if (identity.owner !== currentUser || identity.epoch !== _authStateEpoch) return;
                 try {
                     var response = await window.xtjProtectedFetch('/api/post/media/cleanup', { method: 'POST', authOwner: identity.owner, authEpoch: identity.epoch, body: JSON.stringify(Array.isArray(extraPaths) && extraPaths.length ? { storage_path: path, upload_id: uploadId, extra_paths: extraPaths.slice(0, 2) } : { storage_path: path, upload_id: uploadId }) });
-                    var result = await response.json();
+                    var result = await response.json().catch(function() { return {}; });
                     if (identity.owner !== currentUser || identity.epoch !== _authStateEpoch) return;
-                    if (response.ok && result.ok) forgetPendingPostMedia(identity.owner, path);
+                    if ((response.ok && result.ok) || response.status === 400 || response.status === 403 || response.status === 404) {
+                        forgetPendingPostMedia(identity.owner, path);
+                    }
                 } catch (error) { console.warn('[post-publish] orphan cleanup failed', error); }
             }
             document.addEventListener('visibilitychange', function() {
@@ -11990,7 +12456,12 @@ function renderProfileActivityList(kind) {
                 if (!identity.owner) return;
                 var now = Date.now();
                 readPendingPostMedia(identity.owner).forEach(function(row) {
-                    if (row && row.keep_for_retry && (!row.created_at || (now - row.created_at < 900000))) return;
+                    if (!row || !row.storage_path) return;
+                    if (row.created_at && (now - row.created_at > 48 * 3600 * 1000)) {
+                        forgetPendingPostMedia(identity.owner, row.storage_path);
+                        return;
+                    }
+                    if (row.keep_for_retry && (!row.created_at || (now - row.created_at < 900000))) return;
                     if (Array.from(activePostUploadFlights).some(function(flight) { return flight.owner === identity.owner; })) return;
                     cleanupPendingPostMedia(identity, row.storage_path, row.upload_id, row.extra_paths);
                 });
@@ -12331,7 +12802,9 @@ function renderProfileActivityList(kind) {
                         var cached = window.safeStorage.get(CACHE_KEY);
                         if (cached) {
                             var parsed = JSON.parse(cached);
-                            if (parsed && parsed.data && now - parsed.timestamp < CACHE_DURATION && hydrateFeedStateFromSnapshot(parsed)) {
+                            var cacheAge = now - Number(parsed && parsed.timestamp || 0);
+                            var cacheOwnerOk = !!(parsed && Object.prototype.hasOwnProperty.call(parsed, 'owner') && String(parsed.owner) === String(window.currentUser || ''));
+                            if (parsed && parsed.data && cacheOwnerOk && cacheAge >= 0 && cacheAge < CACHE_DURATION && hydrateFeedStateFromSnapshot(parsed)) {
                                 if (requestId !== feedLoadRequestId) return;
                                 await renderFeedFromMemoryState();
                                 setupFeedInfiniteScroll();
@@ -12417,10 +12890,14 @@ function renderProfileActivityList(kind) {
                             feedEndReached = false;
                             markFeedStateChanged();
                         } else if (forceRefresh) {
+                            feedAllPosts = [];
+                            feedAllComments = [];
+                            feedAllLikes = [];
                             feedLoadedPages = [];
                             feedNextOffset = 0;
                             feedNextCursor = null;
                             feedEndReached = false;
+                            _resetCommentExpandState();
                             markFeedStateChanged();
                         }
                     }
@@ -12474,7 +12951,7 @@ function renderProfileActivityList(kind) {
                             // 私密帖的旧快照注入 feedAllPosts。与快路径统一 5 分钟 TTL + owner 校验。
                             var fallbackAge = Date.now() - Number(fallbackParsed && fallbackParsed.timestamp || 0);
                             var fallbackFresh = Number.isFinite(fallbackAge) && fallbackAge >= 0 && fallbackAge < CACHE_DURATION;
-                            var fallbackOwnerOk = !fallbackParsed || !fallbackParsed.owner || String(fallbackParsed.owner) === String(window.currentUser || '');
+                            var fallbackOwnerOk = !!(fallbackParsed && Object.prototype.hasOwnProperty.call(fallbackParsed, 'owner') && String(fallbackParsed.owner) === String(window.currentUser || ''));
                             if (fallbackFresh && fallbackOwnerOk && fallbackParsed && fallbackParsed.data && hydrateFeedStateFromSnapshot(fallbackParsed)) {
                                 await renderFeedFromMemoryState();
                                 setupFeedInfiniteScroll();
@@ -12610,7 +13087,7 @@ function renderProfileActivityList(kind) {
                         //   内存条数、且还有游标时，说明"到底"是假象 —— 先解除终态再拉下一页，
                         //   不能直接把"没有更多帖子"钉死在列表底部。
                         var knownTotal = Number(window._xtjTotalPostCount);
-                        if (Number.isFinite(knownTotal) && knownTotal > (feedAllPosts || []).length && feedNextCursor) {
+                        if (!feedGuestLimited && Number.isFinite(knownTotal) && knownTotal > (feedAllPosts || []).length && feedNextCursor) {
                             feedEndReached = false;
                             var staleNoMore = document.getElementById('feedNoMore');
                             if (staleNoMore) staleNoMore.remove();
@@ -13531,17 +14008,18 @@ function renderProfileActivityList(kind) {
             //   dm-media.js 的路径正则只允许 [A-Za-z0-9_-]，所以这里也不能出现中文用户名。
             //   客户端不做哈希（避免依赖 crypto.subtle 的 HTTPS 限制），由其异步取一次。
             var _dmUidHashCache = null;
+            window.__xtjResetDmUidHash = function () { _dmUidHashCache = null; };
             async function getDmUidHash() {
-                if (_dmUidHashCache) return _dmUidHashCache;
                 var u = '';
                 try { u = String(window.currentUser || '').trim(); } catch (_) {}
                 if (!u) return null;
+                if (_dmUidHashCache && _dmUidHashCache.owner === u && _dmUidHashCache.hash) return _dmUidHashCache.hash;
                 try {
                     if (window.crypto && window.crypto.subtle && window.TextEncoder) {
                         var buf = await window.crypto.subtle.digest('SHA-256', new TextEncoder().encode(u));
                         var hex = Array.prototype.map.call(new Uint8Array(buf), function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
-                        _dmUidHashCache = hex.slice(0, 12);
-                        return _dmUidHashCache;
+                        _dmUidHashCache = { owner: u, hash: hex.slice(0, 12) };
+                        return _dmUidHashCache.hash;
                     }
                 } catch (_) { /* 非安全上下文等：落回下面的兜底 */ }
                 // 兜底：必须与后端 sha256 前 12 位一致，否则上传必然 400。
@@ -14121,14 +14599,37 @@ function renderProfileActivityList(kind) {
                     window.dockChatListCacheTime = 0;
                     loadDockChatList();
                     updateUnreadBadge();
-                    if (dockChatActiveUser && payload && (!payload.peer || payload.peer===dockChatActiveUser) &&
+                    if (dockChatActiveUser && !(typeof isGroupChatActive === 'function' && isGroupChatActive()) && payload && (!payload.peer || payload.peer===dockChatActiveUser) &&
                         ['read','mark_read','sent','withdraw','delete_message','edit','reaction','transcript','refresh','reconnect','clear','delete'].indexOf(payload.kind) >= 0) {
                         loadDockChatMessages(dockChatActiveUser,false);
                     }
                     if (payload && typeof window.__xtjRefreshChatMessageExtras === 'function') window.__xtjRefreshChatMessageExtras(payload);
-                    if (payload && ['friend_request','friendship','block','friend_note'].indexOf(payload.kind) >= 0 &&
+                    if (payload && ['friend_request','friendship','block','friend_note','contact_added','contact_removed'].indexOf(payload.kind) >= 0 &&
                         typeof window.__xtjRefreshChatSocialState === 'function') window.__xtjRefreshChatSocialState();
                 },180);
+            }
+
+            function isRealtimeDmHistorical(otherUser) {
+                var key = typeof getDockChatCacheKey === 'function' ? getDockChatCacheKey(otherUser) : otherUser;
+                return !!(typeof _chatHistoryFocus !== 'undefined' && _chatHistoryFocus === otherUser) ||
+                    !!(typeof _chatPagination !== 'undefined' && _chatPagination && _chatPagination[key] && _chatPagination[key].historical);
+            }
+            function computeRealtimeDmUnread(convListEl, otherUser, isMine, convOpen, inHistorical) {
+                if (isMine || (convOpen && !inHistorical)) return 0;
+                var isMutedPeer = !!(window.__xtjMutedChatPeers && window.__xtjMutedChatPeers[otherUser]);
+                var existingUnread = 0;
+                if (convListEl && typeof convListEl.querySelectorAll === 'function') {
+                    var items = convListEl.querySelectorAll('.chat-list-item[data-chat-user]');
+                    for (var ui = 0; ui < items.length; ui++) {
+                        if (items[ui].getAttribute('data-chat-user') === otherUser) {
+                            var badge = items[ui].querySelector('.chat-unread-badge, .chat-list-badge');
+                            var raw = badge ? parseInt(String(badge.textContent || '').replace(/\D+/g, ''), 10) : 0;
+                            if (Number.isFinite(raw) && raw > 0) existingUnread = raw;
+                            break;
+                        }
+                    }
+                }
+                return isMutedPeer ? existingUnread : (existingUnread + 1);
             }
 
             function applyRealtimeDmMessage(message) {
@@ -14140,30 +14641,35 @@ function renderProfileActivityList(kind) {
                     var isMine = message.user_name === window.currentUser;
                     var otherUser = isMine ? message.media_url : message.user_name;
                     if (!otherUser || otherUser === window.currentUser) return;
-                    // 增量：把 payload 直接并入该会话缓存（同 id 的乐观消息就地被替换），
-                    //   不再触发 loadDockChatMessages 的全量回拉。
-                    upsertDockChatCacheMessage(otherUser, message);
-                    var convOpen = (currentDockTab === 'chat' && !document.hidden && !isGroupChatActive() && dockChatActiveUser === otherUser);
-                    if (convOpen) {
-                        var key = getDockChatCacheKey(otherUser);
-                        _chatRenderSignature[otherUser] = undefined;
-                        renderDockMessages(otherUser, _chatCache[key] || [], false);
-                        if (!isMine && currentDockTab === 'chat' && !document.hidden && !getDMMessageReadAt(message)) {
-                            window.markMessagesRead(otherUser,_chatCache[key] || [],[{id:message.id}]).catch(function() {
-                                scheduleDockChatListRefresh(120);
-                            });
-                        }
-                    }
-                    // 会话列表就地更新预览/时间/排序；缓存标记失效，下次打开列表仍取权威值。
-                    //   ⚠ 只在列表**已经有渲染内容**时才就地改行：applyDockChatConversationPreview
-                    //   会把「它收集到的会话」整体重排渲染，若此刻列表为空，它会拿"只有一条"的
-                    //   数组去渲染，把完整列表临时覆盖成一条。未渲染时靠 cacheTime=0 在打开时取权威值。
                     window.dockChatListCacheTime = 0;
+                    var inHistorical = typeof isRealtimeDmHistorical === 'function' && isRealtimeDmHistorical(otherUser);
+                    var groupOpen = typeof isGroupChatActive === 'function' && isGroupChatActive();
+                    var convOpen = (currentDockTab === 'chat' && !document.hidden && !groupOpen && dockChatActiveUser === otherUser);
+                    if (!inHistorical) {
+                        upsertDockChatCacheMessage(otherUser, message);
+                        if (convOpen) {
+                            var key = typeof getDockChatCacheKey === 'function' ? getDockChatCacheKey(otherUser) : otherUser;
+                            _chatRenderSignature[otherUser] = undefined;
+                            renderDockMessages(otherUser, _chatCache[key] || [], false);
+                            if (!isMine && currentDockTab === 'chat' && !document.hidden && !getDMMessageReadAt(message)) {
+                                window.markMessagesRead(otherUser, _chatCache[key] || [], [{ id: message.id }]).catch(function() {
+                                    scheduleDockChatListRefresh(120);
+                                });
+                            }
+                        }
+                    } else if (convOpen && typeof setDockChatJumpLatestVisible === 'function') {
+                        setDockChatJumpLatestVisible(true);
+                    }
                     var _convListEl = document.getElementById("dockChatList");
                     if (_convListEl && _convListEl.querySelector(".chat-list-item")) {
-                        applyDockChatConversationPreview(otherUser, message, 0);
+                        var _nextUnread = typeof computeRealtimeDmUnread === 'function'
+                            ? computeRealtimeDmUnread(_convListEl, otherUser, isMine, convOpen, inHistorical)
+                            : 0;
+                        applyDockChatConversationPreview(otherUser, message, _nextUnread);
                     }
-                    if (!isMine && !convOpen) {
+                    if (!isMine && (!convOpen || inHistorical)) {
+                        if (typeof _dmUnreadFetchedAt !== 'undefined') _dmUnreadFetchedAt = 0;
+                        if (typeof window.__xtjInvalidateDmListShared === 'function') window.__xtjInvalidateDmListShared();
                         updateUnreadBadge();
                         notifyIncomingDm(message.user_name, getDockChatMessagePreview(message), message.id, message.created_at);
                     }
@@ -14206,11 +14712,13 @@ function renderProfileActivityList(kind) {
                 // ★ F-H1 修复：topic 拉取失败也要指数退避重试（与通道错误同款）。
                 //   此前失败即 return，Broadcast 起不来就一直起不来，只能等用户切 tab。
                 function scheduleDmBroadcastRetry() {
+                    if (document.hidden || (typeof navigator !== 'undefined' && navigator.onLine === false)) return;
                     dmBroadcast.attempts += 1;
                     var backoff = Math.min(1000 * Math.pow(2, dmBroadcast.attempts), 30000);
                     setTimeout(function () {
                         // 代次校验：期间若已重建订阅，旧定时器必须彻底放弃。
                         if (myEpoch !== dmBroadcast.epoch || owner !== window.currentUser) return;
+                        if (document.hidden || (typeof navigator !== 'undefined' && navigator.onLine === false)) return;
                         subscribeToDmBroadcast();
                     }, backoff);
                 }
@@ -14264,18 +14772,30 @@ function renderProfileActivityList(kind) {
                             }
                             if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
                                 console.warn("[dm-realtime]", status);
+                                if (document.hidden || (typeof navigator !== 'undefined' && navigator.onLine === false)) return;
                                 dmBroadcast.attempts += 1;
                                 var backoff = Math.min(1000 * Math.pow(2, dmBroadcast.attempts), 30000);
                                 setTimeout(function () {
                                     // 代次校验：期间若已重建订阅，旧定时器必须彻底放弃（与 P1-01 同一教训）
                                     if (myEpoch !== dmBroadcast.epoch || owner !== window.currentUser) return;
+                                    if (document.hidden || (typeof navigator !== 'undefined' && navigator.onLine === false)) return;
                                     subscribeToDmBroadcast();
                                 }, backoff);
                             }
                         });
                 } catch (e) { console.warn("[dm-realtime] subscribe failed:", e && e.message); }
             }
+            function ensureDmBroadcastSubscribed() {
+                if (!window.currentUser || !sb) return;
+                if (document.hidden || (typeof navigator !== 'undefined' && navigator.onLine === false)) return;
+                var ch = dmBroadcast && dmBroadcast.channel;
+                var st = ch && ch.state;
+                if (!ch || (st !== 'joined' && st !== 'joining')) {
+                    subscribeToDmBroadcast();
+                }
+            }
             window.subscribeToDmBroadcast = subscribeToDmBroadcast;
+            window.ensureDmBroadcastSubscribed = ensureDmBroadcastSubscribed;
 
             function subscribeToComments() {
                 if (!sb) return;
@@ -14336,6 +14856,7 @@ function renderProfileActivityList(kind) {
                                 // 避免缺 post_id 时落到普通全量刷新分支、导致“正在组织”气泡残留。
                                 var isCatAiReplyRow = row.generated_by_ai === true && row.user_name === 'cat_ai' && row.parent_comment_id;
                                 if (isCatAiReplyRow) {
+                                    if (typeof cancelCatAiTask === 'function') cancelCatAiTask(String(row.parent_comment_id), 'realtime ai reply');
                                     removeCatAiStatus(String(row.parent_comment_id));
                                     if (row.post_id != null) {
                                         upsertAiComment(row, String(row.parent_comment_id), row.post_id);
@@ -14460,11 +14981,11 @@ function renderProfileActivityList(kind) {
                     if (!commentRealtime || commentRealtime.state === 'closed') {
                         subscribeToComments();
                     }
-                    // ★ 修复：DM 实时订阅同样需要在页面恢复可见时重建，
-                    //   此前只恢复评论订阅，DM 通道断开后无法自动恢复
+                    // ★ 修复：DM 实时订阅（含新版 Broadcast 通道）同样需要在页面恢复可见时重建
                     if (!chatRealtime || chatRealtime.state === 'closed') {
                         subscribeToMessages();
                     }
+                    ensureDmBroadcastSubscribed();
                     // ★ F-H1 修复：切回前台立即补拉一次——Broadcast 若仍断着，
                     //   光重建订阅不够，隐藏期间的消息要等下一轮 300s 轮询。
                     //   Broadcast 正常时 SUBSCRIBED 后 180ms 也会刷新一次，
@@ -14516,10 +15037,12 @@ function renderProfileActivityList(kind) {
                     if (!commentRealtime || commentRealtime.state === 'closed') {
                         subscribeToComments();
                     }
-                    // ★ 修复：网络恢复时同时重建 DM 订阅
+                    // ★ 修复：网络恢复时同时重建 DM 订阅与 Broadcast，并立即补拉一次
                     if (!chatRealtime || chatRealtime.state === 'closed') {
                         subscribeToMessages();
                     }
+                    ensureDmBroadcastSubscribed();
+                    pollDmNow();
                 }
             });
             // ★ 2026-09-26（审计 P2-30）：断网提示。此前只有 online 恢复路径，
@@ -14534,10 +15057,11 @@ function renderProfileActivityList(kind) {
                     if (!commentRealtime || commentRealtime.state === 'closed') {
                         subscribeToComments();
                     }
-                    // ★ 修复：页面重新显示时同时重建 DM 订阅
+                    // ★ 修复：页面重新显示时同时重建 DM 订阅与 Broadcast
                     if (!chatRealtime || chatRealtime.state === 'closed') {
                         subscribeToMessages();
                     }
+                    ensureDmBroadcastSubscribed();
                     // ★ F-H1 修复：与 visibilitychange 一致，重新显示时立即补拉一次。
                     pollDmNow();
                 }
@@ -14552,7 +15076,7 @@ function renderProfileActivityList(kind) {
                 _dmPolling = true;
                 try {
                     await updateUnreadBadge();
-                    if (currentDockTab === 'chat' && typeof dockChatActiveUser !== 'undefined' && dockChatActiveUser) {
+                    if (currentDockTab === 'chat' && !(typeof isGroupChatActive === 'function' && isGroupChatActive()) && typeof dockChatActiveUser !== 'undefined' && dockChatActiveUser) {
                         // ★ 2026-09-25：轮询属于后台刷新，禁止动 loading 骨架/空状态，
                         //   否则回包会把用户当前界面顶掉重画（闪屏）。
                         await loadDockChatMessages(dockChatActiveUser, false, true);
@@ -14914,7 +15438,7 @@ function renderProfileActivityList(kind) {
                 if (!sameIdentity()) return;
                 var grid = document.getElementById('photoGrid');
                 if (!grid) return;
-                var hasRenderedPhotos = !!grid.querySelector('.photo-wall-item');
+                var hasRenderedPhotos = !!grid.querySelector('.photo-wall-item, .pw-album-card');
                 var hasSkeleton = hasVisiblePhotoWallSkeleton(grid);
                 var hasEmptyState = !!grid.querySelector('.photo-wall-empty');
                 var hasPhotoData = Array.isArray(window.photoWallData) && window.photoWallData.length > 0;
@@ -14929,7 +15453,7 @@ function renderProfileActivityList(kind) {
                     }
                     hasSkeleton = false;
                 }
-                if (opts.forceReload || !hasRenderedPhotos || (!hasPhotoData && !hasEmptyState)) {
+                if (opts.forceReload || (!hasRenderedPhotos && !hasEmptyState) || (!hasPhotoData && !hasEmptyState)) {
                     if (typeof window.loadPhotoWallData === 'function') {
                         await window.loadPhotoWallData(true);
                     }
@@ -15081,6 +15605,12 @@ function renderProfileActivityList(kind) {
                         try { window.__xtjCloseAiChat(); } catch (eClose) {}
                     }
                 }
+                if (typeof window.__xtjAbortAiChatOpen === 'function') {
+                    try { window.__xtjAbortAiChatOpen({ silent: true }); } catch (eAbortAi) {}
+                }
+                if (routePreviousTab === 'ai' && tab !== 'ai' && typeof window.cleanupPhotoWallTransientState === 'function') {
+                    try { window.cleanupPhotoWallTransientState(); } catch (ePwClean) {}
+                }
                 var shouldAnimateTab = options.animate === true;
                 if (tab !== currentDockTab) {
                     // 「返回时回到帖子页」只属于从帖子直接打开某个会话的路径，由 openChat 在入口处记录。
@@ -15136,9 +15666,10 @@ function renderProfileActivityList(kind) {
                             window.showToast('正在刷新...');
                             ensurePhotoWallLoaded().then(function() {
                                 if (typeof window.loadPhotoWallData === 'function') {
-                                    return window.loadPhotoWallData(true).then(function() {
+                                    return window.loadPhotoWallData(true).then(function(res) {
+                                        if (res && res.ok === false) throw new Error('refresh_failed');
                                         if (typeof window.renderPhotoWall === 'function') {
-                                            window.renderPhotoWall();
+                                            return window.renderPhotoWall({ force: true });
                                         }
                                     });
                                 }
@@ -15180,8 +15711,11 @@ function renderProfileActivityList(kind) {
                             //   改为 await 真正完成后才给结果提示，并在 finally 里释放锁。
                             window.showToast('正在刷新...');
                             window.dockChatListCacheTime = 0;
-                            Promise.resolve()
-                                .then(function() { return loadDockChatList(); })
+                            var chatRefreshJobs = [Promise.resolve().then(function() { return loadDockChatList(); })];
+                            if (window.__xtjChatGroups && typeof window.__xtjChatGroups.reload === 'function') {
+                                chatRefreshJobs.push(Promise.resolve().then(function() { return window.__xtjChatGroups.reload(); }).catch(function() {}));
+                            }
+                            Promise.all(chatRefreshJobs)
                                 .then(function() {
                                     window.showToast('刷新完成');
                                 })
@@ -15210,14 +15744,18 @@ function renderProfileActivityList(kind) {
                             const panel = document.getElementById('panelPosts');
                             if (panel) panel.scrollTo({ top: 0, behavior: 'smooth' });
                         } else if (tab === 'chat') {
-                            // 聊天页：如果在对话中则返回列表，否则回到顶部
-                            if (dockChatActiveUser) {
+                            // 聊天页：如果在对话中（含群聊）则返回列表，否则回到顶部
+                            if (window.__xtjChatGroups && typeof window.__xtjChatGroups.state === 'function' && window.__xtjChatGroups.state() && window.__xtjChatGroups.state().active) {
+                                window.__xtjChatGroups.close();
+                            } else if (dockChatActiveUser) {
                                 dockChatGoBack();
                             } else {
                                 const panel = document.getElementById('panelChat');
                                 if (panel) panel.scrollTo({ top: 0, behavior: 'smooth' });
                             }
                         } else if (tab === 'ai') {
+                            const panelAi = document.getElementById('panelAi');
+                            if (panelAi) panelAi.scrollTo({ top: 0, behavior: 'smooth' });
                             const photoWallPage = document.getElementById('photoWallContainer');
                             if (photoWallPage) photoWallPage.scrollTo({ top: 0, behavior: 'smooth' });
                             if (window.currentUser) {
@@ -15467,6 +16005,13 @@ function renderProfileActivityList(kind) {
             //   仍显示上一个账号的私聊内容。由 doLogout 显式调用。
             window.__xtjResetChatPanels = function() {
                 try { if (typeof window.__xtjResetChatGroups === 'function') window.__xtjResetChatGroups(); } catch (_) {}
+                try { if (typeof window.__xtjResetDmUidHash === 'function') window.__xtjResetDmUidHash(); } catch (_) {}
+                dockChatActiveUser = null;
+                restorePostsScroll = null;
+                window.dockChatListCacheTime = 0;
+                _dockChatSocialTab = 'friends';
+                _dockChatSocialQuery = '';
+                _dockChatSocialRequestDirection = 'incoming';
                 if (_dockChatDraftTimer) clearTimeout(_dockChatDraftTimer);
                 _dockChatDraftTimer=null;_dockChatDraftLoadSeq++;
                 _dockChatLocalDrafts={};_dockChatDraftWrites={};_dockChatDraftConflicts={};
@@ -15823,6 +16368,7 @@ function renderProfileActivityList(kind) {
                 closeChatHistory(); cancelChatVoice(); clearChatMessageDraft(); clearDockChatFilePreview(false); _chatHistoryFocus = '';
                 closeDockChatConversationMenu(true);
                 cancelDockChatSendFlights();
+                if (_chatSendFlight) { try { _chatSendFlight.controller.abort(); } catch (_) {} _chatSendFlight = null; }
                 resetDockChatTyping();
                 showDockChatPresence('',false);
                 if (_dockChatDraftTimer && dockChatActiveUser) {
@@ -15878,6 +16424,47 @@ function renderProfileActivityList(kind) {
             }
             window.dockChatGoBack = dockChatGoBack;
 
+            // 切入群聊时统一收起私聊浮层并取消当前私聊会话，避免后台轮询误标已读与桌面分屏双高亮。
+            window.__xtjDeactivateDmForGroup = function() {
+                var socialSheet = document.getElementById('dockChatSocialSheet');
+                if (socialSheet && !socialSheet.classList.contains('hidden')) {
+                    socialSheet.classList.add('hidden');
+                    socialSheet.setAttribute('aria-hidden', 'true');
+                }
+                try { closeChatHistory(); } catch (_) {}
+                try { closeDockChatConversationMenu(true); } catch (_) {}
+                try { closeAuthorSupport(); } catch (_) {}
+                try { cancelChatFlashSend(); } catch (_) {}
+                try { cancelChatVoice(); } catch (_) {}
+                if (dockChatActiveUser) {
+                    if (_dockChatDraftTimer) {
+                        clearTimeout(_dockChatDraftTimer);
+                        _dockChatDraftTimer = null;
+                    }
+                    var currentDraftInput = document.getElementById('dockChatInput');
+                    try { persistDockChatDraft(dockChatActiveUser, currentDraftInput ? currentDraftInput.value : ''); } catch (_) {}
+                    try { saveChatAttachmentDraft(); } catch (_) {}
+                    _chatContextSeq++;
+                    try { clearChatMessageDraft(); } catch (_) {}
+                    try { clearDockChatFilePreview(false); } catch (_) {}
+                    _chatHistoryFocus = '';
+                    try { cancelDockChatSendFlights(); } catch (_) {}
+                    if (_chatSendFlight) { try { _chatSendFlight.controller.abort(); } catch (_) {} _chatSendFlight = null; }
+                    try { resetDockChatTyping(); } catch (_) {}
+                    try { showDockChatPresence('', false); } catch (_) {}
+                    dockChatActiveUser = null;
+                    dockChatSending = false;
+                    _dockChatSendQueue = [];
+                    _dockChatLoadSeq += 1;
+                    restorePostsScroll = null;
+                    var conversationButton = document.getElementById('dockChatConversationBtn');
+                    if (conversationButton) conversationButton.hidden = true;
+                    document.querySelectorAll('#dockChatList .chat-list-item.active').forEach(function(n) { n.classList.remove('active'); });
+                    syncDockChatLayoutState();
+                    startDMPolling(300000);
+                }
+            };
+
             window.openChatList = function() { switchDockTab('chat', true); };
             window.closeChat = function() {
                 _dockChatLoadSeq += 1;
@@ -15895,6 +16482,7 @@ function renderProfileActivityList(kind) {
                 cancelChatFlashSend();
                 if(_flashViewer)_flashViewer.close();
                 cancelDockChatSendFlights();
+                if (_chatSendFlight) { try { _chatSendFlight.controller.abort(); } catch (_) {} _chatSendFlight = null; dockChatSending = false; }
                 resetDockChatTyping();
                 closeChatHistory(); cancelChatVoice(); clearChatMessageDraft(); clearDockChatFilePreview(false); _chatHistoryFocus = '';
                 if (!window.currentUser) { showToast('请先登录'); return; }
@@ -16548,6 +17136,21 @@ function renderProfileActivityList(kind) {
                 });
                 convs.sort(function(a,b) { return Number(b.pinned)-Number(a.pinned) || String(b.last_time).localeCompare(String(a.last_time)); });
                 renderDockChatConversationList(el, convs);
+                if (window.currentUser && window.currentUser !== 'xxz') {
+                    var xxzRow = el.querySelector('.chat-list-item[data-chat-user="xxz"]');
+                    if (xxzRow) {
+                        xxzRow.classList.add('admin-chat-entry');
+                        var xxzNameWrap = xxzRow.querySelector('.cli-name');
+                        if (xxzNameWrap && !xxzNameWrap.querySelector('.admin-tag-mini')) {
+                            var badgeSpan = document.createElement('span');
+                            badgeSpan.className = 'admin-tag-mini';
+                            badgeSpan.textContent = '管理员';
+                            var nameText = xxzNameWrap.querySelector('.cli-name-text');
+                            if (nameText && nameText.nextSibling) xxzNameWrap.insertBefore(badgeSpan, nameText.nextSibling);
+                            else xxzNameWrap.appendChild(badgeSpan);
+                        }
+                    }
+                }
             }
 
             function scheduleDockChatListRefresh(delay) {
@@ -17389,11 +17992,30 @@ function renderProfileActivityList(kind) {
                     var oldRetry = el.querySelector('.chat-load-retry'); if (oldRetry) oldRetry.remove();
                     renderDockMessages(userName, mergedMessages, forceScroll);
                     syncDockChatHistoryButton(userName);
-                    if (pendingReadUpdates.length && currentDockTab==='chat' && !document.hidden) {
+                    var isGroupOpen = !!(window.__xtjChatGroups && typeof window.__xtjChatGroups.state === 'function' && window.__xtjChatGroups.state() && window.__xtjChatGroups.state().active);
+                    if (pendingReadUpdates.length && currentDockTab==='chat' && !document.hidden && !isGroupOpen) {
                         window.markMessagesRead(userName, mergedMessages, pendingReadUpdates).catch(function() {
                             scheduleDockChatListRefresh(120);
                         });
                     } else {
+                        if (currentDockTab==='chat' && !document.hidden && !isGroupOpen) {
+                            var convState = (typeof _dockChatConversationStates !== 'undefined' && _dockChatConversationStates) ? _dockChatConversationStates[userName] : null;
+                            if (convState && (convState.manual_unread_at || Number(convState.unread_count) > 0)) {
+                                convState.manual_unread_at = null;
+                                convState.unread_count = 0;
+                                if (typeof window.xtjProtectedFetch === 'function') {
+                                    window.xtjProtectedFetch('/api/chat/social/conversations/' + encodeURIComponent(userName), {
+                                        method: 'PATCH',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ action: 'mark_read' }),
+                                        authOwner: loadOwner,
+                                        authEpoch: loadEpoch,
+                                        background: true,
+                                        timeoutMs: 10000
+                                    }).then(function() { scheduleDockChatListRefresh(120); }).catch(function() {});
+                                }
+                            }
+                        }
                         updateUnreadBadge();
                     }
                 } catch(e) {
@@ -18084,7 +18706,7 @@ function renderProfileActivityList(kind) {
                         renderDockMessages(queuedTarget, upsertDockChatCacheMessage(queuedTarget, queuedMessage), true);
                         animateDockChatSend(queuedTempId, queuedTarget, queuedOrigin);
                         applyDockChatConversationPreview(queuedTarget, queuedMessage, 0);
-                        return;
+                        return { queued: true, tempId: queuedTempId };
                     }
                     // ★ 2026-09-25 修复（审计 M-4）：旧实现把 dockChatSending 与"无内容"
                     //   合并在同一个 return 里，发送中再次回车会被静默吞掉（无提示、不排队）。
@@ -18336,6 +18958,15 @@ function renderProfileActivityList(kind) {
                     //   已经把本条会话的预览/时间就地更新好了，发送**不会**改变其它会话。
                     //   现在把它真正作为主更新路径；全量校准交给轮询/可见性变化/手动刷新。
                     applyDockChatConversationPreview(targetUser, insertedMessage, 0);
+                    if (sendResult.auto_friend && (sendResult.auto_friend.status === 'request_sent' || sendResult.auto_friend.status === 'accepted')) {
+                        try { _chatSocialPanels.clear(); } catch (_) {}
+                        try { invalidateChatGroupsFriendsCache(); } catch (_) {}
+                        try { refreshChatFriendNotes(true); } catch (_) {}
+                        try { refreshChatSocialBadge(true); } catch (_) {}
+                        if (sendResult.auto_friend.status === 'accepted' && !forwarding) {
+                            showToast('已与 ' + targetUser + ' 互为好友');
+                        }
+                    }
                     if (forwarding) showToast('已转发给 ' + targetUser);
                     if (typeof window.__xtjRefreshIOSChatViewport === 'function') {
                         window.__xtjRefreshIOSChatViewport({ preserveFocus: true, forceScroll: true });
@@ -18923,18 +19554,30 @@ function renderProfileActivityList(kind) {
                 cancelDmAiAsk();
                 window.__xtjOpenAiChat();
                 var task = { owner: currentUser, epoch: _authStateEpoch, controller: new AbortController(),
-                    root: document.getElementById('aiChatRoot'), timer: null };
+                    root: null, input: null, originalDraft: null, imageBlob: null, timer: null };
                 _dmAiAskTask = task;
-                function current() {
+                function alive() {
                     return _dmAiAskTask === task && task.owner === currentUser && task.epoch === _authStateEpoch &&
-                        !task.controller.signal.aborted && task.root && task.root.isConnected && document.getElementById('aiChatRoot') === task.root;
+                        !task.controller.signal.aborted;
                 }
-                var input = task.root && task.root.querySelector('#aiChatMsgInput'), originalDraft = input && input.value;
+                function current() {
+                    if (!alive()) return false;
+                    var liveRoot = document.getElementById('aiChatRoot');
+                    if (!task.root) {
+                        if (!liveRoot || !liveRoot.isConnected) return false;
+                        var liveInput = liveRoot.querySelector('#aiChatMsgInput');
+                        if (!liveInput) return false;
+                        task.root = liveRoot;
+                        task.input = liveInput;
+                        task.originalDraft = liveInput.value;
+                    }
+                    return task.root.isConnected && liveRoot === task.root;
+                }
                 var prompt = isImage ? '请帮我看看这张图片：' : '请帮我看看这条消息：';
                 if (text) prompt += '\n' + text.slice(0, 800);
                 if (mediaUrl && !isImage) prompt += '\n（媒体链接：' + mediaUrl + '）';
                 var ready = !isImage, attached = false, started = Date.now();
-                if (isImage && current()) {
+                if (isImage && alive()) {
                     // Bearer tokens only go to our own API. Signed Storage and local
                     // blob URLs need no credentials and retain their original bytes.
                     var parsed = new URL(mediaUrl, location.href), api = new URL(window.API_BASE || location.origin, location.href);
@@ -18943,22 +19586,41 @@ function renderProfileActivityList(kind) {
                         signal: task.controller.signal, timeoutMs: 15000 }) : fetch(mediaUrl, { credentials: 'omit', signal: task.controller.signal });
                     Promise.resolve(request).then(function(response) { if (!response.ok) throw Error('图片暂不可用'); return response.blob(); })
                         .then(function(blob) {
-                            if (!current()) return;
-                            var fileInput = task.root.querySelector('input[type="file"]');
-                            if (!fileInput || input.value !== originalDraft) throw Error('输入内容已改变，请重新选择问小猫');
-                            var dt = new DataTransfer(); dt.items.add(new File([blob], 'dm-image', { type: blob.type || 'image/png' }));
-                            fileInput.files = dt.files; fileInput.dispatchEvent(new Event('change', { bubbles: true })); attached = true; ready = true;
-                        }).catch(function(error) { if (current()) { showToast(error.message || '图片暂不可用，请重试'); cancelDmAiAsk(); } });
+                            if (!alive()) return;
+                            task.imageBlob = blob;
+                        }).catch(function(error) { if (alive()) { showToast(error.message || '图片暂不可用，请重试'); cancelDmAiAsk(); } });
                 }
                 task.timer = setInterval(function() {
-                    if (!current()) { clearInterval(task.timer); task.controller.abort(); return; }
+                    if (!alive()) { clearInterval(task.timer); task.controller.abort(); return; }
                     if (Date.now() - started > 15000) { showToast('小猫AI 尚未准备好，请重试'); cancelDmAiAsk(); return; }
+                    if (!current()) return;
+                    if (isImage && !attached && task.imageBlob) {
+                        var fileInput = task.root.querySelector('input[type="file"]');
+                        if (!fileInput || task.input.value !== task.originalDraft) {
+                            showToast('输入内容已改变，请重新选择问小猫');
+                            cancelDmAiAsk();
+                            return;
+                        }
+                        try {
+                            var dt = new DataTransfer();
+                            dt.items.add(new File([task.imageBlob], 'dm-image', { type: task.imageBlob.type || 'image/png' }));
+                            fileInput.files = dt.files;
+                            fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+                            attached = true;
+                            ready = true;
+                        } catch (eAttach) {
+                            showToast('图片附件添加失败，请重试');
+                            cancelDmAiAsk();
+                            return;
+                        }
+                    }
                     if (!ready || (attached && !task.root.querySelector('.ai-file-thumb'))) return;
                     var cfg = window.__xtjAiAgent && window.__xtjAiAgent.getConfig(), button = task.root.querySelector('#aiChatSendBtn');
                     if (!cfg || !button || button.disabled) return;
-                    if (input.value !== originalDraft) { showToast('输入内容已改变，请重新选择问小猫'); cancelDmAiAsk(); return; }
-                    input.value = originalDraft.trim() ? originalDraft.replace(/\s+$/, '') + '\n' + prompt : prompt;
-                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                    if (task.input.value !== task.originalDraft) { showToast('输入内容已改变，请重新选择问小猫'); cancelDmAiAsk(); return; }
+                    var baseDraft = String(task.originalDraft || '');
+                    task.input.value = baseDraft.trim() ? baseDraft.replace(/\s+$/, '') + '\n' + prompt : prompt;
+                    task.input.dispatchEvent(new Event('input', { bubbles: true }));
                     cancelDmAiAsk(); button.click();
                 }, 150);
             }
@@ -19292,7 +19954,9 @@ function renderProfileActivityList(kind) {
                     var result = await chatFeatureApi('history/context?peer=' + encodeURIComponent(peer) + '&message_id=' + encodeURIComponent(id));
                     if (seq !== _chatContextSeq || epoch !== _authStateEpoch || owner !== window.currentUser || dockChatActiveUser !== peer) return;
                     _dockChatLoadSeq++; _chatHistoryRefreshSeq++; _chatHistoryFocus = peer; _chatHistoryAnchor = result.focus_id;
-                    var historyRows = Array.isArray(result.data) ? result.data.slice() : [];
+                    var historyRows = (Array.isArray(result.data) ? result.data.slice() : []).filter(function(m) {
+                        return !isDmMessageLocallyDeleted(m);
+                    });
                     var oldest = historyRows[0];
                     var historyKey = getDockChatCacheKey(peer);
                     _chatPagination[historyKey] = {
@@ -19308,7 +19972,7 @@ function renderProfileActivityList(kind) {
                         if (seq !== _chatContextSeq || epoch !== _authStateEpoch || owner !== window.currentUser || dockChatActiveUser !== peer) return;
                         var row = document.querySelector('#dockChatMessages [data-message-id="' + result.focus_id + '"]');
                         if (row) { row.scrollIntoView({ block: 'center', behavior: 'auto' }); row.classList.add('chat-search-focus'); setTimeout(function() { row.classList.remove('chat-search-focus'); }, 1800); }
-                        setDockChatJumpLatestVisible(true);
+                        setDockChatJumpLatestVisible(!!result.has_newer);
                     });
                 } catch (error) { if (seq === _chatContextSeq && epoch === _authStateEpoch && owner === window.currentUser) showToast(error.message); }
             }
@@ -19395,7 +20059,7 @@ function renderProfileActivityList(kind) {
                     }
                     showToast('已编辑');
                 } catch (error) { if (currentEdit()) showToast(error.message); }
-                finally { if (currentEdit()) { _chatSendFlight = null; dockChatSending = false; } }
+                finally { if (currentEdit()) { _chatSendFlight = null; dockChatSending = false; drainDockChatSendQueue(); } }
             }
             async function setChatReaction(peer, id, emoji) {
                 var owner = window.currentUser;
@@ -19932,7 +20596,7 @@ function renderProfileActivityList(kind) {
 
             var _chatPushSyncing=false, _chatPushPending=false, _chatPushOwner='', _chatPushEnabled=false;
             function chatPushSupported(){return window.isSecureContext && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;}
-            async function chatPushApi(path,body,owner,epoch){var response=await window.xtjProtectedFetch('/api/chat/push/'+path,Object.assign(body?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),timeoutMs:15000}:{timeoutMs:15000},{authOwner:owner,authEpoch:epoch}));var result=await response.json();if(!response.ok || !result.ok)throw new Error(result.error||'通知设置暂不可用');return result;}
+            async function chatPushApi(path,body,owner,epoch){var response=await window.xtjProtectedFetch('/api/chat/push/'+path,Object.assign(body?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),timeoutMs:15000}:{timeoutMs:15000},{authOwner:owner,authEpoch:epoch}));var result=await response.json().catch(function(){return {};});if(!response.ok || !result.ok){var err=new Error(result.error||'通知设置暂不可用');err.status=response.status;throw err;}return result;}
             async function syncChatPushState(){
                 if(!chatPushSupported())return;
                 var owner=window.currentUser || '',epoch=_authStateEpoch,enabled=!!owner && localStorage.getItem('xtj_chat_push_'+owner)==='on';
@@ -19953,7 +20617,21 @@ function renderProfileActivityList(kind) {
                     if(subscription){var key=subscription.options && subscription.options.applicationServerKey;if(key && btoa(String.fromCharCode.apply(null,new Uint8Array(key))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'')!==config.public_key){await subscription.unsubscribe();subscription=null;if(!allowed())return;}}
                     if(!subscription){var raw=atob(config.public_key.replace(/-/g,'+').replace(/_/g,'/'));subscription=await registration.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:Uint8Array.from(raw,function(c){return c.charCodeAt(0);})});}
                     if(!allowed())return;
-                    await chatPushApi('subscribe',{subscription:subscription.toJSON()},owner,epoch);
+                    try {
+                        await chatPushApi('subscribe',{subscription:subscription.toJSON()},owner,epoch);
+                    } catch (subErr) {
+                        // 上一账号若离线登出未释放旧推送端点，会返回 409；本地换发新端点后再试一次。
+                        if (subErr && subErr.status === 409 && allowed()) {
+                            try { await subscription.unsubscribe(); } catch (_) {}
+                            if (!allowed()) return;
+                            var rawRetry = atob(config.public_key.replace(/-/g,'+').replace(/_/g,'/'));
+                            subscription = await registration.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:Uint8Array.from(rawRetry,function(c){return c.charCodeAt(0);})});
+                            if (!allowed()) return;
+                            await chatPushApi('subscribe',{subscription:subscription.toJSON()},owner,epoch);
+                        } else {
+                            throw subErr;
+                        }
+                    }
                     if(!allowed())return;
                     _chatPushOwner=owner;_chatPushEnabled=true;
                     (registration.active || registration.waiting).postMessage({type:'XTJ_CHAT_PUSH_STATE',owner,peer:currentDockTab==='chat'?dockChatActiveUser || '':''});
@@ -20136,14 +20814,16 @@ function renderProfileActivityList(kind) {
                 try{
                     var prepared=await prepareDmImageForUpload(file,{original:original});if(!active())return;var uploadFile=prepared.file;
                     var form=new FormData();form.append('image',uploadFile,uploadFile.name||'flash.jpg');form.append('target_user',peer);form.append('client_id',client);
-                    var response=await window.xtjProtectedFetch('/api/chat/flash/send',{method:'POST',body:form,signal:flight.controller.signal,timeoutMs:60000});var body=await response.json();if(!active())return;if(body.quota){_flashQuota={owner:owner,data:body.quota,at:Date.now()};paintChatFlashQuota();}else void refreshChatFlashQuota(true);
+                    var response=await window.xtjProtectedFetch('/api/chat/flash/send',{method:'POST',body:form,signal:flight.controller.signal,timeoutMs:60000});var body=await response.json().catch(function(){return {};});if(!active())return;if(body.quota){_flashQuota={owner:owner,data:body.quota,at:Date.now()};paintChatFlashQuota();}else void refreshChatFlashQuota(true);
                     if(!response.ok||!body.ok||!body.message)throw Error(body.error||'闪图发送未确认，请重试');
                     var list=upsertDockChatCacheMessage(peer,Object.assign({},body.message,{__committedRevision:++_chatCommittedRevision}));_chatRenderSignature[peer]=undefined;renderDockMessages(peer,list,true);
+                    applyDockChatConversationPreview(peer,body.message,0);
+                    if(body.auto_friend&&(body.auto_friend.status==='request_sent'||body.auto_friend.status==='accepted')){try{_chatSocialPanels.clear();}catch(_){}try{invalidateChatGroupsFriendsCache();}catch(_){}try{refreshChatFriendNotes(true);}catch(_){}try{refreshChatSocialBadge(true);}catch(_){}}
                     if(_chatAttachmentQueue[0]===file){_chatAttachmentQueue.shift();var url=_chatAttachmentUrls.get(file);if(url)URL.revokeObjectURL(url);_chatAttachmentUrls.delete(file);}
                     if(_chatAttachmentQueue.length){showDockChatFilePreview(_chatAttachmentQueue[0]);renderChatAttachmentQueue();}else clearDockChatFilePreview(false);
                     showToast('闪图已发送，对方可查看一次，清晰显示 3 秒');
                 }catch(error){if(active())showToast(error.message||'闪图发送失败，请重试');}
-                finally{if(_flashSendFlight===flight){_flashSendFlight=null;_flashSending=false;dockChatSending=false;restoreDockChatSendAvailability();if(button){button.textContent='闪图';button.disabled=false;}}}
+                finally{if(_flashSendFlight===flight){_flashSendFlight=null;_flashSending=false;dockChatSending=false;restoreDockChatSendAvailability();if(button){button.textContent='闪图';button.disabled=false;}drainDockChatSendQueue();}}
             };
             window.openChatFlash=async function(id){
                 if(_flashViewer||!currentUser||!/^[a-f0-9-]{36}$/i.test(String(id)))return;
@@ -20160,7 +20840,7 @@ function renderProfileActivityList(kind) {
                 watch=setInterval(function(){if(!active())close();},50);
                 try{
                     var response=await window.xtjProtectedFetch('/api/chat/flash/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message_id:id,view_id:view}),signal:controller.signal,timeoutMs:30000,authOwner:owner,authEpoch:epoch});
-                    if(!response.ok){var error=await response.json();if(response.status===410)rememberFlashConsumed(key);throw Error(error.error||'闪图不可查看');}
+                    if(!response.ok){var error=await response.json().catch(function(){return {};});if(response.status===410)rememberFlashConsumed(key);throw Error(error.error||'闪图不可查看');}
                     var cached=(_chatCache[getDockChatCacheKey(peer)]||[]).find(function(m){return String(m.id)===String(id);});role=response.headers.get('X-Flash-Role')||(cached&&cached.user_name===owner?'sender':'recipient');if(role!=='sender' && flashLocallyViewed(owner,id)){close();showToast('闪图已查看');return;}var blob=await response.blob();if(!active())return;
                     if(!blob.size||!/^image\//.test(blob.type))throw Error('闪图图片未加载，请重试');
                     url=URL.createObjectURL(blob);
@@ -20999,7 +21679,7 @@ function renderProfileActivityList(kind) {
                 if (_dockChatSocialTab === 'search') {
                     content.innerHTML = '<form id="dockChatSocialSearchForm" class="chat-social-search-form" autocomplete="off">' +
                         '<input name="q" type="search" minlength="2" maxlength="64" placeholder="输入用户名，至少 2 个字符" value="' + escapeHtml(_dockChatSocialQuery) + '" aria-label="搜索用户名">' +
-                        '<button type="submit">搜索</button></form><div id="dockChatSocialResults" class="chat-social-results"><div class="chat-social-empty">搜索公开用户名，查看好友关系并发送申请。</div></div>';
+                        '<button type="submit">搜索</button></form><div id="dockChatSocialResults" class="chat-social-results"><div class="chat-social-empty">搜索用户名即可直接发消息（发消息自动加为单向好友，对方回复后互为好友）。</div></div>';
                     content.dataset.renderMarkup='';
                     content.setAttribute('aria-busy','false');
                     if (_dockChatSocialQuery) loadDockChatSocialSearch(_dockChatSocialQuery, seq);
@@ -21018,21 +21698,30 @@ function renderProfileActivityList(kind) {
                         _dockChatFriendNotesAt = Date.now();
                         applyDockChatFriendLabels();
                         if (!friends.length) {
-                            updateChatSocialPanel(content,'<div class="chat-social-empty">还没有好友。搜索用户名后发送好友申请即可开始聊天。</div>');
+                            updateChatSocialPanel(content,'<div class="chat-social-empty">还没有好友。直接给任何用户发消息就会自动加入好友列表，对方回复后自动互为好友。</div>');
                             return;
                         }
                         var friendMarkup = friends.map(function(friend) {
                             var name = String(friend.peer_name || '');
                             var note = String(friend.note || '');
-                            var actions = [
+                            var isMutual = friend.mutual !== false && friend.relation_status !== 'one_way';
+                            var actions = isMutual ? [
                                 chatSocialActionButton('聊天', 'friend-chat', name, '', 'primary'),
                                 chatSocialActionButton('资料', 'friend-profile', name),
                                 chatSocialActionButton('共同好友', 'friend-mutual', name),
                                 chatSocialActionButton('备注', 'friend-note', name, '', '', note),
                                 chatSocialActionButton('删除', 'friend-remove', name, '', 'danger'),
                                 chatSocialActionButton('拉黑', 'friend-block', name, '', 'danger')
+                            ] : [
+                                chatSocialActionButton('聊天', 'friend-chat', name, '', 'primary'),
+                                chatSocialActionButton('资料', 'friend-profile', name),
+                                chatSocialActionButton('删除', 'friend-remove', name, '', 'danger'),
+                                chatSocialActionButton('拉黑', 'friend-block', name, '', 'danger')
                             ];
-                            return chatSocialUserRow(name, note ? '账号：' + name : '已添加为好友', actions, note || name);
+                            var metaText = isMutual
+                                ? (note ? '账号：' + name : '互为好友')
+                                : '单向好友 · 对方回复后自动互为好友';
+                            return chatSocialUserRow(name, metaText, actions, note || name);
                         }).join('');
                         updateChatSocialPanel(content,friendMarkup);
                         hydrateDockChatSocialAvatars(friends.map(function(friend) { return friend.peer_name; }));
@@ -21108,16 +21797,16 @@ function renderProfileActivityList(kind) {
                         var meta;
                         if (relation === 'friends') {
                             actions = [chatSocialActionButton('聊天', 'friend-chat', name, '', 'primary'), chatSocialActionButton('资料', 'friend-profile', name)];
-                            meta = '已是好友';
+                            meta = '互为好友';
                         } else if (relation === 'request_sent') {
-                            actions = [chatSocialActionButton('已发送', 'noop', name, '', '', '')];
-                            meta = '等待对方处理';
+                            actions = [chatSocialActionButton('聊天', 'friend-chat', name, '', 'primary'), chatSocialActionButton('资料', 'friend-profile', name)];
+                            meta = '单向好友 · 对方回复后互为好友';
                         } else if (relation === 'request_received') {
-                            actions = [chatSocialActionButton('处理申请', 'requests-open', name, '', 'primary')];
-                            meta = '对方已向你发送好友申请';
+                            actions = [chatSocialActionButton('聊天', 'friend-chat', name, '', 'primary'), chatSocialActionButton('资料', 'friend-profile', name)];
+                            meta = '对方已联系你 · 回复后互为好友';
                         } else {
-                            actions = [chatSocialActionButton('添加好友', 'friend-request', name, '', 'primary'), chatSocialActionButton('资料', 'friend-profile', name)];
-                            meta = '注册用户';
+                            actions = [chatSocialActionButton('聊天', 'friend-chat', name, '', 'primary'), chatSocialActionButton('资料', 'friend-profile', name)];
+                            meta = '注册用户 · 发消息自动加为好友';
                         }
                         return chatSocialUserRow(name, meta, actions, name);
                     }).join('');
@@ -21196,13 +21885,13 @@ function renderProfileActivityList(kind) {
                     return;
                 }
                 if (action === 'friend-remove') {
-                    if (!(await window.xtjConfirm('删除好友', '删除好友后会保留历史聊天，但需要重新成为好友才能发送新消息。确定删除？', '删除'))) return;
+                    if (!(await window.xtjConfirm('删除好友', '确定将该用户移出好友列表？历史聊天仍会保留。', '删除'))) return;
                     try {
                         await requestDockChatSocial('/friends/' + encodeURIComponent(peer), { method: 'DELETE' });
                         await refreshChatFriendNotes(true);
                         invalidateChatGroupsFriendsCache();
                         if (dockChatActiveUser === peer) updateDockChatComposerPermission(peer);
-                        showToast('已删除好友，历史聊天保留');
+                        showToast('已移出好友列表，历史聊天保留');
                         renderDockChatSocialTab('friends');
                     } catch (e) { showToast(e && e.message || '删除好友失败'); }
                     return;
@@ -21281,41 +21970,40 @@ function renderProfileActivityList(kind) {
                     return;
                 }
                 var seq = ++_dockChatRelationshipSeq;
-                if (input) input.disabled = true;
-                if (send) send.disabled = true;
-                if (attach) attach.disabled = true;
-                if (notice) notice.hidden = false;
-                if (message) message.textContent = '正在确认好友关系…';
+                // 任意未拉黑用户可直接发消息（发消息自动单向加好友，对方回复后互为好友），
+                // 打开对话时不再先锁死输入框；仅在服务端明确返回拉黑/账号不可用时才禁用输入。
+                if (input) input.disabled = false;
+                if (send) send.disabled = false;
+                if (attach) attach.disabled = false;
+                if (notice) notice.hidden = true;
                 if (actionButton) { actionButton.hidden = true; actionButton.onclick = null; }
                 var owner = window.currentUser;
                 try {
                     var result = await requestDockChatSocial('/relationship?target=' + encodeURIComponent(userName));
                     if (seq !== _dockChatRelationshipSeq || window.currentUser !== owner || dockChatActiveUser !== userName) return;
                     var relationship = result.relationship || {};
-                    if (relationship.can_message === true) {
+                    if (relationship.can_message === true || ['none', 'request_sent', 'request_received', 'friends'].indexOf(relationship.status) >= 0) {
                         if (input) input.disabled = false;
                         if (send) send.disabled = false;
                         if (attach) attach.disabled = false;
                         if (notice) notice.hidden = true;
                         return;
                     }
+                    if (input) input.disabled = true;
+                    if (send) send.disabled = true;
+                    if (attach) attach.disabled = true;
+                    if (notice) notice.hidden = false;
                     var action = '';
                     var label = '';
                     var note = '';
                     if (relationship.status === 'blocked_by_me') {
-                        note = '你已拉黑该用户。解除拉黑后，双方才能重新申请或发送新消息。'; action = 'blocks'; label = '管理黑名单';
+                        note = '你已拉黑该用户。解除拉黑后，双方才能重新发送新消息。'; action = 'blocks'; label = '管理黑名单';
                     } else if (relationship.status === 'blocked_by_peer') {
-                        note = '对方已限制与你的好友申请和新消息。历史聊天仍可查看。';
-                    } else if (relationship.status === 'request_sent') {
-                        note = '好友申请已发送，等待对方处理。'; action = 'cancel'; label = '取消申请';
-                    } else if (relationship.status === 'request_received') {
-                        note = '对方已向你发送好友申请。'; action = 'requests'; label = '处理申请';
-                    } else if (relationship.status === 'none') {
-                        note = '成为好友后才能发送新消息。历史聊天仍可查看。'; action = 'add'; label = '添加好友';
+                        note = '对方已限制与你的新消息。历史聊天仍可查看。';
                     } else if (relationship.status === 'user_not_found') {
                         note = '该用户当前不可用。';
                     } else {
-                        note = '好友状态不可用，暂时无法发送新消息。'; action = 'retry'; label = '重试';
+                        note = '当前无法向该用户发送新消息。'; action = 'retry'; label = '重试';
                     }
                     if (message) message.textContent = note;
                     if (actionButton && action) {
@@ -21614,7 +22302,8 @@ function renderProfileActivityList(kind) {
                             clearInterval(timer);
                             return;
                         }
-                        if ((tries >= 10 && hasSkeleton) || (tries >= 8 && isEmpty)) {
+                        var feedFetching = (typeof feedPageFetchPending !== 'undefined' && feedPageFetchPending);
+                        if ((tries >= 48 && hasSkeleton && (!feedFetching || tries >= 55)) || (tries >= 16 && isEmpty && !feedFetching)) {
                             clearInterval(timer);
                             console.warn('[XTJ] feed boot watchdog: recovery after ' + tries + 's');
                             feedEl.innerHTML = '<div class="loading" id="feedWatchdogError" role="button" tabindex="0" style="color:#ff3b60;cursor:pointer;padding:24px;text-align:center;">帖子加载超时，点击重试<br><small style="opacity:.7">若底部一直显示「正在等待…」，多半是 Render 冷启动或网络慢，请稍候再点</small></div>';
@@ -21635,12 +22324,6 @@ function renderProfileActivityList(kind) {
                             } catch (e3) {}
                         }
                     }, 1000);
-                    // ★ 2026-09-13 修复（S-1）：bfcache 往返时清理看门狗。
-                    // 进入 bfcache 不触发 beforeunload，该 1s 间隔的看门狗会跨页存活；
-                    // 返回后若 feed 已被浏览器恢复为真实内容，看门狗仍可能在检查窗口内
-                    // 判定为 skeleton/空值并写入 innerHTML，覆盖掉恢复后的真实 feed
-                    //（表现为「返回后 feed 闪回错误页」）。pagehide 在进入 bfcache 时
-                    // 同样触发，是可靠时机。
                     window.addEventListener('pagehide', function() { clearInterval(timer); });
                 })();
                 // 记录访问（用户+IP）
@@ -22120,8 +22803,9 @@ function renderProfileActivityList(kind) {
                     overlay.classList.remove('active');
                     overlay.style.opacity = '';
                     overlay.style.transition = '';
-                    document.body.style.overflow = '';
-                    if (typeof syncReportModalBodyLock === 'function') syncReportModalBodyLock();
+                    if (typeof window.syncHeaderModalBodyLock === 'function') window.syncHeaderModalBodyLock();
+                    else if (typeof syncReportModalBodyLock === 'function') syncReportModalBodyLock();
+                    else document.body.style.overflow = '';
                     currentAnnouncement = null;
                 }, 200);
             };
@@ -23790,13 +24474,16 @@ function renderProfileActivityList(kind) {
             if (!overlay) return;
             overlay.classList.remove('active');
             window.closeReportHistoryModal();
-            syncReportModalBodyLock();
+            if (typeof window.__xtjResetReportAiScan === 'function') window.__xtjResetReportAiScan();
+            if (typeof window.syncHeaderModalBodyLock === 'function') window.syncHeaderModalBodyLock();
+            else syncReportModalBodyLock();
         };
 
         window.switchReportType = function(type) {
             _reportType = type;
             _reportSelectedId = null;
             _reportTargetUser = null;
+            if (typeof window.__xtjResetReportAiScan === 'function') window.__xtjResetReportAiScan();
             document.querySelectorAll('.report-type-tab').forEach(function(t) {
                 t.classList.toggle('active', t.dataset.type === type);
             });
@@ -24041,8 +24728,8 @@ function renderProfileActivityList(kind) {
                         if (reportToken) reportHeaders['Authorization'] = 'Bearer ' + reportToken;
                         res = await fetch(API_BASE + '/api/report', { method: 'POST', credentials: 'include', headers: reportHeaders, body: reportBody });
                     }
-                    var data = await res.json();
-                    if (!res.ok) throw new Error(data.error || '提交失败');
+                    var data = await res.json().catch(function() { return {}; });
+                    if (!res.ok) throw new Error(data.error || ('提交失败（' + res.status + '）'));
                 } else {
                     if (!window.sb) throw new Error('数据库连接未初始化，请刷新页面重试');
                     if (!currentUser) throw new Error('请先登录');
@@ -24677,12 +25364,19 @@ function renderProfileActivityList(kind) {
  */
         (function installFocusSurfaceLifecycle() {
             if (typeof MutationObserver !== 'function') return;
-            var selector = '.modal-overlay, .announcement-modal-overlay, .report-modal-overlay, #ppConfirmOverlay, #photoPreviewOverlay, #pwUploadSheet, #ppInfoModal, #imgViewer, .pp-download-confirm-overlay, [data-xtj-ai-modal]';
+            var selector = '.modal-overlay, .announcement-modal-overlay, .report-modal-overlay, #ppConfirmOverlay, #photoPreviewOverlay, #pwUploadSheet, #ppInfoModal, #imgViewer, .pp-download-confirm-overlay, [data-xtj-ai-modal], .xtj-prompt-overlay, #postShareOverlay, #postVisibilityModal, #aiSiteSearchPanel, .grp-sheet, .grp-viewer';
             var surfaces = new Map(), background = new Map(), sequence = 0, top = null, syncing = false;
             function visible(root) {
+                if (root.closest && root.closest('.dock-panel:not(.active)')) return false;
                 if (root.id === 'ppConfirmOverlay' && root.classList.contains('closing')) return false;
                 if (root.hasAttribute('data-xtj-ai-modal')) return !root.hidden && root.classList.contains('is-ready');
                 if (root.id === 'ppInfoModal') return root.getAttribute('aria-hidden') === 'false' && root.style.display !== 'none';
+                if (root.classList.contains('xtj-prompt-overlay') || root.id === 'postShareOverlay' || root.id === 'postVisibilityModal' || root.classList.contains('grp-viewer')) {
+                    return !root.hidden && root.style.display !== 'none' && !root.classList.contains('closing');
+                }
+                if (root.classList.contains('grp-sheet')) {
+                    return !root.hidden && root.style.display !== 'none' && root.classList.contains('open') && !root.classList.contains('closing');
+                }
                 return !root.hidden && root.style.display !== 'none' && (root.classList.contains('active') || root.classList.contains('show'));
             }
             var CONTROL_SELECTOR = 'button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
@@ -24802,7 +25496,11 @@ function renderProfileActivityList(kind) {
                     if (!nodes.length) focusFirst(top); else (event.shiftKey ? last : first).focus({ preventScroll: true });
                 }
             },true);
-            document.addEventListener('focusin',function(event) { if (top && !top.contains(event.target) && !syncing && !window.__xtjMorphLanding) focusFirst(top); });
+            document.addEventListener('focusin',function(event) {
+                if (!top || top.contains(event.target) || syncing || window.__xtjMorphLanding) return;
+                if (event.target && event.target.closest && event.target.closest('.post-tools-menu, .mention-dropdown, .grp-menu, .grp-mention-pop')) return;
+                focusFirst(top);
+            });
             sync();
         })();
 
@@ -25119,7 +25817,16 @@ function renderProfileActivityList(kind) {
                     var raw = window.safeStorage.get(CACHE_KEY);
                     if (!raw) return null;
                     var parsed = JSON.parse(raw);
-                    return normalizeFeedSnapshotCache(parsed);
+                    if (!parsed || typeof parsed !== 'object') return null;
+                    var age = Date.now() - Number(parsed.timestamp || 0);
+                    if (!(age >= 0 && age < CACHE_DURATION)) return null;
+                    var expectedOwner = String(window.currentUser || '');
+                    if (!Object.prototype.hasOwnProperty.call(parsed, 'owner') || String(parsed.owner) !== expectedOwner) return null;
+                    var normalized = normalizeFeedSnapshotCache(parsed);
+                    if (normalized && normalized.data && Array.isArray(normalized.data.posts) && typeof canViewPost === 'function') {
+                        normalized.data.posts = normalized.data.posts.filter(function(p) { return p && !isSystemPost(p) && canViewPost(p); });
+                    }
+                    return normalized;
                 } catch (e) {
                     return null;
                 }
@@ -25221,13 +25928,14 @@ function renderProfileActivityList(kind) {
             }
 
             function syncHeaderModalBodyLock() {
-                var activeIds = ['announcementModal', 'reportModal', 'reportHistoryModal', 'statModal', 'statRecordsModal'];
+                var activeIds = ['announcementModal', 'reportModal', 'reportHistoryModal', 'statModal', 'statRecordsModal', 'postDetailModal', 'userProfileModal', 'postStatsModal', 'profileDetailModal', 'profileActivityModal', 'delModal', 'photoPreviewOverlay', 'postVisibilityModal'];
                 var hasActive = activeIds.some(function(id) {
                     var el = document.getElementById(id);
                     return !!(el && el.classList.contains('active'));
-                });
+                }) || !!document.querySelector('.pw-upload-sheet.active, #aiSiteSearchPanel.active');
                 document.body.style.overflow = hasActive ? 'hidden' : '';
             }
+            window.syncHeaderModalBodyLock = syncHeaderModalBodyLock;
 
             function renderStatByTypeFinal(type) {
                 if (type === 'posts') {
@@ -25443,30 +26151,41 @@ function renderProfileActivityList(kind) {
                     }
                 }, true);
 
+                var pressedBtn = null;
+                function releasePressedBtn(animateBack) {
+                    var el = pressedBtn;
+                    pressedBtn = null;
+                    if (!el) return;
+                    if (animateBack) {
+                        el.style.transition = 'transform 0.25s cubic-bezier(.34,1.4,.64,1)';
+                        el.style.transform = 'scale(1)';
+                        window.setTimeout(function(){
+                            if (el && pressedBtn !== el) { el.style.transition = ''; el.style.transform = ''; }
+                        }, 280);
+                    } else {
+                        el.style.transform = '';
+                        el.style.transition = '';
+                    }
+                }
                 document.addEventListener('pointerdown', function(event) {
                     var target = event.target;
-                    if (!target || isDock(target)) return;
+                    if (!target || !target.closest || isDock(target)) return;
                     if (target.closest('button:not(.dock-tab),[role="button"]:not(.dock-tab),.action-btn,.send-btn,.chat-img-btn,.photo-wall-btn,.file-label')) {
-                        target.style.transition = 'transform 0.12s ease';
-                        target.style.transform = 'scale(0.96)';
+                        var btn = target.closest('button,[role="button"],.action-btn,.send-btn,.chat-img-btn,.photo-wall-btn,.file-label');
+                        if (!btn || isDock(btn)) return;
+                        if (pressedBtn && pressedBtn !== btn) releasePressedBtn(false);
+                        pressedBtn = btn;
+                        btn.style.transition = 'transform 0.12s ease';
+                        btn.style.transform = 'scale(0.96)';
                     }
                 }, true);
 
-                document.addEventListener('pointerup', function(event) {
-                    var target = event.target;
-                    if (!target) return;
-                    if (target.style.transform) {
-                        target.style.transition = 'transform 0.25s cubic-bezier(.34,1.4,.64,1)';
-                        target.style.transform = 'scale(1)';
-                        window.setTimeout(function(){target.style.transition='';target.style.transform='';}, 280);
-                    }
+                window.addEventListener('pointerup', function() {
+                    if (pressedBtn) releasePressedBtn(true);
                 }, true);
 
-                document.addEventListener('pointercancel', function(event) {
-                    var target = event.target;
-                    if (!target) return;
-                    target.style.transform = '';
-                    target.style.transition = '';
+                window.addEventListener('pointercancel', function() {
+                    if (pressedBtn) releasePressedBtn(false);
                 }, true);
             })();
 

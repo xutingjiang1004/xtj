@@ -164,10 +164,11 @@
       cover.replaceChildren();
       if (coverItem) {
         // The cover only needs the preview-sized copy; the original loads when someone taps it to look closer.
-        var coverPreview = sizedPreview(window.xtjMediaPreviewUrl ? window.xtjMediaPreviewUrl(coverKey) : coverKey, 480);
+        var coverPreview = (coverItem.preview_url && safeUrl(coverItem.preview_url)) || sizedPreview(window.xtjMediaPreviewUrl ? window.xtjMediaPreviewUrl(coverKey) : coverKey, 480);
         var img = document.createElement('img'); img.alt = ''; img.src = coverPreview; img.decoding = 'async';
-        img.addEventListener('error', function () { img.remove(); cover.removeAttribute('role'); cover.removeAttribute('tabindex'); cover.setAttribute('aria-hidden', 'true'); }); cover.appendChild(img);
+        img.addEventListener('error', function () { img.remove(); cover.removeAttribute('role'); cover.removeAttribute('tabindex'); cover.removeAttribute('data-full-src'); cover.removeAttribute('data-thumb-src'); cover.removeAttribute('data-preview-source'); cover.setAttribute('aria-hidden', 'true'); }); cover.appendChild(img);
         cover.setAttribute('data-full-src', coverKey); cover.setAttribute('data-thumb-src', coverPreview);
+        cover.setAttribute('data-preview-source', 'profile'); cover.setAttribute('data-preview-user', String(s.author || ''));
         cover.setAttribute('role', 'button'); cover.setAttribute('tabindex', '0'); cover.setAttribute('aria-label', '查看背景图大图'); cover.removeAttribute('aria-hidden');
         if (!cover.__xtjViewBound) {
           cover.__xtjViewBound = true;
@@ -175,7 +176,7 @@
           cover.addEventListener('click', openCover);
           cover.addEventListener('keydown', function (event) { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openCover(); } });
         }
-      } else { cover.removeAttribute('role'); cover.removeAttribute('tabindex'); cover.removeAttribute('data-full-src'); cover.setAttribute('aria-hidden', 'true'); }
+      } else { cover.removeAttribute('role'); cover.removeAttribute('tabindex'); cover.removeAttribute('data-full-src'); cover.removeAttribute('data-thumb-src'); cover.removeAttribute('data-preview-source'); cover.setAttribute('aria-hidden', 'true'); }
       s._coverKey = coverKey;
     }
     var signature = byId('authorPostsSignature');
@@ -289,11 +290,11 @@
       data.posts.forEach(function (post) { if (post.user_name === s.author && !seen.has(String(post.id))) { s.posts.push(post); seen.add(String(post.id)); } });
       var appended = s.posts.length > beforeCount;
       s.profile = data.profile || s.profile; s.restricted = !!data.restricted; s.guestLimited = !!data.guest_limited;
-      if (s.restricted) s.posts = [];
+      if (s.restricted) { s.posts = []; dropCache(s); }
       s.cursor = data.next_cursor; s.hasMore = !!data.has_more && !!s.cursor; s.loading = false; s.retryable = true;
       render(s, appended && beforeCount > 0 && !s.restricted ? { appendFrom: beforeCount } : undefined);
       status(s, s.restricted ? '对方已关闭个人动态页访问' : !s.posts.length ? '还没有可查看的动态' : s.guestLimited || s.hasMore ? '' : '已显示全部动态');
-      if (beforeCount === 0) writeCache(s);
+      if (beforeCount === 0 && !s.restricted) writeCache(s);
     } catch (error) {
       if (!current(s)) return;
       s.loading = false; s.retryable = error.retryable !== false; status(s, error.message || '动态暂时无法加载', true);
@@ -303,6 +304,15 @@
     generation++;
     if (state && state.controller) state.controller.abort();
     state = null;
+    var gate = byId('authorPostsGuestGate');
+    if (gate) gate.remove();
+    var cover = byId('authorPostsCover');
+    if (cover) {
+      cover.removeAttribute('role'); cover.removeAttribute('tabindex');
+      cover.removeAttribute('data-full-src'); cover.removeAttribute('data-thumb-src');
+      cover.removeAttribute('data-preview-source'); cover.removeAttribute('data-preview-user');
+      cover.setAttribute('aria-hidden', 'true');
+    }
     ['authorPostsList', 'authorPostsCover', 'authorPostsStatus', 'authorPostsSignature'].forEach(function (id) { var node = byId(id); if (node) node.replaceChildren(); });
   };
   window.__xtjOpenAuthorPosts = function (author) {
@@ -362,6 +372,10 @@
     }, { passive: true, capture: true });
   });
   window.__xtjUpdateAuthorPost = function (post) {
+    if (post && post.user_name) {
+      var curId = identity();
+      dropCache({ owner: curId.owner, author: post.user_name });
+    }
     if (!state || !current(state) || !post || post.user_name !== state.author) return;
     state.posts = state.posts.map(function (old) { return String(old.id)===String(post.id) ? Object.assign({}, old, post) : old; });
     dropCache(state);
@@ -374,7 +388,11 @@
     return null;
   };
   window.__xtjRemoveAuthorPost = function (id) {
-    if (!state || !current(state)) return;
+    if (!state || !current(state)) {
+      var curId = identity();
+      if (curId.owner) dropCache({ owner: curId.owner, author: curId.owner });
+      return;
+    }
     state.posts = state.posts.filter(function (post) { return String(post.id) !== String(id); }); dropCache(state); render(state);
     status(state, state.posts.length ? '' : '还没有可查看的动态');
   };

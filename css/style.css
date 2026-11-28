@@ -376,7 +376,7 @@
             top: calc(70px + env(safe-area-inset-top, 0px));
             left: 50%;
             transform: translateX(-50%);
-            z-index: 13000;
+            z-index: 100300;
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -16424,7 +16424,7 @@ profile content only. Dock stays untouched.
 .chat-social-sheet {
   position: absolute;
   inset: 52px 0 0;
-  z-index: 30;
+  z-index: 45;
   padding: 6px;
   border-radius: 18px;
   background: rgba(40, 68, 57, .16);
@@ -16814,7 +16814,7 @@ html.perf-lite .ai-chat-bubble {
 #panelChat .chat-feature-button:hover { background: rgba(210,240,220,.8); }
 #panelChat .chat-feature-button:active { transform: scale(.97); }
 #panelChat .chat-feature-button.recording { color: #b34545; background: #fce8e8; }
-#panelChat .chat-history-panel { position: absolute; z-index: 40; inset: 58px 0 0; display: flex; flex-direction: column; gap: 10px; padding: 18px; color: var(--text-main); background: var(--bg-card,#f8fcf9); border-radius: 16px; box-sizing: border-box; overflow: auto; animation: chatFeatureEnter .18s ease-out; }
+#panelChat .chat-history-panel { position: absolute; z-index: 46; inset: 58px 0 0; display: flex; flex-direction: column; gap: 10px; padding: 18px; color: var(--text-main); background: var(--bg-card,#f8fcf9); border-radius: 16px; box-sizing: border-box; overflow: auto; animation: chatFeatureEnter .18s ease-out; }
 #panelChat .chat-history-head { display: flex; align-items: center; justify-content: space-between; }
 #panelChat .chat-history-head button, #panelChat .chat-message-context button { width: 30px; height: 30px; border: 0; border-radius: 8px; background: rgba(50,120,80,.08); color: inherit; font-size: 22px; cursor: pointer; }
 #panelChat .chat-history-query { display: flex; gap: 8px; }
@@ -17306,13 +17306,21 @@ html.perf-lite .profile-detail-info-item {
    元素，用 absolute inset:0 即可铺满；不写 display，避免盖掉 finishImg()
    隐藏骨架用的 display:none。另把骨架扫光从 0.34 白降到 0.10，消除未
    加载态那道刺眼的竖向亮带（用户反馈的「色差」）。 */
+/* ★ 2026-11-27 照片墙统一方形填充 + 骨架铺满 + 首帧头像尺寸约束
+   删除此前重复冲突的三段 .photo-wall-item > img 规则（CSSO 合并会把旧的
+   aspect-ratio:var(--pw-aspect) 提到 auto 之后），合并为单一干净声明。 */
+.photo-wall-item {
+  aspect-ratio: 1 / 1 !important;
+}
 .photo-wall-item > img {
   position: absolute !important;
   top: 0 !important;
   left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
   width: 100% !important;
-  height: auto !important;
-  aspect-ratio: var(--pw-aspect, 1 / 1) !important;
+  height: 100% !important;
+  aspect-ratio: auto !important;
   object-fit: cover !important;
 }
 .photo-wall-item > .pw-skeleton {
@@ -17326,37 +17334,16 @@ html.perf-lite .profile-detail-info-item {
 .photo-wall-item > .pw-skeleton::after {
   background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .10), transparent) !important;
 }
-
-/* ★ 2026-11-27 照片墙恢复「统一方形填充」预览（对齐上个月版本）
-   用户反馈按原比例显示高低不齐、大小不一、很奇怪；上个月每张卡片都是
-   统一方格、图片 object-fit:cover 裁剪铺满。这里覆盖同日晚些时候那条
-   「按 --pw-aspect 原比例」的规则：卡片高度恒为 1:1，图片用绝对定位
-   inset:0 + 100% 宽高铺满方格（iOS Safari 上 absolute 定宽高的 img 不会
-   因父容器 aspect-ratio 推断出百分比高度失效），竖图横图一律填满不留白。 */
-.photo-wall-item {
-  aspect-ratio: 1 / 1 !important;
-}
-.photo-wall-item > img {
-  position: absolute !important;
-  top: 0 !important;
-  left: 0 !important;
-  width: 100% !important;
-  height: 100% !important;
-  aspect-ratio: auto !important;
-  object-fit: cover !important;
+.pw-load-more-sentinel {
+  grid-column: 1 / -1;
 }
 
-/* ★ 2026-11-27 全屏预览头像首帧大方块修复
-   .pp-story-avatar 的尺寸约束原本只在异步注入的 photo-preview.min.css，
-   首次打开网站、首次打开照片时该 CSS 尚未到位，story.js 异步插入的头像
-   <img>（无 width/height 属性）按原图固有尺寸渲染成左下角大方块。这里把
-   尺寸钉进同步加载的 style.css，首帧即受约束；终态值与 photo-preview.css
-   一致，异步样式到位后无可见跳变。 */
 #photoPreviewOverlay .pp-story-avatar {
   width: 36px !important;
   height: 36px !important;
   min-width: 36px !important;
   min-height: 36px !important;
+  flex: 0 0 36px !important;
   border-radius: 50% !important;
   overflow: hidden !important;
   display: grid !important;
@@ -17369,14 +17356,315 @@ html.perf-lite .profile-detail-info-item {
   display: block !important;
 }
 
-/* ★ 2026-11-27 方形填充终极覆盖（本段位于所有规则最后，确保覆盖上面任何
-   --pw-aspect 相关旧声明）：卡片恒 1:1，img 绝对定位铺满，aspect-ratio 归
-   auto。宽高均 100% 时 aspect-ratio 不参与布局，杜绝按原比例高低不齐。 */
-.photo-wall-item { aspect-ratio: 1 / 1 !important; }
-.photo-wall-item > img {
-  position: absolute !important;
-  top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important;
-  width: 100% !important; height: 100% !important;
-  aspect-ratio: auto !important;
-  object-fit: cover !important;
+/* 帖子权限设置弹窗（公开 / 私密 / 仅谁可见 / 仅谁不可见） */
+#postVisibilityModal {
+  position: fixed;
+  inset: 0;
+  z-index: 10060;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(15, 29, 24, 0.44);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+#postVisibilityModal .post-vis-dialog {
+  position: relative;
+  width: min(440px, 100%);
+  max-height: min(86vh, 660px);
+  display: flex;
+  flex-direction: column;
+  padding: 24px;
+  border-radius: 24px;
+  background: #f5fbf7;
+  border: 1px solid rgba(76, 175, 130, 0.22);
+  box-shadow: 0 24px 64px rgba(15, 36, 28, 0.22);
+  color: #1a4233;
+  overflow: hidden;
+}
+#postVisibilityModal .post-vis-dialog h3 {
+  margin: 0 0 4px;
+  font-size: 20px;
+  color: #1a4233;
+}
+#postVisibilityModal .post-vis-sub {
+  margin: 0 0 14px;
+  font-size: 13px;
+  color: #6b8a7c;
+}
+#postVisibilityModal .post-vis-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 34px;
+  height: 34px;
+  border: 0 !important;
+  border-radius: 999px !important;
+  background: #e6f2ea !important;
+  color: #1a4233 !important;
+  font-size: 20px;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  padding: 0 !important;
+  box-shadow: none !important;
+}
+#postVisibilityModal .post-vis-close:hover {
+  background: #d9ecdf !important;
+}
+#postVisibilityModal .post-vis-modes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+#postVisibilityModal .post-vis-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(76, 175, 130, 0.22);
+  background: #ffffff;
+  cursor: pointer;
+  transition: border-color 0.16s ease, background 0.16s ease;
+}
+#postVisibilityModal .post-vis-option.is-selected {
+  border-color: #2f8f63;
+  background: #ebf8f1;
+}
+#postVisibilityModal .post-vis-option input[type="radio"] {
+  width: 16px;
+  height: 16px;
+  accent-color: #2f8f63;
+  margin: 0;
+  flex-shrink: 0;
+}
+#postVisibilityModal .post-vis-opt-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+#postVisibilityModal .post-vis-opt-body strong {
+  font-size: 14px;
+  font-weight: 700;
+  color: #1a4233;
+}
+#postVisibilityModal .post-vis-opt-body small {
+  font-size: 12px;
+  color: #6b8a7c;
+}
+#postVisibilityModal .post-vis-picker {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  flex: 1;
+}
+#postVisibilityModal .post-vis-picker[hidden] {
+  display: none;
+}
+#postVisibilityModal .post-vis-picker-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 600;
+  color: #4f6f61;
+}
+#postVisibilityModal .post-vis-picker-count {
+  color: #2f8f63;
+}
+#postVisibilityModal .post-vis-search {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 9px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(76, 175, 130, 0.28);
+  background: #ffffff;
+  color: #1a4233;
+  font: inherit;
+  font-size: 13px;
+}
+#postVisibilityModal .post-vis-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 76px;
+  overflow-y: auto;
+}
+#postVisibilityModal .post-vis-chips[hidden] {
+  display: none;
+}
+#postVisibilityModal .post-vis-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px 4px 10px;
+  border-radius: 999px;
+  background: #dff3e8;
+  color: #1d573d;
+  font-size: 12px;
+  font-weight: 600;
+}
+#postVisibilityModal .post-vis-chip-rm {
+  border: 0 !important;
+  background: transparent !important;
+  color: inherit !important;
+  padding: 0 2px !important;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: none !important;
+}
+#postVisibilityModal .post-vis-user-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 190px;
+  overflow-y: auto;
+  padding: 4px;
+  border-radius: 14px;
+  border: 1px solid rgba(76, 175, 130, 0.18);
+  background: rgba(255, 255, 255, 0.82);
+}
+#postVisibilityModal .post-vis-user-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px !important;
+  border: 0 !important;
+  border-radius: 10px !important;
+  background: transparent !important;
+  color: #1a4233 !important;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  box-shadow: none !important;
+}
+#postVisibilityModal .post-vis-user-row:hover {
+  background: #edf7f1 !important;
+}
+#postVisibilityModal .post-vis-user-row.is-selected {
+  background: #e1f4ea !important;
+  font-weight: 600;
+}
+#postVisibilityModal .post-vis-user-check {
+  width: 18px;
+  height: 18px;
+  border-radius: 6px;
+  border: 1.5px solid #96bfa9;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  color: #ffffff;
+  flex-shrink: 0;
+}
+#postVisibilityModal .post-vis-user-row.is-selected .post-vis-user-check {
+  background: #2f8f63;
+  border-color: #2f8f63;
+}
+#postVisibilityModal .post-vis-empty {
+  padding: 18px 12px;
+  text-align: center;
+  font-size: 13px;
+  color: #7d968a;
+}
+#postVisibilityModal .post-vis-retry {
+  border: 1px solid #9bcfb2 !important;
+  border-radius: 8px !important;
+  background: #ffffff !important;
+  color: #2f7d57 !important;
+  padding: 4px 10px !important;
+  font-size: 12px;
+  cursor: pointer;
+  box-shadow: none !important;
+}
+#postVisibilityModal .post-vis-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+}
+#postVisibilityModal .post-vis-actions button {
+  flex: 1;
+  padding: 11px 12px !important;
+  border-radius: 14px !important;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: none !important;
+}
+#postVisibilityModal .post-vis-cancel {
+  border: 1px solid #b6d9c5 !important;
+  background: #ffffff !important;
+  color: #2f6c50 !important;
+}
+#postVisibilityModal .post-vis-save {
+  border: 0 !important;
+  background: linear-gradient(135deg, #3ba374, #2b835b) !important;
+  color: #ffffff !important;
+}
+#postVisibilityModal .post-vis-save:disabled {
+  opacity: 0.65;
+  cursor: default;
+}
+[data-theme="dark"] #postVisibilityModal .post-vis-dialog {
+  background: #14201c;
+  border-color: rgba(153, 213, 185, 0.24);
+  color: #e3f4eb;
+}
+[data-theme="dark"] #postVisibilityModal .post-vis-dialog h3,
+[data-theme="dark"] #postVisibilityModal .post-vis-opt-body strong {
+  color: #e3f4eb;
+}
+[data-theme="dark"] #postVisibilityModal .post-vis-sub,
+[data-theme="dark"] #postVisibilityModal .post-vis-opt-body small,
+[data-theme="dark"] #postVisibilityModal .post-vis-picker-head,
+[data-theme="dark"] #postVisibilityModal .post-vis-empty {
+  color: #8ba79a;
+}
+[data-theme="dark"] #postVisibilityModal .post-vis-close {
+  background: #24332e !important;
+  color: #e3f4eb !important;
+}
+[data-theme="dark"] #postVisibilityModal .post-vis-option {
+  background: #1a2823;
+  border-color: rgba(153, 213, 185, 0.18);
+}
+[data-theme="dark"] #postVisibilityModal .post-vis-option.is-selected {
+  background: #1f372e;
+  border-color: #4eb585;
+}
+[data-theme="dark"] #postVisibilityModal .post-vis-search,
+[data-theme="dark"] #postVisibilityModal .post-vis-user-list {
+  background: #1a2823;
+  border-color: rgba(153, 213, 185, 0.22);
+  color: #e3f4eb;
+}
+[data-theme="dark"] #postVisibilityModal .post-vis-user-row {
+  color: #d8eee2 !important;
+}
+[data-theme="dark"] #postVisibilityModal .post-vis-user-row:hover {
+  background: #22352e !important;
+}
+[data-theme="dark"] #postVisibilityModal .post-vis-user-row.is-selected {
+  background: #244035 !important;
+}
+[data-theme="dark"] #postVisibilityModal .post-vis-chip {
+  background: #224235;
+  color: #b7ebd1;
+}
+[data-theme="dark"] #postVisibilityModal .post-vis-cancel {
+  background: #1d2b26 !important;
+  border-color: #3a5449 !important;
+  color: #a8d8bf !important;
+}
+@media (max-width: 520px) {
+  #postVisibilityModal { padding: 12px; }
+  #postVisibilityModal .post-vis-dialog { padding: 20px; border-radius: 20px; }
 }

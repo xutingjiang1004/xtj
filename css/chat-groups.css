@@ -31,14 +31,14 @@
 .grp-sheet.grp-sheet.grp-sheet svg, .grp-view.grp-view.grp-view svg, .grp-section.grp-section.grp-section svg { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 
 /* ---------- list section ---------- */
-#panelChat .grp-section.grp-section.grp-section { display: block; padding: 0 0 4px; }
+#panelChat .grp-section.grp-section.grp-section { display: flex; flex-direction: column; min-height: 0; max-height: 46%; flex-shrink: 1; padding: 0 0 4px; }
 #panelChat .grp-section.grp-section.grp-section[hidden] { display: none; }
-#panelChat .grp-section-head.grp-section-head.grp-section-head { display: flex; align-items: center; gap: 6px; padding: 10px 4px 4px; color: var(--grp-muted); font-size: 12px; font-weight: 600; letter-spacing: .02em; }
+#panelChat .grp-section-head.grp-section-head.grp-section-head { display: flex; align-items: center; gap: 6px; flex-shrink: 0; padding: 10px 4px 4px; color: var(--grp-muted); font-size: 12px; font-weight: 600; letter-spacing: .02em; }
 #panelChat .grp-section-count.grp-section-count.grp-section-count { opacity: .7; font-weight: 500; }
 #panelChat .grp-create-btn.grp-create-btn.grp-create-btn { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; min-height: 30px; padding: 0 10px; border: 0; border-radius: 999px; background: var(--grp-control); color: var(--grp-accent); font-size: 12px; font-weight: 600; cursor: pointer; transition: background-color .15s ease, transform .15s ease; }
 #panelChat .grp-create-btn.grp-create-btn.grp-create-btn svg { width: 14px; height: 14px; }
 #panelChat .grp-create-btn.grp-create-btn.grp-create-btn:active { transform: scale(.96); }
-#panelChat .grp-list.grp-list.grp-list { display: block; }
+#panelChat .grp-list.grp-list.grp-list { display: block; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 #panelChat .grp-row.grp-row.grp-row { display: flex; align-items: center; cursor: pointer; }
 #panelChat .grp-row.grp-row.grp-row.active { background: var(--grp-control) !important; }
 #panelChat .grp-row-enter.grp-row-enter.grp-row-enter { animation: grpFadeUp .22s cubic-bezier(.2, .8, .2, 1) both; }
@@ -133,10 +133,12 @@
 .grp-enter-mine.grp-enter-mine.grp-enter-mine .grp-msg { animation: grpSend .26s cubic-bezier(.18, .9, .22, 1) both; transform-origin: 100% 100%; }
 .grp-enter.grp-enter.grp-enter .grp-msg, .grp-enter.grp-enter.grp-enter .grp-system { animation: grpFadeUp .2s cubic-bezier(.2, .8, .2, 1) both; transform-origin: 0 100%; }
 
-.grp-jump.grp-jump.grp-jump { position: absolute; right: 16px; bottom: 82px; z-index: 3; border: 0; border-radius: 999px; padding: 7px 12px; background: var(--grp-card); color: var(--grp-accent); font-size: 12px; font-weight: 600; box-shadow: 0 4px 16px rgba(20, 60, 40, .16); cursor: pointer; animation: grpFadeUp .18s ease both; }
+.grp-jump.grp-jump.grp-jump { position: absolute; right: 16px; bottom: calc(82px + env(safe-area-inset-bottom, 0px)); z-index: 3; border: 0; border-radius: 999px; padding: 7px 12px; background: var(--grp-card); color: var(--grp-accent); font-size: 12px; font-weight: 600; box-shadow: 0 4px 16px rgba(20, 60, 40, .16); cursor: pointer; animation: grpFadeUp .18s ease both; }
 .grp-jump.grp-jump.grp-jump[hidden] { display: none; }
 
 .grp-compose.grp-compose.grp-compose { position: relative; flex-shrink: 0; padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--grp-line); background: var(--grp-surface); }
+html.xtj-ios-viewport.xtj-keyboard-open .grp-compose.grp-compose.grp-compose { padding-bottom: 8px; }
+html.xtj-ios-viewport.xtj-keyboard-open .grp-jump.grp-jump.grp-jump { bottom: 82px; }
 .grp-compose.grp-compose.grp-compose[hidden] { display: none; }
 .grp-compose-row.grp-compose-row.grp-compose-row { display: flex; align-items: flex-end; gap: 6px; }
 .grp-compose.grp-compose.grp-compose textarea { flex: 1; min-width: 0; min-height: 42px; max-height: 120px; resize: none; padding: 10px 12px; border: 1px solid var(--grp-line); border-radius: 14px; background: var(--grp-card); color: var(--grp-ink); font: inherit; font-size: 15px; line-height: 1.4; outline: none; transition: border-color .15s ease; }

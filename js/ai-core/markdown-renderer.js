@@ -17,10 +17,12 @@
   };
 
   var BLOCKED_TAGS_RE = /<\s*(\/)?\s*(script|iframe|object|embed|form|input|button|select|textarea|keygen|style|link|meta|base|applet|frame|frameset|ilayer|layer|bgsound|title|head|html|body|svg|math|details|summary|video|audio|source|template|noscript|xmp|plaintext|noembed|noframes)\b/gi;
-  // 事件处理属性 + style（防 style="position:fixed" 全屏钓鱼）；首组捕获保留边界字符
-  var BLOCKED_ATTRS_RE = /(^|[\s"'>\/])(?:on[a-z0-9_]+|style)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'<>&\/=]+)/gi;
+  var BLOCKED_TAGS_SET = { script:1, iframe:1, object:1, embed:1, form:1, input:1, button:1, select:1, textarea:1, keygen:1, style:1, link:1, meta:1, base:1, applet:1, frame:1, frameset:1, ilayer:1, layer:1, bgsound:1, title:1, head:1, html:1, body:1, svg:1, math:1, details:1, summary:1, video:1, audio:1, source:1, template:1, noscript:1, xmp:1, plaintext:1, noembed:1, noframes:1 };
+  // 事件处理属性 + style + srcdoc/formaction（防全屏钓鱼与零点击 XSS）；首组捕获保留边界字符；
+  // 未引号属性值放开 /、=、&，防止 onerror=/**/alert(1)// 等绕过。
+  var BLOCKED_ATTRS_RE = /(^|[\s"'>\/])(?:on[a-z0-9_]*|style|srcdoc|formaction)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'<>]+)/gi;
   // 实体编码的事件属性名（onerror → &#111;nerror）
-  var BLOCKED_ATTRS_ENTITY_RE = /(^|[\s"'>\/])((?:&#x?[0-9a-f]+;)+)[a-z0-9_]*\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'<>&\/=]+)/gi;
+  var BLOCKED_ATTRS_ENTITY_RE = /(^|[\s"'>\/])((?:&#x?[0-9a-f]+;)+)[a-z0-9_]*\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'<>]+)/gi;
 
   // 危险协议检测由 sanitizeHtml 中对解码后 URL 用 new URL(...).protocol 白名单判定
   // （http/https/mailto，另放行 data:image 非 svg），覆盖 jav&#x61;script:、
@@ -28,10 +30,30 @@
   var _decodeTa = null;
   function decodeHtmlEntities(str) {
     if (!str) return '';
+    var input = String(str);
     // 走浏览器原生解码：完整支持数字/命名实体（&#x61;、&colon; 等），RCDATA 下不执行标签
-    if (!_decodeTa) _decodeTa = document.createElement('textarea');
-    _decodeTa.innerHTML = String(str);
-    return _decodeTa.value;
+    try {
+      if (!_decodeTa && typeof document !== 'undefined' && document.createElement) {
+        _decodeTa = document.createElement('textarea');
+      }
+      if (_decodeTa) {
+        _decodeTa.innerHTML = input;
+        if (typeof _decodeTa.value === 'string') return _decodeTa.value;
+      }
+    } catch (_) {}
+    return input
+      .replace(/&#x([0-9a-f]+);?/gi, function (_, hex) {
+        var cp = parseInt(hex, 16);
+        return (cp >= 0 && cp <= 0x10ffff) ? String.fromCodePoint(cp) : '';
+      })
+      .replace(/&#([0-9]+);?/g, function (_, dec) {
+        var cp = parseInt(dec, 10);
+        return (cp >= 0 && cp <= 0x10ffff) ? String.fromCodePoint(cp) : '';
+      })
+      .replace(/&(colon|amp|lt|gt|quot|apos|nbsp|tab|newline);/gi, function (m, name) {
+        var map = { colon: ':', amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', tab: '\t', newline: '\n' };
+        return map[name.toLowerCase()] || m;
+      });
   }
   // DSML / tool_calls / reasoning_content — never show raw protocol to user
   var DSML_RE = /<[|\uff5c]DSML[|\uff5c][\s\S]*?<[|\uff5c]\/DSML[|\uff5c]>/gi;
@@ -53,6 +75,20 @@
     span: { title:1 }
   };
   var _passthroughTpl = null;
+  var _passthroughNonceSeq = 0;
+  function makePassthroughNonce() {
+    _passthroughNonceSeq = (_passthroughNonceSeq + 1) % 1000000000;
+    return 'XTJPH_' + Math.random().toString(36).slice(2) + '_' + _passthroughNonceSeq + '_';
+  }
+  function hasRealTemplateDom() {
+    if (typeof document === 'undefined' || !document.createElement) return false;
+    try {
+      if (!_passthroughTpl) _passthroughTpl = document.createElement('template');
+      return !!(_passthroughTpl && _passthroughTpl.content && typeof _passthroughTpl.content.childNodes === 'object');
+    } catch (_) {
+      return false;
+    }
+  }
   function safeOrigin() {
     try {
       if (typeof location !== 'undefined' && location.origin && location.origin !== 'null') {
@@ -71,12 +107,18 @@
     if (/^(\/(?!\/)|\.\/|\.\.\/|#|\?)/.test(decoded)) return decoded;
     return '#';
   }
-  function walkPassthrough(node, out) {
+  function walkPassthrough(node, out, unmaskRe) {
     var kids = node.childNodes;
     for (var i = 0; i < kids.length; i++) {
       var n = kids[i];
-      if (n.nodeType === 3) { // 文本：以解码后的值重新转义
-        out.push(_escapeHtml(String(n.nodeValue == null ? '' : n.nodeValue)));
+      if (n.nodeType === 3) { // 文本：以解码后的值重新转义，仅在文本节点中还原内部占位符
+        var text = _escapeHtml(String(n.nodeValue == null ? '' : n.nodeValue));
+        if (unmaskRe) {
+          text = text.replace(unmaskRe, function (_, t, idx) {
+            return '\x00' + t + idx + '\x00';
+          });
+        }
+        out.push(text);
       } else if (n.nodeType === 1) { // 元素
         var tag = String(n.tagName || '').toLowerCase();
         if (!PASSTHROUGH_TAGS[tag]) continue; // 非白名单标签：整棵丢弃
@@ -87,14 +129,17 @@
           var attrName = String(attrs[ai].name || '').toLowerCase();
           if (!allow[attrName]) continue;
           var rawVal = String(attrs[ai].value == null ? '' : attrs[ai].value);
+          // 绝不允许占位符出现在属性值内（阻断 &#1;INLINE0&#1; / 嵌套链接破出属性引号 XSS）
+          if (unmaskRe) rawVal = rawVal.replace(unmaskRe, '');
           var v = (attrName === 'href') ? passthroughUrlValue(rawVal, false)
                 : (attrName === 'src') ? passthroughUrlValue(rawVal, true)
+                : (attrName === 'class') ? rawVal.replace(/[^A-Za-z0-9 _-]/g, '')
                 : rawVal;
           out.push(' ' + attrName + '="' + _escapeHtml(v) + '"');
         }
         out.push('>');
         if (!PASSTHROUGH_VOID[tag]) {
-          walkPassthrough(n, out);
+          walkPassthrough(n, out, unmaskRe);
           out.push('</' + tag + '>');
         }
       }
@@ -103,22 +148,72 @@
   }
   function cleanPassthroughHtml(p) {
     try {
-      if (!_passthroughTpl) _passthroughTpl = document.createElement('template');
+      if (!hasRealTemplateDom()) return _escapeHtml(String(p == null ? '' : p));
       // NUL 占位符（\x00INLINE..\x00 / \x00CODE..\x00 / \x00PH..\x00）会被
-      // template 解析丢弃，先换成 \x01 掩码文本，重建完成后再还原。
+      // template 解析丢弃，先换成每次随机不可猜的 nonce 掩码，仅在文本节点中还原。
+      var nonce = makePassthroughNonce();
       var masked = String(p).replace(/\x00(INLINE|CODE|PH)(\d+)\x00/g, function (m, t, idx) {
-        return '\x01' + t + idx + '\x01';
+        return nonce + t + '_' + idx + '_END';
       });
+      var unmaskRe = new RegExp(nonce + '(INLINE|CODE|PH)_(\\d+)_END', 'g');
       _passthroughTpl.innerHTML = masked;
       var out = [];
-      walkPassthrough(_passthroughTpl.content, out);
-      return out.join('').replace(/\x01(INLINE|CODE|PH)(\d+)\x01/g, function (m, t, idx) {
-        return '\x00' + t + idx + '\x00';
-      });
+      walkPassthrough(_passthroughTpl.content, out, unmaskRe);
+      _passthroughTpl.innerHTML = '';
+      return out.join('');
     } catch (e) {
       // 解析异常时最保守降级：整段按纯文本转义
       return _escapeHtml(String(p == null ? '' : p));
     }
+  }
+
+  function sanitizeDomTree(root) {
+    var kids = Array.prototype.slice.call(root.childNodes || []);
+    for (var i = 0; i < kids.length; i++) {
+      var n = kids[i];
+      if (n.nodeType === 1) {
+        var tag = String(n.tagName || '').toLowerCase();
+        if (BLOCKED_TAGS_SET[tag]) {
+          if (n.parentNode) n.parentNode.removeChild(n);
+          continue;
+        }
+        var attrs = Array.prototype.slice.call(n.attributes || []);
+        for (var ai = 0; ai < attrs.length; ai++) {
+          var attrName = String(attrs[ai].name || '').toLowerCase();
+          var attrVal = String(attrs[ai].value == null ? '' : attrs[ai].value);
+          if (!/^[a-z][a-z0-9:-]*$/i.test(attrName) || /^(?:on[a-z0-9_]*|style|srcdoc|formaction)$/i.test(attrName)) {
+            n.removeAttribute(attrs[ai].name);
+            continue;
+          }
+          if (attrName === 'href' || attrName === 'src' || attrName === 'action' || attrName === 'xlink:href') {
+            var safeVal = passthroughUrlValue(attrVal, attrName === 'src');
+            if (safeVal !== attrVal) n.setAttribute(attrs[ai].name, safeVal);
+          }
+        }
+        sanitizeDomTree(n);
+      } else if (n.nodeType === 8) {
+        if (n.parentNode) n.parentNode.removeChild(n);
+      }
+    }
+  }
+
+  function sanitizeTagMarkup(tagMarkup) {
+    var prev;
+    var s = tagMarkup;
+    do { prev = s; s = s.replace(BLOCKED_ATTRS_RE, function (m, p1) { return (p1 || '') + ' '; }); } while (s !== prev);
+    do { prev = s; s = s.replace(BLOCKED_ATTRS_ENTITY_RE, function (m, p1) { return (p1 || '') + ' '; }); } while (s !== prev);
+    s = s.replace(/(href|src|action|xlink:href)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi, function (match, attr, dq, sq, unq) {
+      var rawVal = dq !== undefined ? dq : (sq !== undefined ? sq : (unq || ''));
+      var decoded = decodeHtmlEntities(rawVal).replace(/[\x00-\x1f\x7f\s]+/g, '');
+      if (/^\/\//.test(decoded)) return attr + '="#"';
+      var protocol = '';
+      try { protocol = new URL(decoded, safeOrigin()).protocol.toLowerCase(); } catch (e) { protocol = ''; }
+      if (protocol === 'http:' || protocol === 'https:' || protocol === 'mailto:') return match;
+      if (attr.toLowerCase() === 'src' && protocol === 'data:' && /^data:image\/(?!svg\b)/i.test(decoded)) return match;
+      if (/^(\/(?!\/)|\.\/|\.\.\/|#|\?)/.test(decoded)) return match;
+      return attr + '="#"';
+    });
+    return s;
   }
 
   function sanitizeHtml(html) {
@@ -129,32 +224,25 @@
     s = s.replace(DSML_RE, '');
     s = s.replace(TOOL_CALLS_RAW_RE, '');
     s = s.replace(REASONING_RAW_RE, '');
-    // Strip dangerous tags（收敛循环：一次替换可能暴露出新的可匹配片段）
+    // 浏览器环境优先走 <template> DOM 树净化：彻底避免正则解析差异绕过，
+    // 且不会误删正文或代码块中的合法文本（如 one=1、online=true、style=dashed、expression(）。
+    if (hasRealTemplateDom()) {
+      try {
+        var tpl = document.createElement('template');
+        tpl.innerHTML = s;
+        sanitizeDomTree(tpl.content);
+        return tpl.innerHTML;
+      } catch (_) {}
+    }
+    // 无完整 DOM（如轻量单测 VM）时回退至标签级收敛正则净化：
+    // 先按含引号感知的标签匹配剥离黑名单属性与危险协议，再剥离黑名单标签开头，
+    // 防止属性值内嵌 '>' 或黑名单标签剥离后残留属性逃逸。
     var prev;
-    do { prev = s; s = s.replace(BLOCKED_TAGS_RE, ''); } while (s !== prev);
-    // Strip event handlers / style attrs (quoted and unquoted values, incl. no-space boundary)
-    // 保留边界字符并补空格：避免 <img src="x"onerror="a"onload="b"> 相邻粘连时，
-    // 首次匹配吃掉闭合引号后第二个 on* 属性缺少前置边界而存活（零点击 XSS）。
-    do { prev = s; s = s.replace(BLOCKED_ATTRS_RE, function (m, p1) { return (p1 || '') + ' '; }); } while (s !== prev);
-    // Strip entity-encoded event handler attribute names（同样收敛 + 保留边界）
-    do { prev = s; s = s.replace(BLOCKED_ATTRS_ENTITY_RE, function (m, p1) { return (p1 || '') + ' '; }); } while (s !== prev);
-    // 统一校验 href/src 值：先解码 HTML 实体（&#x61; → a），再剥离全部 C0/DEL 控制字符与空白
-    // （java&#x09;script / &#x01;javascript → javascript），用 new URL 取 protocol 做白名单判定。
-    // 非 http/https/mailto（及 data:image 非 svg）一律降级为 '#'；无协议不再无条件放行，
-    // 仅显式放行安全相对路径（/ ./ ../ # ?），彻底堵死 \x01javascript: 回退放行。
-    s = s.replace(/(href|src)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi, function (match, attr, dq, sq, unq) {
-      var rawVal = dq !== undefined ? dq : (sq !== undefined ? sq : (unq || ''));
-      var decoded = decodeHtmlEntities(rawVal).replace(/[\x00-\x1f\x7f\s]+/g, '');
-      if (/^\/\//.test(decoded)) return attr + '="#"';
-      var protocol = '';
-      try { protocol = new URL(decoded, safeOrigin()).protocol.toLowerCase(); } catch (e) { protocol = ''; }
-      if (protocol === 'http:' || protocol === 'https:' || protocol === 'mailto:') return match;
-      if (protocol === 'data:' && /^data:image\/(?!svg\b)/i.test(decoded)) return match;
-      if (/^(\/(?!\/)|\.\/|\.\.\/|#|\?)/.test(decoded)) return match;
-      return attr + '="#"';
-    });
-    // Strip CSS expressions（防 style 内 expression() 历史漏洞）
-    s = s.replace(/\bexpression\s*\(/gi, '');
+    do {
+      prev = s;
+      s = s.replace(/<(?:[^>"']|"[^"]*"|'[^']*')*>?/g, sanitizeTagMarkup);
+      s = s.replace(BLOCKED_TAGS_RE, '');
+    } while (s !== prev);
     return s;
   }
 

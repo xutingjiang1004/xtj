@@ -6,12 +6,19 @@
  */
         (function installFocusSurfaceLifecycle() {
             if (typeof MutationObserver !== 'function') return;
-            var selector = '.modal-overlay, .announcement-modal-overlay, .report-modal-overlay, #ppConfirmOverlay, #photoPreviewOverlay, #pwUploadSheet, #ppInfoModal, #imgViewer, .pp-download-confirm-overlay, [data-xtj-ai-modal]';
+            var selector = '.modal-overlay, .announcement-modal-overlay, .report-modal-overlay, #ppConfirmOverlay, #photoPreviewOverlay, #pwUploadSheet, #ppInfoModal, #imgViewer, .pp-download-confirm-overlay, [data-xtj-ai-modal], .xtj-prompt-overlay, #postShareOverlay, #postVisibilityModal, #aiSiteSearchPanel, .grp-sheet, .grp-viewer';
             var surfaces = new Map(), background = new Map(), sequence = 0, top = null, syncing = false;
             function visible(root) {
+                if (root.closest && root.closest('.dock-panel:not(.active)')) return false;
                 if (root.id === 'ppConfirmOverlay' && root.classList.contains('closing')) return false;
                 if (root.hasAttribute('data-xtj-ai-modal')) return !root.hidden && root.classList.contains('is-ready');
                 if (root.id === 'ppInfoModal') return root.getAttribute('aria-hidden') === 'false' && root.style.display !== 'none';
+                if (root.classList.contains('xtj-prompt-overlay') || root.id === 'postShareOverlay' || root.id === 'postVisibilityModal' || root.classList.contains('grp-viewer')) {
+                    return !root.hidden && root.style.display !== 'none' && !root.classList.contains('closing');
+                }
+                if (root.classList.contains('grp-sheet')) {
+                    return !root.hidden && root.style.display !== 'none' && root.classList.contains('open') && !root.classList.contains('closing');
+                }
                 return !root.hidden && root.style.display !== 'none' && (root.classList.contains('active') || root.classList.contains('show'));
             }
             var CONTROL_SELECTOR = 'button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
@@ -131,7 +138,11 @@
                     if (!nodes.length) focusFirst(top); else (event.shiftKey ? last : first).focus({ preventScroll: true });
                 }
             },true);
-            document.addEventListener('focusin',function(event) { if (top && !top.contains(event.target) && !syncing && !window.__xtjMorphLanding) focusFirst(top); });
+            document.addEventListener('focusin',function(event) {
+                if (!top || top.contains(event.target) || syncing || window.__xtjMorphLanding) return;
+                if (event.target && event.target.closest && event.target.closest('.post-tools-menu, .mention-dropdown, .grp-menu, .grp-mention-pop')) return;
+                focusFirst(top);
+            });
             sync();
         })();
 
@@ -448,7 +459,16 @@
                     var raw = window.safeStorage.get(CACHE_KEY);
                     if (!raw) return null;
                     var parsed = JSON.parse(raw);
-                    return normalizeFeedSnapshotCache(parsed);
+                    if (!parsed || typeof parsed !== 'object') return null;
+                    var age = Date.now() - Number(parsed.timestamp || 0);
+                    if (!(age >= 0 && age < CACHE_DURATION)) return null;
+                    var expectedOwner = String(window.currentUser || '');
+                    if (!Object.prototype.hasOwnProperty.call(parsed, 'owner') || String(parsed.owner) !== expectedOwner) return null;
+                    var normalized = normalizeFeedSnapshotCache(parsed);
+                    if (normalized && normalized.data && Array.isArray(normalized.data.posts) && typeof canViewPost === 'function') {
+                        normalized.data.posts = normalized.data.posts.filter(function(p) { return p && !isSystemPost(p) && canViewPost(p); });
+                    }
+                    return normalized;
                 } catch (e) {
                     return null;
                 }
@@ -550,13 +570,14 @@
             }
 
             function syncHeaderModalBodyLock() {
-                var activeIds = ['announcementModal', 'reportModal', 'reportHistoryModal', 'statModal', 'statRecordsModal'];
+                var activeIds = ['announcementModal', 'reportModal', 'reportHistoryModal', 'statModal', 'statRecordsModal', 'postDetailModal', 'userProfileModal', 'postStatsModal', 'profileDetailModal', 'profileActivityModal', 'delModal', 'photoPreviewOverlay', 'postVisibilityModal'];
                 var hasActive = activeIds.some(function(id) {
                     var el = document.getElementById(id);
                     return !!(el && el.classList.contains('active'));
-                });
+                }) || !!document.querySelector('.pw-upload-sheet.active, #aiSiteSearchPanel.active');
                 document.body.style.overflow = hasActive ? 'hidden' : '';
             }
+            window.syncHeaderModalBodyLock = syncHeaderModalBodyLock;
 
             function renderStatByTypeFinal(type) {
                 if (type === 'posts') {
@@ -772,30 +793,41 @@
                     }
                 }, true);
 
+                var pressedBtn = null;
+                function releasePressedBtn(animateBack) {
+                    var el = pressedBtn;
+                    pressedBtn = null;
+                    if (!el) return;
+                    if (animateBack) {
+                        el.style.transition = 'transform 0.25s cubic-bezier(.34,1.4,.64,1)';
+                        el.style.transform = 'scale(1)';
+                        window.setTimeout(function(){
+                            if (el && pressedBtn !== el) { el.style.transition = ''; el.style.transform = ''; }
+                        }, 280);
+                    } else {
+                        el.style.transform = '';
+                        el.style.transition = '';
+                    }
+                }
                 document.addEventListener('pointerdown', function(event) {
                     var target = event.target;
-                    if (!target || isDock(target)) return;
+                    if (!target || !target.closest || isDock(target)) return;
                     if (target.closest('button:not(.dock-tab),[role="button"]:not(.dock-tab),.action-btn,.send-btn,.chat-img-btn,.photo-wall-btn,.file-label')) {
-                        target.style.transition = 'transform 0.12s ease';
-                        target.style.transform = 'scale(0.96)';
+                        var btn = target.closest('button,[role="button"],.action-btn,.send-btn,.chat-img-btn,.photo-wall-btn,.file-label');
+                        if (!btn || isDock(btn)) return;
+                        if (pressedBtn && pressedBtn !== btn) releasePressedBtn(false);
+                        pressedBtn = btn;
+                        btn.style.transition = 'transform 0.12s ease';
+                        btn.style.transform = 'scale(0.96)';
                     }
                 }, true);
 
-                document.addEventListener('pointerup', function(event) {
-                    var target = event.target;
-                    if (!target) return;
-                    if (target.style.transform) {
-                        target.style.transition = 'transform 0.25s cubic-bezier(.34,1.4,.64,1)';
-                        target.style.transform = 'scale(1)';
-                        window.setTimeout(function(){target.style.transition='';target.style.transform='';}, 280);
-                    }
+                window.addEventListener('pointerup', function() {
+                    if (pressedBtn) releasePressedBtn(true);
                 }, true);
 
-                document.addEventListener('pointercancel', function(event) {
-                    var target = event.target;
-                    if (!target) return;
-                    target.style.transform = '';
-                    target.style.transition = '';
+                window.addEventListener('pointercancel', function() {
+                    if (pressedBtn) releasePressedBtn(false);
                 }, true);
             })();
 

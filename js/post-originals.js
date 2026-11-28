@@ -17,9 +17,15 @@
     if (!valid(state)) return;
     var images = Array.from(document.images).filter(function (img) { return img.getAttribute('src') === lease.url; });
     // 修复：stored===true 立即 handoff 时新帖 DOM 可能尚未渲染；找不到匹配图片
-    // 不要立刻 release 撤销 blob，改走 scheduleHandoff 延迟兜底窗口再试。
-    if (!images.length) { scheduleHandoff(state, item, lease); return; }
-    images.forEach(function (img) { img.src = item.media_url; });
+    // 不要立刻 release 撤销 blob，改走 scheduleHandoff 有限次数重试后释放，避免 OSS 缩略图场景 180s 空转轮询。
+    if (!images.length) {
+      state.attempts = (state.attempts || 0) + 1;
+      if (state.attempts > 5) { release(state); return; }
+      scheduleHandoff(state, item, lease);
+      return;
+    }
+    var targetSrc = item.preview_url || item.media_url;
+    images.forEach(function (img) { img.src = targetSrc; });
     Promise.all(images.map(function (img) { return img.decode ? img.decode().catch(function () {}) : Promise.resolve(); }))
       .then(function () { if (valid(state)) release(state); });
   }

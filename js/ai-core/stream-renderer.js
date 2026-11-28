@@ -218,13 +218,17 @@
     while (i < max && prev.charCodeAt(i) === next.charCodeAt(i)) i++;
     var j = 0;
     while (j < max - i && prev.charCodeAt(max - 1 - j) === next.charCodeAt(next.length - 1 - j)) j++;
-    if (!j || i + j < 4) return false;
+    // 仅当 prev 被完整拆成前缀+后缀（纯插入，未发生原地改写）且后缀全为闭合标签时才走快路径
+    if (!j || i + j !== max || max < 4) return false;
+    var suffix = next.slice(next.length - j);
+    if (!/^(?:<\/[a-z0-9]+>)+$/i.test(suffix)) return false;
     var delta = next.slice(i, next.length - j);
     if (!delta) return false;
     var tail = streamContentTail(target);
     if (!tail) return false;
     if (delta.charAt(0) === '<') {
       if ((tail.tagName !== 'UL' && tail.tagName !== 'OL') || !/^<li>[\s\S]*<\/li>$/.test(delta)) return false;
+      if (suffix.toLowerCase() !== '</' + tail.tagName.toLowerCase() + '>') return false;
       var holder = document.createElement('div');
       holder.innerHTML = delta;
       if (!holder.firstChild || holder.childNodes.length !== 1 || holder.firstChild.tagName !== 'LI') return false;
@@ -238,8 +242,13 @@
     if (!added) return false;
     var edit = streamEditTarget(tail);
     if (!edit) return false;
+    var firstClose = /^<\/([a-z0-9]+)>/i.exec(suffix);
+    if (!firstClose) return false;
+    var expectedTag = firstClose[1].toLowerCase();
     if (next.charAt(i - 1) === '>') {
-      var openTag = /<([a-z0-9]+)(?:\s[^>]*)?>$/i.exec(next.slice(0, i)); if (openTag && openTag[1].toLowerCase() !== edit.tagName.toLowerCase()) return false;
+      if (expectedTag !== edit.tagName.toLowerCase()) return false;
+      var openTag = /<([a-z0-9]+)(?:\s[^>]*)?>$/i.exec(next.slice(0, i));
+      if (openTag && openTag[1].toLowerCase() !== edit.tagName.toLowerCase()) return false;
       var created = document.createTextNode(added);
       edit.appendChild(created);
       if (ink) ink.record(created, 0, created.length);
@@ -247,6 +256,7 @@
     }
     var textNode = lastTextNode(edit);
     if (!textNode) return false;
+    if (!textNode.parentNode || !textNode.parentNode.tagName || textNode.parentNode.tagName.toLowerCase() !== expectedTag) return false;
     var start = textNode.length;
     textNode.appendData(added);
     if (ink) ink.record(textNode, start, textNode.length);
@@ -423,6 +433,9 @@
       var state = drainState; drainState = null;
       if (!state) return;
       if (state.signal) state.signal.removeEventListener('abort', state.abort);
+      if (state.onVis && typeof document !== 'undefined' && typeof document.removeEventListener === 'function') {
+        try { document.removeEventListener('visibilitychange', state.onVis); } catch (_) {}
+      }
       state.resolve(ok);
     }
     var paused = false;
@@ -635,14 +648,22 @@
         var final = typeof finalText === 'string' && finalText.length ? finalText : rendered + pending;
         // A sanitized replacement must take effect immediately. Only an unseen
         // suffix can follow the existing stream without replaying old text.
-        if (final.indexOf(rendered) !== 0 || reducedMotion || !final || final.length-rendered.length>8192) {
+        // 后台标签页 rAF 会被挂起（0Hz），此时立即结算，避免阻断落库与锁释放。
+        var isHidden = typeof document !== 'undefined' && !!document.hidden;
+        if (isHidden || final.indexOf(rendered) !== 0 || reducedMotion || !final || final.length-rendered.length>8192) {
           api.finish(final); return Promise.resolve(true);
         }
         pending = final.slice(rendered.length); paused = false;
         if (!pending) { api.finish(final); return Promise.resolve(true); }
-        var state = { finalText: final, signal: signal, resolve: null, abort: function() { api.stop(); } };
+        var state = { finalText: final, signal: signal, resolve: null, abort: function() { api.stop(); }, onVis: null };
         state.promise = new Promise(function(resolve) { state.resolve = resolve; });
         drainState = state;
+        if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+          state.onVis = function() {
+            if (document.hidden && drainState === state) api.finish(state.finalText);
+          };
+          document.addEventListener('visibilitychange', state.onVis);
+        }
         if (signal) {
           if (signal.aborted) { api.stop(); return state.promise; }
           signal.addEventListener('abort', state.abort, { once: true });

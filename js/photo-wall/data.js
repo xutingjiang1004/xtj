@@ -350,6 +350,18 @@
     if(!primary)primary=String(a.cloudId||a.id).localeCompare(String(b.cloudId||b.id));
     return primary*direction;
   }
+  function compareServerPageOrder(a,b,key){
+    function stamp(photo){var s=String(photo.created_at||'');var m=s.match(/^(.*:\d{2})(?:\.(\d+))?(?:Z|\+00:00)$/);var ts=Number(photo.timestamp);return m?m[1]+'.'+String(m[2]||'').padEnd(6,'0'):new Date(Number.isFinite(ts)?ts:0).toISOString();}
+    var ascending=key==='date_asc'||key==='name',direction=ascending?1:-1,primary=0;
+    if(key==='name'){
+      var x=String(a.sort_name!=null?a.sort_name:a.username||''),y=String(b.sort_name!=null?b.sort_name:b.username||'');
+      primary=x===y?0:(x<y?-1:1);
+    }else if(key==='size')primary=(Number(a.fileSize)||0)-(Number(b.fileSize)||0);
+    else if(key==='views')primary=(Number(a.views)||0)-(Number(b.views)||0);
+    if(!primary)primary=stamp(a).localeCompare(stamp(b));
+    if(!primary){var idA=String(a.cloudId||a.id),idB=String(b.cloudId||b.id);primary=idA===idB?0:(idA<idB?-1:1);}
+    return primary*direction;
+  }
   window.__xtjComparePhotoWallOrder=comparePhotoOrder;
   window.setPhotoWallSort=function(key){
     if(['date_desc','date_asc','name','size','views'].indexOf(key)<0)return Promise.resolve(window.photoWallData);
@@ -541,7 +553,7 @@
         if (resetSortedPages) return false;
         if (!more) return false;
         if (cloudIds.has(key)) return visibleCloudIds.has(key);
-        if (photoOrderBoundary) return comparePhotoOrder(item,photoOrderBoundary,photoLoadedSort)>0;
+        if (photoOrderBoundary) return compareServerPageOrder(item,photoOrderBoundary,photoLoadedSort)>0;
         return boundary == null || !Number.isFinite(item.timestamp) || item.timestamp <= boundary;
       });
       window.photoWallData = mergePhotoLists(cloud, retained);
@@ -668,8 +680,8 @@
           if (rawIds.has(key)) return visibleIds.has(key);
           if (photoPageSeenIds.has(key) || !photoSnapshotKnownIds.has(key)) return true;
           if (upperOrderBoundary && lowerOrderBoundary) {
-            if (comparePhotoOrder(item,upperOrderBoundary,photoLoadedSort)<=0) return true;
-            return nextMore && comparePhotoOrder(item,lowerOrderBoundary,photoLoadedSort)>0;
+            if (compareServerPageOrder(item,upperOrderBoundary,photoLoadedSort)<=0) return true;
+            return nextMore && compareServerPageOrder(item,lowerOrderBoundary,photoLoadedSort)>0;
           }
           if (upperBoundary == null || !Number.isFinite(item.timestamp) || item.timestamp > upperBoundary) return true;
           return nextMore && (lowerBoundary == null || item.timestamp <= lowerBoundary);
@@ -725,17 +737,21 @@
     window.photoWallData = window.photoWallData.filter(function(item){
       return String(item.id) !== key && String(item.cloudId || '') !== key;
     });
+    if (Array.isArray(window.pwCurrentSortedPhotos)) {
+      window.pwCurrentSortedPhotos = window.pwCurrentSortedPhotos.filter(function(item){
+        return item && String(item.id) !== key && String(item.cloudId || '') !== key;
+      });
+    }
     if (before !== window.photoWallData.length) {
       photoPaginationRevision++;
       photoPaginationDirty = true;
       if (loadMoreController) loadMoreController.abort();
     }
     saveLocalPhotoWallData();
-    // P4: 本地删除是成功操作，更新 lastSuccessfulLoadedAt 保持数据新鲜度
-    lastSuccessfulLoadedAt = Date.now();
-    window.photoWallDataLoadedAt = lastSuccessfulLoadedAt;
-    
+
     var removedDom = false;
+    var grid = typeof document !== 'undefined' && document.getElementById ? document.getElementById('photoGrid') : null;
+    if (grid) grid.__xtjPwSig = '';
     if (typeof document !== 'undefined' && document.querySelectorAll) {
       var els = document.querySelectorAll('.photo-wall-item[data-photo-id]');
       for (var i = 0; i < els.length; i++) {
@@ -747,8 +763,8 @@
         }
       }
     }
-    
-    if (shouldRender !== false && !removedDom && before !== window.photoWallData.length && typeof window.renderPhotoWallWithoutReload === 'function') {
+    var remainingCards = grid && grid.querySelectorAll ? grid.querySelectorAll('.photo-wall-item[data-photo-id]').length : -1;
+    if (shouldRender !== false && (!removedDom || remainingCards === 0) && before !== window.photoWallData.length && typeof window.renderPhotoWallWithoutReload === 'function') {
       window.renderPhotoWallWithoutReload();
     }
     return before !== window.photoWallData.length;
@@ -846,10 +862,12 @@
       toast('云端删除失败，请稍后重试');
       return { ok:false, error:'cloud_delete_failed' };
     }
-    // 云端删除成功后才标记为已删除，防止浏览器崩溃后永久丢失照片
+    // 云端删除成功后才标记为已删除并刷新成功时间戳，防止浏览器崩溃或回滚后永久丢失照片
     removePendingDeletedPhotoId(item.id);
     removePendingDeletedPhotoId(item.cloudId);
     addDeletedPhotoId(id);
+    lastSuccessfulLoadedAt = Date.now();
+    window.photoWallDataLoadedAt = lastSuccessfulLoadedAt;
     if (window.XTJHaptics) window.XTJHaptics.play('success');
     broadcastSync('photo_deleted', { photoId: id });
     // The delete response is authoritative. A slow wall refresh must not keep
@@ -961,6 +979,16 @@
               handleExternalSync({ type:'photo_deleted', photoId: payload.new.id });
               return;
             }
+            var existing = (window.photoWallData || []).find(function(p){
+              return p && (String(p.cloudId || p.id) === String(payload.new.id));
+            });
+            if (existing && existing.imageUrl === updated.imageUrl && existing.caption === updated.caption) {
+              if (Number.isFinite(updated.views) && updated.views !== existing.views) {
+                existing.views = updated.views;
+                updatePhotoViewDisplays(existing);
+              }
+              return;
+            }
           }
           loadPhotoWallData(true).then(function(){
             if (typeof window.renderPhotoWallWithoutReload === 'function') window.renderPhotoWallWithoutReload();
@@ -997,7 +1025,9 @@
   // Tab 聚焦/切回时自动重新同步（防止离线期间错过删除事件）
   var _lastVisibilitySync = 0;
   function reconcilePhotoWallAfterResume(){
-    if (!navigator.onLine) return;
+    if (!navigator.onLine || !window.currentUser) return;
+    var wallPanel = byId('panelAi');
+    if (wallPanel && !wallPanel.classList.contains('active')) return;
     var now = Date.now();
     if (now - _lastVisibilitySync < 5000) return; // 5秒内不重复
     _lastVisibilitySync = now;

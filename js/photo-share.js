@@ -23,13 +23,16 @@
     viewer.addEventListener('dblclick', function () { resetDrag(); surface.classList.toggle('is-zoomed', viewer.classList.toggle('zoomed')); });
     surface.addEventListener('pointerdown', function (event) {
       if (!dialog.open || viewer.classList.contains('zoomed') || !event.isPrimary || event.button !== 0) return;
-      drag = { id:event.pointerId, x:event.clientX, y:event.clientY, dy:0 };
-      if (surface.setPointerCapture) surface.setPointerCapture(event.pointerId);
+      drag = { id:event.pointerId, x:event.clientX, y:event.clientY, dy:0, captured:false };
     });
     surface.addEventListener('pointermove', function (event) {
       if (!drag || event.pointerId !== drag.id) return;
       var dx = event.clientX - drag.x, dy = event.clientY - drag.y;
       if (dy <= 0 || Math.abs(dx) > dy) { drag.dy = 0; viewer.style.transform = ''; return; }
+      if (!drag.captured && dy > 8) {
+        drag.captured = true;
+        try { if (surface.setPointerCapture) surface.setPointerCapture(event.pointerId); } catch (_) {}
+      }
       drag.dy = dy;
       viewer.style.transform = 'translateY(' + dy + 'px) scale(' + Math.max(.85, 1 - dy / (innerHeight * 4)) + ')';
     });

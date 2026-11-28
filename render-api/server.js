@@ -10,6 +10,15 @@ const { createComment, readRelationPage, readFeedEngagement } = require('./post-
 const { readPostViewers } = require('./post-viewers');
 const { readPostCleanupPaths, deleteOssObjects } = require('./oss-cleanup');
 const { sanitizePostContent } = require('./post-meta');
+const {
+  POST_VISIBILITY_MODES,
+  MAX_VISIBILITY_USERS,
+  cleanVisibilityUsers,
+  parsePostVisibility,
+  canUserViewPost,
+  applyPostVisibilityToContent,
+  stripPostVisibilityAudience
+} = require('./post-visibility');
 const passwordVerifier = require('./password-verifier');
 const { markAuxAttached } = require('./aux-media');
 const { verifyPostOssMedia } = require('./oss-sign');
@@ -103,7 +112,7 @@ const { createChatFeatures } = require('./chat-features');
 const aiScheduler = require('./ai-scheduler');
 const { createDmPrivateStorage, dmStorageBucket, PRIVATE_BUCKET } = require('./dm-private-storage');
 const { sniffDocument } = require('./dm-file-magic');
-const { createChatSocialRouter, assertCanSendDirectMessage, listChatConversations, getChatConversationState } = require('./chat-social');
+const { createChatSocialRouter, assertCanSendDirectMessage, recordAutoFriendOnMessage, listChatConversations, getChatConversationState } = require('./chat-social');
 
 /**
  * ★★★ 2026-09-22 修复（P0「网页搜索/读网页时显示超大板块内容」根因之一）：
@@ -5422,7 +5431,7 @@ async function aiSiteSearch(source, query, userName, limit, isAdmin, searchPlan)
     if (postRes.error) { console.error('[aiSiteSearch] posts query error:', postRes.error); return { results: [], error: { code: 'posts_query_failed', message: '帖子搜索暂时不可用' } }; }
     var candidates = (postRes.data || []).filter(function(p) {
       if (!isNormalPost(p)) return false;
-      if (p.visibility === 'private' && p.user_name !== userName) return false;
+      if (!canUserViewPost(p, userName)) return false;
       return true;
     });
         // client-side filter: check extracted text content (not just raw JSON)
@@ -5447,12 +5456,12 @@ async function aiSiteSearch(source, query, userName, limit, isAdmin, searchPlan)
     if (commentRes.error) { console.error('[aiSiteSearch] comments query error:', commentRes.error); return { results: [], error: { code: 'comments_query_failed', message: '评论搜索暂时不可用' } }; }
     var comments = commentRes.data || [];
     var commentPostIds = comments.map(function(c) { return c.post_id; }).filter(Boolean);
-    var commentPosts = commentPostIds.length ? await supabase.from('posts').select('id,user_name,visibility,media_type').in('id', commentPostIds) : { data: [], error: null };
+    var commentPosts = commentPostIds.length ? await supabase.from('posts').select('id,user_name,visibility,media_type,content,is_deleted').in('id', commentPostIds) : { data: [], error: null };
     if (commentPosts.error) { console.error('[aiSiteSearch] comment posts lookup error:', commentPosts.error); }
     var visibleCommentPosts = new Set((commentPosts.data || []).filter(function(p) {
       // ★ M1 审计修复：系统标记行（__dm__/__user_info__/安全告警等）下挂的评论
-      //   不允许被搜索检索到，统一用 isNormalPost 过滤
-      return isNormalPost(p) && (p.visibility !== 'private' || p.user_name === userName);
+      //   不允许被搜索检索到，统一用 isNormalPost + canUserViewPost 过滤
+      return isNormalPost(p) && canUserViewPost(p, userName);
     }).map(function(p) { return String(p.id); }));
     rows = comments.filter(function(c) { return visibleCommentPosts.has(String(c.post_id)); }).map(function(c) {
       var text = aiSiteText(c.content, 10000);
@@ -5558,9 +5567,9 @@ app.get('/api/post/detail/:id/relations/:kind', optionalAuth, rateLimit(60000,12
     if(!id || !['likes','comments','engagement','views'].includes(kind))return res.status(400).json({ok:false,error:'分页参数无效'});
     // 浏览用户名单只给登录用户看（点赞名单、评论仍然公开可读）。
     if(kind==='views'&&!req.userName)return res.status(401).json({ok:false,code:'login_required',error:'登录后才能查看浏览用户'});
-    var lookup=await supabase.from('posts').select('id,user_name,media_type,visibility,is_deleted').eq('id',id).maybeSingle();
+    var lookup=await supabase.from('posts').select('id,user_name,media_type,visibility,is_deleted,content').eq('id',id).maybeSingle();
     if(lookup.error)return res.status(503).json({ok:false,error:'互动暂不可用，请重试',retryable:true});
-    if(!isNormalPost(lookup.data)||(lookup.data.visibility==='private'&&lookup.data.user_name!==(req.userName||'')))return res.status(404).json({ok:false,error:'帖子不存在或不可查看'});
+    if(!isNormalPost(lookup.data)||!canUserViewPost(lookup.data,req.userName))return res.status(404).json({ok:false,error:'帖子不存在或不可查看'});
     if(kind==='engagement'){
       var engagement=await readFeedEngagement(supabase,[lookup.data],req.userName);
       var stats=engagement.posts[0];
@@ -5586,14 +5595,13 @@ app.get('/api/post/detail/:id', optionalAuth, async (req, res) => {
     var post = postRes.data;
     if (!isNormalPost(post)) return res.status(422).json({ ok: false, error: 'not_normal_post', message: '该帖子不存在、已删除或不可查看。' });
     if (post.is_deleted === true) return res.status(404).json({ ok: false, error: 'post_not_found', message: '该帖子不存在、已删除或不可查看。' });
-    if (post.visibility === 'private' && post.user_name !== (req.userName || '')) {
-      // ★ 2026-09-26（审计 P3-3）：私密帖统一返回 404（此前 403），避免匿名用户
-      //   用 403/404 差异遍历 UUID 判定"存在但私密"。与 /api/post/comment、
-      //   /api/post/like 的口径保持一致。
+    if (!canUserViewPost(post, req.userName)) {
+      // ★ 2026-09-26（审计 P3-3）：无权查看的帖子统一返回 404，避免用 403/404 差异遍历 UUID。
       return res.status(404).json({ ok: false, error: 'post_not_found', message: '该帖子不存在、已删除或不可查看。' });
     }
     try { post = (await loadPostAttachments(supabase, [post]))[0]; }
     catch (error) { return res.status(503).json({ ok: false, error: error.code || 'attachments_unavailable', message: '帖子图片加载失败，请重试。', retryable: true }); }
+    post = stripPostVisibilityAudience(post, req.userName);
     var likesRes = await readRelationPage(supabase, postId, 'likes', { limit: 50 });
     var commentsRes = await readPostDetailComments(supabase, postId);
     var myLikeRes = req.userName ? await supabase.from('likes').select('id::text').eq('post_id', postId).eq('user_name', req.userName).limit(1) : { data: [] };
@@ -8028,10 +8036,10 @@ app.get('/api/comments/ai-reply-status', rateLimit(60000, 30), authenticateUser,
     if (commentRes.error) return res.status(503).json({ error: 'comment lookup temporarily unavailable', code: 'comment_query_failed', retryable: true });
     if (!commentRes.data) return res.status(404).json({ error: 'comment not found' });
     // 验证帖子访问权限
-    var postRes = await supabase.from('posts').select('id, visibility, user_name').eq('id', commentRes.data.post_id).maybeSingle();
+    var postRes = await supabase.from('posts').select('id, visibility, user_name, content, is_deleted').eq('id', commentRes.data.post_id).maybeSingle();
     if (postRes.error) return res.status(503).json({ error: 'post lookup temporarily unavailable', code: 'post_query_failed', retryable: true });
     if (!postRes.data) return res.status(404).json({ error: 'post not found' });
-    if (postRes.data.visibility === 'private' && postRes.data.user_name !== req.userName) {
+    if (!canUserViewPost(postRes.data, req.userName)) {
       return res.status(403).json({ error: 'access denied' });
     }
     // 查询任务状态，再从真实子评论解析 reply_comment_id 用于一致性检查
@@ -8119,15 +8127,15 @@ app.post('/api/comments/ai-reply-retry', rateLimit(60000, 30), authenticateUser,
 
     // 2. 验证帖子存在
     var { data: post, error: postErr } = await supabase.from('posts')
-      .select('id, user_name, visibility')
+      .select('id, user_name, visibility, content, is_deleted')
       .eq('id', sourceComment.post_id)
       .maybeSingle();
     if (postErr) return res.status(503).json({ error: sanitizeError(postErr), code: 'post_query_failed', retryable: true });
     if (!post) return res.status(404).json({ error: '帖子不存在', code: 'post_not_found' });
 
-    // 3. 权限检查：仅帖子作者或评论作者可重试（管理员也可）
+    // 3. 权限检查：仅帖子作者或评论作者可重试（管理员也可），且非作者须有权查看帖子
     var isOwner = post.user_name === userName || userName === ADMIN_USERNAME;
-    var isCommenter = sourceComment.user_name === userName;
+    var isCommenter = sourceComment.user_name === userName && canUserViewPost(post, userName);
     if (!isOwner && !isCommenter) {
       return res.status(403).json({ error: '无权操作', code: 'forbidden' });
     }
@@ -12536,7 +12544,8 @@ const photoAccess = createPhotoAccess({ app, supabase, supabaseUrl:SUPABASE_URL,
     return !!result.data;
   } });
 const flashPhotos=require('./flash-photos').createFlashPhotos({express,supabase,sharp,authenticateUser,verifyToken,rateLimit,
- canSend:(actor,peer)=>assertCanSendDirectMessage(supabase,actor,peer,ADMIN_USERNAME),banError:userBanError,
+ canSend:(actor,peer)=>assertCanSendDirectMessage(supabase,actor,peer,ADMIN_USERNAME),
+ onSent:(actor,peer)=>recordAutoFriendOnMessage(supabase,actor,peer,publishChatEvent),banError:userBanError,
  publish:publishDmRealtime,notifyConsumed:(sender,peer)=>{publishChatEvent(sender,'chat-state',{kind:'flash_consumed'});publishChatEvent(peer,'chat-state',{kind:'flash_consumed'});},audit:logAdminAudit,setPro:(actor,active)=>aiQuota.setPro(actor,active,{})});
 app.use(flashPhotos.router);
 require('./upload-access').installUploadAccess(app, {supabase,supabaseUrl:SUPABASE_URL,optionalAuth:async function(req,res,next) {
@@ -14844,9 +14853,9 @@ app.post('/api/post/update', authenticateUser, rateLimit(60000, 30), async (req,
     if (!postId) return res.status(400).json({ error: '帖子参数无效', code: 'invalid_post_id' });
     // ★ 2026-09-26（审计 P3-6）：解构 error 并 fail-closed，避免 DB 故障被误报为
     //   "帖子不存在"(404)，误导客户端。
-    var { data: post, error: postLookupError } = await supabase.from('posts').select('user_name, media_type, media_url').eq('id', postId).maybeSingle();
+    var { data: post, error: postLookupError } = await supabase.from('posts').select('user_name, media_type, media_url, content, visibility, is_deleted').eq('id', postId).maybeSingle();
     if (postLookupError) return res.status(503).json({ error: '修改校验暂不可用，请稍后重试', code: 'update_lookup_failed', retryable: true });
-    if (!post) return res.status(404).json({ error: '帖子不存在' });
+    if (!post || post.is_deleted === true) return res.status(404).json({ error: '帖子不存在' });
     var isAdmin = req.userName === ADMIN_USERNAME;
     if (!isAdmin && post.user_name !== req.userName) return res.status(403).json({ error: '无权修改' });
     // ★ 只允许编辑"普通帖子"。posts 大表混存 DM/认证/用户资料/系统标记等行，
@@ -14871,7 +14880,10 @@ app.post('/api/post/update', authenticateUser, rateLimit(60000, 30), async (req,
       var contentStr = String(req.body.content);
       if (contentStr.length > 50000) return res.status(400).json({ error: '内容长度超过限制（50000字符）' });
       if (!contentStr.trim() && !post.media_url) return res.status(400).json({ error: '请输入帖子内容', code: 'empty_post' });
-      updates.content = sanitizePostContent(contentStr, { supabaseUrl: SUPABASE_URL, hosts: [SERVER_HOSTNAME, req.headers.host] }).content;
+      updates.content = sanitizePostContent(contentStr, { supabaseUrl: SUPABASE_URL, hosts: [SERVER_HOSTNAME, req.headers.host], authorName: post.user_name }).content;
+    } else if (updates.visibility) {
+      // 旧入口切换 public/private 时同步清理 content meta 中的受众定向配置，避免状态分裂。
+      updates.content = applyPostVisibilityToContent(post.content, updates.visibility, [], post.user_name).content;
     }
     // 服务端生成 updated_at（不允许客户端传入）
     if (Object.keys(updates).length === 0) return res.status(400).json({ error: '没有要更新的字段' });
@@ -14881,6 +14893,122 @@ app.post('/api/post/update', authenticateUser, rateLimit(60000, 30), async (req,
     if (!updatedPost) return res.status(500).json({ error: '更新失败：未返回数据' });
     return res.json({ ok: true, data: updatedPost });
   } catch (e) { console.error('[API] post update:', e.message); return res.status(500).json({ error: '更新失败' }); }
+});
+
+// 帖子权限设置（公开 / 私密 / 仅谁可见 / 仅谁不可见），严格仅帖子作者本人可修改，覆盖全部帖子类型。
+app.post('/api/post/visibility', authenticateUser, rateLimit(60000, 30), async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    var postId = normalizePostId(req.body && req.body.post_id);
+    if (!postId) return res.status(400).json({ ok: false, error: '帖子参数无效', code: 'invalid_post_id' });
+    var mode = String(req.body && req.body.mode || '').trim().toLowerCase();
+    if (POST_VISIBILITY_MODES.indexOf(mode) < 0) {
+      return res.status(400).json({ ok: false, error: '权限模式无效', code: 'invalid_visibility_mode' });
+    }
+    var lookup = await supabase.from('posts')
+      .select('id, user_name, media_type, media_url, content, visibility, is_deleted')
+      .eq('id', postId).maybeSingle();
+    if (lookup.error) {
+      return res.status(503).json({ ok: false, error: '权限校验暂不可用，请稍后重试', code: 'visibility_lookup_failed', retryable: true });
+    }
+    var post = lookup.data;
+    if (!post || post.is_deleted === true || !isNormalPost(post)) {
+      return res.status(404).json({ ok: false, error: '帖子不存在或已删除', code: 'not_found' });
+    }
+    if (post.user_name !== req.userName) {
+      return res.status(403).json({ ok: false, error: '只有帖子作者可以修改帖子权限', code: 'author_only' });
+    }
+
+    var verifiedUsers = [];
+    if (mode === 'allow_list' || mode === 'deny_list') {
+      var rawUsers = req.body && req.body.users;
+      if (!Array.isArray(rawUsers)) {
+        return res.status(400).json({ ok: false, error: '请选择指定用户', code: 'invalid_visibility_users' });
+      }
+      var cleanedUsers = cleanVisibilityUsers(rawUsers, post.user_name);
+      if (!cleanedUsers.length) {
+        return res.status(400).json({ ok: false, error: '请至少选择一位用户', code: 'empty_visibility_users' });
+      }
+      if (cleanedUsers.length > MAX_VISIBILITY_USERS) {
+        return res.status(400).json({ ok: false, error: '最多只能选择 ' + MAX_VISIBILITY_USERS + ' 位用户', code: 'too_many_visibility_users' });
+      }
+      var userCheck = await supabase.from('posts')
+        .select('user_name')
+        .eq('media_type', AUTH_MARKER)
+        .in('user_name', cleanedUsers);
+      if (userCheck.error) {
+        return res.status(503).json({ ok: false, error: '用户校验暂不可用，请稍后重试', code: 'user_lookup_failed', retryable: true });
+      }
+      var existingSet = new Set((userCheck.data || []).map(function(r) { return String(r.user_name || '').trim(); }).filter(Boolean));
+      verifiedUsers = cleanedUsers.filter(function(u) { return existingSet.has(u); });
+      if (verifiedUsers.length !== cleanedUsers.length) {
+        return res.status(400).json({ ok: false, error: '部分所选用户不存在或已注销，请重新选择', code: 'invalid_visibility_users' });
+      }
+    }
+
+    var next = applyPostVisibilityToContent(post.content, mode, verifiedUsers, post.user_name);
+    var sanitized = sanitizePostContent(next.content, { supabaseUrl: SUPABASE_URL, hosts: [SERVER_HOSTNAME, req.headers.host], authorName: post.user_name }).content;
+    var updates = {
+      visibility: next.dbVisibility,
+      content: sanitized,
+      updated_at: new Date().toISOString()
+    };
+    var updateRes = await supabase.from('posts')
+      .update(updates)
+      .eq('id', postId)
+      .eq('user_name', req.userName)
+      .select('*')
+      .maybeSingle();
+    if (updateRes.error) {
+      return res.status(400).json({ ok: false, error: sanitizeError(updateRes.error), code: 'visibility_update_failed' });
+    }
+    if (!updateRes.data) {
+      return res.status(500).json({ ok: false, error: '权限更新失败：未返回数据', code: 'visibility_update_empty' });
+    }
+    return res.json({
+      ok: true,
+      data: updateRes.data,
+      permission: { mode: next.mode, users: next.users }
+    });
+  } catch (e) {
+    console.error('[API] post visibility:', e && e.message);
+    return res.status(500).json({ ok: false, error: '权限更新失败，请重试', code: 'visibility_update_error' });
+  }
+});
+
+// 站点注册用户目录（供帖子权限选择器按需列出/搜索站内已注册用户，仅登录可用）。
+app.get('/api/users/directory', authenticateUser, rateLimit(60000, 60), async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    var q = String(req.query.q || '').trim().toLowerCase().slice(0, 64);
+    var limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 80));
+    var userQuery = supabase.from('posts')
+      .select('user_name, created_at')
+      .eq('media_type', AUTH_MARKER)
+      .order('created_at', { ascending: false })
+      .limit(500);
+    var result = await userQuery;
+    if (result.error) {
+      return res.status(503).json({ ok: false, error: '用户列表暂不可用，请稍后重试', code: 'user_directory_failed', retryable: true });
+    }
+    var seen = new Set();
+    var names = [];
+    (result.data || []).forEach(function(row) {
+      var name = String(row && row.user_name || '').trim();
+      if (!name || name === req.userName || name === CAT_AI_USERNAME || seen.has(name)) return;
+      if (q && name.toLowerCase().indexOf(q) < 0) return;
+      seen.add(name);
+      names.push(name);
+    });
+    names.sort(function(a, b) { return a.localeCompare(b, 'zh-Hans-CN'); });
+    return res.json({
+      ok: true,
+      users: names.slice(0, limit).map(function(name) { return { user_name: name }; })
+    });
+  } catch (e) {
+    console.error('[API] users directory:', e && e.message);
+    return res.status(503).json({ ok: false, error: '用户列表暂不可用，请稍后重试', code: 'user_directory_error', retryable: true });
+  }
 });
 
 // ===================== Atomic post pin API =====================
@@ -15111,14 +15239,14 @@ app.post('/api/post/comment', authenticateUser, rateLimit(60000, 30), async (req
       if (!parentCommentId || !/^\d{1,19}$/.test(parentCommentId)) return res.status(400).json({ error: 'Invalid parent comment id', code: 'invalid_parent_comment_id' });
     }
 
-    var postResult = await supabase.from('posts').select('id, user_name, visibility, media_type, is_deleted').eq('id', postId).maybeSingle();
+    var postResult = await supabase.from('posts').select('id, user_name, visibility, media_type, is_deleted, content').eq('id', postId).maybeSingle();
     if (postResult.error) return res.status(500).json({ error: sanitizeError(postResult.error), code: 'post_lookup_failed' });
     if (!postResult.data) return res.status(404).json({ error: 'Post not found', code: 'not_found' });
-    // 只允许对普通可见帖子评论：私密帖仅作者本人可评论，系统内部 marker（DM/登录事件等）不可评论
+    // 只允许对普通可见帖子评论：私密/无权查看的帖子不可评论，系统内部 marker 不可评论
     var targetPost = postResult.data;
     if (!isNormalPost(targetPost)) return res.status(422).json({ error: '该帖子不存在、已删除或不可评论', code: 'not_normal_post' });
-    if (targetPost.visibility === 'private' && targetPost.user_name !== req.userName) {
-      return res.status(403).json({ error: '无法评论私密帖子', code: 'forbidden' });
+    if (!canUserViewPost(targetPost, req.userName)) {
+      return res.status(403).json({ error: '无法评论该帖子', code: 'forbidden' });
     }
 
     var inserted = await createComment(supabase, postId, req.userName, content, req.body && req.body.client_request_id, 'post', parentCommentId);
@@ -15258,15 +15386,15 @@ app.post('/api/post/like', authenticateUser, rateLimit(60000, 60), async (req, r
       return res.status(400).json({ error: 'post_id must be a UUID and liked must be boolean', code: 'invalid_request' });
     }
 
-    // 与 comment 对齐：校验可见性 + 普通帖；私密帖/系统 marker 统一 404，避免存在性侧信道
+    // 与 comment 对齐：校验可见性 + 普通帖；私密/无权查看/系统 marker 统一 404，避免存在性侧信道
     var { data: post, error: postError } = await supabase.from('posts')
-      .select('id, user_name, visibility, media_type, is_deleted')
+      .select('id, user_name, visibility, media_type, is_deleted, content')
       .eq('id', postId)
       .maybeSingle();
     if (postError) return res.status(500).json({ error: sanitizeError(postError), code: 'post_lookup_failed' });
     if (!post) return res.status(404).json({ error: 'Post not found', code: 'not_found' });
     if (!isNormalPost(post)) return res.status(404).json({ error: 'Post not found', code: 'not_found' });
-    if (post.visibility === 'private' && post.user_name !== req.userName) {
+    if (!canUserViewPost(post, req.userName)) {
       return res.status(404).json({ error: 'Post not found', code: 'not_found' });
     }
 
@@ -15301,10 +15429,11 @@ app.get('/api/stats/snapshot', authenticateUser, rateLimit(60000, 30), async (re
     if (failed) return res.status(500).json({ error: sanitizeError(failed), code: 'stats_snapshot_failed' });
 
     var posts = (postsResult.data || []).filter(function(post) {
-      // ★ 修复：软删（is_deleted=true）的帖子不得进入统计快照——此前只按 media_type
-      //   白名单过滤，已删帖的正文/媒体仍会随 /api/stats/snapshot 返回。
+      // ★ 修复：软删（is_deleted=true）的帖子不得进入统计快照
       if (post.is_deleted === true) return false;
-      return !post.visibility || post.visibility === 'public' || post.user_name === req.userName;
+      return canUserViewPost(post, req.userName);
+    }).map(function(post) {
+      return stripPostVisibilityAudience(post, req.userName);
     });
     var postIds = new Set(posts.map(function(post) { return String(post.id); }));
     var ownPostIds = new Set(posts.filter(function(p) { return p.user_name === req.userName; }).map(function(p) { return String(p.id); }));
@@ -15406,8 +15535,7 @@ app.post('/api/post/media/batch', optionalAuth, rateLimit(60000, 120), async (re
     var result = await supabase.from('posts').select('id,user_name,media_type,media_url,visibility,is_deleted,content').in('id', ids);
     if (result.error) return res.status(503).json({ ok: false, code: 'media_lookup_failed', retryable: true });
     var visible = (result.data || []).filter(function(post) {
-      return isNormalPost(post) && !looksLikeSystemTelemetry(post.content) &&
-        (!post.visibility || post.visibility === 'public' || post.user_name === (req.userName || ''));
+      return isNormalPost(post) && !looksLikeSystemTelemetry(post.content) && canUserViewPost(post, req.userName);
     });
     var posts = await loadPostAttachments(supabase, visible);
     res.set('Cache-Control', 'no-store');
@@ -15465,8 +15593,8 @@ app.get('/api/feed', optionalAuth, rateLimit(60000, 60), async (req, res) => {
         ? supabase.from('posts').select(selectFields, { count: 'estimated' })
         : supabase.from('posts').select(selectFields);
       query = query.or('media_type.is.null,media_type.eq.\"\",media_type.in.(text,image,video,audio,photo,album)');
-      // 管理员和其他用户一样：只能看到公开帖和自己的帖子，看不到别人的私密帖。
-      if (isLoggedIn) query = query.or('visibility.eq.public,user_name.eq.' + pgrstQuote(req.userName));
+      // 管理员和其他用户一样：只能看到公开帖、自己可见的受众定向帖和自己的帖子，看不到别人的私密帖。
+      if (isLoggedIn) query = query.or('visibility.in.(public,unlisted),user_name.eq.' + pgrstQuote(req.userName));
       else query = query.eq('visibility', 'public');
       query = query.or('is_deleted.is.null,is_deleted.eq.false');
       if (after) {
@@ -15483,7 +15611,37 @@ app.get('/api/feed', optionalAuth, rateLimit(60000, 60), async (req, res) => {
     if (req.query.q) {
       var searchPage = await require('./feed-search').readFeedSearch(supabase,req.query,req.userName,selectFields);
       posts=searchPage.posts.filter(function(post){return isNormalPost(post)&&!looksLikeSystemTelemetry(post.content)&&
-        (post.visibility==='public'||post.user_name===(req.userName||''));});
+        canUserViewPost(post, req.userName);});
+      if (isLoggedIn && req.query.visibility !== 'private' && !cursorMode) {
+        try {
+          var qLower = String(req.query.q || '').trim().toLowerCase();
+          var unlistedQ = supabase.from('posts').select(selectFields)
+            .eq('visibility', 'unlisted')
+            .or('media_type.is.null,media_type.eq.\"\",media_type.in.(text,image,video,audio,photo,album)')
+            .or('is_deleted.is.null,is_deleted.eq.false');
+          if (req.query.only_mine === 'true') unlistedQ = unlistedQ.eq('user_name', req.userName);
+          else if (req.query.author) unlistedQ = unlistedQ.eq('user_name', String(req.query.author).trim());
+          if (req.query.from) unlistedQ = unlistedQ.gte('created_at', String(req.query.from));
+          if (req.query.to) unlistedQ = unlistedQ.lt('created_at', String(req.query.to));
+          var unlistedRes = await unlistedQ.order('created_at', { ascending: false }).order('id', { ascending: false }).limit(80);
+          if (unlistedRes && !unlistedRes.error && Array.isArray(unlistedRes.data)) {
+            var seenIds = new Set(posts.map(function(p) { return String(p.id); }));
+            unlistedRes.data.forEach(function(p) {
+              if (!p || seenIds.has(String(p.id))) return;
+              if (!isNormalPost(p) || looksLikeSystemTelemetry(p.content) || !canUserViewPost(p, req.userName)) return;
+              var hay = (postToolContent(p) + ' ' + String(p.user_name || '')).toLowerCase();
+              if (hay.indexOf(qLower) >= 0) {
+                seenIds.add(String(p.id));
+                posts.push(p);
+              }
+            });
+            posts.sort(function(a, b) {
+              return String(b.created_at || '').localeCompare(String(a.created_at || '')) || String(b.id || '').localeCompare(String(a.id || ''));
+            });
+            if (posts.length > limit) posts = posts.slice(0, limit);
+          }
+        } catch (_) {}
+      }
       scannedCount=searchPage.posts.length;nextCursor=searchPage.nextCursor;endReached=searchPage.endReached;
       res.set('Cache-Control','no-store');
     } else if (!cursorMode) {
@@ -15492,10 +15650,10 @@ app.get('/api/feed', optionalAuth, rateLimit(60000, 60), async (req, res) => {
       var rawPosts = firstResult.data || [];
       totalCount = firstResult.count;
       scannedCount = rawPosts.length;
-      posts = rawPosts.filter(function(p) { return !looksLikeSystemTelemetry(p.content); });
+      posts = rawPosts.filter(function(p) { return !looksLikeSystemTelemetry(p.content) && canUserViewPost(p, req.userName); });
       endReached = rawPosts.length < limit;
       var firstPageAfter = rawPosts.length ? { created_at: rawPosts[rawPosts.length - 1].created_at, id: rawPosts[rawPosts.length - 1].id } : null;
-      // Keep the initial page full too when legacy telemetry rows are filtered.
+      // Keep the initial page full too when legacy telemetry or restricted rows are filtered.
       // The first request starts at offset zero for compatibility, then advances
       // with the same stable keyset cursor used by every later request.
       for (var firstScan = 0; posts.length < limit && rawPosts.length === limit && firstPageAfter && firstScan < 19; firstScan++) {
@@ -15510,7 +15668,7 @@ app.get('/api/feed', optionalAuth, rateLimit(60000, 60), async (req, res) => {
           var fillPost = fillBatch[fi];
           scannedCount++;
           firstPageAfter = { created_at: fillPost.created_at, id: fillPost.id };
-          if (!looksLikeSystemTelemetry(fillPost.content)) posts.push(fillPost);
+          if (!looksLikeSystemTelemetry(fillPost.content) && canUserViewPost(fillPost, req.userName)) posts.push(fillPost);
           if (posts.length >= limit) {
             posts.length = limit;
             break;
@@ -15525,7 +15683,7 @@ app.get('/api/feed', optionalAuth, rateLimit(60000, 60), async (req, res) => {
       }
       nextCursor = firstPageAfter;
     } else {
-      // Fill a visible page when legacy telemetry rows are filtered in JS. Advance by the last
+      // Fill a visible page when legacy telemetry or restricted rows are filtered in JS. Advance by the last
       // consumed raw row so insertions at the top cannot shift the next-page boundary.
       var after = { created_at: cursorCreatedAt, id: cursorId };
       var maxScans = 20;
@@ -15542,7 +15700,7 @@ app.get('/api/feed', optionalAuth, rateLimit(60000, 60), async (req, res) => {
           var rawPost = batch[bi];
           scannedCount++;
           after = { created_at: rawPost.created_at, id: rawPost.id };
-          if (!looksLikeSystemTelemetry(rawPost.content)) posts.push(rawPost);
+          if (!looksLikeSystemTelemetry(rawPost.content) && canUserViewPost(rawPost, req.userName)) posts.push(rawPost);
           if (posts.length >= limit) {
             posts.length = limit;
             nextCursor = after;
@@ -15571,7 +15729,8 @@ app.get('/api/feed', optionalAuth, rateLimit(60000, 60), async (req, res) => {
     var comments = [], likes = [];
     try {
       var engagement = await readFeedEngagement(supabase, posts, req.userName);
-      posts = engagement.posts; comments = engagement.comments; likes = engagement.likes;
+      posts = engagement.posts.map(function(p) { return stripPostVisibilityAudience(p, req.userName); });
+      comments = engagement.comments; likes = engagement.likes;
     } catch (error) {
       console.error('[API] feed relations failed:', error.message);
       return res.status(503).json({ error: '互动数据加载失败，请重试', code: 'feed_relations_failed', retryable: true });
@@ -16828,8 +16987,8 @@ app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res
     if (!dmPermission.ok) {
       var blockedPair = dmPermission.code === 'chat_blocked';
       return res.status(403).json({
-        error: blockedPair ? '你们暂时无法互相发送消息' : '成为好友后才能继续发送消息',
-        code: dmPermission.code || 'friend_required',
+        error: blockedPair ? '你们暂时无法互相发送消息' : '当前无法向该用户发送消息',
+        code: dmPermission.code || 'chat_unavailable',
         relationship: dmPermission.status || 'none'
       });
     }
@@ -17119,11 +17278,15 @@ app.post('/api/dm/send', authenticateUser, rateLimit(60000, 30), async (req, res
     //   HTTP 响应回来之前就会先收到广播，此时缓存里还只有带 __tempId 的乐观消息，
     //   upsertDockChatCacheMessage 无法按 id 命中，会多出一个重复气泡。
     //   发件人其它设备的同步仍由轮询兜底（与本次改动之前一致，不是回归）。
+    var autoFriend = await recordAutoFriendOnMessage(supabase, sender, targetUser, publishChatEvent);
     publishDmRealtime(targetUser, inserted);
     void chatPush.notify(targetUser, sender, inserted.id);
     publishChatEvent(req.userName,'chat-state',{kind:'sent',peer:targetUser});
     // The sending device transcribes with free local Whisper after this ACK.
     // Do not silently submit new audio to a paid provider.
+    if (autoFriend && autoFriend.status && autoFriend.status !== 'skipped') {
+      return res.json({ ok: true, message: inserted, auto_friend: autoFriend });
+    }
     return res.json({ ok: true, message: inserted });
   } catch (e) {
     console.error('[API] dm send:', e && e.message);
@@ -28165,16 +28328,13 @@ app.get('/api/feed/authors', optionalAuth, rateLimit(60000, 60), async (req, res
     // ★ 修复：不再对已登录用户连续追加 .or('visibility...')——PostgREST 连续 .or()
     // 可能互相覆盖（post-query.js 自注），白名单一旦丢失即扩大作者枚举范围。
     // 改为 JS 侧可见性过滤，语义与 /api/feed 一致且无 .or() 覆盖风险。
-    var query = supabase.from('posts').select('user_name,created_at,visibility')
+    var query = supabase.from('posts').select('user_name,created_at,visibility,content,is_deleted')
       .or('media_type.is.null,media_type.eq."",media_type.in.(text,image,video,audio,photo,album)');
     var result = await query.order('created_at', { ascending: false }).limit(1000);
     if (result.error) return res.status(500).json({ error: 'authors_query_failed' });
     var seen = new Set();
     var authors = (result.data || []).filter(function(row) {
-      if (isAdmin) return true;
-      // 私密帖仅属主可见；其余（含 null/空 visibility）视为公开
-      if (row && row.visibility === 'private' && row.user_name !== req.userName) return false;
-      return true;
+      return row && row.is_deleted !== true && canUserViewPost(row, req.userName);
     }).map(function(row) { return String(row.user_name || '').trim(); }).filter(function(name) {
       if (!name || seen.has(name)) return false;
       seen.add(name);
@@ -28207,7 +28367,7 @@ async function loadPostToolPost(postId, userName) {
   if (found.error) throw new Error('post_lookup_failed');
   var post = found.data;
   if (!post || post.is_deleted === true || String(post.media_type || '').indexOf('__') === 0) throw new Error('post_not_found');
-  if (post.visibility === 'private' && post.user_name !== userName) throw new Error('post_not_visible');
+  if (!canUserViewPost(post, userName)) throw new Error('post_not_visible');
   return post;
 }
 

@@ -80,10 +80,8 @@
   function clock(stamp) { var d = new Date(stamp || Date.now()); return isNaN(d) ? '' : pad(d.getHours()) + ':' + pad(d.getMinutes()); }
   function linkify(text) {
     var html = esc(text);
-    html = html.replace(/https?:\/\/[^\s<>"']+/g, function (url) {
-      return '<a href="' + url + '" target="_blank" rel="noopener noreferrer nofollow">' + url + '</a>';
-    });
-    return html.replace(/@([^\s@<>&]{1,24})/g, function (all) {
+    return html.replace(/(https?:\/\/[^\s<>"']+)|@([^\s@<>&]{1,24})/g, function (all, url) {
+      if (url) return '<a href="' + url + '" target="_blank" rel="noopener noreferrer nofollow">' + url + '</a>';
       return '<span class="grp-mention">' + all + '</span>';
     });
   }
@@ -305,7 +303,10 @@
     var response = await window.xtjProtectedFetch('/api/chat/friends', { authOwner: me(), authEpoch: epoch() });
     var data = await response.json().catch(function () { return {}; });
     if (!response.ok || !data.ok) throw new Error(data.error || '好友列表暂时不可用');
-    state.friends = (data.friends || []).map(function (f) { return { name: f.peer_name, note: f.note || '' }; });
+    // 群聊数据库函数仅允许拉「互为好友」成员，单向联系人不进入建群/邀请候选。
+    state.friends = (data.friends || [])
+      .filter(function (f) { return f && f.mutual !== false && f.relation_status !== 'one_way'; })
+      .map(function (f) { return { name: f.peer_name, note: f.note || '' }; });
     state.friendsAt = Date.now();
     return state.friends;
   }
@@ -441,6 +442,21 @@
     var view = ensureView(); if (!view) return;
     if (typeof window.switchDockTab === 'function' && !isChatVisible()) window.switchDockTab('chat', true);
     if (state.active && state.active.id === id && !view.hidden) { focusInput(); return; }
+    if (typeof window.__xtjDeactivateDmForGroup === 'function') {
+      try { window.__xtjDeactivateDmForGroup(); } catch (_) {}
+    }
+    var prev = state.active;
+    if (prev) {
+      clearTimeout(prev.readTimer);
+      saveDraft(prev.id, $('groupChatInput') ? $('groupChatInput').value : '');
+      if (prev.messages) {
+        prev.messages.forEach(function (m) {
+          if (m && m.__preview) { try { URL.revokeObjectURL(m.__preview); } catch (_) {} }
+        });
+      }
+      closeMessageMenu();
+      hideMentionPop();
+    }
     closeInfo(true);
     state.active = newConversation(id);
     var conv = state.active;
@@ -463,9 +479,9 @@
       if (anim) anim.finished.then(function () {}, function () {});
     }
     $('groupStream').innerHTML = '<div class="grp-loading"><span class="grp-spinner"></span></div>';
-    Promise.all([refreshDetail(conv), fetchLatest(conv)]).then(function () {
+    Promise.all([refreshDetail(conv), fetchLatest(conv)]).then(function (results) {
       if (state.active !== conv) return;
-      markRead(conv);
+      if (results && results[1]) markRead(conv);
       if (!view.classList.contains('is-split')) focusInput(true);
     });
     startPolling();
@@ -476,6 +492,7 @@
     var view = $('groupChatView');
     var conv = state.active;
     if (conv) {
+      clearTimeout(conv.readTimer);
       saveDraft(conv.id, $('groupChatInput') ? $('groupChatInput').value : '');
       if (conv.messages) {
         conv.messages.forEach(function (m) {
@@ -486,6 +503,7 @@
     state.active = null;
     stopPolling();
     closeInfo(true);
+    closeMessageMenu();
     hideMentionPop();
     document.querySelectorAll('#dockGroupList .grp-row.active').forEach(function (row) { row.classList.remove('active'); });
     if (!view || view.hidden) return;
@@ -512,7 +530,10 @@
   function syncActiveFromList() {
     var conv = state.active; if (!conv) return;
     var group = findGroup(conv.id);
-    if (!group) return;
+    if (!group) {
+      if (state.groupsLoaded) refreshDetail(conv);
+      return;
+    }
     if (!conv.detail) paintHeader(group);
     if (group.unread && document.visibilityState === 'visible' && isChatVisible()) {
       // The list says there is something newer than what we show.
@@ -582,14 +603,16 @@
   async function fetchLatest(conv) {
     try {
       var data = await api('/' + conv.id + '/messages?limit=40', { owner: conv.owner, epoch: conv.epoch });
-      if (state.active !== conv) return;
+      if (state.active !== conv) return false;
       $('groupStream').innerHTML = '';
       conv.hasMore = !!data.has_more;
       mergeMessages(conv, data.messages, 'replace');
       scrollToBottom(true);
+      return true;
     } catch (error) {
-      if (state.active !== conv) return;
+      if (state.active !== conv) return false;
       $('groupStream').innerHTML = '<div class="grp-load-error">消息加载失败<button type="button" data-grp="retry">重试</button></div>';
+      return false;
     }
   }
 
@@ -613,6 +636,10 @@
       // 轮询 tick（4s/12s）本来就会重试，这里只记日志并 30 秒内最多提示一次，
       // 避免离线时每几秒弹一次 toast。
       console.warn('[group] fetchNewer failed:', error && error.message);
+      if (error && error.code === 'not_member') {
+        if (state.active === conv) { toast('你已不在该群聊中'); closeGroup(); scheduleListRefresh(0); }
+        return;
+      }
       if (state.active === conv && Date.now() - (conv.fetchFailedToastAt || 0) > 30000) {
         conv.fetchFailedToastAt = Date.now();
         toast('群消息同步失败，稍后自动重试');
@@ -769,7 +796,8 @@
       var w = Number(msg.meta && msg.meta.width) || 0, h = Number(msg.meta && msg.meta.height) || 0;
       var ratio = w && h ? Math.max(.35, Math.min(2.4, h / w)) : .75;
       var src = msg.__preview || msg.media_url || '';
-      body += src ? '<button type="button" class="grp-image" data-image style="--grp-ratio:' + ratio.toFixed(3) + '"><img src="' + esc(src) + '" alt="图片" decoding="async" loading="lazy"></button>'
+      var fullAttr = msg.media_url ? ' data-full-src="' + esc(msg.media_url) + '"' : '';
+      body += src ? '<button type="button" class="grp-image" data-image style="--grp-ratio:' + ratio.toFixed(3) + '"><img src="' + esc(src) + '"' + fullAttr + ' alt="图片" decoding="async" loading="lazy"></button>'
         : '<span class="grp-image is-missing" style="--grp-ratio:' + ratio.toFixed(3) + '">图片不可用</span>';
     } else {
       body += '<span class="grp-text">' + linkify(msg.body) + '</span>';
@@ -844,10 +872,11 @@
       if (node) node.remove();
       return;
     }
+    var prevToRevoke = '';
     if (local && local.__preview && !msg.media_url) msg.__preview = local.__preview;
     else if (local && local.__preview) {
-      var prevToRevoke = local.__preview;
-      setTimeout(function () { try { URL.revokeObjectURL(prevToRevoke); } catch (_) {} }, 3000);
+      prevToRevoke = local.__preview;
+      msg.__preview = prevToRevoke;
     }
     conv.messages.set(msg.id, msg);
     if (index >= 0) conv.order[index] = msg.id;
@@ -856,7 +885,31 @@
       var img = node.querySelector('.grp-image img');
       node.innerHTML = messageHtml(conv, msg); node.__html = node.innerHTML;
       var nextImg = node.querySelector('.grp-image img');
-      if (img && nextImg && img.complete && img.naturalWidth) nextImg.replaceWith(img); // no flash from blob → signed URL
+      if (img && nextImg && img.complete && img.naturalWidth) {
+        if (msg.media_url) img.setAttribute('data-full-src', msg.media_url);
+        nextImg.replaceWith(img); // no flash from blob → signed URL
+        if (prevToRevoke && msg.media_url) {
+          var preloader = new Image();
+          var targetUrl = msg.media_url;
+          var revokeBlob = function () {
+            if (msg.__preview === prevToRevoke) msg.__preview = '';
+            try { URL.revokeObjectURL(prevToRevoke); } catch (_) {}
+          };
+          preloader.onload = function () {
+            if (img.isConnected && img.getAttribute('src') === prevToRevoke) img.src = targetUrl;
+            revokeBlob();
+          };
+          preloader.onerror = function () {
+            // Keep preview alive while conversation stays open; closeGroup revokes msg.__preview.
+          };
+          preloader.src = targetUrl;
+        }
+      } else if (prevToRevoke && msg.media_url) {
+        setTimeout(function () {
+          if (msg.__preview === prevToRevoke) msg.__preview = '';
+          try { URL.revokeObjectURL(prevToRevoke); } catch (_) {}
+        }, 3000);
+      }
       conv.nodes.set(msg.id, node);
     }
   }
@@ -1209,7 +1262,7 @@
       var at = event.target.closest('[data-at]');
       if (at && conv) { var m = conv.messages.get(at.closest('[data-msg-id]').getAttribute('data-msg-id')); insertMentionFor(at.getAttribute('data-at'), m ? m.sender_display || m.sender : at.getAttribute('data-at')); return; }
       var img = event.target.closest('[data-image] img');
-      if (img) { openImageViewer(img.currentSrc || img.src); return; }
+      if (img) { openImageViewer(img.getAttribute('data-full-src') || img.currentSrc || img.src); return; }
       var retry = event.target.closest('[data-retry]');
       if (retry && conv) { retryLocal(conv, retry.closest('[data-msg-id]').getAttribute('data-msg-id')); return; }
       var quote = event.target.closest('[data-quote]');
@@ -1355,7 +1408,7 @@
     }
     html += '<div class="grp-info-card">' +
       infoRow('rename', '群聊名称', esc(g.name)) +
-      infoRow('qr', '群二维码', '<svg class="grp-qr-mini" viewBox="0 0 24 24"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h2v2h-2zM18 14h2v2h-2zM14 18h2v2h-2zM18 18h2v2h-2z"/></svg>') +
+      (g.qr_token ? infoRow('qr', '群二维码', '<svg class="grp-qr-mini" viewBox="0 0 24 24"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h2v2h-2zM18 14h2v2h-2zM14 18h2v2h-2zM18 18h2v2h-2z"/></svg>') : '') +
       infoRow('announce', '群公告', g.announcement ? '<span class="grp-info-ann">' + esc(g.announcement.slice(0, 60)) + '</span>' : '<span class="grp-muted">未设置</span>') +
       (admin ? infoRow('manage', '群管理', g.pending_requests ? '<span class="grp-dot">' + g.pending_requests + '</span>' : '') : '') + '</div>' +
       '<div class="grp-info-card">' + infoRow('search', '查找聊天内容') + '</div>' +
@@ -1439,7 +1492,12 @@
     } else if (what === 'clear') {
       if (!(await confirmBox('清空聊天记录', '只清空你在这个群里看到的聊天记录，其他成员不受影响。', '清空'))) return;
       var cleared = await groupAction(conv, { action: 'clear_history' }, '聊天记录已清空');
-      if (cleared && state.active === conv) { conv.messages.clear(); conv.nodes.clear(); conv.order = []; conv.hasMore = false; $('groupStream').innerHTML = ''; }
+      if (cleared && state.active === conv) {
+        conv.messages.forEach(function (m) {
+          if (m && m.__preview) { try { URL.revokeObjectURL(m.__preview); } catch (_) {} }
+        });
+        conv.messages.clear(); conv.nodes.clear(); conv.order = []; conv.hasMore = false; $('groupStream').innerHTML = '';
+      }
     } else if (what === 'report') {
       openReport(conv);
     } else if (what === 'leave') {
@@ -1469,16 +1527,26 @@
       (removeMode ? '<p class="grp-hint">点选要移出群聊的成员</p>' : '') + '<div class="grp-member-list" id="grpMemberList"></div>';
     var layer = openSheet((removeMode ? '移出成员' : '群成员') + '（' + d.group.member_count + '）', body, { wide: true });
     var list = layer.el.querySelector('#grpMemberList'), members = d.members, rendered = 0;
+    var filterInput = layer.el.querySelector('#grpMemberFilter');
     // Render 1000 members in chunks so the sheet opens instantly.
     function renderChunk() {
+      if (layer.closed) return;
       var chunk = members.slice(rendered, rendered + 120).filter(function (m) { return !removeMode || canManage(d, m); });
+      var prevCount = list.children.length;
       list.insertAdjacentHTML('beforeend', chunk.map(rowHtml).join(''));
+      var q = filterInput ? filterInput.value.trim().toLowerCase() : '';
+      if (q) {
+        for (var i = prevCount; i < list.children.length; i++) {
+          var row = list.children[i];
+          if (row && row.hasAttribute('data-member')) row.hidden = (row.getAttribute('data-search') || '').indexOf(q) < 0;
+        }
+      }
       ensureAvatars(members.slice(rendered, rendered + 120).map(function (m) { return m.user_name; }), list);
       rendered += 120;
-      if (rendered < members.length) requestAnimationFrame(renderChunk);
+      if (rendered < members.length && !layer.closed) requestAnimationFrame(renderChunk);
     }
     renderChunk();
-    layer.el.querySelector('#grpMemberFilter').addEventListener('input', function (event) {
+    filterInput.addEventListener('input', function (event) {
       var q = event.target.value.trim().toLowerCase();
       list.querySelectorAll('[data-member]').forEach(function (row) { row.hidden = !!q && row.getAttribute('data-search').indexOf(q) < 0; });
     });
@@ -1681,10 +1749,10 @@
     return qrLoader;
   }
   function joinLink(token) { return location.origin + '/?group_join=' + encodeURIComponent(token); }
-  function drawQr(canvas, text, size) {
+  function drawQr(canvas, text, size, forcedRatio) {
     var qr = window.qrcode(0, 'M'); qr.addData(text); qr.make();
     var count = qr.getModuleCount(), margin = 2, cell = Math.floor(size / (count + margin * 2));
-    var real = cell * (count + margin * 2), ratio = window.devicePixelRatio || 1;
+    var real = cell * (count + margin * 2), ratio = forcedRatio || window.devicePixelRatio || 1;
     canvas.width = real * ratio; canvas.height = real * ratio; canvas.style.width = real + 'px'; canvas.style.height = real + 'px';
     var ctx = canvas.getContext('2d'); ctx.scale(ratio, ratio);
     ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, real, real); ctx.fillStyle = '#16302a';
@@ -1694,6 +1762,7 @@
   async function openQr(conv) {
     var d = conv.detail; if (!d) return;
     var g = d.group, admin = d.me.role !== 'member';
+    if (!g.qr_token) { toast('当前仅群主和管理员可邀请成员'); return; }
     var body = '<div class="grp-qr-card" id="grpQrCard"><div class="grp-qr-head">' + groupAvatarHtml(g, 'grp-avatar is-large') + '<div><strong>' + esc(g.name) + '</strong><span>' + g.member_count + ' 位成员</span></div></div>' +
       '<div class="grp-qr-box"><canvas id="grpQrCanvas" aria-label="群二维码"></canvas></div><p>扫一扫二维码，加入群聊' + (g.join_approval ? '（需群主或管理员同意）' : '') + '</p></div>';
     var layer = openSheet('群二维码', body, {
@@ -1710,11 +1779,12 @@
       else if (what === 'save') saveQrImage(conv.detail.group);
       else if (what === 'reset') {
         if (!(await confirmBox('重置群二维码', '重置后，之前分享的二维码和链接将立即失效。', '重置'))) return;
-        if (await groupAction(conv, { action: 'reset_qr' }, '二维码已重置') && conv.detail) drawQr(layer.el.querySelector('#grpQrCanvas'), joinLink(conv.detail.group.qr_token), 220);
+        if (await groupAction(conv, { action: 'reset_qr' }, '二维码已重置') && conv.detail && conv.detail.group.qr_token) drawQr(layer.el.querySelector('#grpQrCanvas'), joinLink(conv.detail.group.qr_token), 220);
       }
     });
   }
   function saveQrImage(g) {
+    if (!g || !g.qr_token) { toast('二维码暂不可用'); return; }
     var w = 600, h = 760, canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h;
     var ctx = canvas.getContext('2d');
     ctx.fillStyle = '#f4faf6'; ctx.fillRect(0, 0, w, h);
@@ -1726,8 +1796,8 @@
     ctx.fillText(g.name.length > 12 ? g.name.slice(0, 12) + '…' : g.name, 200, 112);
     ctx.fillStyle = '#6b8578'; ctx.font = '24px system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif';
     ctx.fillText(g.member_count + ' 位成员', 200, 154);
-    var qrCanvas = document.createElement('canvas'); var saveRatio = window.devicePixelRatio; window.devicePixelRatio = 1;
-    var size = drawQr(qrCanvas, joinLink(g.qr_token), 400); window.devicePixelRatio = saveRatio;
+    var qrCanvas = document.createElement('canvas');
+    var size = drawQr(qrCanvas, joinLink(g.qr_token), 400, 1);
     ctx.drawImage(qrCanvas, (w - size) / 2, 220, size, size);
     ctx.textAlign = 'center'; ctx.fillStyle = '#6b8578'; ctx.font = '24px system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif';
     ctx.fillText('扫一扫二维码，加入群聊', w / 2, 220 + size + 40);
@@ -1753,9 +1823,21 @@
         var data = await api('/' + conv.id + '/search?q=' + encodeURIComponent(q), { owner: conv.owner, epoch: conv.epoch });
         if (mine !== seq) return;
         var rx = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+        function highlightEsc(rawText) {
+          var raw = String(rawText == null ? '' : rawText), out = '', last = 0, m;
+          rx.lastIndex = 0;
+          while ((m = rx.exec(raw)) !== null) {
+            if (m.index > last) out += esc(raw.slice(last, m.index));
+            out += '<mark>' + esc(m[0]) + '</mark>';
+            last = m.index + m[0].length;
+            if (!m[0].length) rx.lastIndex++;
+          }
+          if (last < raw.length) out += esc(raw.slice(last));
+          return out;
+        }
         results.innerHTML = data.messages.length ? data.messages.map(function (m) {
           return '<button type="button" class="grp-search-row" data-jump="' + esc(m.id) + '">' + avatarHtml(m.sender) + '<div><span class="grp-search-meta"><strong>' + esc(m.sender_display || m.sender) + '</strong><time>' + esc(formatTime(m.created_at, true)) + '</time></span>' +
-            '<span class="grp-search-text">' + esc(m.body).replace(rx, function (x) { return '<mark>' + x + '</mark>'; }) + '</span></div></button>';
+            '<span class="grp-search-text">' + highlightEsc(m.body) + '</span></div></button>';
         }).join('') : '<p class="grp-empty">没有找到相关聊天记录</p>';
         ensureAvatars(data.messages.map(function (m) { return m.sender; }), results);
       } catch (error) { if (mine === seq) results.innerHTML = '<p class="grp-empty">' + esc(error.message) + '</p>'; }
@@ -1859,6 +1941,23 @@
     state.realtimeAt = Date.now();
     var conv = state.active;
     if (conv && payload.group_id === conv.id) {
+      if (payload.kind === 'withdraw' && payload.message_id) {
+        var oldMsg = conv.messages.get(payload.message_id);
+        if (oldMsg && !oldMsg.withdrawn) {
+          var withdrawnMsg = Object.assign({}, oldMsg, {
+            withdrawn: true,
+            withdrawn_by: payload.withdrawn_by || oldMsg.sender,
+            body: '',
+            media_url: ''
+          });
+          if (withdrawnMsg.__preview) {
+            try { URL.revokeObjectURL(withdrawnMsg.__preview); } catch (_) {}
+            withdrawnMsg.__preview = '';
+          }
+          conv.messages.set(withdrawnMsg.id, withdrawnMsg);
+          patchMessage(conv, withdrawnMsg, oldMsg);
+        }
+      }
       if (payload.kind === 'remove_member' || payload.kind === 'dissolve' || payload.kind === 'transfer' || payload.kind === 'set_admin' ||
           payload.kind === 'unset_admin' || payload.kind === 'ban' || payload.kind === 'unban' || payload.kind === 'set_mute_all' ||
           payload.kind === 'rename' || payload.kind === 'announce' || payload.kind === 'invite' || payload.kind === 'members' ||
@@ -1872,6 +1971,7 @@
   };
 
   function resetForAccount() {
+    clearTimeout(state.listTimer); state.listTimer = 0; state.realtimeAt = 0;
     closeAllSheets(); closeMessageMenu(); closeGroup(true);
     state.groups = []; state.groupsLoaded = false; state.lastUnread = Object.create(null); state.friends = null; state.listSeq++;
     avatarUrls = Object.create(null);
@@ -1925,7 +2025,14 @@
       var wasActive = panel.classList.contains('active');
       new MutationObserver(function () {
         var active = panel.classList.contains('active');
-        if (active && !wasActive && me()) { scheduleListRefresh(0); placeView(); if (state.active) markRead(state.active); }
+        if (active && !wasActive && me()) {
+          scheduleListRefresh(0);
+          placeView();
+          if (state.active) {
+            var activeConv = state.active;
+            fetchNewer(activeConv).then(function () { if (state.active === activeConv) markRead(activeConv); });
+          }
+        }
         if (!active) closeMessageMenu();
         wasActive = active;
       }).observe(panel, { attributes: true, attributeFilter: ['class'] });
@@ -1933,7 +2040,7 @@
     document.addEventListener('keydown', function (event) {
       if (event.key !== 'Escape') return;
       if (state.menu) { closeMessageMenu(); return; }
-      if (document.querySelector('.xtj-prompt-overlay, #ppConfirmOverlay.active')) return;
+      if (document.querySelector('.xtj-prompt-overlay, #ppConfirmOverlay.active, .modal-overlay.active, .announcement-modal-overlay.active, .report-modal-overlay.active, #photoPreviewOverlay.active, #postShareOverlay.active, #dockChatSocialSheet:not(.hidden), #chatHistoryPanel:not(.hidden)')) return;
       var top = state.layers[state.layers.length - 1];
       if (top) { event.preventDefault(); top.close(); return; }
       if (state.info) { closeInfo(); return; }

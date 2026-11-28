@@ -358,17 +358,18 @@
             //   dm-media.js 的路径正则只允许 [A-Za-z0-9_-]，所以这里也不能出现中文用户名。
             //   客户端不做哈希（避免依赖 crypto.subtle 的 HTTPS 限制），由其异步取一次。
             var _dmUidHashCache = null;
+            window.__xtjResetDmUidHash = function () { _dmUidHashCache = null; };
             async function getDmUidHash() {
-                if (_dmUidHashCache) return _dmUidHashCache;
                 var u = '';
                 try { u = String(window.currentUser || '').trim(); } catch (_) {}
                 if (!u) return null;
+                if (_dmUidHashCache && _dmUidHashCache.owner === u && _dmUidHashCache.hash) return _dmUidHashCache.hash;
                 try {
                     if (window.crypto && window.crypto.subtle && window.TextEncoder) {
                         var buf = await window.crypto.subtle.digest('SHA-256', new TextEncoder().encode(u));
                         var hex = Array.prototype.map.call(new Uint8Array(buf), function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
-                        _dmUidHashCache = hex.slice(0, 12);
-                        return _dmUidHashCache;
+                        _dmUidHashCache = { owner: u, hash: hex.slice(0, 12) };
+                        return _dmUidHashCache.hash;
                     }
                 } catch (_) { /* 非安全上下文等：落回下面的兜底 */ }
                 // 兜底：必须与后端 sha256 前 12 位一致，否则上传必然 400。
@@ -948,14 +949,37 @@
                     window.dockChatListCacheTime = 0;
                     loadDockChatList();
                     updateUnreadBadge();
-                    if (dockChatActiveUser && payload && (!payload.peer || payload.peer===dockChatActiveUser) &&
+                    if (dockChatActiveUser && !(typeof isGroupChatActive === 'function' && isGroupChatActive()) && payload && (!payload.peer || payload.peer===dockChatActiveUser) &&
                         ['read','mark_read','sent','withdraw','delete_message','edit','reaction','transcript','refresh','reconnect','clear','delete'].indexOf(payload.kind) >= 0) {
                         loadDockChatMessages(dockChatActiveUser,false);
                     }
                     if (payload && typeof window.__xtjRefreshChatMessageExtras === 'function') window.__xtjRefreshChatMessageExtras(payload);
-                    if (payload && ['friend_request','friendship','block','friend_note'].indexOf(payload.kind) >= 0 &&
+                    if (payload && ['friend_request','friendship','block','friend_note','contact_added','contact_removed'].indexOf(payload.kind) >= 0 &&
                         typeof window.__xtjRefreshChatSocialState === 'function') window.__xtjRefreshChatSocialState();
                 },180);
+            }
+
+            function isRealtimeDmHistorical(otherUser) {
+                var key = typeof getDockChatCacheKey === 'function' ? getDockChatCacheKey(otherUser) : otherUser;
+                return !!(typeof _chatHistoryFocus !== 'undefined' && _chatHistoryFocus === otherUser) ||
+                    !!(typeof _chatPagination !== 'undefined' && _chatPagination && _chatPagination[key] && _chatPagination[key].historical);
+            }
+            function computeRealtimeDmUnread(convListEl, otherUser, isMine, convOpen, inHistorical) {
+                if (isMine || (convOpen && !inHistorical)) return 0;
+                var isMutedPeer = !!(window.__xtjMutedChatPeers && window.__xtjMutedChatPeers[otherUser]);
+                var existingUnread = 0;
+                if (convListEl && typeof convListEl.querySelectorAll === 'function') {
+                    var items = convListEl.querySelectorAll('.chat-list-item[data-chat-user]');
+                    for (var ui = 0; ui < items.length; ui++) {
+                        if (items[ui].getAttribute('data-chat-user') === otherUser) {
+                            var badge = items[ui].querySelector('.chat-unread-badge, .chat-list-badge');
+                            var raw = badge ? parseInt(String(badge.textContent || '').replace(/\D+/g, ''), 10) : 0;
+                            if (Number.isFinite(raw) && raw > 0) existingUnread = raw;
+                            break;
+                        }
+                    }
+                }
+                return isMutedPeer ? existingUnread : (existingUnread + 1);
             }
 
             function applyRealtimeDmMessage(message) {
@@ -967,30 +991,35 @@
                     var isMine = message.user_name === window.currentUser;
                     var otherUser = isMine ? message.media_url : message.user_name;
                     if (!otherUser || otherUser === window.currentUser) return;
-                    // 增量：把 payload 直接并入该会话缓存（同 id 的乐观消息就地被替换），
-                    //   不再触发 loadDockChatMessages 的全量回拉。
-                    upsertDockChatCacheMessage(otherUser, message);
-                    var convOpen = (currentDockTab === 'chat' && !document.hidden && !isGroupChatActive() && dockChatActiveUser === otherUser);
-                    if (convOpen) {
-                        var key = getDockChatCacheKey(otherUser);
-                        _chatRenderSignature[otherUser] = undefined;
-                        renderDockMessages(otherUser, _chatCache[key] || [], false);
-                        if (!isMine && currentDockTab === 'chat' && !document.hidden && !getDMMessageReadAt(message)) {
-                            window.markMessagesRead(otherUser,_chatCache[key] || [],[{id:message.id}]).catch(function() {
-                                scheduleDockChatListRefresh(120);
-                            });
-                        }
-                    }
-                    // 会话列表就地更新预览/时间/排序；缓存标记失效，下次打开列表仍取权威值。
-                    //   ⚠ 只在列表**已经有渲染内容**时才就地改行：applyDockChatConversationPreview
-                    //   会把「它收集到的会话」整体重排渲染，若此刻列表为空，它会拿"只有一条"的
-                    //   数组去渲染，把完整列表临时覆盖成一条。未渲染时靠 cacheTime=0 在打开时取权威值。
                     window.dockChatListCacheTime = 0;
+                    var inHistorical = typeof isRealtimeDmHistorical === 'function' && isRealtimeDmHistorical(otherUser);
+                    var groupOpen = typeof isGroupChatActive === 'function' && isGroupChatActive();
+                    var convOpen = (currentDockTab === 'chat' && !document.hidden && !groupOpen && dockChatActiveUser === otherUser);
+                    if (!inHistorical) {
+                        upsertDockChatCacheMessage(otherUser, message);
+                        if (convOpen) {
+                            var key = typeof getDockChatCacheKey === 'function' ? getDockChatCacheKey(otherUser) : otherUser;
+                            _chatRenderSignature[otherUser] = undefined;
+                            renderDockMessages(otherUser, _chatCache[key] || [], false);
+                            if (!isMine && currentDockTab === 'chat' && !document.hidden && !getDMMessageReadAt(message)) {
+                                window.markMessagesRead(otherUser, _chatCache[key] || [], [{ id: message.id }]).catch(function() {
+                                    scheduleDockChatListRefresh(120);
+                                });
+                            }
+                        }
+                    } else if (convOpen && typeof setDockChatJumpLatestVisible === 'function') {
+                        setDockChatJumpLatestVisible(true);
+                    }
                     var _convListEl = document.getElementById("dockChatList");
                     if (_convListEl && _convListEl.querySelector(".chat-list-item")) {
-                        applyDockChatConversationPreview(otherUser, message, 0);
+                        var _nextUnread = typeof computeRealtimeDmUnread === 'function'
+                            ? computeRealtimeDmUnread(_convListEl, otherUser, isMine, convOpen, inHistorical)
+                            : 0;
+                        applyDockChatConversationPreview(otherUser, message, _nextUnread);
                     }
-                    if (!isMine && !convOpen) {
+                    if (!isMine && (!convOpen || inHistorical)) {
+                        if (typeof _dmUnreadFetchedAt !== 'undefined') _dmUnreadFetchedAt = 0;
+                        if (typeof window.__xtjInvalidateDmListShared === 'function') window.__xtjInvalidateDmListShared();
                         updateUnreadBadge();
                         notifyIncomingDm(message.user_name, getDockChatMessagePreview(message), message.id, message.created_at);
                     }
@@ -1033,11 +1062,13 @@
                 // ★ F-H1 修复：topic 拉取失败也要指数退避重试（与通道错误同款）。
                 //   此前失败即 return，Broadcast 起不来就一直起不来，只能等用户切 tab。
                 function scheduleDmBroadcastRetry() {
+                    if (document.hidden || (typeof navigator !== 'undefined' && navigator.onLine === false)) return;
                     dmBroadcast.attempts += 1;
                     var backoff = Math.min(1000 * Math.pow(2, dmBroadcast.attempts), 30000);
                     setTimeout(function () {
                         // 代次校验：期间若已重建订阅，旧定时器必须彻底放弃。
                         if (myEpoch !== dmBroadcast.epoch || owner !== window.currentUser) return;
+                        if (document.hidden || (typeof navigator !== 'undefined' && navigator.onLine === false)) return;
                         subscribeToDmBroadcast();
                     }, backoff);
                 }
@@ -1091,18 +1122,30 @@
                             }
                             if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
                                 console.warn("[dm-realtime]", status);
+                                if (document.hidden || (typeof navigator !== 'undefined' && navigator.onLine === false)) return;
                                 dmBroadcast.attempts += 1;
                                 var backoff = Math.min(1000 * Math.pow(2, dmBroadcast.attempts), 30000);
                                 setTimeout(function () {
                                     // 代次校验：期间若已重建订阅，旧定时器必须彻底放弃（与 P1-01 同一教训）
                                     if (myEpoch !== dmBroadcast.epoch || owner !== window.currentUser) return;
+                                    if (document.hidden || (typeof navigator !== 'undefined' && navigator.onLine === false)) return;
                                     subscribeToDmBroadcast();
                                 }, backoff);
                             }
                         });
                 } catch (e) { console.warn("[dm-realtime] subscribe failed:", e && e.message); }
             }
+            function ensureDmBroadcastSubscribed() {
+                if (!window.currentUser || !sb) return;
+                if (document.hidden || (typeof navigator !== 'undefined' && navigator.onLine === false)) return;
+                var ch = dmBroadcast && dmBroadcast.channel;
+                var st = ch && ch.state;
+                if (!ch || (st !== 'joined' && st !== 'joining')) {
+                    subscribeToDmBroadcast();
+                }
+            }
             window.subscribeToDmBroadcast = subscribeToDmBroadcast;
+            window.ensureDmBroadcastSubscribed = ensureDmBroadcastSubscribed;
 
             function subscribeToComments() {
                 if (!sb) return;
@@ -1163,6 +1206,7 @@
                                 // 避免缺 post_id 时落到普通全量刷新分支、导致“正在组织”气泡残留。
                                 var isCatAiReplyRow = row.generated_by_ai === true && row.user_name === 'cat_ai' && row.parent_comment_id;
                                 if (isCatAiReplyRow) {
+                                    if (typeof cancelCatAiTask === 'function') cancelCatAiTask(String(row.parent_comment_id), 'realtime ai reply');
                                     removeCatAiStatus(String(row.parent_comment_id));
                                     if (row.post_id != null) {
                                         upsertAiComment(row, String(row.parent_comment_id), row.post_id);
@@ -1287,11 +1331,11 @@
                     if (!commentRealtime || commentRealtime.state === 'closed') {
                         subscribeToComments();
                     }
-                    // ★ 修复：DM 实时订阅同样需要在页面恢复可见时重建，
-                    //   此前只恢复评论订阅，DM 通道断开后无法自动恢复
+                    // ★ 修复：DM 实时订阅（含新版 Broadcast 通道）同样需要在页面恢复可见时重建
                     if (!chatRealtime || chatRealtime.state === 'closed') {
                         subscribeToMessages();
                     }
+                    ensureDmBroadcastSubscribed();
                     // ★ F-H1 修复：切回前台立即补拉一次——Broadcast 若仍断着，
                     //   光重建订阅不够，隐藏期间的消息要等下一轮 300s 轮询。
                     //   Broadcast 正常时 SUBSCRIBED 后 180ms 也会刷新一次，
@@ -1343,10 +1387,12 @@
                     if (!commentRealtime || commentRealtime.state === 'closed') {
                         subscribeToComments();
                     }
-                    // ★ 修复：网络恢复时同时重建 DM 订阅
+                    // ★ 修复：网络恢复时同时重建 DM 订阅与 Broadcast，并立即补拉一次
                     if (!chatRealtime || chatRealtime.state === 'closed') {
                         subscribeToMessages();
                     }
+                    ensureDmBroadcastSubscribed();
+                    pollDmNow();
                 }
             });
             // ★ 2026-09-26（审计 P2-30）：断网提示。此前只有 online 恢复路径，
@@ -1361,10 +1407,11 @@
                     if (!commentRealtime || commentRealtime.state === 'closed') {
                         subscribeToComments();
                     }
-                    // ★ 修复：页面重新显示时同时重建 DM 订阅
+                    // ★ 修复：页面重新显示时同时重建 DM 订阅与 Broadcast
                     if (!chatRealtime || chatRealtime.state === 'closed') {
                         subscribeToMessages();
                     }
+                    ensureDmBroadcastSubscribed();
                     // ★ F-H1 修复：与 visibilitychange 一致，重新显示时立即补拉一次。
                     pollDmNow();
                 }
@@ -1379,7 +1426,7 @@
                 _dmPolling = true;
                 try {
                     await updateUnreadBadge();
-                    if (currentDockTab === 'chat' && typeof dockChatActiveUser !== 'undefined' && dockChatActiveUser) {
+                    if (currentDockTab === 'chat' && !(typeof isGroupChatActive === 'function' && isGroupChatActive()) && typeof dockChatActiveUser !== 'undefined' && dockChatActiveUser) {
                         // ★ 2026-09-25：轮询属于后台刷新，禁止动 loading 骨架/空状态，
                         //   否则回包会把用户当前界面顶掉重画（闪屏）。
                         await loadDockChatMessages(dockChatActiveUser, false, true);
@@ -1741,7 +1788,7 @@
                 if (!sameIdentity()) return;
                 var grid = document.getElementById('photoGrid');
                 if (!grid) return;
-                var hasRenderedPhotos = !!grid.querySelector('.photo-wall-item');
+                var hasRenderedPhotos = !!grid.querySelector('.photo-wall-item, .pw-album-card');
                 var hasSkeleton = hasVisiblePhotoWallSkeleton(grid);
                 var hasEmptyState = !!grid.querySelector('.photo-wall-empty');
                 var hasPhotoData = Array.isArray(window.photoWallData) && window.photoWallData.length > 0;
@@ -1756,7 +1803,7 @@
                     }
                     hasSkeleton = false;
                 }
-                if (opts.forceReload || !hasRenderedPhotos || (!hasPhotoData && !hasEmptyState)) {
+                if (opts.forceReload || (!hasRenderedPhotos && !hasEmptyState) || (!hasPhotoData && !hasEmptyState)) {
                     if (typeof window.loadPhotoWallData === 'function') {
                         await window.loadPhotoWallData(true);
                     }

@@ -45,15 +45,54 @@ async function assertCanSendDirectMessage(supabase, senderName, targetName, admi
   if (relationship.status === 'blocked_by_me' || relationship.status === 'blocked_by_peer') {
     return { ok: false, code: 'chat_blocked', status: relationship.status };
   }
-  if (relationship.can_message === true) return { ok: true, relationship: relationship };
-
-  // Preserve the existing administrator support conversation. A block still
-  // wins above, so this compatibility path cannot bypass user privacy choices.
-  if (adminName && (senderName === adminName || targetName === adminName) &&
-      ['none', 'request_sent', 'request_received'].indexOf(relationship.status) >= 0) {
-    return { ok: true, relationship: relationship, adminConversation: true };
+  if (relationship.status === 'user_not_found' || relationship.status === 'account_unavailable' || relationship.status === 'self') {
+    return { ok: false, code: relationship.status, status: relationship.status };
   }
-  return { ok: false, code: 'friend_required', status: relationship.status };
+  if (relationship.can_message === true ||
+      ['none', 'request_sent', 'request_received', 'friends'].indexOf(relationship.status) >= 0) {
+    return {
+      ok: true,
+      relationship: relationship,
+      autoFriend: relationship.status !== 'friends',
+      adminConversation: !!(adminName && (senderName === adminName || targetName === adminName))
+    };
+  }
+  return { ok: false, code: 'account_unavailable', status: relationship.status };
+}
+
+// 发消息自动维护单向/双向好友关系（复用既有 chat_request_friend 原子 RPC）：
+//   · A 先给 B 发消息 -> 写入待确认单向关系 (A -> B)，B 立即成为 A 的单向好友，A 暂不在 B 的好友列表；
+//   · B 回复 A 消息   -> chat_request_friend(B, A) 命中反向待确认记录，自动晋升为 chat_friendships 互为好友。
+async function recordAutoFriendOnMessage(supabase, senderName, targetName, publishEvent) {
+  var sender = cleanName(senderName);
+  var target = cleanName(targetName);
+  if (!sender || !target || sender === target) {
+    return { status: 'skipped', mutual: false, one_way: false };
+  }
+  try {
+    var outcome = await callChatRpc(supabase, 'chat_request_friend', {
+      p_requester_name: sender,
+      p_target_name: target,
+      p_note: null
+    });
+    var status = outcome && outcome.status ? String(outcome.status) : 'unknown';
+    if (typeof publishEvent === 'function') {
+      if (status === 'request_sent') {
+        publishEvent(sender, 'chat-state', { kind: 'contact_added', peer: target });
+      } else if (status === 'accepted') {
+        publishEvent(sender, 'chat-state', { kind: 'friendship', peer: target });
+        publishEvent(target, 'chat-state', { kind: 'friendship', peer: sender });
+      }
+    }
+    return {
+      status: status,
+      mutual: status === 'accepted' || status === 'already_friends',
+      one_way: status === 'request_sent' || status === 'request_pending'
+    };
+  } catch (e) {
+    console.warn('[chat-social] auto-friend on message skipped:', e && (e.code || e.message) || 'rpc_error');
+    return { status: 'skipped', mutual: false, one_way: false };
+  }
 }
 
 function errorResponse(res, error, code) {
@@ -152,14 +191,47 @@ function createChatSocialRouter(options) {
     if (!peerName) return res.status(400).json({ ok: false, error: '目标用户无效', code: 'invalid_target' });
     try {
       var relationship = await getChatRelationship(supabase, req.userName, peerName);
-      return res.json({ ok: true, relationship: relationship });
+      var status = relationship && relationship.status;
+      var openDirect = ['none', 'request_sent', 'request_received', 'friends'].indexOf(status) >= 0;
+      var enriched = Object.assign({}, relationship, {
+        can_message: openDirect ? true : (relationship.can_message === true),
+        is_contact: status === 'friends' || status === 'request_sent',
+        is_mutual_friend: status === 'friends'
+      });
+      return res.json({ ok: true, relationship: enriched });
     } catch (e) { return errorResponse(res, e, 'chat_relationship_unavailable'); }
   });
 
   router.get('/friends', authenticatedReadLimit(), async function(req, res) {
     try {
-      var friends = await callChatRpc(supabase, 'chat_list_friends', { p_user_name: req.userName });
-      return res.json({ ok: true, friends: Array.isArray(friends) ? friends : [] });
+      var mutualRows = await callChatRpc(supabase, 'chat_list_friends', { p_user_name: req.userName });
+      var list = (Array.isArray(mutualRows) ? mutualRows : []).filter(function(row) {
+        return row && cleanName(row.peer_name);
+      }).map(function(row) {
+        return Object.assign({}, row, { mutual: true, relation_status: 'friends' });
+      });
+      var seen = new Set(list.map(function(row) { return String(row.peer_name); }));
+      // 把我主动发过消息但对方尚未回复的单向联系人合并进好友列表（对方列表中不会出现我）
+      try {
+        var outgoing = await callChatRpc(supabase, 'chat_list_requests', {
+          p_user_name: req.userName,
+          p_direction: 'outgoing'
+        });
+        (Array.isArray(outgoing) ? outgoing : []).forEach(function(row) {
+          var target = row && cleanName(row.target_name);
+          if (!target || target === req.userName || seen.has(target)) return;
+          seen.add(target);
+          list.push({
+            peer_name: target,
+            friend_since: row.created_at || null,
+            note: null,
+            mutual: false,
+            relation_status: 'one_way',
+            request_id: row.request_id || null
+          });
+        });
+      } catch (_) { /* 降级仅返回互为好友列表 */ }
+      return res.json({ ok: true, friends: list });
     } catch (e) { return errorResponse(res, e, 'chat_friends_unavailable'); }
   });
 
@@ -283,6 +355,27 @@ function createChatSocialRouter(options) {
     var peerName = cleanName(req.params.peerName);
     if (!peerName) return res.status(400).json({ ok: false, error: '目标用户无效', code: 'invalid_target' });
     try {
+      // 若当前仅为单向联系人（我方主动发消息/申请、对方尚未回复），只撤销我方的单向记录。
+      try {
+        var outgoing = await callChatRpc(supabase, 'chat_list_requests', {
+          p_user_name: req.userName,
+          p_direction: 'outgoing'
+        });
+        var pendingOut = (Array.isArray(outgoing) ? outgoing : []).find(function(row) {
+          return row && cleanName(row.target_name) === peerName && isUuid(row.request_id);
+        });
+        if (pendingOut) {
+          var canceled = await callChatRpc(supabase, 'chat_finish_friend_request', {
+            p_actor_name: req.userName,
+            p_request_id: pendingOut.request_id,
+            p_action: 'cancel'
+          });
+          if (canceled && canceled.status === 'canceled') {
+            publishEvent(req.userName, 'chat-state', { kind: 'contact_removed', peer: peerName });
+            return res.json({ ok: true, result: { status: 'removed', one_way: true }, history_preserved: true });
+          }
+        }
+      } catch (_) { /* 继续走标准互为好友删除 */ }
       var outcome = await callChatRpc(supabase, 'chat_remove_friend', {
         p_actor_name: req.userName,
         p_peer_name: peerName
@@ -355,5 +448,6 @@ module.exports = {
   getChatConversationState: getChatConversationState,
   getChatRelationship: getChatRelationship,
   assertCanSendDirectMessage: assertCanSendDirectMessage,
+  recordAutoFriendOnMessage: recordAutoFriendOnMessage,
   createChatSocialRouter: createChatSocialRouter
 };

@@ -185,7 +185,9 @@
       '.pp-info-modal,' +
       '.pp-info-modal-content,' +
       '.pp-download-confirm-overlay,' +
-      '.pp-download-confirm-content'
+      '.pp-download-confirm-content,' +
+      '.pp-download-overlay,' +
+      '.pp-download-cancel-btn'
     ));
   }
 
@@ -215,11 +217,22 @@
     if (photo && photo.__xtjSource && typeof window.syncPostPhotoPreviewChrome === 'function') window.syncPostPhotoPreviewChrome(photo);
     photo = photo || activePhoto();
     var deleteBtn = document.getElementById('ppDeleteBtn');
-    if (photo && !photo.__xtjSource && deleteBtn && deleteBtn.__xtjPostDeleteBound) {
-      deleteBtn.__xtjPostDeleteBound = false;
-      deleteBtn.onclick = function() { window.deletePhotoFromPreview(); };
-      deleteBtn.title = '删除'; deleteBtn.setAttribute('aria-label', '删除');
-      deleteBtn.style.removeProperty('display');
+    if (photo && !photo.__xtjSource) {
+      ['ppPrevBtn', 'ppNextBtn', 'ppShareBtn'].forEach(function (btnId) {
+        var b = document.getElementById(btnId);
+        if (b) b.style.removeProperty('display');
+      });
+      if (deleteBtn && deleteBtn.__xtjPostDeleteBound) {
+        deleteBtn.__xtjPostDeleteBound = false;
+        deleteBtn.onclick = function() { window.deletePhotoFromPreview(); };
+        deleteBtn.title = '删除'; deleteBtn.setAttribute('aria-label', '删除');
+        deleteBtn.style.removeProperty('display');
+      }
+      if (deleteBtn) {
+        var canDel = !!(window.canDeletePhotoWallPhoto ? window.canDeletePhotoWallPhoto(photo) : (window.currentUser && (photo.username === window.currentUser || (window.isAdmin && window.isAdmin()))));
+        deleteBtn.hidden = !canDel;
+        deleteBtn.style.removeProperty('display');
+      }
     }
     if (photo && window.renderPhotoStory) { window.renderPhotoStory(photo); return; }
     var userEl = document.getElementById('photoPreviewUser');
@@ -291,14 +304,16 @@
 
   function toggleTimedClass(node, className, delay) {
     if (!node) return;
-    node.classList.remove(className);
-    if (node._xtjMotionFrame) cancelAnimationFrame(node._xtjMotionFrame);
-    node._xtjMotionFrame = requestAnimationFrame(function () {
-      node.classList.add(className);
-      window.setTimeout(function () {
-        if (node) node.classList.remove(className);
-      }, delay || 240);
-    });
+    if (!node._xtjMotionTimers) node._xtjMotionTimers = Object.create(null);
+    if (node._xtjMotionTimers[className]) {
+      clearTimeout(node._xtjMotionTimers[className]);
+      node._xtjMotionTimers[className] = 0;
+    }
+    node.classList.add(className);
+    node._xtjMotionTimers[className] = window.setTimeout(function () {
+      node._xtjMotionTimers[className] = 0;
+      if (node) node.classList.remove(className);
+    }, delay || 240);
   }
 
   // The picture's position/scale and the slide track offset change on every frame of a gesture. Written on the
@@ -340,14 +355,14 @@
     if (!img || !root) return;
     // 清掉可能残留的 inline transform，确保下方的 CSS 变量变换真正生效
     if (img.style.transform) img.style.transform = '';
+    if (animate) toggleTimedClass(root, 'pp-animate-image', 240);
+    else root.classList.remove('pp-animate-image');
     setPreviewVars({
       '--pp-img-x': state.tx + 'px',
       '--pp-img-y': state.ty + 'px',
       '--pp-scale': state.scale,
       '--pp-rotate': state.rotation + 'deg'
     });
-    if (animate) toggleTimedClass(root, 'pp-animate-image', 240);
-    else root.classList.remove('pp-animate-image');
     img.classList.toggle('zoomed', state.scale > 1.01);
   }
 
@@ -360,20 +375,20 @@
     var root = overlay();
     if (!track || !root) return;
     var offset = centerTrackOffset(extraX);
+    if (animate) toggleTimedClass(root, 'pp-animate-track', 240);
+    else root.classList.remove('pp-animate-track');
     setPreviewVars({ '--pp-track-x': offset + 'px' });
     // The legacy navigator owns an inline transform; update it for gestures too.
     track.style.transition = animate ? 'transform 220ms ease-out' : 'none';
     track.style.transform = 'translateX(' + offset + 'px)';
-    if (animate) toggleTimedClass(root, 'pp-animate-track', 240);
-    else root.classList.remove('pp-animate-track');
   }
 
   function clearDismissVisual(animate) {
     var root = overlay();
     if (root) {
-      setPreviewVars({ '--pp-overlay-opacity': 1 });
       if (animate) toggleTimedClass(root, 'pp-animate-root', 240);
       else root.classList.remove('pp-animate-root');
+      setPreviewVars({ '--pp-overlay-opacity': 1 });
     }
     applyImageTransform(animate);
   }
@@ -398,6 +413,27 @@
     applyImageTransform(!!opts.animate);
   }
 
+  function clampPan() {
+    var img = previewImage();
+    var vw = viewportWidth();
+    var vh = viewportHeight();
+    var scale = Math.max(state.scale || 1, 1);
+    if (scale <= 1.01 || !img) {
+      state.tx = 0;
+      state.ty = 0;
+      return;
+    }
+    var baseW = parseFloat(img.style.width) || img.clientWidth || vw;
+    var baseH = parseFloat(img.style.height) || img.clientHeight || vh;
+    var rotated = ((state.rotation % 180) + 180) % 180 === 90;
+    var visW = (rotated ? baseH : baseW) * scale;
+    var visH = (rotated ? baseW : baseH) * scale;
+    var maxX = Math.max(0, (visW - vw) / 2);
+    var maxY = Math.max(0, (visH - vh) / 2);
+    state.tx = clamp(state.tx, -maxX, maxX);
+    state.ty = clamp(state.ty, -maxY, maxY);
+  }
+
   function reboundScaleIfNeeded(animate) {
     if (state.scale < 1) {
       resetPreviewState({ animate: animate, resetRotation: false, keepSuppressTap: true });
@@ -407,6 +443,8 @@
       state.scale = 1;
       state.tx = 0;
       state.ty = 0;
+    } else {
+      clampPan();
     }
     applyImageTransform(animate);
   }
@@ -535,6 +573,7 @@
   function updatePan(point) {
     state.tx = state.startTx + (point.x - state.startX);
     state.ty = state.startTy + (point.y - state.startY);
+    clampPan();
     if (Math.abs(point.x - state.startX) + Math.abs(point.y - state.startY) > 8) {
       state.moved = true;
     }
@@ -889,15 +928,14 @@
     if (!root) return;
     pinStoryAvatar(root);
     if (!window.MutationObserver) return;
-    var lastImgCount = -1;
+    var lastImgNode = null;
     var observer = new MutationObserver(function () {
       var avatar = root.querySelector('.pp-story-avatar') || root.querySelector('#ppStoryAvatar');
       if (!avatar) return;
-      var img = avatar.querySelector('img');
-      var count = img ? 1 : 0;
-      if (count !== lastImgCount) {
+      var img = avatar.querySelector('img') || null;
+      if (img !== lastImgNode) {
         pinStoryAvatar(root);
-        lastImgCount = count;
+        lastImgNode = img;
       }
     });
     observer.observe(root, { childList: true, subtree: true });
@@ -921,16 +959,19 @@
   }
 
   function infoRow(label, value) {
-    return '<div class="pp-info-row"><span class="pp-info-label">' + escapeValue(label) + '</span><span class="pp-info-value">' + escapeValue(value || '--') + '</span></div>';
+    var display = (value === 0 || value === '0') ? '0' : (value || '--');
+    return '<div class="pp-info-row"><span class="pp-info-label">' + escapeValue(label) + '</span><span class="pp-info-value">' + escapeValue(display) + '</span></div>';
   }
 
   function buildPhotoInfoHtml(photo) {
     if (!photo) return '<div class="pp-info-section"><div class="pp-info-section-title">照片信息</div>' + infoRow('状态', '暂无数据') + '</div>';
     // ★ 2026-09-25 修复（"照片详情点开什么都没有"）：原实现无条件输出四行，缺数据时
     //   用 '--' / '未知用户' 占位 —— 而聊天图片此前不带任何元数据，于是整个面板
-    //   全是空占位。现在改为：有值才出行；聊天图片不显示"浏览"（私聊图片没有浏览量
-    //   概念）；一个字段都没有时给明确空态，而不是四个破折号。
-    var isChatPhoto = String(photo.__xtjSource || '') === 'chat';
+    //   全是空占位。现在改为：有值才出行；聊天/头像封面图不显示"浏览"；
+    //   一个字段都没有时给明确空态，而不是四个破折号。
+    var srcKind = String(photo.__xtjSource || '');
+    var isChatPhoto = srcKind === 'chat';
+    var isProfilePhoto = srcKind === 'profile';
     var parts = [];
     var who = photoUsername(photo);
     if (who) parts.push(infoRow('作者', who));
@@ -938,12 +979,13 @@
       var tsDate = new Date(photo.timestamp);
       if (!isNaN(tsDate.getTime())) parts.push(infoRow('时间', tsDate.toLocaleString('zh-CN')));
     }
-    if (!isChatPhoto && photo.views != null) parts.push(infoRow('浏览', photo.views));
+    if (!isChatPhoto && !isProfilePhoto && photo.views != null) parts.push(infoRow('浏览', photo.views));
     if (photo.fileSize) parts.push(infoRow('大小', formatFileSize(photo.fileSize)));
     if (photo.originalSize && Number(photo.originalSize) > 0 && Number(photo.originalSize) !== Number(photo.fileSize || 0)) {
       parts.push(infoRow('原始大小', formatFileSize(photo.originalSize)));
     }
     if (isChatPhoto) parts.push(infoRow('来源', '聊天图片'));
+    else if (isProfilePhoto) parts.push(infoRow('来源', '个人资料图片'));
     if (!parts.length) parts.push(infoRow('状态', '这张图片没有可显示的元数据'));
     var html = '<div class="pp-info-section"><div class="pp-info-section-title">照片信息</div>' + parts.join('') + '</div>';
     // G-L4: 删死 EXIF 块——服务端 inspectPhotoOriginal 只存 { orientation }，
@@ -1056,6 +1098,7 @@
     var body = infoBody();
     // 「照片详情」卡片缩回被点的 ⓘ 按钮（共用 xtjMorph）：缩回结束的那一刻再隐藏，不再叠一层自带的淡出。
     var morph = window.xtjMorph;
+    if (silent && morph && content) morph.abort(content);
     var closeTarget = !silent && content && morph && morph.motionOk() && modal.classList.contains('active') ? morph.rectOfElement(document.querySelector('#photoPreviewOverlay .pp-info-btn')) : null;
     if (closeTarget) {
       modal.style.pointerEvents = 'none';
@@ -1157,7 +1200,9 @@
       modal.classList.add('pp-info-prep');
     }
     requestAnimationFrame(function () {
+      if (!state.infoOpen) return;
       requestAnimationFrame(function () {
+        if (!state.infoOpen) return;
         modal.classList.remove('pp-info-prep');
         modal.classList.add('active');
         var closeBtn = modal.querySelector('.pp-info-modal-close');
@@ -1232,6 +1277,18 @@
         root.classList.remove('active', 'closing', 'pp-closing', 'pp-hotfix-closing', 'pp-hotfix-basic-close', 'pp-post-mode', 'pp-info-open');
         root.classList.remove('pp-animate-root', 'pp-animate-track', 'pp-animate-image');
         root.style.pointerEvents = '';
+        ['ppPrevBtn', 'ppNextBtn', 'ppShareBtn', 'ppDeleteBtn'].forEach(function (btnId) {
+          var b = document.getElementById(btnId);
+          if (b) b.style.removeProperty('display');
+        });
+        root.querySelectorAll('.pp-slide-img').forEach(function (slideImg) {
+          slideImg.style.removeProperty('width');
+          slideImg.style.removeProperty('height');
+          slideImg.style.removeProperty('max-width');
+          slideImg.style.removeProperty('max-height');
+          slideImg.style.removeProperty('aspect-ratio');
+          delete slideImg.__ppFitSig;
+        });
         clearPreviewVars();
         root.setAttribute('aria-hidden', 'true');
         root.inert = true;
@@ -1264,7 +1321,11 @@
       }
 
       document.body.classList.remove('photo-previewing');
-      document.body.style.overflow = '';
+      if (typeof window.syncHeaderModalBodyLock === 'function') {
+        window.syncHeaderModalBodyLock();
+      } else if (!document.querySelector('.modal-overlay.active, .pw-upload-sheet.active, .ai-site-search-panel.active')) {
+        document.body.style.overflow = '';
+      }
     } finally {
       state.forceClosing = false;
     }
@@ -1530,24 +1591,44 @@
       toggleZoomAt({ x: event.clientX, y: event.clientY });
     }, true);
 
+    surface.addEventListener('wheel', function (event) {
+      var root = overlay();
+      if (!root || !root.classList.contains('active')) return;
+      if (isControl(event.target) || isModalOpen()) return;
+      var commentsPanel = document.getElementById('ppCommentsPanel');
+      if (commentsPanel && !commentsPanel.hidden && commentsPanel.contains(event.target)) return;
+      if (!event.deltaY) return;
+      event.preventDefault();
+      var step = event.deltaY < 0 ? 1.18 : (1 / 1.18);
+      zoomAt(event.clientX, event.clientY, (state.scale || 1) * step, false);
+    }, { passive: false });
+
     window.addEventListener('mouseup', function () {
+      var r = overlay();
+      if (!r || !r.classList.contains('active')) return;
       state.mouseDown = false;
       if (state.mode === 'pan' && state.scale > 1.01) reboundScaleIfNeeded(true);
       clearInteractionState();
     }, true);
 
     window.addEventListener('mouseleave', function () {
+      var r = overlay();
+      if (!r || !r.classList.contains('active')) return;
       state.mouseDown = false;
       clearInteractionState();
     }, true);
 
     window.addEventListener('blur', function () {
+      var r = overlay();
+      if (!r || !r.classList.contains('active')) return;
       state.mouseDown = false;
       clearInteractionState();
     }, true);
 
     document.addEventListener('visibilitychange', function () {
       if (!document.hidden) return;
+      var r = overlay();
+      if (!r || !r.classList.contains('active')) return;
       state.mouseDown = false;
       clearInteractionState();
     }, true);
@@ -1581,10 +1662,15 @@
       if (tag === 'INPUT' || tag === 'TEXTAREA' || (event.target && event.target.isContentEditable)) return;
       var commentsPanel = document.getElementById('ppCommentsPanel');
       if (commentsPanel && !commentsPanel.hidden && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) return;
+      var dlConfirm = document.getElementById('ppDownloadConfirmModal');
+      var dlConfirmOpen = !!(dlConfirm && (dlConfirm.classList.contains('show') || dlConfirm.style.display === 'flex'));
+      if ((isModalOpen() || dlConfirmOpen) && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) return;
       if (event.key === 'Escape') {
         event.preventDefault();
         event.stopPropagation();
-        if (isModalOpen())window.closePhotoInfo();else window.closePhotoPreview();
+        if (dlConfirmOpen && typeof window.ppCancelDownload === 'function') window.ppCancelDownload();
+        else if (isModalOpen()) window.closePhotoInfo();
+        else window.closePhotoPreview();
       } else if (event.key === 'ArrowLeft') {
         event.preventDefault();
         if (typeof window.ppPrevPhoto === 'function') window.ppPrevPhoto();
@@ -1691,8 +1777,9 @@
     var root=overlay(); if (!root || !img || !img.naturalWidth || !img.naturalHeight) return;
     // ★ 第二轮修复（预-4）：旋转 90°/270° 后图片视觉宽高互换，但签名里
     //   没有旋转角，缓存会跳过必要的重算，横图转竖后溢出视口。签名加
-    //   入旋转角，fit 用互换后的尺寸算。
-    var _rot=((state.rotation%180)+180)%180;
+    //   入旋转角，fit 用互换后的尺寸算（仅对主图生效，邻图不旋转）。
+    var _isMain = img.id === 'photoPreviewImage';
+    var _rot = _isMain ? (((state.rotation%180)+180)%180) : 0;
     var fitSig=(img.currentSrc||img.src)+'|'+img.naturalWidth+'x'+img.naturalHeight+'|'+fitTick+'|'+_rot;
     if (img.__ppFitSig===fitSig && img.style.getPropertyValue('width') && img.style.getPropertyValue('height')) return;
     img.__ppFitSig=fitSig;
@@ -1701,6 +1788,13 @@
     var width=(img.naturalWidth*fit)+'px',height=(img.naturalHeight*fit)+'px';
     if(img.style.width!==width)img.style.setProperty('width',width,'important');
     if(img.style.height!==height)img.style.setProperty('height',height,'important');
+    if(_rotated){
+      img.style.setProperty('max-width','none','important');
+      img.style.setProperty('max-height','none','important');
+    }else{
+      img.style.removeProperty('max-width');
+      img.style.removeProperty('max-height');
+    }
     if(img.style.aspectRatio!=='auto')img.style.setProperty('aspect-ratio','auto','important');
   }
   function installPreviewLoadFeedback() {
@@ -1838,7 +1932,7 @@
         if (window.showToast) window.showToast('照片数据加载中，请稍后重试');
         return;
       }
-      if (!window.currentUser && explicitPhotos.some(function(photo) { return photo.__xtjSource !== 'post'; })) {
+      if (!window.currentUser && explicitPhotos.some(function(photo) { return photo.__xtjSource !== 'post' && photo.__xtjSource !== 'profile'; })) {
         if (window.showToast) window.showToast('请登录后查看照片墙');
         return;
       }

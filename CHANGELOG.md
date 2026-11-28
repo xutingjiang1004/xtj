@@ -1,5 +1,19 @@
 # 更新日志
 
+## 2026-11-28 全站四板块审计修复 + 帖子权限管理 + 聊天发消息自动加好友
+
+- **四板块全面审计与修复（帖子 / 小猫 AI / 照片墙与预览 / 聊天与群聊）**：
+  - **小猫 AI**：修复 Markdown HTML/实体编码 XSS 漏洞与无头降级标签清洗顺序；修复流式渲染快路径闭合标签校验与后台标签页 `drain()` 卡死；修复服务端 TTS 临时错误永久禁用、SSE 缓冲区解析与无提示中断、多轮请求身份/会话竞态。
+  - **照片墙与预览**：修复分页排序边界、删除后缓存与预览同步、预览图缩放与工具栏兜底、非当前面板恢复时无谓重拉、视频/单图预览按钮显隐。
+  - **帖子板块**：修复评论展开失败与换号状态残留、早加载 `early-feed` 切换账号与刷新竞争、音乐卡片解析负缓存与播放切换、列表缓存属主校验、置顶/删除后同步清理 `early-feed` 缓存与作者页状态。
+  - **聊天与群聊**：修复群聊与私聊切换双高亮及后台轮询误标已读、历史上下文过滤本地已删消息、编辑完成后继续排空发送队列、推送 409 自动换发端点、群聊路由参数与事件清理、切换账号清理 `dmUidHash` 缓存。
+- **帖子发布后权限管理（用户明确要求）**：
+  - 在任意类型帖子（文字、音乐链接、网页链接、图片、多图、视频、音频）卡片与详情的「•••」工具菜单中为帖子作者新增「**权限**」入口，弹窗支持切换「公开 / 私密 / 仅谁可见 / 仅谁不可见」，并支持搜索多选站内已注册用户（`GET /api/users/directory`、`POST /api/post/visibility`）。
+  - 后端全链路强制隔离（`/api/feed`、`/api/post/detail/:id`、`/api/post/detail/:id/relations/:kind`、`/api/post/:id/media/:position`、`/api/uploads/media`、`/api/post/comment`、`/api/post/like`、`/api/post/view`、`/api/author-posts/:userName`、`/api/profile/records`、`/api/stats/snapshot`、`/api/post/media/batch`、`/api/agent/post-tools`、AI 站内搜索与 `/share/posts/:id`），并向非作者剥离受众用户名单（`render-api/post-visibility.js`）。
+- **聊天发消息自动单向 / 双向加好友（用户明确要求）**：
+  - 移除私聊“先手动加好友”门槛：任意已登录用户可直接向未拉黑的注册用户发送私信或闪图；首次发送后对方自动加入发件人的好友列表（标为单向好友，对方列表中暂不出现）；对方回复消息后双方自动晋升为互为好友（落库 `chat_friendships`）。拉黑拦截与群聊“仅拉互为好友”保持不变。
+- 新增回归与实测用例：`tests/audit-2026-11-28-fixes.test.js`、`tests/post-visibility-and-auto-friend.test.js`。
+
 ## 2026-11-27 第二轮审计修复（用户反馈 · 合并 fix/audit-round2-20261126）
 
 **范围与结果**

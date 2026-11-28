@@ -406,7 +406,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
             scopedStorageSet(RESEARCH_MODEL_PREF_KEY, prefModel);
           }
         } catch (ePref2) {}
-        try { applyServerStudyPrefs(data.ai_prefs && data.ai_prefs.study); } catch (eStudyPref) {}
+        try { applyServerStudyPrefs(data.ai_prefs && data.ai_prefs.study, { deferPush: true }); } catch (eStudyPref) {}
         var tombstones = loadDeletedModelUids();
         return data.models.filter(function(m) {
           if (!m || !m.uid || m.uid === OPENROUTER_MODEL_UID || !m.api_key&&!m.key_configured || m.provider === 'openrouter' || m.server_managed) return false;
@@ -868,6 +868,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var _prevQuota = S.quota;
     var _mergedQuota = Object.assign(defaultQuotaShape(), _prevQuota || {});
     Object.keys(quota).forEach(function(k) { if (quota[k] !== null && quota[k] !== undefined) _mergedQuota[k] = quota[k]; });
+    ['exhausted_window', 'window_5h_reset_at', 'window_7d_reset_at'].forEach(function(k) {
+      if (Object.prototype.hasOwnProperty.call(quota, k) && quota[k] === null) _mergedQuota[k] = null;
+    });
+    if (quota.can_chat === true && !quota.exhausted_window) _mergedQuota.exhausted_window = null;
     S.quota = _mergedQuota;
     S.quotaFetchedAt = Date.now();
     S._quotaFetchFailed = false;
@@ -940,9 +944,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         // ★ 第二轮修复（额-3）：服务端没给可用额度（401/503/空响应）也要
         //   记失败，面板不再永远停在“加载中”。
         S._quotaFetchFailed = true;
+        if (typeof S._renderQuotaUI === 'function') { try { S._renderQuotaUI(); } catch (_) {} }
       } catch (e) {
         // ★ 第二轮修复（额-3）：网络/请求异常同样记失败。
         S._quotaFetchFailed = true;
+        if (typeof S._renderQuotaUI === 'function') { try { S._renderQuotaUI(); } catch (_) {} }
         try { if (AI_DEBUG) console.warn('[AI] quota fetch failed', e); } catch (e2) {}
       } finally {
         if (S._quotaInflight === inflight) { S._quotaInflight = null; S._quotaInflightStartedAt = 0; }
@@ -1795,7 +1801,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     s = s.replace(/\x00XIC(\d+)\x00/g, function(_, index) { return inlineCode[Number(index)] || ''; });
     // ★ 普通正文：HTML 转义
     s = s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-    s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
+    var renderedInlineCode = [];
+    s = s.replace(/`([^`]+)`/g, function(_, codeInner) {
+      var idx = renderedInlineCode.length;
+      renderedInlineCode.push('<code>' + codeInner + '</code>');
+      return '\x00XRC' + idx + '\x00';
+    });
     s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
     s = s.replace(/\*([^*]+)\*/g, '<em>$1</em>');
     // 图片: 只允许 data:image/ 协议
@@ -1830,6 +1841,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       a.textContent = aiDecodeHtmlEntities(label);
       return a.outerHTML;
     });
+    s = s.replace(/\x00XRC(\d+)\x00/g, function(_, idx) { return renderedInlineCode[Number(idx)] || ''; });
     s = s.replace(/^###### (.+)$/gm, '<h6>$1</h6>');
     s = s.replace(/^##### (.+)$/gm, '<h5>$1</h5>');
     s = s.replace(/^#### (.+)$/gm, '<h4>$1</h4>');
@@ -2029,7 +2041,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           if (!menu.contains(ce2.target) && ce2.target !== bubbleEl) {
             closeCopyMenu();
           }
-        }, { signal: _menuSig, once: true });
+        }, { signal: _menuSig });
       }, 0);
     }
 
@@ -2571,7 +2583,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if(managed){entry.context_id=String(item.client_request_id||item.id||'local-'+hi);if(itemContent.length>charCap)entry.context_truncated=true;}
       // ★ D-H2：超总预算时丢弃本条及更旧的轮次（循环由新到旧，丢的都是最旧的）。
       var entryChars = String(entry.content || '').length;
-      if (totalCharsUsed + entryChars > totalCharsBudget) { historyDropped++; continue; }
+      if (totalCharsUsed + entryChars > totalCharsBudget) { historyDropped += (hi + 1); break; }
       totalCharsUsed += entryChars;
       if (forwarded.length) entry.attachments = forwarded;
       if (Array.isArray(item.vision_urls) && item.vision_urls.length && !forwarded.length) {
@@ -3050,17 +3062,29 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
   //   图片不走这里（继续用原有视觉链路）；任何失败都静默忽略，回落本地文本解析，
   //   绝不能因为解析服务不可用而阻止用户发消息。
   async function uploadAiDocument(att, headers, signal) {
-    var resp = await fetch(API_BASE + '/files/upload', {
-      method: 'POST',
-      headers: Object.assign({}, headers || {}, { 'Content-Type': 'application/json' }),
-      credentials: 'include',
-      body: JSON.stringify({ name: att.name, type: att.type, data_url: att.data_url }),
-      signal: signal
-    });
-    if (!resp || !resp.ok) return;
-    var data = await resp.json().catch(function() { return null; });
-    if (data && data.ok && /^file-api-[A-Za-z0-9_-]+$/.test(String(data.file_id || ''))) {
-      att.file_id = String(data.file_id);
+    var ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+    var onOuterAbort = function() { if (ctrl) try { ctrl.abort(); } catch (_) {} };
+    if (signal) {
+      if (signal.aborted) return;
+      if (typeof signal.addEventListener === 'function') signal.addEventListener('abort', onOuterAbort, { once: true });
+    }
+    var timer = ctrl ? setTimeout(function() { try { ctrl.abort(); } catch (_) {} }, 25000) : null;
+    try {
+      var resp = await fetch(API_BASE + '/files/upload', {
+        method: 'POST',
+        headers: Object.assign({}, headers || {}, { 'Content-Type': 'application/json' }),
+        credentials: 'include',
+        body: JSON.stringify({ name: att.name, type: att.type, data_url: att.data_url }),
+        signal: ctrl ? ctrl.signal : signal
+      });
+      if (!resp || !resp.ok) return;
+      var data = await resp.json().catch(function() { return null; });
+      if (data && data.ok && /^file-api-[A-Za-z0-9_-]+$/.test(String(data.file_id || ''))) {
+        att.file_id = String(data.file_id);
+      }
+    } finally {
+      if (timer) clearTimeout(timer);
+      if (signal && typeof signal.removeEventListener === 'function') signal.removeEventListener('abort', onOuterAbort);
     }
   }
 
@@ -3153,6 +3177,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         var _retryAfter = Math.max(0, Math.round(Number(r.retry_after || (r.data && r.data.retry_after)) || 0));
         return '请求有点频繁，请' + (_retryAfter ? (_retryAfter > 90 ? Math.ceil(_retryAfter / 60) + ' 分钟' : _retryAfter + ' 秒') : '稍等一会') + '后再试';
       }
+      var _raw429Msg = String(r.error || (r.data && r.data.error) || '').trim();
+      if (_raw429Msg) return _raw429Msg;
       return '小猫调用额度已达上限，请稍后再试或开通 Pro';
     }
     if (r.status === 502) return 'AI 服务调用失败，请检查配置或服务日志';
@@ -4963,10 +4989,12 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       //   （loadHistory 会把 vision_urls 转回 attachments）再找该轮次；
       //   ③ 确实找不回、且还有文字可发时明确提示，仅按文字重新生成。
       var sendAtts = atts;
+      var regenIdentity = customModelIdentity(), regenLife = S.lifecycleId, regenConvId = S.conversationId;
       if (atts && !regenerateAttachmentsUsable(atts)) {
         sendAtts = rebuildAttachmentsFromVisionUrls(userMsg);
         if (!sendAtts) {
           try { sendAtts = await rebuildRegenerateAttachments(messagesEl, userMsg, plain); } catch (eRebuild) { sendAtts = null; }
+          if (!customModelIdentityCurrent(regenIdentity) || S.lifecycleId !== regenLife || S.conversationId !== regenConvId || !S.active || S.sending) return;
         }
         if (!sendAtts && plain) {
           try { notify('原附件图片已无法恢复，将仅按文字重新生成'); } catch (eLost) {}
@@ -5210,7 +5238,9 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var j = 0;
     while (j < max - i && prev.charCodeAt(max - 1 - j) === next.charCodeAt(next.length - 1 - j)) j++;
     // 只处理「旧内容原样保留、中间插入一段」的情况；旧内容本身变了就交给逐节点对比。
-    if (!j || i + j < 4 || i + j !== max) return false;
+    if (!j || max < 4 || i + j !== max) return false;
+    var suffix = next.slice(next.length - j);
+    if (!/^(?:<\/[a-z0-9]+>)+$/i.test(suffix)) return false;
     var delta = next.slice(i, next.length - j);
     if (!delta) return false;
     var tail = streamContentTail(target);
@@ -5230,7 +5260,10 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     if (!added) return false;
     var edit = streamEditTarget(tail);
     if (!edit) return false;
+    var firstClose = /^<\/([a-z0-9]+)>/i.exec(suffix);
+    var expectedTag = firstClose ? firstClose[1].toUpperCase() : '';
     if (next.charAt(i - 1) === '>') {
+      if (expectedTag && edit.tagName !== expectedTag) return false;
       var created = document.createTextNode(added);
       edit.appendChild(created);
       if (ink) ink.record(created, 0, created.length);
@@ -5238,6 +5271,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     }
     var textNode = lastTextNode(edit);
     if (!textNode) return false;
+    if (expectedTag && textNode.parentNode && textNode.parentNode.tagName !== expectedTag) return false;
     var start = textNode.length;
     textNode.appendData(added);
     if (ink) ink.record(textNode, start, textNode.length);
@@ -5606,6 +5640,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       var state = drainState; drainState = null;
       if (!state) return;
       if (state.signal) state.signal.removeEventListener('abort', state.abort);
+      if (state.onVisibility && typeof document !== 'undefined') document.removeEventListener('visibilitychange', state.onVisibility);
       state.resolve(ok);
     }
     // A renderer can be created after the global pause button was pressed.
@@ -5881,18 +5916,24 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         // A sanitized replacement must take effect immediately. Only an unseen
         // suffix can follow the existing stream without replaying old text.
         // Large authoritative terminal snapshots can settle directly.
-        if (final.indexOf(rendered) !== 0 || reducedMotion || !final || final.length-rendered.length>8192) {
+        if (final.indexOf(rendered) !== 0 || reducedMotion || (typeof document !== 'undefined' && document.hidden) || !final || final.length-rendered.length>8192) {
           api.finish(final); return Promise.resolve(true);
         }
         pending = final.slice(rendered.length); paused = false;
         if (!pending) { api.finish(final); return Promise.resolve(true); }
-        var state = { finalText: final, signal: signal, resolve: null, abort: function() { api.stop(); } };
+        var state = { finalText: final, signal: signal, resolve: null, abort: function() { api.stop(); }, onVisibility: null };
         state.promise = new Promise(function(resolve) { state.resolve = resolve; });
         drainState = state;
         if (S.activeRenderers.indexOf(api) === -1) S.activeRenderers.push(api);
         if (signal) {
           if (signal.aborted) { api.stop(); return state.promise; }
           signal.addEventListener('abort', state.abort, { once: true });
+        }
+        if (typeof document !== 'undefined') {
+          state.onVisibility = function() {
+            if (document.hidden && drainState === state) api.finish(state.finalText);
+          };
+          document.addEventListener('visibilitychange', state.onVisibility);
         }
         schedule(); return state.promise;
       },
@@ -10384,8 +10425,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     };
     var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if ((target.type === 'post' || target.type === 'comment') && typeof window.openPostDetail === 'function') {
-      // validate: source must be posts, source_id must be valid UUID
-      if (item.source !== 'posts') {
+      // validate: post requires posts source; comment allows posts or comments source, and post_id must be valid UUID
+      var allowedSource = target.type === 'comment'
+        ? (item.source === 'posts' || item.source === 'comments')
+        : (item.source === 'posts');
+      if (!allowedSource) {
         console.warn('[site-search] blocked invalid post result', { source: item.source, source_id: item.source_id });
         return;
       }
@@ -11225,8 +11269,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     updateSecondaryPageState(true, 'site-search');
     var input = document.getElementById('aiSiteSearchInput');
     if (input) setTimeout(function() { try { input.focus(); } catch (e3) {} }, 50);
-    // verify auth in background — don't block page visibility
-    ensureUserAuthOrNotify().catch(function(e) { console.error('[site-search] auth check failed:', e && e.message); });
+    // verify auth in background — don't block page visibility; close panel if auth fails
+    var searchAuthIdentity = customModelIdentity();
+    ensureUserAuthOrNotify({ allowGuest: true }).then(function(ok) {
+      if (!ok && customModelIdentityCurrent(searchAuthIdentity)) {
+        try { closeSiteSearch(); } catch (_) {}
+      }
+    }).catch(function(e) { console.error('[site-search] auth check failed:', e && e.message); });
   }
 
   function bindTopAiTools() {
@@ -11315,8 +11364,13 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     if (S._sendPreflight) { try { notify('已发送，请勿重复点击'); } catch (eDupPreflight) {} return; }
     // ★ 2026-11-14：游客先确认 /guest-mode，避免 S.guestAi 尚未初始化时误拦（含带附件发送）
     if (!readUserName() && !S.guestAi) {
+      var preflightIdentity = customModelIdentity(), preflightLife = S.lifecycleId, preflightConvId = S.conversationId;
       S._sendPreflight = true;
       await ensureGuestAiMode();
+      if (!customModelIdentityCurrent(preflightIdentity) || S.lifecycleId !== preflightLife || S.conversationId !== preflightConvId) {
+        S._sendPreflight = false;
+        return;
+      }
     }
     if (!readUserName() && !S.guestAi) { S._sendPreflight = false; notify('请先登录后再和小猫聊天'); return; }
     if (!S.active) { S._sendPreflight = false; notify('聊天面板未就绪，请重新打开后再发送'); return; }
@@ -12357,6 +12411,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         var searchResults = evt && Array.isArray(evt.search_results) ? evt.search_results : null;
         // 修复(bug5)：DeepSeek 原生联网的 sources 事件没有随 done 回传，这里用流式累积的来源补齐。
         if ((!searchResults || !searchResults.length) && streamSourceItems.length) searchResults = streamSourceItems.slice(0, 50);
+        if (!searchCount && searchResults && searchResults.length) searchCount = searchResults.length;
         var searchExpiresAt = evt && typeof evt.search_expires_at === 'number' ? evt.search_expires_at : 0;
         userMsg._pendingSync = !(evt && evt.saved === true);
         userMsg._historyRequestAtCommit = S.historyRequestId;
@@ -13872,6 +13927,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
           
           if (evt.type === 'error') {
             hideAssistantTyping();
+            if (evt.quota) { try { applyQuota(evt.quota); } catch (_) {} }
             var errMsg = evt.error || 'AI 调用失败';
             // ★★★ 2026-09-17 修复（P1「内置模型回复时误报 AI 连接中断」）：
             //   症状：内置模型调用失败时，用户有时看到"AI 连接中断，请稍后重试"
@@ -14358,8 +14414,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         resetSendingIfCurrent();
         return;
       }
-      // 网络错误或 abort
-      if (fetchErr && fetchErr.name !== 'AbortError') {
+      // 网络错误或 abort（controller.abort('timeout') 在浏览器中可能抛字符串而非 DOMException）
+      var isAbortLike = (fetchErr && fetchErr.name === 'AbortError') ||
+        !!(controller && controller.signal && controller.signal.aborted) ||
+        !!(sharedCtrl && sharedCtrl.signal && sharedCtrl.signal.aborted);
+      if (fetchErr && !isAbortLike) {
         hideAssistantTyping();
         // ★★★ 2026-09-15 修复（P1-6「回复已完整却显示 AI 生成中断」）：
         //   症状（用户截图实证）：AI 把完整回复给完了，底下仍有一行小字
@@ -14526,7 +14585,8 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
     var keepCount = Array.isArray(keepNodes) ? keepNodes.length : 0;
     var drop = Math.min(over, Math.max(0, total - keepCount));
     if (drop <= 0) return;
-    S.messages.splice(0, drop);
+    if (keepCount > 0) S.messages.splice(keepCount, drop);
+    else S.messages.splice(0, drop);
     if (!messagesEl || !messagesEl.querySelectorAll) return;
     var nodes = messagesEl.querySelectorAll('.ai-msg');
     var removed = 0;
@@ -14741,6 +14801,11 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         //   rAF 锚点回调前同步完成，Δ 已含剪掉的高度，视口不跳）。
         pruneAiHistory(messagesEl, _historyNodes);
         renderAiHistoryCards(messagesEl, msgs, _historyNodes, msgs.map(function() { return _existingFirstNode; }));
+        // 同步先把滚动位置锚定到旧消息，避免 finally 读到未更新的 scrollTop < 60 引发连续自触发分页。
+        try {
+          var syncDelta = messagesEl.scrollHeight - oldScroll;
+          if (syncDelta > 0) messagesEl.scrollTop = oldScrollTop + syncDelta;
+        } catch (eSyncScroll) {}
         try {
           requestAnimationFrame(function() {
             // ★ 2026-09-29（审计 M9，接上方注释）：Δ 是"新增内容高度"，
@@ -14977,6 +15042,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
       if (r && r.ok) {
         S.conversationRequestId += 1;
         conversationMetadata.delete(cid);conversationTitleDrafts.delete(cid);setConversationTitleOverride(cid,'');
+        try { setStudyConv(cid, false); } catch (_) {}
         clearAiConversationHistoryCache(cid, 'normal');
         if (S._forgetAiComposerDraft) S._forgetAiComposerDraft(cid);
         if (itemEl && itemEl.parentElement) itemEl.remove();
@@ -14984,6 +15050,7 @@ if (typeof window.throttleRAF !== 'function') window.throttleRAF = function(fn) 
         S.conversations = (S.conversations || []).filter(function(c) { return c.conversation_id !== cid; });
         // 如果删除的是当前对话，重置
         if (cid === S.conversationId) {
+          if (S._voiceConversation) S._voiceConversation.setEnabled(false);
           if (S._aiChatFilesCleanup) S._aiChatFilesCleanup();
           abortCurrentRequest('chat'); S.historyRequestId += 1; S._currentReqId = null;
           // ★ 修复（P1 历史永久 loading）：自增 historyRequestId 会让在途 loadHistory 的
@@ -15280,7 +15347,7 @@ function showChatMessages() {
     if (studyPushTimer) clearTimeout(studyPushTimer);
     studyPushTimer = setTimeout(function() { studyPushTimer = null; pushStudyPrefs(); }, 600);
   }
-  function applyServerStudyPrefs(remote) {
+  function applyServerStudyPrefs(remote, opts) {
     var localAt = readStudyUpdatedAt();
     var remoteAt = remote && typeof remote === 'object' ? Number(remote.updated_at) || 0 : 0;
     if (remoteAt > localAt) {
@@ -15291,7 +15358,11 @@ function showChatMessages() {
       redrawStudyEmptyState();
       syncStudyUi();
     } else if (localAt > remoteAt && !studyPushTimer) {
-      pushStudyPrefs();
+      if (opts && opts.deferPush) {
+        studyPushTimer = setTimeout(function() { studyPushTimer = null; pushStudyPrefs(); }, 600);
+      } else {
+        pushStudyPrefs();
+      }
     }
   }
   function readStudyConvIds() {
@@ -17415,6 +17486,12 @@ function showChatMessages() {
           model: model,
           base_url: baseValue
         };
+        if (keepExistingKey && _prev) {
+          if (_prev.stored_reference) record.stored_reference = _prev.stored_reference;
+          if (_prev.config_revision != null) record.config_revision = _prev.config_revision;
+          if (_prev.key_hint) record.key_hint = _prev.key_hint;
+          if (_prev.reasoning_effort_supported != null) record.reasoning_effort_supported = _prev.reasoning_effort_supported;
+        }
         var targetUid = editingUid;
         if (!targetUid && customs.filter(function(m) { return !m.server_managed; }).length >= CUSTOM_MODEL_LIMIT) {
           feedback.className = 'ai-invite-code-feedback is-bad';
@@ -17504,7 +17581,9 @@ function showChatMessages() {
     }
     function autoClose() {
       var m = document.getElementById(AUTO_ID);
-      if (m && m.parentNode) m.parentNode.removeChild(m);
+      if (!m) return;
+      if (typeof m.__xtjAiDispose === 'function') m.__xtjAiDispose(false);
+      else if (m.parentNode) m.parentNode.removeChild(m);
     }
     function autoApi(method, path, body) {
       return apiRequest(method, '/scheduled-tasks' + path, body, { background: true });
@@ -17578,6 +17657,7 @@ function showChatMessages() {
           '</div>' +
         '</div>';
       document.body.appendChild(modal);
+      var modalOwner = bindAiModalIdentity(modal);
 
       var listBox = modal.querySelector('#aiAutoList');
       var form = modal.querySelector('#aiAutoForm');
@@ -17592,9 +17672,10 @@ function showChatMessages() {
       }
       function loadTasks() {
         autoApi('GET', '').then(function(r) {
+          if (!modalOwner.current()) return;
           if (r && r.ok && r.data && r.data.ok) autoRenderList(listBox, r.data.tasks || []);
           else autoRenderList(listBox, [], true);
-        }).catch(function() { autoRenderList(listBox, [], true); });
+        }).catch(function() { if (modalOwner.current()) autoRenderList(listBox, [], true); });
       }
 
       modal.addEventListener('click', function(e) {
@@ -17622,17 +17703,41 @@ function showChatMessages() {
           var op = opBtn.getAttribute('data-auto-op');
           if (!id) return;
           if (op === 'del') {
-            if (!window.confirm('确定删除这个定时任务？')) return;
-            opBtn.disabled = true;
-            autoApi('DELETE', '/' + encodeURIComponent(id)).then(function() { loadTasks(); });
+            askConfirm('删除定时任务', '确定删除这个定时任务？', '删除').then(function(ok) {
+              if (!ok || !modalOwner.current()) return;
+              opBtn.disabled = true;
+              autoApi('DELETE', '/' + encodeURIComponent(id)).then(function(r) {
+                if (!modalOwner.current()) return;
+                if (r && r.ok && (!r.data || r.data.ok !== false)) {
+                  notify('定时任务已删除');
+                  loadTasks();
+                } else {
+                  opBtn.disabled = false;
+                  notify((r && r.data && r.data.error) || '删除失败，请稍后重试');
+                }
+              }).catch(function() {
+                if (modalOwner.current()) { opBtn.disabled = false; notify('删除失败，请稍后重试'); }
+              });
+            });
           } else if (op === 'toggle') {
             var turnOn = opBtn.textContent === '启用';
             opBtn.disabled = true;
-            autoApi('POST', '/' + encodeURIComponent(id) + '/toggle', { enabled: turnOn }).then(function() { loadTasks(); });
+            autoApi('POST', '/' + encodeURIComponent(id) + '/toggle', { enabled: turnOn }).then(function(r) {
+              if (!modalOwner.current()) return;
+              if (r && r.ok && (!r.data || r.data.ok !== false)) {
+                loadTasks();
+              } else {
+                opBtn.disabled = false;
+                notify((r && r.data && r.data.error) || '操作失败，请稍后重试');
+              }
+            }).catch(function() {
+              if (modalOwner.current()) { opBtn.disabled = false; notify('操作失败，请稍后重试'); }
+            });
           } else if (op === 'run') {
             opBtn.disabled = true;
             opBtn.textContent = '执行中…';
             autoApi('POST', '/' + encodeURIComponent(id) + '/run', {}).then(function(r) {
+              if (!modalOwner.current()) return;
               opBtn.disabled = false;
               opBtn.textContent = '试跑';
               if (r && r.ok && r.data && r.data.ok) {
@@ -17641,7 +17746,9 @@ function showChatMessages() {
               } else {
                 notify((r && r.data && r.data.error) || '执行失败，请稍后再试');
               }
-            }).catch(function() { opBtn.disabled = false; opBtn.textContent = '试跑'; });
+            }).catch(function() {
+              if (modalOwner.current()) { opBtn.disabled = false; opBtn.textContent = '试跑'; notify('执行失败，请稍后再试'); }
+            });
           }
           return;
         }
@@ -17674,6 +17781,7 @@ function showChatMessages() {
           var submit = e.target.closest('#aiAutoSubmit');
           submit.disabled = true;
           autoApi('POST', '', payload).then(function(r) {
+            if (!modalOwner.current()) return;
             submit.disabled = false;
             if (r && r.ok && r.data && r.data.ok) {
               notify('定时任务已创建');
@@ -17684,10 +17792,19 @@ function showChatMessages() {
             } else {
               notify((r && r.data && r.data.error) || '创建失败');
             }
-          }).catch(function() { submit.disabled = false; notify('创建失败'); });
+          }).catch(function() { if (modalOwner.current()) { submit.disabled = false; notify('创建失败'); } });
         }
       });
-      modal.addEventListener('keydown', function(e) { if (e.key === 'Escape') autoClose(); });
+      modal.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+          if (document.querySelector('#ppConfirmOverlay.active, .xtj-prompt-overlay')) return;
+          e.preventDefault();
+          e.stopPropagation();
+          autoClose();
+        }
+      });
+      var closeBtnAuto = modal.querySelector('.ai-auto-close');
+      if (closeBtnAuto) setTimeout(function() { if (modalOwner.current()) try { closeBtnAuto.focus({ preventScroll: true }); } catch (_) {} }, 20);
       loadTasks();
     }
 
@@ -18170,6 +18287,12 @@ function showChatMessages() {
   // Detach the AI surface for a Dock tab switch without aborting the stream.
   // The request, renderer and DOM stay alive; only visibility changes.
   function hideAiChatForTabSwitch() {
+    if (S._voiceConversation) { try { S._voiceConversation.setEnabled(false); } catch (_) {} }
+    try { closeCopyMenu(); } catch (_) {}
+    try { closeAiOwnedModals(); } catch (_) {}
+    try { closeResearchSheet(false); } catch (_) {}
+    try { closeResearchHistoryPanel(); } catch (_) {}
+    try { closeSiteSearch(); } catch (_) {}
     if (!S.active) {
       // 2026-11-12（用户反馈：iPad 上点了小猫 AI 之后，左侧导航一直点不动）：
       //   打开小猫后如果登录校验没通过（未登录、登录已失效，或服务受限时刷新登录失败），openAiChat 会把
@@ -18182,7 +18305,7 @@ function showChatMessages() {
       stalePanel.classList.add('hidden');
       stalePanel.setAttribute('aria-hidden', 'true');
       document.body.classList.remove('xtj-ai-page-open');
-      try { document.body.style.overflow = ''; } catch (eStaleOverflow) {}
+      try { if (typeof window.syncHeaderModalBodyLock === 'function') window.syncHeaderModalBodyLock(); else document.body.style.overflow = ''; } catch (eStaleOverflow) {}
       window.__xtjAiChatActive = false;
       updateSecondaryPageState(false, 'ai-chat');
       // ★ D-M4：登录失败残留的面板切走时同样停掉轮询定时器。
@@ -18216,7 +18339,7 @@ function showChatMessages() {
     }
     document.body.classList.remove('xtj-research-open');
     document.body.classList.remove('xtj-ai-page-open');
-    try { document.body.style.overflow = ''; } catch (eOverflow) {}
+    try { if (typeof window.syncHeaderModalBodyLock === 'function') window.syncHeaderModalBodyLock(); else document.body.style.overflow = ''; } catch (eOverflow) {}
     window.__xtjAiChatActive = false;
     updateSecondaryPageState(false, 'ai-chat');
     // ★ 研究页用的是默认 owner 'deep-think'。只释放 'ai-chat' 会让
@@ -18412,9 +18535,9 @@ function showChatMessages() {
     updateAiStatus();
 
     var inp = document.getElementById('aiChatMsgInput');
-    if (inp) inp.placeholder = '问' + AI_DISPLAY_NAME;
+    if (inp && !studyActive()) inp.placeholder = '问' + AI_DISPLAY_NAME;
 
-    var empty = document.querySelector('#aiChatRoot .ai-chat-empty:not(.ai-history-loading):not(.ai-history-unavailable)');
+    var empty = document.querySelector('#aiChatRoot .ai-chat-empty:not(.ai-history-loading):not(.ai-history-unavailable):not(.ai-study-landing)');
     if (empty) {
       var e1 = empty.querySelector('.ai-chat-empty-emoji');
       if (e1) renderCatAvatarNode(e1, 'ai-chat-empty-avatar', S.config && S.config.avatar_url, S.config && S.config.avatar_version);
@@ -18455,6 +18578,11 @@ function showChatMessages() {
     if(aiFeatureRequestClient)aiFeatureRequestClient.clear();
     if(S._toolRetryFlights){S._toolRetryFlights.forEach(function(abort){abort.abort();});S._toolRetryFlights.clear();}
     closeAiOwnedModals();
+    try { closeResearchSheet(false); } catch (_) {}
+    try { closeResearchHistoryPanel(); } catch (_) {}
+    if (studyPushTimer) { clearTimeout(studyPushTimer); studyPushTimer = null; }
+    S._sendPreflight = false;
+    S._resendFn = null;
     document.querySelectorAll('.ai-research-card').forEach(function(card){if(card._exportAbort)card._exportAbort.abort();});
     closeCopyMenu();
     if (typeof window.__xtjCancelDmAiAsk === 'function') window.__xtjCancelDmAiAsk();
@@ -18704,7 +18832,9 @@ function showChatMessages() {
     S.dtDomConversationId = null;
     S.dtResearchModel = 'pro'; S.dtHistoryPageData = null;
     saveDtConvId();
-    S.quota = null; S.quotaFetchedAt = 0;
+    S.quota = null; S.quotaFetchedAt = 0; S._quotaFetchFailed = false;
+    S._sendPreflight = false; S._resendFn = null;
+    if (studyPushTimer) { clearTimeout(studyPushTimer); studyPushTimer = null; }
     S._quotaInflight = null; S._quotaInflightStartedAt = 0;
     ['dtMessages', 'aiSiteSearchResults'].forEach(function(id) {
       var node = document.getElementById(id); if (node) node.replaceChildren();

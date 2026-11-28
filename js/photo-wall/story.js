@@ -195,22 +195,28 @@
     warm();warm();warm();
   };
   function showAvatar(photo){
-    var name=String(photo.username||''),avatar=el('ppStoryAvatar'),cached=avatars.get(name);
-    avatar.setAttribute('aria-label',name+'的头像');
-    if(avatar.dataset.author!==name){avatar.dataset.author=name;avatar.textContent=name.slice(0,1)||'?';if(cached&&cached.image)avatar.replaceChildren(cached.image.cloneNode());}
-    preloadAvatar(name).then(function(image){if(image&&current&&current.username===name&&avatar.dataset.author===name){var shown=avatar.querySelector('img');if(!shown||shown.src!==image.src)avatar.replaceChildren(image.cloneNode());}});
+    var name=String(photo.username||photo.user_name||''),avatar=el('ppStoryAvatar'),cached=avatars.get(name);
+    avatar.setAttribute('aria-label',name ? (name+'的头像') : '头像');
+    avatar.hidden=!name;
+    if(!name){avatar.dataset.author='';avatar.textContent='';return;}
+    if(avatar.dataset.author!==name||!avatar.querySelector('img')){avatar.dataset.author=name;avatar.textContent=Array.from(name)[0]||'?';if(cached&&cached.image)avatar.replaceChildren(cached.image.cloneNode());}
+    preloadAvatar(name).then(function(image){var curName=current&&String(current.username||current.user_name||'');if(image&&curName===name&&avatar.dataset.author===name){var shown=avatar.querySelector('img');if(!shown||shown.src!==image.src)avatar.replaceChildren(image.cloneNode());}});
   }
   window.addEventListener('xtj:avatar-updated',function(event){
     var detail=event.detail||{},name=String(detail.username||'');if(!name)return;
     var cached=avatars.get(name);if(cached&&cached.image&&cached.image.src===detail.url)return;
-    avatars.delete(name);if(current&&current.username===name)showAvatar(current);
+    avatars.delete(name);if(current&&String(current.username||current.user_name||'')===name)showAvatar(current);
   });
   window.renderPhotoStory=function(photo){
     if(!photo||!ensure())return;
     function stableText(id,value){var node=el(id),text=String(value);if(node&&node.textContent!==text)node.textContent=text;}
-    stableText('photoPreviewUser',photo.username||photo.user_name||(photo.__xtjSource==='chat'?'':'未知用户'));
+    var srcKind=String(photo.__xtjSource||'');
+    var hideViews=srcKind==='chat'||srcKind==='profile';
+    var viewsWrap=el('photoPreviewViews');
+    if(viewsWrap)viewsWrap.style.display=hideViews?'none':'';
+    stableText('photoPreviewUser',photo.username||photo.user_name||(hideViews?'':'未知用户'));
     stableText('photoPreviewTime',photo.timestamp?new Date(photo.timestamp).toLocaleString('zh-CN',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'');
-    stableText('photoPreviewViewsCount',photo.views==null?'':photo.views);
+    stableText('photoPreviewViewsCount',hideViews||photo.views==null?'':photo.views);
     var key=function(p){return p&&(p.cloudId||p.id||p.imageUrl);};
     var same=current&&key(current)&&String(key(current))===String(key(photo))&&storyAuthEpoch===authEpoch()&&(current._storyOwner||'')===(window.currentUser||'');
     if(!same)saveCommentDraft();

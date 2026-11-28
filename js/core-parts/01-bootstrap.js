@@ -534,7 +534,15 @@ const ADMIN_NAME = "xxz";
                 try { avatarCache = {}; } catch(e) {}
                 try { currentUser = ''; window.currentUser = ''; window._lastKnownUser = ''; window._xtjCanonicalUser = ''; window._xtjAuthState = 'unauthenticated'; } catch(e) {}
                 try { if (window.__xtjResetPhotoWallAccess) window.__xtjResetPhotoWallAccess(); } catch(e) {}
-                try { window.safeStorage.remove('xtj_photos'); window.safeStorage.remove('xtj_photos_owner'); } catch(e) {}
+                try { if (typeof window.__xtjResetDmUidHash === 'function') window.__xtjResetDmUidHash(); } catch(e) {}
+                if (!preserveShared) {
+                    try {
+                        window.safeStorage.remove('xtj_photos');
+                        window.safeStorage.remove('xtj_photos_owner');
+                        window.safeStorage.remove('xtj_photos_deleted');
+                        window.safeStorage.remove('xtj_photos_sort');
+                    } catch(e) {}
+                }
                 try { if (window.__xtjResetPostState) window.__xtjResetPostState(); } catch(e) {}
                 try { if (window.__xtjResetDmNotifications) window.__xtjResetDmNotifications(); } catch(e) {}
                 try { if (window.XTJVoiceTranscription) window.XTJVoiceTranscription.reset(); } catch(e) {}
@@ -2223,6 +2231,7 @@ function isAdmin() {
                 _aiChatOpenGeneration += 1;
                 _aiChatOpenInProgress = false;
                 _aiChatOpenPromise = null;
+                try { window.__xtjPendingAiChatOpen = false; } catch (_) {}
             };
 
             // ★ 修复（P1「小猫 AI 卡住打不开，然后哪里都点不了」）：
@@ -2230,22 +2239,30 @@ function isAdmin() {
             //   （实测 45 秒都发不出去），整页被 #panelAiChat 盖住且无法返回，
             //   只能刷新。这里提供最小收尾：作废本次打开、收起面板、归还滚动、
             //   回到帖子页；无需 ai-agent 已加载。
-            window.__xtjAbortAiChatOpen = function() {
-                try { window.__xtjCancelPendingAiChatOpen(); } catch (eCancel) {}
+            window.__xtjAbortAiChatOpen = function(opts) {
+                var silent = !!(opts && opts.silent);
                 var panel = document.getElementById('panelAiChat');
-                if (panel) {
+                var hasPendingSkeleton = !!(panel && panel.getAttribute('aria-busy') === 'true');
+                if (silent && !_aiChatOpenInProgress && !window.__xtjPendingAiChatOpen && !hasPendingSkeleton) return;
+                try { window.__xtjCancelPendingAiChatOpen(); } catch (eCancel) {}
+                if (panel && (!silent || hasPendingSkeleton || !window.__xtjAiChatActive)) {
                     panel.classList.remove('active', 'is-entering', 'is-leaving');
                     panel.classList.add('hidden');
                     panel.setAttribute('aria-hidden', 'true');
                     panel.removeAttribute('aria-busy');
                     panel.style.display = '';
-                    panel.innerHTML = '';
+                    if (!silent || hasPendingSkeleton) panel.innerHTML = '';
                 }
-                try { document.body.style.overflow = ''; } catch (eOverflow) {}
                 try {
-                    var postsTab = document.querySelector('[data-desktop-tab="posts"]');
-                    if (postsTab) postsTab.click();
-                } catch (eTab) {}
+                    if (typeof window.syncHeaderModalBodyLock === 'function') window.syncHeaderModalBodyLock();
+                    else document.body.style.overflow = '';
+                } catch (eOverflow) {}
+                if (!silent) {
+                    try {
+                        var postsTab = document.querySelector('[data-desktop-tab="posts"]');
+                        if (postsTab) postsTab.click();
+                    } catch (eTab) {}
+                }
             };
 
             window.__xtjOpenAiChat = function() {
@@ -2504,6 +2521,16 @@ function isAdmin() {
             var parsed = parsePostContent(post || {});
             var meta = Object.assign({}, POST_META_DEFAULTS, parsed.meta || {});
             var realVisibility = post && typeof post.visibility === "string" && post.visibility ? post.visibility : "";
+            var effectiveVisibility = realVisibility || meta.visibility || "public";
+            var rawMode = typeof meta.visibility_mode === "string" ? meta.visibility_mode.trim().toLowerCase() : "";
+            var visibilityMode = effectiveVisibility === "private"
+                ? "private"
+                : (effectiveVisibility === "unlisted"
+                    ? ((rawMode === "allow_list" || rawMode === "deny_list" || rawMode === "restricted") ? rawMode : "private")
+                    : "public");
+            var visibilityUsers = Array.isArray(meta.visibility_users)
+                ? meta.visibility_users.map(function(u) { return String(u || "").trim(); }).filter(Boolean)
+                : [];
             var hasRealPinned = !!(post && (post.is_pinned === true || post.is_pinned === false));
             var hasRealPinnedAt = !!(post && post.pinned_at);
             var hasRealUpdatedAt = !!(post && post.updated_at);
@@ -2514,7 +2541,9 @@ function isAdmin() {
             var metaLocationLevel = meta.location_level || "";
             return Object.assign({}, post, {
                 content: parsed.text || "",
-                visibility: realVisibility || meta.visibility || "public",
+                visibility: effectiveVisibility,
+                visibility_mode: visibilityMode,
+                visibility_users: visibilityUsers,
                 is_pinned: hasRealPinned ? !!post.is_pinned : !!meta.is_pinned,
                 pinned_at: hasRealPinnedAt ? post.pinned_at : (meta.pinned_at || null),
                 updated_at: hasRealUpdatedAt ? post.updated_at : (meta.updated_at || null),
@@ -2539,8 +2568,17 @@ function isAdmin() {
 
         function canViewPost(post) {
             var p = normalizePost(post);
+            var viewer = String(window.currentUser || "").trim();
             if (p.visibility === "private") {
-                return !!window.currentUser && p.user_name === window.currentUser;
+                return !!viewer && p.user_name === viewer;
+            }
+            if (p.visibility === "unlisted") {
+                if (!viewer) return false;
+                if (p.user_name === viewer) return true;
+                if (p.visibility_mode === "allow_list") return p.visibility_users.indexOf(viewer) >= 0;
+                if (p.visibility_mode === "deny_list") return p.visibility_users.indexOf(viewer) < 0;
+                if (p.visibility_mode === "restricted") return true;
+                return false;
             }
             return true;
         }
@@ -2737,6 +2775,11 @@ function isAdmin() {
             if (overlay._closeTimer) {
                 clearTimeout(overlay._closeTimer);
                 overlay._closeTimer = null;
+                var pendingCb = overlay._pendingConfirmCb;
+                overlay._pendingConfirmCb = null;
+                if (typeof pendingCb === 'function') {
+                    try { pendingCb(); } catch (_) {}
+                }
             }
             
             // FLIP Animation: Step 1 - First (记录按钮位置)
@@ -2902,6 +2945,7 @@ function isAdmin() {
                     dialog.style.transform = 'translate(' + targetDx + 'px, ' + targetDy + 'px) scale(' + targetScale + ')';
                     dialog.style.opacity = '0';
                     
+                    overlay._pendingConfirmCb = cb;
                     overlay._closeTimer = setTimeout(function() {
                         dialog.style.transform = '';
                         dialog.style.opacity = '';
@@ -2912,8 +2956,10 @@ function isAdmin() {
                         overlay.classList.remove('closing');
                         overlay.classList.remove('active');
                         window._confirmCallback = null;
-                        if (typeof cb === 'function') {
-                            cb();
+                        var runCb = overlay._pendingConfirmCb;
+                        overlay._pendingConfirmCb = null;
+                        if (typeof runCb === 'function') {
+                            runCb();
                         }
                     }, 320);
                     return;
@@ -2924,13 +2970,16 @@ function isAdmin() {
             overlay.classList.add('closing');
             var okBtn = document.getElementById('ppConfirmOkBtn');
             if (okBtn) okBtn.disabled = true;
+            overlay._pendingConfirmCb = cb;
             overlay._closeTimer = setTimeout(function() {
                 overlay.classList.remove('closing');
                 overlay.classList.remove('active');
                 window._confirmCallback = null;
                 overlay._closeTimer = null;
-                if (typeof cb === 'function') {
-                    cb();
+                var runCb = overlay._pendingConfirmCb;
+                overlay._pendingConfirmCb = null;
+                if (typeof runCb === 'function') {
+                    runCb();
                 }
             }, 280);
         };

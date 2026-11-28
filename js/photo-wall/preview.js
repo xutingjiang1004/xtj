@@ -110,12 +110,27 @@
         while (blobOrder.length > 1 && (blobOrder.length > BLOB_LIMIT || bytes() > BLOB_BYTES)) forgetBlob(blobOrder[0]);
     }
     function originalDisplayUrl(url) {
-        return blobUrls[url] || (window.XtjPostOriginals ? window.XtjPostOriginals.displayUrl(url) : url);
+        if (blobUrls[url]) {
+            var idx = blobOrder.indexOf(url);
+            if (idx >= 0 && idx !== blobOrder.length - 1) {
+                blobOrder.splice(idx, 1);
+                blobOrder.push(url);
+            }
+            return blobUrls[url];
+        }
+        return window.XtjPostOriginals ? window.XtjPostOriginals.displayUrl(url) : url;
     }
     // 换账号时丢掉内存里的原图，避免上一个账号的图被下一个账号看到。
+    if (window.__ppBlobOwner === undefined) window.__ppBlobOwner = window.currentUser || "";
     window.addEventListener("auth-ready", function() {
         var who = window.currentUser || "";
-        if (blobOrder.length && window.__ppBlobOwner !== undefined && window.__ppBlobOwner !== who) blobOrder.slice().forEach(forgetBlob), loadedOriginals = Object.create(null), loadedOriginalOrder = [];
+        if (window.__ppBlobOwner !== who) {
+            blobOrder.slice().forEach(forgetBlob);
+            loadedOriginals = Object.create(null);
+            loadedOriginalOrder = [];
+            previewCacheOrder.length = 0;
+            Object.keys(C).forEach(function(k) { delete C[k]; });
+        }
         window.__ppBlobOwner = who;
     });
     var BLOB_MAX_FILE = 64 * 1024 * 1024;
@@ -158,7 +173,12 @@
                         etag = res.headers.get("ETag") || etag;
                         // 太大的原图不留在内存里：放弃这条下载，交给 <img> 直接加载（进度条走缓慢趋近）。
                         if (total > BLOB_MAX_FILE) { try { entry.ctl && entry.ctl.abort(); } catch (err) {} return finish(!1); }
-                        if (!res.body || !res.body.getReader) return res.arrayBuffer().then(function(buffer) { chunks = [new Uint8Array(buffer)]; loaded = buffer.byteLength; complete(); }, retry);
+                        if (!res.body || !res.body.getReader) return res.arrayBuffer().then(function(buffer) {
+                            var bytes = new Uint8Array(buffer);
+                            if (res.status === 206 && resume) { chunks.push(bytes); loaded += bytes.byteLength; }
+                            else { chunks = [bytes]; loaded = bytes.byteLength; }
+                            complete();
+                        }, retry);
                         var reader = res.body.getReader();
                         arm();
                         (function pump() {
@@ -441,15 +461,25 @@
             };
             // 没有预览图可垫底的当前这张：先读原图并显示进度条，读完（或读不了）再交给 <img>，错误重试照旧由 <img> 负责。
             if (e.id === "photoPreviewImage" && !forceReload && !loadedOriginals[t] && !/^(blob|data):/i.test(displaySource)) {
-                var directBar = ppBar.start(t), directWatch = watchOriginal(displaySource, directBar.set, t), directSettled = !1;
-                e._ppCleanup = function() { if (!directSettled) { directWatch.release(); directBar.cancel(); } cleanup(); };
+                var directBar = ppBar.start(t), directWatch = watchOriginal(displaySource, directBar.set, t), directSettled = !1, directBarDone = !1;
+                var doneDirectBar = function(ok) {
+                    if (directBarDone) return;
+                    directBarDone = !0;
+                    e.removeEventListener("load", onDirectLoad);
+                    e.removeEventListener("error", onDirectError);
+                    ok ? directBar.finish() : directBar.cancel();
+                };
+                var onDirectLoad = function() { doneDirectBar(!0); };
+                var onDirectError = function() { doneDirectBar(!1); };
+                e._ppCleanup = function() { if (!directSettled) directWatch.release(); doneDirectBar(!1); cleanup(); };
                 directWatch.promise.then(function() {
                     if (directSettled || e._ppLoadGen !== a || e._ppUrl !== t) return;
                     directSettled = !0; directWatch.release();
                     displaySource = originalDisplayUrl(t);
-                    e._ppCleanup = cleanup;
-                    e.addEventListener("load", function done() { e.removeEventListener("load", done); directBar.finish(); });
+                    e.addEventListener("load", onDirectLoad);
+                    e.addEventListener("error", onDirectError);
                     directLoad();
+                    if (e.complete && e.naturalWidth > 0) doneDirectBar(!0);
                 });
                 return;
             }
@@ -864,7 +894,7 @@
         W(1);
     }, window.openPhotoPreview = function(b, L) {
         var requestedPhotos = Array.isArray(L) ? L : L && L.photos || window.pwCurrentSortedPhotos || window.photoWallData || [];
-        if (!window.currentUser && requestedPhotos.some(function(photo) { return photo.__xtjSource !== 'post'; })) {
+        if (!window.currentUser && requestedPhotos.some(function(photo) { return photo.__xtjSource !== 'post' && photo.__xtjSource !== 'profile'; })) {
             if (window.showToast) window.showToast('请登录后查看照片墙'); return;
         }
         cancelTrackAnimation();
@@ -1283,21 +1313,36 @@
                     var plainStart = function() {
                         if (plainShown || _._openLoadGen !== ee) return;
                         plainShown = !0;
-                        J.src = originalDisplayUrl(plainUrl);
+                        J._ppUrl = plainUrl;
                         J.addEventListener("load", handleOpenLoad), J.addEventListener("error", handleOpenError);
+                        J.src = originalDisplayUrl(plainUrl);
+                        if (J.complete) {
+                            J.naturalWidth > 0 ? (cachePreviewImage(plainUrl, J), handleOpenLoad()) : handleOpenError();
+                        }
                     };
                     $ = setTimeout(function() {
                         _._openLoadGen === ee && (cleanupOpenListeners(), re());
                     }, 8e3);
                     // 没有预览图：先读原图并显示进度条（读完交给 <img> 显示）；读不了就直接让 <img> 去加载。
                     if (!loadedOriginals[plainUrl] && !/^(blob|data):/i.test(originalDisplayUrl(plainUrl))) {
-                        var plainBar = ppBar.start(plainUrl), plainWatch = watchOriginal(originalDisplayUrl(plainUrl), plainBar.set, plainUrl);
-                        J._ppFullPreloadCleanup = function() { plainShown = !0; plainWatch.release(); plainBar.cancel(); };
+                        var plainBar = ppBar.start(plainUrl), plainWatch = watchOriginal(originalDisplayUrl(plainUrl), plainBar.set, plainUrl), plainBarDone = !1;
+                        var finishPlainBar = function(ok) {
+                            if (plainBarDone) return;
+                            plainBarDone = !0;
+                            J.removeEventListener("load", onPlainLoad);
+                            J.removeEventListener("error", onPlainError);
+                            ok ? plainBar.finish() : plainBar.cancel();
+                        };
+                        var onPlainLoad = function() { cachePreviewImage(plainUrl, J); finishPlainBar(!0); };
+                        var onPlainError = function() { finishPlainBar(!1); };
+                        J._ppFullPreloadCleanup = function() { plainShown = !0; plainWatch.release(); finishPlainBar(!1); };
                         plainWatch.promise.then(function() {
                             if (plainShown || _._openLoadGen !== ee) return;
-                            J._ppFullPreloadCleanup = null; plainWatch.release();
-                            J.addEventListener("load", function done() { J.removeEventListener("load", done); plainBar.finish(); });
+                            plainWatch.release();
+                            J.addEventListener("load", onPlainLoad);
+                            J.addEventListener("error", onPlainError);
                             plainStart();
+                            if (J.complete && J.naturalWidth > 0) finishPlainBar(!0);
                         });
                     } else plainStart();
                 }
@@ -1459,7 +1504,7 @@
                 var response;
                 if (window.apiAuthFetch) response = await window.apiAuthFetch(endpoint,options);
                 else { Object.assign(options.headers, await window.getUserAuthHeaders()); response = await fetch(endpoint,options); }
-                var result = await response.json();
+                var result = await response.json().catch(function(){ return {}; });
                 if (!response.ok || !result.ok || !/^\/share\/photos\/[A-Za-z0-9_-]+$/.test(result.share_path || '')) throw new Error(result.error || '分享链接生成失败，请重试');
                 path = result.share_path;
             }
@@ -1473,7 +1518,8 @@
                 try { await navigator.clipboard.writeText(link); copied = true; } catch (_) {}
             }
             if (!copied) {
-                var input = document.createElement('textarea'); input.value = link; document.body.appendChild(input); input.select();
+                var host = document.getElementById('photoPreviewOverlay') || document.body;
+                var input = document.createElement('textarea'); input.value = link; input.style.cssText = 'position:fixed;opacity:0;pointer-events:none;'; host.appendChild(input); input.select();
                 try { copied = document.execCommand('copy'); } finally { input.remove(); }
             }
             if (!copied) throw new Error('复制失败，请重试');
@@ -1511,12 +1557,15 @@
                     var result=await window.deletePhotoWallPhoto(selectedPhoto,{render:false});
                     if (!result || !result.ok) return;
                     n=n.filter(function(photo){return photo && String(photo.id)!==id;});
+                    if (Array.isArray(window.__xtjPreviewExplicitPhotos)) {
+                        window.__xtjPreviewExplicitPhotos = window.__xtjPreviewExplicitPhotos.filter(function(photo){ return photo && String(photo.id)!==id; });
+                    }
                     if (t && String(t.id)===id) {
                         // 修复：删除当前查看的照片时优先走完整关闭链（动画+清理），
                         // 找不到再回退私有 V()，避免残留遮罩/滚动锁/监听器
                         if (typeof window.closePhotoPreview === 'function') window.closePhotoPreview(); else V();
                     }
-                    else if (t) { i=n.findIndex(function(photo){return String(photo.id)===String(t.id);});F(i); }
+                    else if (t) { i=n.findIndex(function(photo){return String(photo.id)===String(t.id);}); if (i >= 0) { z(i); F(i); } }
                     window.showToast('照片已从照片墙删除');
                 } catch (error) { window.showToast('删除失败，请稍后重试'); }
                 finally {
@@ -1562,19 +1611,23 @@
                     downloadAbort = ctrl;
                     if (E = !0, function() {
                         try {
-                            var e = document.getElementById("ppDownloadOverlay");
-                            e && (e.style.display = "flex");
+                            var dlOv = document.getElementById("ppDownloadOverlay");
+                            if (!dlOv) {
+                                var host = document.getElementById("photoPreviewOverlay") || document.body;
+                                if (host) {
+                                    dlOv = document.createElement("div");
+                                    dlOv.className = "pp-download-overlay";
+                                    dlOv.id = "ppDownloadOverlay";
+                                    dlOv.style.display = "none";
+                                    dlOv.innerHTML = '<div class="pp-download-content"><div class="pp-download-spinner"></div><div class="pp-download-text" id="ppDownloadText">正在下载...</div><div class="pp-download-progress"><div class="pp-download-progress-bar" id="ppDownloadProgressBar"></div></div><button class="pp-download-cancel-btn" id="ppDownloadCancelBtn" type="button" onclick="window.ppCancelDownload()">取消</button></div>';
+                                    host.appendChild(dlOv);
+                                }
+                            }
+                            dlOv && (dlOv.style.display = "flex");
                         } catch (e) {
                             console.error("Error showing download overlay:", e);
                         }
                     }(), ee(0, "正在下载..."), window.XTJHaptics) window.XTJHaptics.play('impact');
-                    var fetchRes = await fetch(e.imageUrl, ctrl ? { signal: ctrl.signal } : undefined);
-                    if (!fetchRes.ok) throw new Error("HTTP error " + fetchRes.status);
-                    // G-H1: 流式读取真实进度（有 Content-Length 时按收到字节算，不再
-                    // 假推到 85%）；分块拼成 Blob，避免 response.blob() 再持一份全量拷贝。
-                    var total = 0;
-                    try { total = Number(fetchRes.headers && fetchRes.headers.get('content-length')) || 0; } catch (err) {}
-                    var chunks = [], received = 0;
                     function armStallTimer() {
                         clearStallTimer();
                         stallTimer = setTimeout(function() {
@@ -1582,6 +1635,15 @@
                             if (ctrl) { try { ctrl.abort(); } catch (err) {} }
                         }, 60000);
                     }
+                    // 响应头（TTFB）同样受 60 秒停滞看门狗保护，防止连接建立后无限挂起。
+                    armStallTimer();
+                    var fetchRes = await fetch(e.imageUrl, ctrl ? { signal: ctrl.signal } : undefined);
+                    if (!fetchRes.ok) throw new Error("HTTP error " + fetchRes.status);
+                    // G-H1: 流式读取真实进度（有 Content-Length 时按收到字节算，不再
+                    // 假推到 85%）；分块拼成 Blob，避免 response.blob() 再持一份全量拷贝。
+                    var total = 0;
+                    try { total = Number(fetchRes.headers && fetchRes.headers.get('content-length')) || 0; } catch (err) {}
+                    var chunks = [], received = 0;
                     armStallTimer();
                     if (fetchRes.body && typeof fetchRes.body.getReader === 'function') {
                         var reader = fetchRes.body.getReader();

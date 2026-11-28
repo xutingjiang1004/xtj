@@ -103,13 +103,22 @@ test('request action rejects invalid IDs/actions before RPC and reports ownershi
   assert.equal(fixture.calls.find(call => call.name === 'chat_finish_friend_request').args.p_actor_name, 'trusted-actor');
 });
 
-test('message authorization fails closed for pending/non-friend states and blocks admin bypass when blocked', async () => {
-  let relationship = { status: 'request_sent', can_message: false };
+test('message authorization allows non-blocked registered users for auto-friend and fails closed on blocks/unavailable', async () => {
+  let relationship = { status: 'none', can_message: false };
   const supabase = { rpc: async () => ({ data: relationship, error: null }) };
-  assert.equal((await assertCanSendDirectMessage(supabase, 'alice', 'bob', 'admin')).code, 'friend_required');
-  assert.equal((await assertCanSendDirectMessage(supabase, 'alice', 'admin', 'admin')).ok, true);
+  const firstMsg = await assertCanSendDirectMessage(supabase, 'alice', 'bob', 'admin');
+  assert.equal(firstMsg.ok, true);
+  assert.equal(firstMsg.autoFriend, true);
+  relationship = { status: 'request_sent', can_message: false };
+  assert.equal((await assertCanSendDirectMessage(supabase, 'alice', 'bob', 'admin')).ok, true);
+  relationship = { status: 'request_received', can_message: false };
+  assert.equal((await assertCanSendDirectMessage(supabase, 'alice', 'bob', 'admin')).ok, true);
   relationship = { status: 'blocked_by_me', can_message: false };
   assert.equal((await assertCanSendDirectMessage(supabase, 'alice', 'admin', 'admin')).code, 'chat_blocked');
+  relationship = { status: 'blocked_by_peer', can_message: false };
+  assert.equal((await assertCanSendDirectMessage(supabase, 'alice', 'bob', 'admin')).code, 'chat_blocked');
+  relationship = { status: 'user_not_found', can_message: false };
+  assert.equal((await assertCanSendDirectMessage(supabase, 'alice', 'ghost', 'admin')).ok, false);
   relationship = { status: 'friends', can_message: true };
   assert.equal((await assertCanSendDirectMessage(supabase, 'alice', 'bob', 'admin')).ok, true);
   const unavailable = { rpc: async () => ({ data: null, error: { code: '08006' } }) };

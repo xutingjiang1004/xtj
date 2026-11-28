@@ -1,6 +1,7 @@
 'use strict';
 const { NORMAL_POST_MEDIA_TYPES, isNormalPost } = require('./post-query');
 const { loadPostAttachments } = require('./post-attachments');
+const { canUserViewPost, stripPostVisibilityAudience } = require('./post-visibility');
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/;
 const FIELDS = 'id,user_name,content,media_type,media_url,created_at,visibility,is_deleted,is_pinned,pinned_at,updated_at,views,location_name,ip_region_text,ip_region_status';
@@ -40,7 +41,11 @@ function createAuthorPosts({ express, supabase, optionalAuth, rateLimit, looksLi
         const before = cursor ? 'created_at.lt.' + cursor.at + ',and(created_at.eq.' + cursor.at + ',id.lt.' + cursor.id + ')' : '';
         let query = supabase.from('posts').select(FIELDS).eq('user_name', author).not('is_deleted', 'is', true);
         const filters = ['or(' + normal + ')'];
-        if (!canSeePrivate) filters.push('or(visibility.is.null,visibility.eq.public)');
+        if (!canSeePrivate) {
+          filters.push(req.userName
+            ? 'or(visibility.is.null,visibility.eq.public,visibility.eq.unlisted)'
+            : 'or(visibility.is.null,visibility.eq.public)');
+        }
         if (before) filters.push('or(' + before + ')');
         const rangeDays = { '3d':3, '1m':30, '6m':180 }[settings.timeline_range];
         if (!canSeePrivate && rangeDays) filters.push('created_at.gte.' + new Date(Date.now()-rangeDays*86400000).toISOString());
@@ -51,7 +56,9 @@ function createAuthorPosts({ express, supabase, optionalAuth, rateLimit, looksLi
         exhausted = rows.length < pageLimit + 1;
         for (const post of rows) {
           cursor = { at: post.created_at, id: post.id };
-          if (isNormalPost(post) && post.user_name === author && (canSeePrivate || !post.visibility || post.visibility === 'public') && !looksLikeSystemTelemetry(post.content)) visible.push(post);
+          if (isNormalPost(post) && post.user_name === author && canUserViewPost(post, req.userName) && !looksLikeSystemTelemetry(post.content)) {
+            visible.push(stripPostVisibilityAudience(post, req.userName));
+          }
           if (visible.length > pageLimit) break;
         }
       }

@@ -8,7 +8,7 @@ const ORPHAN_SCAN_INTERVAL_MS=5*60*1000;
 const BUCKET='dm-flash',UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 function seal(bytes){const key=crypto.randomBytes(32),iv=crypto.randomBytes(12),cipher=crypto.createCipheriv('aes-256-gcm',key,iv);return{bytes:Buffer.concat([cipher.update(bytes),cipher.final()]),key,iv:iv.toString('base64'),tag:cipher.getAuthTag().toString('base64')};}
 function unseal(bytes,key,iv,tag){const decipher=crypto.createDecipheriv('aes-256-gcm',key,Buffer.from(iv,'base64'));decipher.setAuthTag(Buffer.from(tag,'base64'));return Buffer.concat([decipher.update(bytes),decipher.final()]);}
-function createFlashPhotos({express,supabase,sharp,authenticateUser,verifyToken,rateLimit,canSend,banError,publish,notifyConsumed,audit,setPro}){
+function createFlashPhotos({express,supabase,sharp,authenticateUser,verifyToken,rateLimit,canSend,onSent,banError,publish,notifyConsumed,audit,setPro}){
  const router=express.Router(),store=()=>supabase.storage.from(BUCKET);let timer,busy=false,inFlightUploads=0,orphanOffset=0,nextOrphanScanAt=0;
  const upload=multer({storage:multer.memoryStorage(),limits:{fileSize:20*1024*1024,files:1,fields:2,fieldSize:200}}).single('image');
  async function checked(query){const r=await query;if(!r||r.error)throw Error('flash_store_unavailable');return r.data;}
@@ -40,7 +40,9 @@ function createFlashPhotos({express,supabase,sharp,authenticateUser,verifyToken,
    }
    if(!result.ok){await remove(path);path=null;return res.status(result.code==='flash_quota_exceeded'?429:409).json({...result,error:result.code==='flash_quota_exceeded'?'今日闪图次数已用完':'闪图未发送，请重试'});}
    if(result.idempotent){await remove(path);path=null;}
-   if(publish)publish(peer,result.message);res.json(result);
+   let auto_friend=null;
+   if(!result.idempotent&&onSent){try{auto_friend=await onSent(actor,peer);}catch(_){auto_friend=null;}}
+   if(publish)publish(peer,result.message);res.json(auto_friend?Object.assign({},result,{auto_friend}):result);
   }catch(_){unavailable(res);}
   finally{if(req._flashRelease)req._flashRelease();if(req.file&&req.file.buffer)req.file.buffer.fill(0);if(encrypted){encrypted.key.fill(0);encrypted.bytes.fill(0);}/* Unknown commit ciphertext stays private; sweep removes expired/orphaned objects. */}
  });

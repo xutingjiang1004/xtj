@@ -301,6 +301,7 @@
     } catch (e) {}
     setTimeout(function () {
       if (pageHidden) return; // S-1
+      if (window.__xtjCoreFeedReady && feedEl() && feedEl().querySelector('.post')) return;
       if (state.status !== 'error' || state.error !== err) return;
       if (stillSkeleton(feedEl())) {
         showError(err);
@@ -308,6 +309,7 @@
     }, 300);
     setTimeout(function () {
       if (pageHidden) return; // S-1
+      if (window.__xtjCoreFeedReady && feedEl() && feedEl().querySelector('.post')) return;
       if (state.status !== 'error' || state.error !== err) return;
       if (stillSkeleton(feedEl())) {
         showError(err);
@@ -366,11 +368,25 @@
       if (coreRefreshNeeded) refreshCoreFeed();
     }, 1200);
   }
+  function sameBootViewer() {
+    var cur = '';
+    if (typeof window.currentUser === 'string' && window.currentUser) {
+      cur = window.currentUser;
+    } else if (window._xtjAuthState === 'unauthenticated') {
+      cur = '';
+    } else {
+      try { cur = localStorage.getItem('xtj_user') || ''; } catch (_) {}
+    }
+    return String(cur || '').trim() === String(state.bootUser || '').trim();
+  }
   function refreshCoreFeed() {
+    if (!sameBootViewer()) { coreRefreshNeeded = false; return; }
     // Never yank the page while the visitor is typing or reading further down.
     coreRefreshNeeded = true;
     var active = document.activeElement;
-    if (pageHidden || (active && /^(TEXTAREA|INPUT)$/.test(active.tagName)) || (window.scrollY || 0) > 160) {
+    var panelPosts = document.getElementById('panelPosts');
+    var scrollTop = Math.max(window.scrollY || 0, (panelPosts && panelPosts.scrollTop) || 0);
+    if (pageHidden || (active && /^(TEXTAREA|INPUT)$/.test(active.tagName)) || scrollTop > 160) {
       scheduleCoreRefreshRetry();
       return;
     }
@@ -414,6 +430,7 @@
         })
         .then(function (json) {
           clearTimeout(timer);
+          if (!sameBootViewer()) return;
           if (!json || !json.ok) throw new Error((json && json.error) || 'feed_not_ok');
           writeFeedCache(json);
           if (servedStale) {
@@ -427,10 +444,11 @@
         })
         .catch(function (err) {
           clearTimeout(timer);
+          if (!sameBootViewer()) { finishErr(err || new Error('feed_failed')); return; }
           var cached = state.status === 'loading' && err && err.status !== 401 && err.status !== 403 ? readFeedCache() : null;
           if (cached) serveStale(cached);
           if (servedStale) {
-            if (attempt < FEED_RETRY_DELAYS.length) setTimeout(function () { if (!pageHidden && servedStale) requestFeed(attempt + 1); }, FEED_RETRY_DELAYS[attempt]);
+            if (attempt < FEED_RETRY_DELAYS.length) setTimeout(function () { if (!pageHidden && servedStale && sameBootViewer()) requestFeed(attempt + 1); }, FEED_RETRY_DELAYS[attempt]);
             return;
           }
           finishErr(err || new Error('feed_failed'));
